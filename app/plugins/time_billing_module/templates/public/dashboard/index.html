@@ -1,0 +1,257 @@
+{% extends "public/base_timesheet_billing_module.html" %}
+{% block content %}
+
+<!-- Hero -->
+<section class="mb-4">
+  <div
+    class="p-4 p-md-5 rounded-3"
+    style="background:
+      {% if config.theme_settings.theme == 'dark' %}
+        linear-gradient(135deg, #1f1f1f, #2a2a2a)
+      {% elif config.theme_settings.theme == 'modern' %}
+        linear-gradient(135deg, #e3f2fd, #ffffff)
+      {% else %}
+        linear-gradient(135deg, #f8f9fa, #ffffff)
+      {% endif %}
+    ;"
+  >
+    <div class="container">
+      <h3 class="mb-2 d-flex align-items-center">
+        <i class="bi bi-person-workspace me-2"></i>
+        My Time & Billing
+      </h3>
+      <p class="mb-3 text-muted">
+        Fill in your weekly timesheet, submit for approval, and download your records.
+      </p>
+      <div class="d-flex flex-wrap gap-2">
+        <a
+          href="{{ url_for('public_time_billing.public_week_readonly', week_id=latest_week_id or example_week_id) }}"
+          class="btn btn-primary"
+        >
+          <i class="bi bi-pencil-square me-1"></i> View Latest
+        </a>
+        <a
+          href="{{ url_for('public_time_billing.public_week_page', week_id=latest_week_id or example_week_id) }}"
+          class="btn btn-secondary"
+        >
+          <i class="bi bi-file-spreadsheet me-1"></i> Open Editor For Latest
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Quick KPIs -->
+<section class="mb-4">
+  <div class="row g-3">
+
+    <!-- Hours (This Year) -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3"><i class="bi bi-hourglass-split fs-2"></i></div>
+          <div>
+            <div class="text-muted small">Hours (This Year)</div>
+            <div class="fs-5 fw-semibold">
+              {{ '{:.2f}'.format(kpis.hours_year or 0) }}
+            </div>
+          </div>
+        </div>
+        <div class="card-footer text-end">
+        </div>
+      </div>
+    </div>
+
+    <!-- Pay (This Year) -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3"><i class="bi bi-currency-pound fs-2"></i></div>
+          <div>
+            <div class="text-muted small">Pay (This Year)</div>
+            <div class="fs-5 fw-semibold">
+              £{{ '{:,.2f}'.format(kpis.pay_year or 0) }}
+            </div>
+          </div>
+        </div>
+        <div class="card-footer text-end">
+        </div>
+      </div>
+    </div>
+
+    <!-- Submission Status -->
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3"><i class="bi bi-send-check fs-2"></i></div>
+          <div>
+            <div class="text-muted small">Submission Status</div>
+            <div class="fs-6">
+              {% if kpis.submission_status == 'approved' %}
+                <span class="badge bg-success">Approved</span>
+              {% elif kpis.submission_status == 'submitted' %}
+                <span class="badge bg-primary">Submitted</span>
+              {% elif kpis.submission_status == 'rejected' %}
+                <span class="badge bg-danger">Rejected</span>
+              {% else %}
+                <span class="badge bg-secondary">Draft</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="card-footer text-end">
+          <a
+            href="{{ url_for('public_time_billing.public_week_page', week_id=latest_week_id or example_week_id) }}"
+            class="btn btn-sm btn-secondary"
+          >
+            Open
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Exports -->
+    <!-- <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3"><i class="bi bi-download fs-2"></i></div>
+          <div>
+            <div class="text-muted small">Exports</div>
+            <div class="fs-6">CSV / PDF</div>
+          </div>
+        </div>
+        <div class="card-footer d-flex justify-content-end gap-2">
+          <a
+            href="{{ url_for('public_time_billing.api_public_export_csv', week_id=latest_week_id or example_week_id) }}"
+            class="btn btn-sm btn-outline-primary"
+          >
+            <i class="bi bi-filetype-csv"></i>
+          </a>
+          <a
+            href="{{ url_for('public_time_billing.api_public_export_pdf', week_id=latest_week_id or example_week_id) }}"
+            class="btn btn-sm btn-outline-secondary"
+          >
+            <i class="bi bi-filetype-pdf"></i>
+          </a>
+        </div>
+      </div>
+    </div> -->
+
+  </div>
+</section>
+
+<!-- Recent activity -->
+<section>
+  <div class="card">
+    <div class="card-body">
+      <h5 class="card-title d-flex align-items-center mb-3">
+        <i class="bi bi-clock me-2"></i> Recent Weeks
+      </h5>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Week</th>
+              <th>Week Ending</th>
+              <th class="text-end">Hours</th>
+              <th class="text-end">Pay</th>
+              <th class="text-center">Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for w in recent_weeks %}
+              <tr>
+                <td>{{ w.week_id }}</td>
+                <td data-iso="{{ w.week_ending }}" class="js-week-ending">
+                  {{ w.week_ending }}
+                </td>
+                <td class="text-end">
+                  {{ '{:.2f}'.format(w.total_hours or 0) }}
+                </td>
+                <td class="text-end">
+                  £{{ '{:,.2f}'.format(w.total_pay or 0) }}
+                </td>
+                <td class="text-center">
+                  {% if w.status == 'approved' %}
+                    <span class="badge bg-success">Approved</span>
+                  {% elif w.status == 'submitted' %}
+                    <span class="badge bg-primary">Submitted</span>
+                  {% elif w.status == 'rejected' %}
+                    <span class="badge bg-danger">Rejected</span>
+                  {% else %}
+                    <span class="badge bg-secondary">Draft</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <div class="btn-group btn-group-sm">
+                    <a
+                      class="btn btn-outline-primary {% if w.status != 'draft' and w.status != 'rejected' %} disabled {% endif %}"
+                      href="{{ url_for('public_time_billing.public_week_page', week_id=w.week_id) }}"
+                    >
+                      Edit
+                    </a>
+                    <a
+                      class="btn btn-outline-secondary"
+                      href="{{ url_for('public_time_billing.public_week_readonly', week_id=w.week_id) }}"
+                    >
+                      View
+                    </a>
+                    <!-- <a
+                      class="btn btn-outline-dark"
+                      href="{{ url_for('public_time_billing.api_public_export_csv', week_id=w.week_id) }}"
+                    >
+                      CSV
+                    </a>
+                    <a
+                      class="btn btn-outline-dark"
+                      href="{{ url_for('public_time_billing.api_public_export_pdf', week_id=w.week_id) }}"
+                    >
+                      PDF
+                    </a> -->
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="6" class="text-center text-muted py-4">
+                  No recent weeks yet.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex justify-content-end">
+        <a
+          href="{{ url_for('public_time_billing.public_week_page', week_id=latest_week_id or example_week_id) }}"
+          class="btn btn-primary btn-sm"
+        >
+          Go to this week
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  function fmtDateISO(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".js-week-ending").forEach((td) => {
+      const iso = td.getAttribute("data-iso");
+      td.textContent = fmtDateISO(iso);
+    });
+  });
+</script>
+
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-eye me-2"></i> Template Preview
+        </h4>
+        <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.runsheets_page') }}">
+            <i class="bi bi-arrow-left me-1"></i> Back
+        </a>
+    </div>
+
+    <!-- Preview Body -->
+    <div class="card">
+        <div class="card-body" id="previewBody">Loading…</div>
+    </div>
+
+</div>
+
+<script>
+    (async function () {
+        const tplId = (location.hash.match(/preview-(\d+)/) || [])[1];
+        const body = document.getElementById('previewBody');
+
+        async function load() {
+            const r = await fetch(`{{ url_for('internal_time_billing.get_template_fields', tpl_id='__ID__') }}`.replace('__ID__', tplId));
+            const fields = await r.json();
+
+            if (!fields.length) {
+                body.innerHTML = '<div class="text-muted">No fields.</div>';
+                return;
+            }
+
+            const frag = document.createDocumentFragment();
+
+            fields.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'mb-3';
+
+                // Label
+                const label = document.createElement('label');
+                label.className = 'form-label';
+                label.textContent = f.label || f.key || 'Field';
+
+                // Input
+                let input;
+                switch (f.type) {
+                    case 'textarea':
+                        input = document.createElement('textarea');
+                        input.className = 'form-control';
+                        input.disabled = true;
+                        break;
+                    case 'select':
+                        input = document.createElement('select');
+                        input.className = 'form-select';
+                        input.disabled = true;
+                        if (f.options_json) {
+                            try {
+                                const opts = JSON.parse(f.options_json).choices || [];
+                                opts.forEach(o => {
+                                    const option = document.createElement('option');
+                                    option.value = o.id;
+                                    option.textContent = o.label;
+                                    input.appendChild(option);
+                                });
+                            } catch (e) {
+                                console.warn('Invalid options JSON for field', f);
+                            }
+                        }
+                        break;
+                    case 'checkbox':
+                        input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.className = 'form-check-input';
+                        input.disabled = true;
+                        input.checked = !!f.default || false;
+                        break;
+                    default:
+                        input = document.createElement('input');
+                        input.type = f.type || 'text';
+                        input.className = 'form-control';
+                        input.disabled = true;
+                }
+
+                div.appendChild(label);
+                div.appendChild(input);
+                frag.appendChild(div);
+            });
+
+            body.innerHTML = '';
+            body.appendChild(frag);
+        }
+
+        load();
+    })();
+</script>
+{% endblock %}

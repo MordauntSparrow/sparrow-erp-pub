@@ -157,7 +157,7 @@ def create_app():
     _ensure_core_manifest(config_dir)
 
     # Dependency handler (your existing behaviour)
-    # _run_dependency_handler(app_root)
+    _run_dependency_handler(app_root)
 
     # Import modules that may not exist until dependencies are installed
     try:

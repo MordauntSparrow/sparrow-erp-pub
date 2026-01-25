@@ -1,0 +1,23 @@
+{
+  "system_name": "event_manager_module",
+  "name": "Event Manager",
+  "description": "Manage and publish upcoming business events (e.g. weddings, charity nights, wakes) with public event listings.",
+  "version": "0.0.1",
+  "icon": "icon.png",
+  "settings": {
+    "default_view": { "value": "calendar", "editable": true },
+    "date_format": { "value": "DD/MM/YYYY", "editable": true },
+    "allow_menu_uploads": { "value": true, "editable": true },
+    "max_menu_file_size_mb": { "value": 5, "editable": true },
+    "music_types": {
+      "value": ["None", "DJ", "Live Band", "Other"],
+      "editable": false
+    }
+  },
+  "enabled": false,
+  "dependencies": ["website_module"],
+  "repository": "official",
+  "download_url": "https://gitlab.com/sparrow-erp/Core/repository/files/plugins/event_manager_module.zip",
+  "changelog": "Initial release of Event Manager module.",
+  "repository_token": ""
+}

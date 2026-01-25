@@ -112,7 +112,7 @@ class WebsiteServer:
     """
     Manages the website Flask application lifecycle.
     """
-    def __init__(self, port=80, plugins_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))):
+    def __init__(self, port=72, plugins_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))):
         self.port = port
         self.plugins_dir = plugins_dir
         self.app = create_website_app(plugins_dir)

@@ -1,0 +1,399 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-currency-pound me-2"></i> Wage Rate Cards
+    </h4>
+    <div class="d-flex gap-2">
+      <a class="btn btn-secondary btn-sm"
+         href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">
+        <i class="bi bi-arrow-left me-1"></i> Back
+      </a>
+      <button class="btn btn-primary btn-sm"
+              data-mdb-toggle="modal"
+              data-mdb-target="#createRowModal">
+        <i class="bi bi-plus-lg me-1"></i> Add rate
+      </button>
+    </div>
+  </div>
+
+  <!-- Cards and rows -->
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-semibold">Wage rate cards</span>
+      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">
+        <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+      </button>
+    </div>
+    <div class="card-body" id="cardsBody">
+      <div class="text-muted">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Create/Add Row Modal -->
+<div class="modal fade" id="createRowModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form class="modal-content" id="createRowForm">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Add wage rate</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <!-- Choose existing card OR create a new card -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Use existing card</label>
+            <select class="form-select" name="card_id" id="cardSelect"></select>
+            <div class="form-text">Pick a card to add a rate row to.</div>
+          </div>
+          <div class="col-md-6">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="createNewCardChk">
+              <label class="form-check-label" for="createNewCardChk">
+                Or create new card
+              </label>
+            </div>
+            <div id="newCardFields" class="mt-2 d-none">
+              <label class="form-label">New card name</label>
+              <input class="form-control mb-2"
+                     name="new_card_name"
+                     placeholder="e.g., Contractor Base Rates 2025" />
+
+              <label class="form-label">Role (optional, ID)</label>
+              <input class="form-control"
+                     name="new_card_role_id"
+                     type="number"
+                     min="1"
+                     placeholder="Role ID (optional)" />
+              <div class="form-text">
+                Links this card to a role (used by RateResolver role default).
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <hr class="my-3" />
+
+        <!-- Row details -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Job type</label>
+            <select class="form-select" name="job_type_id" id="jobTypeSelect" required></select>
+            <div class="form-text">Loaded from Job Types API.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Rate (hourly)</label>
+            <div class="input-group">
+              <span class="input-group-text">£</span>
+              <input class="form-control"
+                     name="rate"
+                     type="number"
+                     step="0.01"
+                     min="0"
+                     placeholder="0.00"
+                     required />
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">Effective from</label>
+            <input class="form-control" name="effective_from" type="date" required />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective to (optional)</label>
+            <input class="form-control" name="effective_to" type="date" />
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-mdb-dismiss="modal">
+          Cancel
+        </button>
+        <button class="btn btn-primary btn-sm" type="submit">
+          <span class="create-label">Save</span>
+          <span class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const cardsBody        = document.getElementById('cardsBody');
+  const refreshBtn       = document.getElementById('refreshBtn');
+  const createModalEl    = document.getElementById('createRowModal');
+  const cardSelect       = document.getElementById('cardSelect');
+  const createNewCardChk = document.getElementById('createNewCardChk');
+  const newCardFields    = document.getElementById('newCardFields');
+  const jobTypeSelect    = document.getElementById('jobTypeSelect');
+  const form             = document.getElementById('createRowForm');
+
+  // Toggle new card fields
+  createNewCardChk.addEventListener('change', () => {
+    const on = createNewCardChk.checked;
+    newCardFields.classList.toggle('d-none', !on);
+    cardSelect.disabled = on;
+  });
+
+  // Load job types + cards whenever modal opens
+  createModalEl.addEventListener('show.mdb.modal', async () => {
+    await Promise.all([loadJobTypes(), loadCardsForSelect()]);
+  });
+
+  async function loadJobTypes() {
+    try {
+      jobTypeSelect.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch("/plugin/time_billing_module/api/refs/job-types", { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Job types failed');
+      const data  = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        jobTypeSelect.innerHTML = '<option value="">No job types</option>';
+        return;
+      }
+      jobTypeSelect.innerHTML = items.map(j => `<option value="${j.id}">${j.name}</option>`).join('');
+    } catch (e) {
+      console.error(e);
+      jobTypeSelect.innerHTML = '<option value="">Failed to load job types</option>';
+    }
+  }
+
+  async function loadCardsForSelect() {
+    try {
+      cardSelect.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch('/plugin/time_billing_module/api/wage-cards', { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Cards failed');
+      const items = await r.json();
+      if (!Array.isArray(items) || !items.length) {
+        cardSelect.innerHTML = '<option value="">No cards yet</option>';
+        return;
+      }
+      cardSelect.innerHTML = items.map(c =>
+        `<option value="${c.id}">${c.name}${c.role_name ? ' — ' + c.role_name : ''}</option>`
+      ).join('');
+    } catch (e) {
+      console.error(e);
+      cardSelect.innerHTML = '<option value="">Failed to load cards</option>';
+    }
+  }
+
+  // Render cards list with rows
+  async function refreshCards() {
+    try {
+      cardsBody.innerHTML = '<div class="text-muted">Loading…</div>';
+      const r = await fetch('/plugin/time_billing_module/api/wage-cards', { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('List failed');
+      const cards = await r.json();
+
+      if (!Array.isArray(cards) || !cards.length) {
+        cardsBody.innerHTML = `
+          <div class="text-center py-4">
+            <div class="mb-2 text-muted">No wage rate cards yet.</div>
+            <button class="btn btn-primary btn-sm"
+                    data-mdb-toggle="modal"
+                    data-mdb-target="#createRowModal">
+              <i class="bi bi-plus-lg me-1"></i> Create first card and rate
+            </button>
+          </div>`;
+        return;
+      }
+
+      // For each card, fetch its rows
+      const blocks = await Promise.all(cards.map(async c => {
+        let rows = [];
+        try {
+          const r2 = await fetch(`/plugin/time_billing_module/api/wage-cards/${c.id}/rows`, { headers: { 'Accept': 'application/json' } });
+          if (r2.ok) rows = await r2.json();
+        } catch (e) {
+          console.warn(e);
+        }
+
+        const rowsHtml = Array.isArray(rows) && rows.length
+          ? rows.map(w => `
+              <tr>
+                <td>${w.job_type_name || w.job_type_id}</td>
+                <td>£${Number(w.rate || 0).toFixed(2)}</td>
+                <td>${w.effective_from || ''}</td>
+                <td>${w.effective_to || ''}</td>
+              </tr>`).join('')
+          : `<tr><td colspan="4" class="text-muted text-center">No rows yet.</td></tr>`;
+
+        return `
+          <div class="mb-3 border rounded">
+            <div class="p-2 bg-light d-flex align-items-center justify-content-between">
+              <div>
+                <strong>${c.name}</strong>
+                ${c.role_name ? `<span class="text-muted ms-2">(${c.role_name})</span>` : ''}
+                ${String(c.active) === '0' ? '<span class="badge bg-secondary ms-2">inactive</span>' : ''}
+              </div>
+              <button class="btn btn-outline-primary btn-sm"
+                      data-mdb-toggle="modal"
+                      data-mdb-target="#createRowModal"
+                      data-card-id="${c.id}">
+                Add rate
+              </button>
+            </div>
+            <div class="p-2">
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th>Job type</th>
+                      <th>Rate</th>
+                      <th>Effective from</th>
+                      <th>Effective to</th>
+                    </tr>
+                  </thead>
+                  <tbody>${rowsHtml}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>`;
+      }));
+
+      cardsBody.innerHTML = blocks.join('');
+
+      // Preselect card when clicking "Add rate" on a card block
+      cardsBody.querySelectorAll('[data-card-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          createNewCardChk.checked = false;
+          newCardFields.classList.add('d-none');
+          cardSelect.disabled = false;
+          cardSelect.value = btn.getAttribute('data-card-id') || '';
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      cardsBody.innerHTML = '<div class="text-danger">Failed to load cards.</div>';
+    }
+  }
+
+  refreshBtn.addEventListener('click', refreshCards);
+
+  // Submit: create new card if checked, then add row
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn     = form.querySelector('button[type="submit"]');
+    const spinner = btn.querySelector('.spinner-border');
+    const label   = btn.querySelector('.create-label');
+    const fd      = new FormData(form);
+
+    const wantNew = createNewCardChk.checked;
+    let cardId    = fd.get('card_id') ? parseInt(fd.get('card_id'), 10) : null;
+
+    const payloadRow = {
+      job_type_id   : parseInt(fd.get('job_type_id'), 10),
+      rate          : parseFloat(fd.get('rate')),
+      effective_from: (fd.get('effective_from') || '').toString(),
+      effective_to  : (fd.get('effective_to') || '').toString() || null
+    };
+
+    // Validations
+    if (wantNew) {
+      const n = (fd.get('new_card_name') || '').toString().trim();
+      if (!n) {
+        alert('New card name is required');
+        return;
+      }
+    } else {
+      if (!Number.isInteger(cardId)) {
+        alert('Select an existing card or create a new one');
+        return;
+      }
+    }
+
+    if (!Number.isInteger(payloadRow.job_type_id)) {
+      alert('Choose job type');
+      return;
+    }
+    if (Number.isNaN(payloadRow.rate)) {
+      alert('Provide a valid rate');
+      return;
+    }
+    if (!payloadRow.effective_from) {
+      alert('Effective from is required');
+      return;
+    }
+    if (payloadRow.effective_to && payloadRow.effective_to < payloadRow.effective_from) {
+      alert('Effective to must be after effective from');
+      return;
+    }
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    label.textContent = 'Saving…';
+
+    try {
+      // 1) Create card if needed
+      if (wantNew) {
+        const newCard = {
+          name   : (fd.get('new_card_name') || '').toString().trim(),
+          role_id: fd.get('new_card_role_id') ? parseInt(fd.get('new_card_role_id'), 10) : null,
+          active : 1
+        };
+        const r1 = await fetch('/plugin/time_billing_module/api/wage-cards', {
+          method : 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body   : JSON.stringify(newCard)
+        });
+        if (!r1.ok) {
+          let msg = 'Card create failed';
+          try {
+            const j = await r1.json();
+            if (j && j.error) msg = j.error;
+          } catch {}
+          throw new Error(msg);
+        }
+        const j1 = await r1.json();
+        cardId   = j1.id;
+      }
+
+      // 2) Add row to the chosen/new card
+      const r2 = await fetch(`/plugin/time_billing_module/api/wage-cards/${cardId}/rows`, {
+        method : 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body   : JSON.stringify(payloadRow)
+      });
+      if (!r2.ok) {
+        let msg = 'Row add failed';
+        try {
+          const j = await r2.json();
+          if (j && j.error) msg = j.error;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      // Done
+      const modal = mdb.Modal.getInstance(createModalEl);
+      if (modal) modal.hide();
+      form.reset();
+      createNewCardChk.checked = false;
+      newCardFields.classList.add('d-none');
+      cardSelect.disabled = false;
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save: ' + (err.message || 'Unknown error'));
+    } finally {
+      btn.disabled = false;
+      spinner.classList.add('d-none');
+      label.textContent = 'Save';
+    }
+  });
+
+  // Initial load
+  refreshCards();
+})();
+</script>
+{% endblock %}

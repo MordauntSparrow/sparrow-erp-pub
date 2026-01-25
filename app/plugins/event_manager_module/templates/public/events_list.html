@@ -1,0 +1,157 @@
+{% extends "public/base_event_manager_module.html" %}
+{% block content %}
+<style>
+.event-search-bar {
+    background: #fff;
+    border-radius: 1.2em;
+    box-shadow: 0 0.2rem 0.7rem rgba(60,60,90,0.06);
+    padding: 1.2em 1.5em;
+    margin-bottom: 2.5em;
+    gap: 1em;
+}
+.event-search-bar .form-control,
+.event-search-bar .form-select {
+    min-width: 180px;
+    max-width: 240px;
+    margin-right: 1em;
+    font-size: 1.08em;
+    border-radius: 0.8em;
+    height: 2.6em;
+}
+.event-search-bar input[type="text"] {
+    min-width: 140px;
+    max-width: 200px;
+}
+.event-search-bar .btn {
+    border-radius: 0.8em;
+    min-width: 48px;
+    height: 2.6em;
+    font-size: 1.1em;
+    box-shadow: 0 2px 8px 0 rgba(0, 95, 255, 0.08);
+}
+@media (max-width: 900px) {
+    .event-search-bar {
+        flex-direction: column !important;
+        padding: 1em 0.7em;
+        gap: 0.7em;
+    }
+    .event-search-bar .form-control,
+    .event-search-bar .form-select,
+    .event-search-bar .btn {
+        margin-right: 0;
+        width: 100%;
+        max-width: 100%;
+    }
+}
+.event-card:hover {
+    box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.15)!important;
+    transform: translateY(-2px) scale(1.015);
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+</style>
+<div class="container py-5">
+
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="mb-4 d-flex align-items-center">
+                <i class="bi bi-calendar-event me-2"></i> Upcoming Events
+            </h2>
+        </div>
+    </div>
+
+    <!-- Search / Filter Bar -->
+    <form class="event-search-bar d-flex align-items-center flex-wrap" method="get" action="{{ url_for('public_event_manager.events_list') }}">
+        <input type="text" class="form-control" name="q" placeholder="Search events..." value="{{ q or '' }}">
+        <input type="date" class="form-control" name="start_date" value="{{ start_date or '' }}" placeholder="dd/mm/yyyy" onfocus="this.type='date'" onblur="if(!this.value)this.type='text'">
+        <input type="date" class="form-control" name="end_date" value="{{ end_date or '' }}" placeholder="dd/mm/yyyy" onfocus="this.type='date'" onblur="if(!this.value)this.type='text'">
+        <select class="form-select" name="music_type">
+            <option value="">All Music</option>
+            <option value="DJ" {% if music_type == 'DJ' %}selected{% endif %}>DJ</option>
+            <option value="Live Band" {% if music_type == 'Live Band' %}selected{% endif %}>Live Band</option>
+            <option value="Other" {% if music_type == 'Other' %}selected{% endif %}>Other</option>
+            <option value="None" {% if music_type == 'None' %}selected{% endif %}>None</option>
+        </select>
+        <button type="submit" class="btn btn-primary ms-0 mt-2 mt-lg-0">
+            <i class="bi bi-search"></i>
+        </button>
+    </form>
+
+    <!-- Event Grid -->
+    {% if events %}
+        <div class="row g-4">
+            {% for event in events %}
+                <div class="col-12 col-md-6 col-lg-4">
+                    <a href="{{ url_for('public_event_manager.event_detail', event_id=event.id) }}" class="text-decoration-none text-dark">
+                        <div class="card h-100 shadow-sm hover-shadow border-0 event-card">
+                            <div class="card-body pb-3">
+                                <div class="d-flex align-items-center mb-2">
+                                    <span class="badge rounded-pill bg-primary me-2">{{ event.category }}</span>
+                                    {% if event.music_type and event.music_type != 'None' %}
+                                        <span class="badge rounded-pill bg-secondary">
+                                            <i class="bi bi-music-note-beamed"></i> {{ event.music_type }}
+                                        </span>
+                                    {% endif %}
+                                </div>
+                                <h5 class="card-title mb-2 fs-4 fw-bold">{{ event.event_name }}</h5>
+                                <div class="mb-2 text-muted small">
+                                    <i class="bi bi-calendar-event"></i>
+                                    {{ event.start_date }}
+                                    {% if event.start_time %}
+                                        {% if event.start_time.__class__.__name__ == 'time' %}
+                                            {{ event.start_time.strftime('%H:%M') }}
+                                        {% elif event.start_time.__class__.__name__ == 'timedelta' %}
+                                            {{ "%02d:%02d" % ((event.start_time.total_seconds() // 3600)|int, ((event.start_time.total_seconds() // 60) % 60)|int) }}
+                                        {% elif event.start_time is string and ':' in event.start_time %}
+                                            {{ event.start_time[:5] }}
+                                        {% endif %}
+                                    {% endif %}
+                                    &ndash;
+                                    {{ event.end_date }}
+                                    {% if event.end_time %}
+                                        {% if event.end_time.__class__.__name__ == 'time' %}
+                                            {{ event.end_time.strftime('%H:%M') }}
+                                        {% elif event.end_time.__class__.__name__ == 'timedelta' %}
+                                            {{ "%02d:%02d" % ((event.end_time.total_seconds() // 3600)|int, ((event.end_time.total_seconds() // 60) % 60)|int) }}
+                                        {% elif event.end_time is string and ':' in event.end_time %}
+                                            {{ event.end_time[:5] }}
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                                {% if event.entry_cost %}
+                                    <div class="mb-2">
+                                        <span class="badge bg-success fs-6"><i class="bi bi-cash-coin me-1"></i> £{{ event.entry_cost }}</span>
+                                    </div>
+                                {% endif %}
+                                <p class="mb-2 text-truncate" style="max-height:3.6em;">{{ event.event_details_public|truncate(120) }}</p>
+                            </div>
+                            <div class="card-footer bg-white border-0 text-end">
+                                <span class="btn btn-outline-primary btn-sm">View Details <i class="bi bi-arrow-right"></i></span>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="alert alert-info mt-4">No events found for your search. Please adjust your filters.</div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if total > page_size %}
+        <nav class="mt-4">
+            <ul class="pagination justify-content-center">
+                {% set total_pages = ((total-1)//page_size)+1 %}
+                {% for p in range(1, total_pages+1) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link"
+                           href="{{ url_for('public_event_manager.events_list', q=q, start_date=start_date, end_date=end_date, music_type=music_type, page=p) }}">
+                            {{ p }}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}

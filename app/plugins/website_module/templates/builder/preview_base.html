@@ -1,0 +1,5 @@
+{% extends "public/base.html" %}
+{% block title %}{{ page.seo.title or page.title }}{% endblock %}
+{% block content %}
+{{ rendered|safe }}
+{% endblock %}

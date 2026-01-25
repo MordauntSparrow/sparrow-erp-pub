@@ -1,55 +1,379 @@
 {% extends "base.html" %}
-
-{% block title %}Manage Plugins - Sparrow ERP{% endblock %}
-
+{% block title %}Plugins · Sparrow ERP{% endblock %}
 {% block content %}
-<h1>Plugins</h1>
-<a href="/" class="btn btn-secondary btn-sm mb-3">Back to Dashboard</a>
+{% set no_installed = (not plugins or plugins|length == 0) %}
+{% set installed_active = (not no_installed) %}
+{% set marketplace_active = no_installed %}
+<div class="container">
+<style>
+/* Card hover lift */
+.card.shadow-1-strong {
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+.card.shadow-1-strong:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 .75rem 1.5rem rgba(0,0,0,.12) !important;
+}
 
-<div class="row">
-    {% for plugin in plugins %}
-    <div class="col-md-4 mb-4">
-        <div class="card">
-            <!-- Display plugin image -->
-            <img src="/plugins/{{plugin.system_name}}/{{ plugin.icon }}" class="card-img-top" alt="{{ plugin.name }}" style="max-height: 150px; max-width: fit-content;">
-            <div class="card-body">
-                <!-- Display plugin name and description from factory manifest -->
-                <h5 class="card-title">{{ plugin.name }}</h5>
-                <p class="card-text">{{ plugin.description }}</p>
+/* Truncate long texts */
+.line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
-                <!-- Check if the plugin is installed and enabled -->
-                {% if plugin.installed %}
-                    <!-- If installed, show settings button if enabled -->
-                    <a href="/plugin/{{ plugin.system_name }}/settings" class="btn btn-primary {% if not plugin.enabled %}disabled{% endif %}">
-                        Settings
-                    </a>
-                    
-                    <!-- Enable/Disable button based on current status -->
-                    {% if not plugin.enabled %}
-                    <form action="/plugin/{{ plugin.system_name }}/enable" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-success">Enable</button>
-                    </form>
-                    {% else %}
-                    <form action="/plugin/{{ plugin.system_name }}/disable" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-danger">Disable</button>
-                    </form>
-                    {% endif %}
+/* Tooltip for truncated names */
+.card-title[title] { cursor: help; }
 
-                    <!-- Uninstall button -->
-                    <form action="/plugin/{{ plugin.system_name }}/uninstall" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-danger">Uninstall</button>
-                    </form>
+/* Global progress bar */
+#globalProgressBar {
+    position: fixed;
+    top: 0; left: 0;
+    height: 3px; width: 0%;
+    z-index: 2000;
+    transition: width .3s ease, opacity .2s ease;
+    {% if config.theme_settings.theme == 'dark' %}
+        background-color: #1e90ff;
+    {% else %}
+        background-color: #0d6efd;
+    {% endif %}
+    opacity: 0;
+}
 
-                {% else %}
-                    <!-- If not installed, show Install button -->
-                    <form action="/plugin/{{ plugin.system_name }}/install" method="POST" style="display:inline;">
-                        <button type="submit" class="btn btn-success">Install</button>
-                    </form>
-                {% endif %}
-            </div>
-        </div>
+/* Page overlay with spinner */
+#actionOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.35);
+    backdrop-filter: saturate(120%) blur(1px);
+    z-index: 1999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+}
+#actionOverlay .box {
+    {% if config.theme_settings.theme == 'dark' %}
+        background: #1f1f1f; color: #e6e6e6; border: 1px solid #333;
+    {% else %}
+        background: #ffffff; color: #212529; border: 1px solid rgba(0,0,0,.08);
+    {% endif %}
+    border-radius: .5rem;
+    padding: 1rem 1.25rem;
+    min-width: 260px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.15);
+}
+.spinner-sm { width: 1.25rem; height: 1.25rem; border-width: .15rem; }
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    #globalProgressBar, .card.shadow-1-strong, .btn, .line-clamp-3 { transition: none !important; }
+}
+</style>
+
+<!-- Global progress + overlay -->
+<div id="globalProgressBar"></div>
+<div id="actionOverlay" role="alert" aria-live="polite" aria-atomic="true">
+    <div class="box d-flex align-items-center gap-3">
+        <div class="spinner-border spinner-sm" role="status" aria-hidden="true"></div>
+        <div id="overlayText" class="fw-medium">Working…</div>
     </div>
-    {% endfor %}
 </div>
 
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+        <h1 class="h4 mb-1">Plugins</h1>
+        <p class="text-muted mb-0">Manage installed plugins and explore new ones from the marketplace</p>
+    </div>
+    <a href="/" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+</div>
+
+<!-- Flash messages -->
+<div aria-live="polite" aria-atomic="true">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</div>
+
+<ul class="nav nav-tabs" id="pluginsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <a class="nav-link {% if installed_active %}active{% endif %}" id="installed-tab"
+           data-mdb-toggle="tab" href="#installed" role="tab"
+           aria-controls="installed" aria-selected="{{ 'true' if installed_active else 'false' }}">
+           Installed
+        </a>
+    </li>
+    <li class="nav-item" role="presentation">
+        <a class="nav-link {% if marketplace_active %}active{% endif %}" id="marketplace-tab"
+           data-mdb-toggle="tab" href="#marketplace" role="tab"
+           aria-controls="marketplace" aria-selected="{{ 'true' if marketplace_active else 'false' }}">
+           Marketplace
+           {% if available_plugins and available_plugins|length > 0 %}
+           <span class="badge rounded-pill bg-primary ms-1">{{ available_plugins|length }}</span>
+           {% endif %}
+        </a>
+    </li>
+</ul>
+
+<div class="tab-content pt-3">
+
+    <!-- Installed -->
+    <div class="tab-pane fade {% if installed_active %}show active{% endif %}" id="installed" role="tabpanel" aria-labelledby="installed-tab">
+        {% if plugins and plugins|length > 0 %}
+        <div class="row g-3">
+            {% for plugin in plugins %}
+            <div class="col-12 col-sm-6 col-lg-4">
+                <div class="card h-100 shadow-1-strong">
+                    {% set local_icon = url_for('routes.serve_plugin_icon', plugin_name=plugin.system_name, filename=plugin.icon) %}
+                    <div class="bg-light d-flex align-items-center justify-content-center" style="height:160px;">
+                        <img src="{{ local_icon }}"
+                             alt="{{ plugin.name }}"
+                             class="img-fluid p-3"
+                             style="max-height:140px; object-fit:contain;"
+                             onerror="this.closest('.bg-light').style.display='none'">
+                    </div>
+
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-start justify-content-between mb-2">
+                            <h5 class="card-title mb-0 text-truncate" title="{{ plugin.name }}">{{ plugin.name }}</h5>
+                            <span class="badge bg-light text-dark text-truncate" style="max-width:5rem;">v{{ plugin.version }}</span>
+                        </div>
+
+                        <p class="card-text text-muted mb-3 line-clamp-3">{{ plugin.description }}</p>
+
+                        <div class="mt-auto d-flex flex-wrap gap-2">
+                            <a href="/plugin/{{ plugin.system_name }}/settings"
+                               class="btn btn-primary btn-sm {% if not plugin.enabled %}disabled{% endif %}">
+                               Settings
+                            </a>
+
+                            {% if not plugin.enabled %}
+                            <form action="/plugin/{{ plugin.system_name }}/enable" method="POST" class="action-form" data-action-label="Enabling {{ plugin.name }}…">
+                                <button type="submit" class="btn btn-success btn-sm action-btn" data-loading-text="Enabling…">Enable</button>
+                            </form>
+                            {% else %}
+                            <form action="/plugin/{{ plugin.system_name }}/disable" method="POST" class="action-form" data-action-label="Disabling {{ plugin.name }}…">
+                                <button type="submit" class="btn btn-warning btn-sm action-btn" data-loading-text="Disabling…">Disable</button>
+                            </form>
+                            {% endif %}
+
+                            <form action="/plugin/{{ plugin.system_name }}/uninstall" method="POST" class="action-form"
+                                  data-action-label="Uninstalling {{ plugin.name }}…"
+                                  onsubmit="return confirm('Uninstall {{ plugin.name }}? This will disable any dependents.');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm action-btn" data-loading-text="Uninstalling…">Uninstall</button>
+                            </form>
+                        </div>
+
+                        <div class="pt-2">
+                            {% if plugin.enabled %}
+                                <span class="badge bg-success">Enabled</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Disabled</span>
+                            {% endif %}
+
+                            <!-- Check for update button -->
+                            <a href="/version" 
+                               class="btn btn-sm btn-outline-primary ms-1 mt-2">
+                               Check for Update
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-info mb-0">
+            No plugins installed yet. Check the Marketplace tab to install new plugins.
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Marketplace -->
+    <div class="tab-pane fade {% if marketplace_active %}show active{% endif %}" id="marketplace" role="tabpanel" aria-labelledby="marketplace-tab">
+        {% if available_plugins and available_plugins|length > 0 %}
+
+        <!-- Search -->
+        <div class="row mb-3">
+            <div class="col-12 col-md-6 ms-auto">
+                <div class="form-outline" data-mdb-input-init>
+                    <input type="text" id="marketplaceSearch" class="form-control" />
+                    <label class="form-label" for="marketplaceSearch">Search marketplace</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3" id="marketplaceGrid">
+            {% for p in available_plugins %}
+            <div class="col-12 col-sm-6 col-lg-4 marketplace-card"
+                 data-name="{{ p.name|lower }}"
+                 data-desc="{{ (p.description or '')|lower }}">
+                <div class="card h-100 shadow-1-strong">
+                    {% set icon_src = (p.icon if p.icon and (p.icon|lower).startswith('http')
+                                       else url_for('routes.serve_plugin_icon', plugin_name=p.system_name, filename=p.icon)) %}
+                    <div class="bg-light d-flex align-items-center justify-content-center" style="height:160px;">
+                        <img src="{{ icon_src }}"
+                             alt="{{ p.name }}"
+                             class="img-fluid p-3"
+                             style="max-height:140px; object-fit:contain;"
+                             onerror="this.closest('.bg-light').style.display='none'">
+                    </div>
+
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex align-items-start justify-content-between mb-2">
+                            <h5 class="card-title mb-0 text-truncate" title="{{ p.name }}">{{ p.name }}</h5>
+                            <span class="badge bg-light text-dark text-truncate" style="max-width:5rem;">v{{ p.current_version }}</span>
+                        </div>
+
+                        <p class="card-text text-muted mb-2 line-clamp-3">
+                            {{ p.description or 'No description available.' }}
+                        </p>
+
+                        {% if p.repository %}
+                        <span class="badge bg-info text-dark align-self-start mb-2">{{ p.repository|capitalize }}</span>
+                        {% endif %}
+
+                        {% if p.changelog and p.changelog|length > 0 %}
+                        <details class="small mb-3">
+                            <summary class="text-muted">Changelog (latest)</summary>
+                            <ul class="mb-0 ps-3">
+                                {% for item in p.changelog[:5] %}
+                                <li>{{ item }}</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+
+                        <div class="mt-auto">
+                            <form method="POST"
+                                  class="action-form"
+                                  data-action-label="Installing {{ p.name }}…"
+                                  action="{{ url_for('routes.install_plugin_remote', plugin_system_name=p.system_name) }}">
+                                <button type="submit" class="btn btn-success w-100 action-btn" data-loading-text="Installing…">Install</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card-footer d-flex justify-content-between align-items-center small text-muted">
+                        <span class="text-truncate">{{ p.system_name }}</span>
+                        {% if p.download_url %}
+                        <a href="{{ p.download_url }}" class="text-decoration-none" target="_blank" rel="noopener noreferrer">Remote manifest</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% else %}
+        <div class="alert alert-secondary mb-0">No new plugins available in the marketplace.</div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // Marketplace search
+    const input = document.getElementById('marketplaceSearch');
+    if (input) {
+        const cards = document.querySelectorAll('.marketplace-card');
+        input.addEventListener('input', function () {
+            const q = (this.value || '').toLowerCase().trim();
+            cards.forEach(c => {
+                const name = c.getAttribute('data-name') || '';
+                const desc = c.getAttribute('data-desc') || '';
+                c.style.display = (!q || name.includes(q) || desc.includes(q)) ? '' : 'none';
+            });
+        });
+    }
+
+    // Tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-mdb-toggle="tooltip"]'));
+    tooltipTriggerList.forEach(el => new mdb.Tooltip(el));
+
+    // Progress overlay
+    const progressBar = document.getElementById('globalProgressBar');
+    const overlay = document.getElementById('actionOverlay');
+    const overlayText = document.getElementById('overlayText');
+    const main = document.querySelector('main');
+
+    function startProgress(label) {
+        if (overlay && overlayText) {
+            overlayText.textContent = label || 'Working…';
+            overlay.style.display = 'flex';
+        }
+        if (main) main.setAttribute('aria-busy', 'true');
+        if (progressBar) {
+            progressBar.style.opacity = '1';
+            progressBar.style.width = '20%';
+            let w = 20;
+            progressBar._timer && clearInterval(progressBar._timer);
+            progressBar._timer = setInterval(() => {
+                w = Math.min(w + Math.random() * 15, 85);
+                progressBar.style.width = w + '%';
+            }, 500);
+        }
+    }
+
+    function endProgress() {
+        if (progressBar) {
+            progressBar.style.width = '100%';
+            setTimeout(() => {
+                progressBar.style.opacity = '0';
+                progressBar.style.width = '0%';
+                progressBar._timer && clearInterval(progressBar._timer);
+            }, 200);
+        }
+        if (overlay) {
+            setTimeout(() => { overlay.style.display = 'none'; }, 150);
+        }
+        if (main) main.removeAttribute('aria-busy');
+    }
+
+    // Button loading
+    function setButtonLoading(btn, isLoading) {
+        if (!btn) return;
+        if (isLoading) {
+            if (btn.dataset.loading === '1') return;
+            btn.dataset.loading = '1';
+            btn.dataset.originalText = btn.innerText;
+            btn.innerText = btn.dataset.loadingText || 'Working…';
+            btn.disabled = true;
+            btn.classList.add('disabled');
+        } else {
+            btn.dataset.loading = '';
+            if (btn.dataset.originalText) btn.innerText = btn.dataset.originalText;
+            btn.disabled = false;
+            btn.classList.remove('disabled');
+        }
+    }
+
+    // Intercept action forms
+    document.querySelectorAll('form.action-form').forEach(form => {
+        form.setAttribute('novalidate', 'novalidate');
+        form.addEventListener('submit', function (e) {
+            if (this.dataset.submitting === '1') {
+                e.preventDefault(); return false;
+            }
+            this.dataset.submitting = '1';
+            const btn = this.querySelector('.action-btn');
+            setButtonLoading(btn, true);
+            startProgress(this.dataset.actionLabel);
+            this._fallbackTimer = setTimeout(() => {
+                this.dataset.submitting = '';
+                setButtonLoading(btn, false);
+                endProgress();
+            }, 20000);
+        }, { passive: false });
+    });
+});
+</script>
+</div>
 {% endblock %}

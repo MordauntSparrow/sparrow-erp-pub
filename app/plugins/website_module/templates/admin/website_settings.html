@@ -1,0 +1,234 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="mb-4"><i class="bi bi-gear"></i> Website Global Settings</h2>
+  <form method="POST" enctype="multipart/form-data" class="needs-validation" novalidate>
+
+    <!-- Branding Images -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-image"></i> Branding Images</strong>
+      </div>
+      <div class="card-body row g-3 align-items-center">
+        <div class="col-md-6">
+          <label for="favicon" class="form-label">Favicon</label>
+          <input class="form-control" type="file" name="favicon" id="favicon" accept="image/x-icon,image/png">
+          {% if settings.favicon_path %}
+            <div class="mt-2">
+              <img src="{{ url_for('website_admin_routes.website_module_static', filename=settings.favicon_path) }}" alt="Favicon" height="32" class="rounded border">
+            </div>
+          {% endif %}
+        </div>
+        <div class="col-md-6">
+          <label for="default_og_image" class="form-label">Default OG Image</label>
+          <input class="form-control" type="file" name="default_og_image" id="default_og_image" accept="image/*">
+          {% if settings.default_og_image %}
+            <div class="mt-2">
+              <img src="{{ url_for('website_admin_routes.website_module_static', filename=settings.default_og_image) }}" alt="OG Image" height="40" class="rounded border">
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- SEO & Analytics -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-bar-chart"></i> SEO & Analytics</strong>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="analytics_code" class="form-label">Analytics / Tracking Code</label>
+          <textarea class="form-control" name="analytics_code" id="analytics_code" rows="2" placeholder="Paste Google Analytics or similar code">{{ settings.analytics_code }}</textarea>
+        </div>
+        <div>
+          <label for="schema_json" class="form-label">Global Schema JSON</label>
+          <textarea class="form-control" name="schema_json" id="schema_json" rows="2" placeholder="Paste JSON-LD for site-wide schema">{{ settings.schema_json }}</textarea>
+          <div class="form-text">For advanced SEO. For per-page schema, edit each page separately.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Social Profiles -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-people"></i> Social Profiles</strong>
+      </div>
+      <div class="card-body">
+        <div class="row g-2">
+          {% set socials = [
+            ('Facebook', 'facebook_url', 'facebook'),
+            ('Instagram', 'instagram_url', 'instagram'),
+            ('LinkedIn', 'linkedin_url', 'linkedin'),
+            ('Twitter', 'twitter_url', 'twitter'),
+            ('YouTube', 'youtube_url', 'youtube'),
+            ('TikTok', 'tiktok_url', 'tiktok'),
+            ('Pinterest', 'pinterest_url', 'pinterest'),
+            ('WhatsApp', 'whatsapp_url', 'whatsapp'),
+            ('Threads', 'threads_url', 'threads'),
+            ('Reddit', 'reddit_url', 'reddit'),
+            ('Snapchat', 'snapchat_url', 'snapchat'),
+            ('Telegram', 'telegram_url', 'telegram'),
+            ('Discord', 'discord_url', 'discord'),
+            ('Tumblr', 'tumblr_url', 'tumblr'),
+            ('GitHub', 'github_url', 'github'),
+            ('Medium', 'medium_url', 'medium'),
+            ('Vimeo', 'vimeo_url', 'vimeo'),
+            ('Dribbble', 'dribbble_url', 'dribbble'),
+            ('Behance', 'behance_url', 'behance'),
+            ('SoundCloud', 'soundcloud_url', 'soundcloud'),
+            ('Slack', 'slack_url', 'slack'),
+            ('Mastodon', 'mastodon_url', 'mastodon')
+          ] %}
+          {% for label, key, icon in socials %}
+            <div class="col-md-4 mb-2">
+              <label for="{{ key }}" class="form-label">
+                <i class="bi bi-{{ icon }}"></i> {{ label }}
+              </label>
+              <input type="url" class="form-control" name="{{ key }}" id="{{ key }}" value="{{ settings[key] or '' }}" placeholder="https://{{ label|lower }}.com/yourprofile">
+            </div>
+          {% endfor %}
+        </div>
+        <div class="form-text">Leave blank to hide a network from your footer and schema.</div>
+      </div>
+    </div>
+
+    <!-- Cookie Bar & Consent -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-shield-lock"></i> GDPR & Cookie Bar</strong>
+      </div>
+      <div class="card-body row g-3 align-items-center">
+        <div class="col-md-8">
+          <label for="cookie_bar_text" class="form-label">Cookie Bar Text</label>
+          <textarea class="form-control" name="cookie_bar_text" id="cookie_bar_text" rows="2" placeholder="Short message for cookie consent bar">{{ settings.cookie_bar_text }}</textarea>
+        </div>
+        <div class="col-md-4">
+          <label for="cookie_bar_colors" class="form-label">Cookie Bar Accent Color</label>
+          <input type="color" class="form-control form-control-color border" name="cookie_bar_colors" id="cookie_bar_colors" value="{{ settings.cookie_bar_colors or '#3860ff' }}">
+        </div>
+      </div>
+      <!-- Cookie Bar Preview -->
+      <div class="mt-4">
+        <label class="form-label fw-semibold">Cookie Bar Preview</label>
+        <div id="cookieBarPreview" class="cookie-bar-preview d-flex flex-column flex-md-row align-items-center justify-content-between px-3 py-3"
+             style="background: #fff; border-top: 3px solid {{ settings.cookie_bar_colors or '#3860ff' }};">
+          <span id="cookieBarPreviewText" style="color: #333;">{{ settings.cookie_bar_text or 'We use cookies to ensure you get the best experience on our website.' }}</span>
+          <div class="mt-3 mt-md-0">
+            <button type="button" class="btn btn-success btn-sm me-2">Accept</button>
+            <button type="button" class="btn btn-outline-danger btn-sm me-2">Decline</button>
+            <a href="/cookie-policy" class="btn btn-link btn-sm disabled" style="color: {{ settings.cookie_bar_colors or '#3860ff' }}; text-decoration: underline;" disabled>Cookie Policy</a>
+          </div>
+        </div>
+      </div>
+      <style>
+        .cookie-bar-preview {
+          min-height: 60px;
+          border-radius: 0;
+          box-shadow: 0 -2px 12px rgba(0,0,0,0.08);
+          border-top-width: 3px !important;
+          border-top-style: solid !important;
+          border-top-color: inherit;
+          background: #fff !important;
+          margin-top: 1em;
+        }
+        .cookie-bar-preview .btn-link { text-decoration: underline; }
+        .cookie-bar-preview .btn-outline-danger { border-width: 2px; }
+      </style>
+    </div>
+
+    <!-- Policy Generator -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-file-earmark-text"></i> Privacy & Cookie Policy Generator</strong>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-2">
+          {% set generator_fields = [
+            ('Ecommerce', 'has_ecommerce', 'bi-cart'),
+            ('Newsletter', 'has_newsletter', 'bi-envelope'),
+            ('Google Analytics', 'uses_google_analytics', 'bi-graph-up'),
+            ('Facebook Pixel', 'uses_facebook_pixel', 'bi-facebook'),
+            ('Contact Forms', 'has_contact_forms', 'bi-chat'),
+            ('User Accounts', 'has_user_accounts', 'bi-person'),
+            ('Comments', 'has_comments', 'bi-chat-left-text'),
+            ('Social Sharing', 'has_social_sharing', 'bi-share')
+          ] %}
+          {% for label, key, icon in generator_fields %}
+            <div class="col-md-3 mb-1">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" name="{{ key }}" id="{{ key }}" value="1" {% if settings[key] %}checked{% endif %}>
+                <label class="form-check-label" for="{{ key }}">
+                  <i class="bi {{ icon }}"></i> {{ label }}
+                </label>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="submit" name="generate_policies" value="1" class="btn btn-outline-primary mb-2">
+          <i class="bi bi-magic"></i> Auto-generate Privacy & Cookie Policy
+        </button>
+        <div class="form-text">Tick features your site uses, then generate default legal text (editable below).</div>
+      </div>
+    </div>
+
+    <!-- Editable Policies -->
+    <div class="card mb-4">
+      <div class="card-header bg-light">
+        <strong><i class="bi bi-pencil-square"></i> Policies (Editable)</strong>
+      </div>
+      <div class="card-body row g-3">
+        <div class="col-md-6">
+          <label for="privacy_policy" class="form-label">Privacy Policy</label>
+          <textarea class="form-control" name="privacy_policy" id="privacy_policy" rows="8">{{ settings.privacy_policy }}</textarea>
+          <div class="form-text"><span id="privacy_length"></span></div>
+        </div>
+        <div class="col-md-6">
+          <label for="cookie_policy" class="form-label">Cookie Policy</label>
+          <textarea class="form-control" name="cookie_policy" id="cookie_policy" rows="8">{{ settings.cookie_policy }}</textarea>
+          <div class="form-text"><span id="cookie_length"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-flex justify-content-end">
+      <button type="submit" class="btn btn-success btn-lg">
+        <i class="bi bi-save"></i> Save Settings
+      </button>
+    </div>
+  </form>
+</div>
+<script>
+// Character counters for policies
+function updateCounter(id, outId) {
+  var el = document.getElementById(id);
+  var out = document.getElementById(outId);
+  if (el && out) {
+    out.textContent = el.value.length + " characters";
+    el.addEventListener('input', function() {
+      out.textContent = el.value.length + " characters";
+    });
+  }
+}
+updateCounter('privacy_policy', 'privacy_length');
+updateCounter('cookie_policy', 'cookie_length');
+
+// Cookie Bar Preview Logic
+document.addEventListener("DOMContentLoaded", function() {
+  const preview = document.getElementById('cookieBarPreview');
+  const previewText = document.getElementById('cookieBarPreviewText');
+  const barText = document.getElementById('cookie_bar_text');
+  const barColor = document.getElementById('cookie_bar_colors');
+  const policyLink = preview.querySelector('a.btn-link');
+
+  function updatePreview() {
+    previewText.textContent = barText.value || 'We use cookies to ensure you get the best experience on our website.';
+    const color = barColor.value || '#3860ff';
+    preview.style.borderTopColor = color;
+    if (policyLink) { policyLink.style.color = color; }
+  }
+  barText.addEventListener('input', updatePreview);
+  barColor.addEventListener('input', updatePreview);
+});
+</script>
+{% endblock %}

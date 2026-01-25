@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ page_data.meta.title or config.site_settings.company_name }}{% endblock %}</title>
+    <meta name="description" content="{{ page_data.meta.description }}">
+    <meta name="keywords" content="{{ ', '.join(page_data.meta.keywords) }}">
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- Material Bootstrap -->
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css"
+      rel="stylesheet"
+    >
+    <!-- Plugin site styles -->
+    <link rel="stylesheet" href="{{ url_for('website_public.static', filename='css/site.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+
+    {% block head %}{% endblock %}
+
+    <style>
+      /* -------------------------------
+         GLOBAL BODY & THEME STYLES
+         ------------------------------- */
+      body {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #121212 !important;
+              color: #ffffff !important;
+          {% elif config.theme_settings.theme == 'modern' %}
+              background-color: #f0f2f5 !important;
+              color: #212529 !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+          {% endif %}
+      }
+
+      /* -------------------------------
+         NAVBAR (HEADER) CUSTOMIZATION
+         ------------------------------- */
+        .navbar {
+          background-color: #ffffff !important;  /* keep white */
+          position: sticky; /* keep navbar visible while scrolling */
+          top: 0;
+          z-index: 1030; /* above most content */
+          box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        }
+      .navbar .navbar-brand,
+      .navbar .nav-link {
+          color: #1B4D3E !important;  /* forest green text */
+      }
+      .navbar .nav-link:hover,
+      .navbar .nav-link:focus {
+          color: #163F31 !important;  /* darker green on hover */
+      }
+      .navbar-toggler {
+          border-color: #1B4D3E;
+          background-color: #fff;
+      }
+      .navbar-toggler-icon {
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 30 30' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath stroke='rgba(27,77,62,1)' stroke-width='2' stroke-linecap='round' stroke-miterlimit='10' d='M4 7h22M4 15h22M4 23h22'/%3E%3C/svg%3E");
+          filter: invert(23%) sepia(60%) saturate(350%) hue-rotate(89deg) brightness(91%) contrast(87%);
+      }
+
+      /* -------------------------------
+         FOOTER CUSTOMIZATION
+         ------------------------------- */
+      .footer {
+          background-color: #1B4D3E !important;  /* forest green */
+          color: #CCAA33 !important;              /* gold */
+      }
+      .footer h5 {
+          color: #CCAA33 !important;
+      }
+      .footer a {
+          color: #CCAA33 !important;  /* gold links */
+          text-decoration: none;
+      }
+      .footer a:hover,
+      .footer a:focus {
+          color: #FFFFFF !important;  /* white on hover */
+          text-decoration: underline;
+      }
+      .footer .bg-dark {
+          background-color: #163F31 !important; /* darker green for bottom bar */
+          color: #CCAA33 !important;
+      }
+      .footer-socials {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em;
+        justify-content: flex-start;
+        align-items: center;
+        max-width: 100%;
+        margin-top: 0.5em;
+      }
+      .footer-socials a {
+        font-size: 1.35rem;
+        color: #CCAA33;
+        transition: color 0.2s;
+        display: flex;
+        align-items: center;
+      }
+      .footer-socials a:hover { color: #FFFFFF; }
+      @media (max-width: 600px) {
+        .footer-socials { justify-content: center; }
+        .footer-socials a { font-size: 1.1rem; }
+      }
+
+      /* -------------------------------
+         DEFAULT LINK OVERRIDES
+         ------------------------------- */
+      a {
+          {% if config.theme_settings.theme == 'dark' %}
+              color: #CCAA33 !important;  /* gold for dark */
+          {% elif config.theme_settings.theme == 'modern' %}
+              color: #1B4D3E !important;   /* forest green for modern */
+          {% else %}
+              color: #1B4D3E !important;   /* forest green for default */
+          {% endif %}
+      }
+      a:hover {
+          {% if config.theme_settings.theme == 'dark' %}
+              color: #FFFFFF !important;
+          {% else %}
+              color: #163F31 !important; /* darker green on hover */
+          {% endif %}
+      }
+
+      /* -------------------------------
+         LIST GROUPS
+         ------------------------------- */
+      .list-group {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #1e1e1e !important;
+              color: #ffffff !important;
+              border: 1px solid #444444 !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+              border: 1px solid #ced4da !important;
+          {% endif %}
+      }
+      .list-group-item {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #1e1e1e !important;
+              color: #ffffff !important;
+              border-bottom: 1px solid #444444 !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+          {% endif %}
+      }
+      .list-group-item:hover {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #292929 !important;
+              color: #ffffff !important;
+          {% else %}
+              background-color: #f8f9fa !important;
+              color: #212529 !important;
+          {% endif %}
+      }
+
+        /* -------------------------------
+         BUTTON STYLES (Unified: gold background, white text)
+         ------------------------------- */
+        .btn,
+        .btn-primary,
+        .btn-secondary,
+        .btn-reserve,
+        .btn-pdf,
+        .btn-book {
+          background-color: #CCAA33 !important; /* gold */
+          border-color: #CCAA33 !important;
+          color: #FFFFFF !important;
+        }
+        .btn:focus,
+        .btn:hover {
+          background-color: #B5982E !important; /* darker gold */
+          border-color: #B5982E !important;
+          color: #FFFFFF !important;
+          opacity: 1 !important;
+        }
+        .btn-danger {
+          background-color: #dc3545 !important;
+          color: #FFFFFF !important;
+        }
+        .btn-warning {
+          background-color: #ffc107 !important;
+          color: #212529 !important;
+        }
+
+      /* -------------------------------
+         FORM CONTROLS
+         ------------------------------- */
+      input, textarea, select, .form-control {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #1f1f1f !important;
+              color: #ffffff !important;
+              border: 1px solid #444444 !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+              border: 1px solid #ced4da !important;
+          {% endif %}
+      }
+
+      /* -------------------------------
+         MODALS
+         ------------------------------- */
+      .modal-content {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #1e1e1e !important;
+              color: #ffffff !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+          {% endif %}
+      }
+      .modal-header, .modal-footer {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #292929 !important;
+              color: #ffffff !important;
+          {% else %}
+              background-color: #f8f9fa !important;
+              color: #212529 !important;
+          {% endif %}
+      }
+
+      /* -------------------------------
+         CARDS
+         ------------------------------- */
+      .card {
+          {% if config.theme_settings.theme == 'dark' %}
+              background-color: #1e1e1e !important;
+              color: #ffffff !important;
+              border: 1px solid #444444 !important;
+          {% else %}
+              background-color: #ffffff !important;
+              color: #212529 !important;
+              box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
+          {% endif %}
+      }
+        /* -------------------------------
+         ICON LISTS (reusable for nicer bullets)
+         ------------------------------- */
+        .icon-list {
+          list-style: none;
+          padding-left: 0;
+          margin: 0;
+        }
+          .icon-list li {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+          }
+        .icon-list .material-symbols-outlined,
+        .icon-list .bi {
+          color: #CCAA33; /* gold */
+          font-size: 1.1rem;
+          line-height: 1;
+          margin-top: 0.15rem; /* align with text */
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg">
+      <div class="container">
+        {% if config.site_settings['branding'] == 'logo' and config.site_settings['logo_path'] %}
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename=config.site_settings['logo_path']) }}"
+                     alt="Logo" height="80">
+            </a>
+        {% else %}
+            <a class="navbar-brand" href="/">
+                {{ config.site_settings['company_name'] or 'Company' }}
+            </a>
+        {% endif %}
+
+        <button
+          class="navbar-toggler"
+          type="button"
+          data-mdb-toggle="collapse"
+          data-mdb-target="#navbarNav"
+          aria-controls="navbarNav"
+          aria-expanded="false"
+          aria-label="Toggle navigation"
+        >
+          <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            {% for page in pages %}
+              {% if page.header %}
+                <li class="nav-item">
+                  <a class="nav-link" href="{{ url_for('website_public.custom_page', page_route=page.route.strip('/')) }}">
+                    {{ page.title }}
+                  </a>
+                </li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container-fluid">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer text-center text-lg-start mt-5">
+      <div class="container p-4">
+        <div class="row">
+          <div class="col-lg-4 col-md-12 mb-4">
+            <h5>{{ config.site_settings['company_name'] }}</h5>
+            <p>A cosy, family-owned pub in Shipley, Horsham. Dog-friendly, locally sourced, and serving real ales.</p>
+            <!-- Social Links -->
+            <div class="footer-socials mb-2">
+              {% if website_settings is defined %}
+                {% set socials = [
+                  ('Facebook',    'bi bi-facebook',    website_settings.facebook_url),
+                  ('Instagram',   'bi bi-instagram',   website_settings.instagram_url),
+                  ('LinkedIn',    'bi bi-linkedin',    website_settings.linkedin_url),
+                  ('Twitter',     'bi bi-twitter-x',   website_settings.twitter_url),
+                  ('YouTube',     'bi bi-youtube',     website_settings.youtube_url),
+                  ('TikTok',      'bi bi-tiktok',      website_settings.tiktok_url),
+                  ('Pinterest',   'bi bi-pinterest',   website_settings.pinterest_url),
+                  ('WhatsApp',    'bi bi-whatsapp',    website_settings.whatsapp_url),
+                  ('Threads',     'bi bi-threads',     website_settings.threads_url),
+                  ('Reddit',      'bi bi-reddit',      website_settings.reddit_url),
+                  ('Snapchat',    'bi bi-snapchat',    website_settings.snapchat_url),
+                  ('Telegram',    'bi bi-telegram',    website_settings.telegram_url),
+                  ('Discord',     'bi bi-discord',     website_settings.discord_url),
+                  ('Tumblr',      'bi bi-tumblr',      website_settings.tumblr_url),
+                  ('GitHub',      'bi bi-github',      website_settings.github_url),
+                  ('Medium',      'bi bi-medium',      website_settings.medium_url),
+                  ('Vimeo',       'bi bi-vimeo',       website_settings.vimeo_url),
+                  ('Dribbble',    'bi bi-dribbble',    website_settings.dribbble_url),
+                  ('Behance',     'bi bi-behance',     website_settings.behance_url),
+                  ('SoundCloud',  'bi bi-soundwave',   website_settings.soundcloud_url),
+                  ('Slack',       'bi bi-slack',       website_settings.slack_url),
+                  ('Mastodon',    'bi bi-mastodon',    website_settings.mastodon_url)
+                ] %}
+              {% else %}
+                {% set socials = [] %}
+              {% endif %}
+              {% for name, icon, url in socials %}
+                {% if url %}
+                  <a href="{{ url }}" target="_blank" rel="noopener" title="{{ name }}">
+                    <i class="{{ icon }}"></i>
+                  </a>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+          <div class="col-lg-4 col-md-12 mb-4">
+            <h5>Quick Links</h5>
+            <ul class="list-unstyled mb-0">
+              {% for page in pages %}
+                {% if page.footer %}
+                  <li>
+                    <a href="{{ url_for('website_public.custom_page', page_route=page.route.strip('/')) }}">
+                      {{ page.title }}
+                    </a>
+                  </li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="col-lg-4 col-md-12 mb-4">
+            <h5>Find Us & Reviews</h5>
+            <p class="mb-2">Find us on Google Maps and read reviews.</p>
+            <!-- OpenStreetMap embed (responsive) -->
+            <div style="width:100%;height:200px;overflow:hidden;border-radius:8px;">
+              <iframe width="100%" height="200" src="https://www.openstreetmap.org/export/embed.html?bbox=-0.37900149822235113%2C50.998858669640875%2C-0.3764909505844117%2C50.999952487453434&amp;layer=mapnik" style="border: 1px solid black" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+            <p class="mt-2"><small><a href="https://www.openstreetmap.org/?#map=19/50.999406/-0.377746" target="_blank" rel="noopener">View Larger Map</a></small></p>
+          </div>
+        </div>
+      </div>
+      <div class="text-center p-3 bg-dark">
+        Powered by <strong>Sparrow ERP</strong> &nbsp;|&nbsp; &copy; 2025 {{ config.site_settings['company_name'] or 'Company' }}.
+      </div>
+    </footer>
+
+    <!-- MDB JS -->
+    <script
+      type="text/javascript"
+      src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"
+    ></script>
+    <!-- Mobile navbar auto-close on link click -->
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var navLinks = document.querySelectorAll('.navbar-nav .nav-link');
+        var navbarCollapse = document.getElementById('navbarNav');
+        navLinks.forEach(function (link) {
+          link.addEventListener('click', function () {
+            if (window.innerWidth < 992 && navbarCollapse.classList.contains('show')) {
+              var collapseInstance = new mdb.Collapse(navbarCollapse, {toggle: false});
+              collapseInstance.hide();
+            }
+          });
+        });
+      });
+    </script>
+</body>
+</html>

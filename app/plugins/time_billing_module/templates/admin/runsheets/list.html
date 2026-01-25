@@ -1,0 +1,176 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-clipboard2-check me-2"></i> Runsheets
+        </h4>
+        <a class="btn btn-primary btn-sm" href="#" id="btnNew">
+            <i class="bi bi-plus-lg me-1"></i> New
+        </a>
+    </div>
+
+    <!-- Filters -->
+    <form class="row g-2 mb-3" id="filterForm">
+        <div class="col-12 col-md-3">
+            <input class="form-control form-control-sm" type="text" name="client_name" placeholder="Client ID">
+        </div>
+        <div class="col-12 col-md-3">
+            <input class="form-control form-control-sm" type="text" name="job_type_id" placeholder="Job Type ID">
+        </div>
+        <div class="col-12 col-md-3">
+            <input class="form-control form-control-sm" type="text" name="week_id" placeholder="Week ID (YYYYWW)">
+        </div>
+        <div class="col-12 col-md-3 d-flex gap-2">
+            <button class="btn btn-secondary btn-sm" type="submit">
+                <i class="bi bi-search me-1"></i> Apply
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="btnClear">Clear</button>
+        </div>
+    </form>
+
+    <!-- Runsheets Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Work Date</th>
+                            <th>Client</th>
+                            <th>Job Type</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function () {
+    const body = document.getElementById('rsBody');
+    const form = document.getElementById('filterForm');
+    const btnNew = document.getElementById('btnNew');
+
+    // Build API URLs
+    const LIST_URL = "{{ url_for('internal_time_billing.api_list_runsheets') }}";
+    const CREATE_URL = "{{ url_for('internal_time_billing.api_create_runsheet') }}";
+
+    // Publish: use base + id to avoid Jinja int converter errors
+    const PUBLISH_BASE = "{{ url_for('internal_time_billing.api_publish_runsheet', rs_id=0) }}".replace(/0\/publish$/, "");
+
+    function normalizeListPayload(data) {
+        // Accept array or {items: [...]}
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.items)) return data.items;
+        return [];
+    }
+
+    async function load() {
+        const params = new URLSearchParams(new FormData(form));
+        const url = `${LIST_URL}?${params.toString()}`;
+        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
+
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error('Load failed');
+
+            const raw = await resp.json();
+            const items = normalizeListPayload(raw);
+
+            body.innerHTML = '';
+            if (!items.length) {
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No runsheets found.</td></tr>';
+                return;
+            }
+
+            for (const r of items) {
+                const tr = document.createElement('tr');
+                const status = (r.status || 'draft').toLowerCase();
+                const badge = status === 'published'
+                    ? 'bg-success'
+                    : (status === 'draft' ? 'bg-secondary' : 'bg-dark');
+
+                tr.innerHTML = `
+                    <td>${r.id}</td>
+                    <td>${r.work_date || ''}</td>
+                    <td>${r.client_name || r.client_id || ''}</td>
+                    <td>${r.job_type_name || r.job_type_id || ''}</td>
+                    <td><span class="badge ${badge}">${status}</span></td>
+                    <td class="text-end">
+                        <div class="btn-group btn-group-sm">
+                            <a class="btn btn-outline-primary"
+                               href="{{ url_for('internal_time_billing.runsheets_edit_page') }}#edit-${r.id}">
+                               Edit
+                            </a>
+                            <button class="btn btn-outline-success js-publish"
+                                    data-id="${r.id}">
+                                Publish
+                            </button>
+                        </div>
+                    </td>
+                `;
+                body.appendChild(tr);
+            }
+
+            // Bind publish buttons safely
+            body.querySelectorAll('.js-publish').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm('Publish this runsheet?')) return;
+                    const resp = await fetch(`${PUBLISH_BASE}/${btn.dataset.id}/publish`, {
+                        method: 'POST'
+                    });
+                    if (resp.ok) {
+                        load();
+                    } else {
+                        alert('Publish failed');
+                    }
+                });
+            });
+        } catch (e) {
+            body.innerHTML = '<tr><td colspan="6" class="text-danger">Load failed</td></tr>';
+            console.error(e);
+        }
+    }
+
+    form.addEventListener('submit', e => {
+        e.preventDefault();
+        load();
+    });
+
+    document.getElementById('btnClear').addEventListener('click', () => {
+        form.reset();
+        load();
+    });
+
+    btnNew.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+            const resp = await fetch(CREATE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (resp.ok) {
+                load();
+            } else {
+                alert('Create failed');
+            }
+        } catch (e) {
+            alert('Create failed');
+        }
+    });
+
+    load();
+})();
+</script>
+
+{% endblock %}

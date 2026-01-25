@@ -1,0 +1,345 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Website Builder — {{ page.title }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+  <div class="row">
+    <!-- Left: Blocks, Layers, Settings -->
+    <div class="col-md-4 col-lg-3">
+      <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item">
+          <button class="nav-link active" data-mdb-toggle="tab" data-mdb-target="#tab-blocks" type="button">Blocks</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-mdb-toggle="tab" data-mdb-target="#tab-layers" type="button">Layers</button>
+        </li>
+        <li class="nav-item">
+          <button class="nav-link" data-mdb-toggle="tab" data-mdb-target="#tab-settings" type="button">Settings</button>
+        </li>
+      </ul>
+
+      <div class="tab-content">
+        <!-- Blocks palette -->
+        <div class="tab-pane fade show active" id="tab-blocks">
+          <div class="list-group small" id="blocksPalette">
+            {% for key, meta in blocks_registry.items() %}
+              <button class="list-group-item list-group-item-action d-flex align-items-center gap-2 palette-item" 
+                      data-type="{{ key }}" type="button">
+                <i class="bi {{ meta.icon }}"></i>
+                <span>{{ meta.label }}</span>
+              </button>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Layers -->
+        <div class="tab-pane fade" id="tab-layers">
+          <ul class="list-group small" id="layersList"></ul>
+        </div>
+
+        <!-- Settings -->
+        <div class="tab-pane fade" id="tab-settings">
+          <div id="settingsForm" class="small"></div>
+
+          <hr>
+          <h6>Page variables</h6>
+          <div id="varsForm" class="small"></div>
+
+          <hr>
+          <h6>SEO</h6>
+          <div class="mb-2">
+            <label class="form-label small">Title</label>
+            <input id="seoTitle" class="form-control form-control-sm" value="{{ page.seo.title or '' }}">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Description</label>
+            <textarea id="seoDesc" class="form-control form-control-sm" rows="2">{{ page.seo.description or '' }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Preview + actions -->
+    <div class="col-md-8 col-lg-9">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="btn-group btn-group-sm" role="group">
+          <button class="btn btn-outline-secondary" data-width="375" type="button">Mobile</button>
+          <button class="btn btn-outline-secondary" data-width="768" type="button">Tablet</button>
+          <button class="btn btn-outline-secondary active" data-width="100%" type="button">Desktop</button>
+        </div>
+
+        <div class="d-flex gap-2">
+          <button id="saveBtn" class="btn btn-primary btn-sm" type="button">Save</button>
+          <a class="btn btn-outline-secondary btn-sm" target="_blank" href="{{ url_for('website_admin_routes.builder_preview', page_route=page.route.lstrip('/')) }}">Preview</a>
+          <button id="publishBtn" class="btn btn-success btn-sm" type="button">Publish</button>
+        </div>
+      </div>
+
+      <div class="bg-light rounded-3 border p-2">
+       <iframe id="previewFrame" src="{{ url_for('website_admin_routes.builder_preview', page_route=page.route.lstrip('/')) }}" style="width:100%;height:70vh;border:0;"></iframe>
+      </div>
+
+      <div class="text-muted small mt-2">
+        Route: <code>{{ page.route }}</code>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .palette-item { cursor: grab; }
+  .palette-item:active { cursor: grabbing; }
+  #layersList li.active { background: #eef7f8; border-color: #0E7C86; }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+  const REGISTRY = {{ blocks_registry | tojson }};
+  let state = {
+    route: "{{ page.route }}",
+    blocks: {{ page.blocks | tojson }},
+    vars: {{ page.vars | tojson if page.vars else '{}' }},
+    seo: {{ (page.seo or {}) | tojson }},
+    selectedIndex: null
+  };
+
+  // Layers UI
+  const layersEl = document.getElementById('layersList');
+  function refreshLayers() {
+    if (!state.blocks.length) {
+      layersEl.innerHTML = '<li class="list-group-item text-muted">No blocks yet — add one from the palette.</li>';
+      return;
+    }
+    layersEl.innerHTML = state.blocks.map((b,i) => `
+      <li class="list-group-item d-flex justify-content-between align-items-center ${i===state.selectedIndex?'active':''}" data-i="${i}">
+        <span>${REGISTRY[b.type]?.label || b.type}</span>
+        <span class="btn-group btn-group-sm">
+          <button class="btn btn-outline-secondary" data-act="dup" data-i="${i}" type="button">Dup</button>
+          <button class="btn btn-outline-danger" data-act="del" data-i="${i}" type="button">Del</button>
+        </span>
+      </li>
+    `).join('');
+  }
+  refreshLayers();
+
+  new Sortable(layersEl, {
+    animation: 150,
+    onEnd: (evt) => {
+      const [moved] = state.blocks.splice(evt.oldIndex, 1);
+      state.blocks.splice(evt.newIndex, 0, moved);
+      state.selectedIndex = evt.newIndex;
+      refreshLayers();
+      updatePreviewDebounced();
+    }
+  });
+
+  layersEl.addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    if(!li) return;
+    const i = parseInt(li.dataset.i);
+
+    if (e.target.dataset.act === 'del') {
+      state.blocks.splice(i,1);
+      state.selectedIndex = Math.min(i, state.blocks.length - 1);
+      if (state.selectedIndex < 0) state.selectedIndex = null;
+      refreshLayers(); updatePreviewDebounced(); renderSettings();
+      return;
+    }
+
+    if (e.target.dataset.act === 'dup') {
+      const clone = window.structuredClone ? structuredClone(state.blocks[i]) : JSON.parse(JSON.stringify(state.blocks[i]));
+      state.blocks.splice(i+1,0,clone);
+      state.selectedIndex = i+1;
+      refreshLayers(); updatePreviewDebounced(); renderSettings();
+      const newLi = layersEl.querySelector(`li[data-i="${i+1}"]`);
+      newLi?.scrollIntoView({block:'nearest'});
+      return;
+    }
+
+    state.selectedIndex = i;
+    refreshLayers();
+    renderSettings();
+  });
+
+  // Palette add
+  document.querySelectorAll('.palette-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.type;
+      if (!REGISTRY[type]) return;
+      const defaults = REGISTRY[type].defaults || {};
+      state.blocks.push({type, props: {...defaults}});
+      state.selectedIndex = state.blocks.length - 1;
+      refreshLayers(); renderSettings(); updatePreviewDebounced();
+    });
+  });
+
+  // Settings form
+  function renderSettings() {
+    const wrap = document.getElementById('settingsForm');
+    wrap.innerHTML = '';
+
+    if (state.selectedIndex == null) {
+      wrap.innerHTML = '<div class="text-muted">Select a block to edit its properties.</div>';
+      return;
+    }
+
+    const blk = state.blocks[state.selectedIndex];
+    const schema = REGISTRY[blk.type]?.schema || [];
+    const form = document.createElement('div');
+
+    schema.forEach(field => {
+      const name = field.name;
+      const label = document.createElement('label');
+      label.className = 'form-label mt-2';
+      label.textContent = field.label || name;
+
+      if (field.type === 'blocks' || field.type === 'columns') {
+        const note = document.createElement('div');
+        note.className = 'text-muted small';
+        note.innerHTML = 'Nested content editing will be available in the next step.';
+        form.appendChild(label); form.appendChild(note);
+        return;
+      }
+
+      let input;
+      if (field.type === 'select') {
+        input = document.createElement('select');
+        input.className = 'form-select form-select-sm';
+        (field.options||[]).forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt; o.textContent = opt;
+          if (blk.props[name]===opt) o.selected=true;
+          input.appendChild(o);
+        });
+      } else if (field.type === 'switch') {
+        const line = document.createElement('div');
+        line.className = 'form-check form-switch mt-2';
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'form-check-input';
+        input.checked = !!blk.props[name];
+        line.appendChild(input);
+        line.appendChild(document.createTextNode(' ' + (field.label||name)));
+        form.appendChild(line);
+        input.addEventListener('change', ()=>{ blk.props[name]=input.checked; updatePreviewDebounced(); });
+        return;
+      } else if (field.type === 'richtext') {
+        input = document.createElement('textarea');
+        input.className = 'form-control';
+        input.rows=6;
+        input.value = blk.props[name]||'';
+      } else {
+        input = document.createElement('input');
+        input.type='text';
+        input.className='form-control form-control-sm';
+        input.value = blk.props[name]||'';
+      }
+
+      input.addEventListener('input', ()=>{ blk.props[name]=input.value; updatePreviewDebounced(); });
+      form.appendChild(label); form.appendChild(input);
+    });
+
+    wrap.appendChild(form);
+
+    // Page variables
+    const varsWrap = document.getElementById('varsForm');
+    varsWrap.innerHTML='';
+    const vars = state.vars || {};
+    Object.keys(vars).forEach(k => {
+      const row = document.createElement('div');
+      row.className='input-group input-group-sm mb-1';
+      row.innerHTML = `<span class="input-group-text">${k}</span><input class="form-control" value="${vars[k]}">`;
+      const input = row.querySelector('input');
+      input.addEventListener('input', ()=>{ vars[k] = input.value; });
+      varsWrap.appendChild(row);
+    });
+
+    const addRow = document.createElement('div');
+    addRow.className='input-group input-group-sm';
+    addRow.innerHTML = `<input class="form-control" placeholder="var name"><input class="form-control" placeholder="value"><button class="btn btn-outline-secondary" type="button">Add</button>`;
+    addRow.querySelector('button').addEventListener('click', ()=> {
+      const name = addRow.children[0].value.trim();
+      const val = addRow.children[1].value;
+      if (!name) return;
+      state.vars[name]=val;
+      renderSettings();
+    });
+    varsWrap.appendChild(addRow);
+  }
+
+  renderSettings();
+
+  // Preview sizing buttons
+  document.querySelectorAll('[data-width]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('[data-width]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const w = btn.getAttribute('data-width');
+      const iframe = document.getElementById('previewFrame');
+      iframe.style.width = w.endsWith('%') ? w : (w+'px');
+    });
+  });
+
+  // Dirty tracking
+  let dirty = false;
+  const markDirty = ()=>{ dirty = true; };
+  ['input','change'].forEach(evt=>{
+    document.addEventListener(evt, (e)=>{
+      if (e.target.closest('#settingsForm') || e.target.closest('#varsForm')) markDirty();
+    }, true);
+  });
+  window.addEventListener('beforeunload', (e)=>{
+    if (!dirty) return;
+    e.preventDefault(); e.returnValue='';
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e)=>{
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    if ((isMac && e.metaKey && e.key.toLowerCase()==='s') || (!isMac && e.ctrlKey && e.key.toLowerCase()==='s')) {
+      e.preventDefault();
+      document.getElementById('saveBtn').click();
+    }
+    if (e.key==='Delete' && state.selectedIndex != null) {
+      state.blocks.splice(state.selectedIndex, 1);
+      state.selectedIndex = Math.min(state.selectedIndex, state.blocks.length - 1);
+      if (state.selectedIndex < 0) state.selectedIndex = null;
+      refreshLayers(); updatePreviewDebounced(); renderSettings();
+    }
+  });
+
+  // Preview reload (cache-bust)
+  function updatePreview(force=false) {
+    const iframe = document.getElementById('previewFrame');
+    const url = new URL(iframe.src, window.location.origin);
+    if (force) url.searchParams.set('_', Date.now());
+    iframe.src = url.toString();
+  }
+  const updatePreviewDebounced = (()=>{ let t; return ()=>{ clearTimeout(t); t=setTimeout(()=>updatePreview(true),400); }; })();
+
+  // Save / Publish
+  async function saveDraft() {
+    const saveUrl = "{{ url_for('website_admin_routes.builder_save', page_route=page.route.lstrip('/')) }}";
+    const res = await fetch(saveUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({blocks:state.blocks, vars:state.vars, seo:state.seo}) });
+    if(!res.ok){ const err=await res.json().catch(()=>({error:'Save failed'})); alert(err.error||'Save failed'); return false; }
+    dirty=false; console.log('Saved'); return true;
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', async ()=>{ const ok=await saveDraft(); if(ok) updatePreviewDebounced(); });
+  document.getElementById('publishBtn').addEventListener('click', async ()=>{
+    const ok = await saveDraft(); if(!ok) return;
+    const pubUrl = "{{ url_for('website_admin_routes.builder_publish', page_route=page.route.lstrip('/')) }}";
+    const res = await fetch(pubUrl, {method:'POST'}); if(!res.ok){ alert('Publish failed'); return; }
+    updatePreviewDebounced();
+  });
+
+  // SEO inputs
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const seoTitle = document.getElementById('seoTitle');
+    const seoDesc = document.getElementById('seoDesc');
+    if(seoTitle) seoTitle.addEventListener('input', e=>{ state.seo.title=e.target.value; dirty=true; });
+    if(seoDesc) seoDesc.addEventListener('input', e=>{ state.seo.description=e.target.value; dirty=true; });
+  });
+</script>
+{% endblock %}

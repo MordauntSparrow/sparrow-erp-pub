@@ -246,7 +246,7 @@
         {% if session['site_settings']['branding'] == 'logo' and session['site_settings']['logo_path'] %}
             <a class="navbar-brand" href="/">
                 <img src="{{ url_for('static', filename=session['site_settings']['logo_path']) }}"
-                     alt="Logo" height="40">
+                     alt="Sparrow ERP" height="70">
             </a>
         {% else %}
             <a class="navbar-brand" href="/">
@@ -269,7 +269,7 @@
         <div class="collapse navbar-collapse" id="adminNavbar">
             <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('website_admin_routes.admin_index') }}">
+                    <a class="nav-link" href="/">
                         <i class="bi bi-speedometer2"></i> Plugin Dashboard
                     </a>
                 </li>

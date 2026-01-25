@@ -1,0 +1,50 @@
+{% extends "public/base.html" %}
+
+{% block title %}About The George & Dragon{% endblock %}
+
+{% block head %}
+<style>
+  /* Normalize body text on About page to a consistent readable size */
+  .page-content p,
+  .page-content ul,
+  .page-content ol,
+  .page-content li {
+    font-size: 1rem; /* base size */
+    line-height: 1.6;
+    color: inherit;
+  }
+  /* Ensure .lead doesn't scale larger than body text */
+  .page-content p.lead {
+    font-size: 1rem;
+    font-weight: 400;
+    margin-bottom: 1rem;
+  }
+  @media (min-width: 992px) {
+    .page-content p,
+    .page-content li {
+      font-size: 1.03rem;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="container py-5 page-content">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <h1>Welcome to The George &amp; Dragon, Shipley</h1>
+      <p class="lead">Nestled in the heart of the Sussex countryside, The George &amp; Dragon is a charming 16th-century pub full of character, history, and old-world warmth. Set in the peaceful hamlet of Dragons Green, our pub has long been a favourite spot for walkers, families, cyclists, locals, and visitors looking for great food, good company, and a proper country pub experience.</p>
+
+      <p>Over the centuries, the pub has seen many changes, but its heart has always remained the same: a relaxed, welcoming place where people come together to enjoy good food, good drinks, and great memories.</p>
+
+      <p>Our menu is crafted by <strong>Chef Dominique Toussaint</strong>, a culinary expert with over 20 years’ experience in Michelin-starred restaurants and fine dining across the UK. Whether you’re popping in for a quiet pint, a hearty Sunday roast, or a special evening out, our warm wooden interiors and charming pub garden provide the perfect setting.</p>
+
+      <h3 class="mt-4">Our Story</h3>
+      <p>The pub is proudly run by <strong>Tim Mordant</strong> and <strong>Sophie Burrell</strong>, who took ownership with a clear vision: to bring this beautiful old building back to life and restore it as a true community pub. They reopened the doors not just as owners, but as custodians of a piece of local history. Every beam restored, every fire relit, every corner refreshed was done with love, purpose, and a desire to create a pub that feels like home.</p>
+
+      <h3 class="mt-4">A Country Pub with Community at Its Heart</h3>
+      <p>From charity events and live music nights, to quiz evenings, race nights, weddings, wakes, celebrations, and family gatherings, the pub has grown into a lively hub for the local community.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

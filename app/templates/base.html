@@ -1,337 +1,210 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ session['site_settings']['company_name'] or 'Sparrow ERP' }}</title>
-    
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{ session['site_settings']['company_name'] or 'Sparrow ERP' }}</title>
 
+<!-- MDB UI Kit -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+<!-- Bootstrap Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+<!-- Font Awesome -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 
-    <!-- Material Design Bootstrap CSS -->
-    <link
-      href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css"
-      rel="stylesheet"
-    >
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+<style>
+/* ===== Theme-aware base ===== */
+body {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #121212;
+    color: #ffffff;
+  {% elif config.theme_settings.theme == 'modern' %}
+    background-color: #f0f2f5;
+    color: #212529;
+  {% else %}
+    background-color: #ffffff;
+    color: #212529;
+  {% endif %}
+}
 
-    <!-- Font Awesome for Icons -->
-    <link
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
-      rel="stylesheet"
-    >
+/* ===== Navbar ===== */
+.navbar {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1f1f1f;
+  {% else %}
+    background-color: #ffffff;
+  {% endif %}
+}
+.navbar .nav-link, .navbar-brand {
+  {% if config.theme_settings.theme == 'dark' %}
+    color: #e6e6e6;
+  {% else %}
+    color: #212529;
+  {% endif %}
+}
+.navbar .nav-link:hover, .navbar .nav-link:focus {
+  {% if config.theme_settings.theme == 'dark' %}
+    color: #1e90ff;
+  {% else %}
+    color: #0d6efd;
+  {% endif %}
+  text-decoration: none;
+}
+.navbar .nav-link i { transition: transform 0.2s ease; }
+.navbar .nav-link:hover i { transform: scale(1.2); }
 
-    <style>
-        /* General Body Styles */
-        body {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #121212 !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #f0f2f5 !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        /* Navbar and Footer */
-        .navbar, .footer {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1f1f1f !important;
-                color: #b3b3b3 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #495057 !important;
-                box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        /* Links */
-        a {
-            {% if config.theme_settings.theme == 'dark' %}
-                color: #1e90ff !important; /* Lighter blue for dark mode */
-            {% elif config.theme_settings.theme == 'modern' %}
-                color: #007bff !important;
-            {% else %}
-                color: #007bff !important;
-            {% endif %}
-        }
-      
-        a:hover {
-            {% if config.theme_settings.theme == 'dark' %}
-                color: #87ceeb !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                color: #0056b3 !important;
-            {% else %}
-                color: #0056b3 !important;
-            {% endif %}
-        }
-      
-        /* List Groups */
-        .list-group {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1e1e1e !important;
-                color: #ffffff !important;
-                border: 1px solid #444444 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                border: 1px solid #ced4da !important;
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                border: 1px solid #ced4da !important;
-            {% endif %}
-        }
-      
-        .list-group-item {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1e1e1e !important;
-                color: #ffffff !important;
-                border-bottom: 1px solid #444444 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        .list-group-item:hover {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #292929 !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #f8f9fa !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #f8f9fa !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        /* Buttons (Dynamic Colours) */
-        .btn-primary {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1e90ff !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #007bff !important;
-                color: #ffffff !important;
-            {% else %}
-                background-color: #007bff !important;
-                color: #ffffff !important;
-            {% endif %}
-        }
-      
-        .btn-danger {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #dc3545 !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #dc3545 !important;
-                color: #ffffff !important;
-            {% else %}
-                background-color: #dc3545 !important;
-                color: #ffffff !important;
-            {% endif %}
-        }
-      
-        .btn-warning {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #ffc107 !important;
-                color: #1f1f1f !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffc107 !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #ffc107 !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        .btn-secondary {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #6c757d !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #6c757d !important;
-                color: #ffffff !important;
-            {% else %}
-                background-color: #6c757d !important;
-                color: #ffffff !important;
-            {% endif %}
-        }
-      
-        /* Hover Effects for Buttons */
-        .btn:hover {
-            {% if config.theme_settings.theme == 'dark' %}
-                opacity: 0.9 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                opacity: 0.9 !important;
-            {% else %}
-                opacity: 0.9 !important;
-            {% endif %}
-        }
-      
-        /* Inputs */
-        input, textarea, select, .form-control {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1f1f1f !important;
-                color: #ffffff !important;
-                border: 1px solid #444444 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                border: 1px solid #ced4da !important;
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                border: 1px solid #ced4da !important;
-            {% endif %}
-        }
-      
-        /* Modals */
-        .modal-content {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1e1e1e !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        .modal-header, .modal-footer {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #292929 !important;
-                color: #ffffff !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #f8f9fa !important;
-                color: #212529 !important;
-            {% else %}
-                background-color: #f8f9fa !important;
-                color: #212529 !important;
-            {% endif %}
-        }
-      
-        /* Cards */
-        .card {
-            {% if config.theme_settings.theme == 'dark' %}
-                background-color: #1e1e1e !important;
-                color: #ffffff !important;
-                border: 1px solid #444444 !important;
-            {% elif config.theme_settings.theme == 'modern' %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
-            {% else %}
-                background-color: #ffffff !important;
-                color: #212529 !important;
-                border: 1px solid #ced4da !important;
-            {% endif %}
-        }
-      </style>
-      
-      
-      
-      
-      
-      
-      
-      
-  
+/* ===== Links ===== */
+a { 
+  {% if config.theme_settings.theme == 'dark' %} color: #1e90ff; {% else %} color: #007bff; {% endif %} 
+}
+a:hover { 
+  {% if config.theme_settings.theme == 'dark' %} color: #87ceeb; {% else %} color: #0056b3; {% endif %} 
+  text-decoration: none;
+}
 
+/* ===== List groups ===== */
+.list-group {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border-bottom: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border-bottom: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item:hover {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929;
+  {% else %}
+    background-color: #f8f9fa;
+  {% endif %}
+}
 
+/* ===== Buttons ===== */
+.btn-primary { background-color: {% if config.theme_settings.theme == 'dark' %} #1e90ff {% else %} #007bff {% endif %}; color: #fff; }
+.btn-danger { background-color: #dc3545; color: #fff; }
+.btn-warning { background-color: #ffc107; color: #212529; }
+.btn-secondary { background-color: #6c757d; color: #fff; }
+
+/* ===== Inputs (checkboxes/radios untouched) ===== */
+input, textarea, select, .form-control {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1f1f1f; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+
+/* ===== Modals ===== */
+.modal-content {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff;
+  {% else %}
+    background-color: #fff; color: #212529;
+  {% endif %}
+}
+.modal-header, .modal-footer {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929; color: #fff;
+  {% else %}
+    background-color: #f8f9fa; color: #212529;
+  {% endif %}
+}
+
+/* ===== Cards ===== */
+.card {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  {% endif %}
+}
+
+/* Footer separation */
+.footer { {% if config.theme_settings.theme != 'dark' %} border-top: 1px solid rgba(0,0,0,.06); {% endif %} }
+</style>
 </head>
 <body>
-    <!-- Navbar -->
-    <nav class="navbar navbar-expand-lg">
-        <div class="container">
-            <!-- Branding -->
-            {% if session['site_settings']['branding'] == 'logo' and session['site_settings']['logo_path'] %}
-                <a class="navbar-brand" href="/">
-                    <img src="{{ url_for('static', filename=session['site_settings']['logo_path']) }}"
-                         alt="Logo" height="40">
-                </a>
-            {% else %}
-                <a class="navbar-brand" href="/">
-                    {{ session['site_settings']['company_name'] or 'Sparrow ERP' }}
-                </a>
-            {% endif %}
-            
-            <!-- Navbar Toggle -->
-            <button
-              class="navbar-toggler"
-              type="button"
-              data-mdb-toggle="collapse"
-              data-mdb-target="#navbarNav"
-              aria-controls="navbarNav"
-              aria-expanded="false"
-              aria-label="Toggle navigation"
-            >
-                <i class="fas fa-bars"></i>
-            </button>
 
-            <!-- Navbar Content -->
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/plugins">
-                            <i class="bi bi-boxes"></i> Plugins
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/version">
-                            <i class="bi bi-download"></i> Check Version
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/logout">
-                            <i class="bi bi-box-arrow-right"></i> Logout
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <span class="nav-link disabled" title="UserName">
-                            <i class="bi bi-info-circle"></i> Logged in as: {{ session.get('site_settings', {}).get('user_name', 'User') }}
-                        </span>
-                    </li>
-                </ul>
-            </div>
-        </div>
-    </nav>
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-light sticky-top shadow-sm">
+<div class="container-fluid px-3">
+  {% if session['site_settings']['branding'] == 'logo' and session['site_settings']['logo_path'] %}
+<a class="navbar-brand" href="/"><img src="{{ url_for('static', filename=session['site_settings']['logo_path']) }}" alt="Logo" height="60" style="max-height:60px"></a>
+{% else %}
+<a class="navbar-brand fw-semibold" href="/">{{ session['site_settings']['company_name'] or 'Sparrow ERP' }}</a>
+{% endif %}
 
-    <!-- Page Content -->
-    <div class="container mt-4">
-        {% block content %}{% endblock %}
-    </div>
+  <button class="navbar-toggler" type="button" data-mdb-toggle="collapse" data-mdb-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+    <i class="fas fa-bars"></i>
+  </button>
 
-    <!-- Footer -->
-    <footer class="footer text-center py-3">
-        <div class="container">
-            <div class="row">
-                <div class="col-md-6">
-                    <p>&copy; 2025 {{ session['site_settings']['company_name'] or 'Sparrow ERP' }}.</p>
-                </div>
-                <div class="col-md-6">
-                    <p>Powered by <strong>Sparrow ERP</strong></p>
-                </div>
-            </div>
-        </div>
-    </footer>
+  <div class="collapse navbar-collapse" id="navbarNav">
+    <ul class="navbar-nav ms-auto align-items-lg-center">
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3" href="/" aria-current="{{ 'page' if request.path == '/' else 'false' }}">
+          <i class="bi bi-house me-1"></i> Home
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3" href="/plugins" aria-current="{{ 'page' if request.path.startswith('/plugins') else 'false' }}">
+          <i class="bi bi-boxes me-1"></i> Plugins
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3" href="/version" aria-current="{{ 'page' if request.path == '/version' else 'false' }}">
+          <i class="bi bi-cloud-download me-1"></i> Version Manager
+        </a>
+      </li>
+      <li class="w-100 d-lg-none my-2"><hr class="my-0"></li>
+      <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle py-2 px-3 d-flex align-items-center" href="#" id="userDropdown" role="button" data-mdb-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-person-circle me-1"></i>
+          <span class="text-truncate" style="max-width:160px">{{ session.get('site_settings', {}).get('user_name', 'User') }}</span>
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+          <li><h6 class="dropdown-header d-flex align-items-center"><i class="bi bi-info-circle me-2"></i> Account</h6></li>
+          <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+</nav>
 
-    <!-- MDB JS -->
-    <script
-      type="text/javascript"
-      src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"
-    ></script>
+<!-- Page Content -->
+<main class="container-fluid">{% block content %}{% endblock %}</main>
+
+<!-- Footer -->
+<footer class="footer text-center py-3 mt-4">
+<div class="container">
+  <div class="row gy-2 align-items-center">
+    <div class="col-12 col-md-6 order-2 order-md-1"><p class="mb-0">&copy; 2025 {{ session['site_settings']['company_name'] or 'Sparrow ERP' }}.</p></div>
+    <div class="col-12 col-md-6 order-1 order-md-2"><p class="mb-0">Powered by <strong>Sparrow ERP</strong></p></div>
+  </div>
+</div>
+</footer>
+
+<!-- MDB JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+<script>
+// Auto-collapse menu on mobile link click
+document.addEventListener('click', function(e){
+  const target = e.target.closest('.navbar .nav-link, .navbar .dropdown-item');
+  if(!target) return;
+  const navbarCollapse = document.getElementById('navbarNav');
+  const toggler = document.querySelector('.navbar-toggler');
+  if(navbarCollapse && toggler && window.getComputedStyle(toggler).display !== 'none'){
+    const collapseInstance = mdb.Collapse.getInstance(navbarCollapse) || new mdb.Collapse(navbarCollapse);
+    collapseInstance.hide();
+  }
+}, false);
+</script>
+
 </body>
 </html>

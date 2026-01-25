@@ -1,0 +1,10 @@
+{
+    "system_name": "event_manager_module",
+    "name": "Event Manager",
+    "description": "Manage and publish upcoming business events (e.g. weddings, charity nights, wakes) with public event listings.",
+    "version": "0.0.1",
+    "icon": "icon.png",
+    "enabled": true,
+    "installed": true,
+    "update_available": false
+}

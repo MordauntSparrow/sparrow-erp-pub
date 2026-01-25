@@ -1,0 +1,10 @@
+{
+    "system_name": "time_billing_module",
+    "version": "0.0.1",
+    "installed": true,
+    "enabled": true,
+    "name": "Time Billing Module",
+    "description": "",
+    "icon": "icon.png",
+    "update_available": false
+}

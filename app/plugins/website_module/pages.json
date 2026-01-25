@@ -17,12 +17,19 @@
         "footer": true,
         "meta": {"title": "About The George & Dragon", "description": "About The George & Dragon", "keywords": ["about", "George & Dragon"]}
     },
-    {
-        "title": "Menus",
+        {
+        "title": "Our Menus",
         "route": "/menus",
         "header": true,
         "footer": true,
-        "meta": {"title": "Our Menus", "description": "View our menus", "keywords": ["menu"]}
+        "meta": {
+            "title": "Our Menus",
+            "description": "View the amazing menu offerings we offer here at The George & Dragon",
+            "keywords": [
+                "George & Dragon",
+                "Menu"
+            ]
+        }
     },
     {
         "title": "Accommodation",
@@ -39,18 +46,57 @@
         "meta": {"title": "Events & Functions", "description": "Events & functions at the pub", "keywords": ["events"]}
     },
     {
+        "title": "Privacy Policy",
+        "route": "/privacy-policy",
+        "header": false,
+        "footer": true,
+        "meta": {
+            "title": "Privacy Policy",
+            "description": "",
+            "keywords": [
+                ""
+            ]
+        }
+    },
+{
+        "title": "Cookie Policy",
+        "route": "/cookie-policy",
+        "header": false,
+        "footer": true,
+        "meta": {
+            "title": "Cookie Policy",
+            "description": "",
+            "keywords": [
+                ""
+            ]
+        }
+    },
+    {
         "title": "Book a Table",
         "route": "/book-a-table",
         "header": true,
         "footer": true,
         "meta": {"title": "Book a Table", "description": "Reserve a table", "keywords": ["booking", "table"]}
-    },
-    {
+    },    
+{
         "title": "Gallery",
         "route": "/gallery",
         "header": true,
         "footer": true,
         "meta": {"title": "Gallery", "description": "Photo gallery", "keywords": ["gallery"]}
+    },
+{
+        "title": "What's On",
+        "route": "/events",
+        "header": true,
+        "footer": false,
+        "meta": {
+            "title": "What's On",
+            "description": "",
+            "keywords": [
+                ""
+            ]
+        }
     },
     {
         "title": "Contact Us",
@@ -58,5 +104,20 @@
         "header": true,
         "footer": true,
         "meta": {"title": "Contact Us", "description": "Contact The George & Dragon", "keywords": ["contact"]}
-    }
+    },
+
+    {
+  "title": "Sitemap",
+  "route": "/sitemap.xml",
+  "header": false,
+  "footer": true,
+  "meta": {
+    "title": "Sitemap â€“ Sparrow ERP",
+    "description": "XML sitemap for Sparrow ERP",
+    "keywords": [
+      "sitemap",
+      "Sparrow ERP"
+    ]
+  }
+}
 ]

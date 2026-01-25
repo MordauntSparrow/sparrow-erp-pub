@@ -1,97 +1,397 @@
 {% extends "base.html" %}
-
-{% block title %}Dashboard - {{ config.site_settings.company_name }}{% endblock %}
+{% block title %}Dashboard — {{ (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}{% endblock %}
 
 {% block content %}
-<div class="row">
-<!-- Sidebar -->
-<nav class="col-md-2 d-none d-md-block sidebar" 
-    style="background-color: {% if config.theme_settings.theme == 'dark' %}#1f1f1f{% elif config.theme_settings.theme == 'modern' %}#ffffff{% else %}#f8f9fa{% endif %};
-           color: {% if config.theme_settings.theme == 'dark' %}#b3b3b3{% else %}#212529{% endif %};
-           border-right: 1px solid {% if config.theme_settings.theme == 'dark' %}#2c2c2c{% elif config.theme_settings.theme == 'modern' %}#e9ecef{% else %}#dee2e6{% endif %};
-           border-radius: 12px; margin: 15px 0; padding: 10px;">
-    <div class="position-sticky pt-3">
-        <h5 class="mb-3">Plugins</h5>
-        <ul class="nav flex-column">
-            {% for plugin in plugins %}
-            <li class="nav-item">
-                <a class="nav-link" href="/plugin/{{ plugin.system_name }}/" style="color: inherit;">
-                    {{ plugin.name }}
-                </a>
-            </li>
-            {% endfor %}
-        </ul>
+{% set _cfg = config if config is defined and config else {} %}
+{% set _user = user if user is defined and user else {} %}
+{% set company_name = (_cfg.site_settings.company_name if _cfg and _cfg.site_settings is defined and _cfg.site_settings.company_name is defined else 'Sparrow ERP') %}
+{% set user_first = (_user.first_name if _user and _user.first_name is defined else 'User') %}
+{% set username = (_user.username if _user and _user.username is defined else 'user') %}
+{% set core_ver = (core_version if core_version is defined and core_version else 'Unknown') %}
+{% set safe_updates = updates if updates is defined and updates else {} %}
 
-        <h5 class="mt-4 mb-3">Settings</h5>
-        <ul class="nav flex-column">
-            <li class="nav-item">
-                <a class="nav-link" href="/core/settings" style="color: inherit;">
-                    Core Module Settings
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="/users" style="color: inherit;">
-                    User Management
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" href="/smtp-config" style="color: inherit;">
-                    SMTP Settings
-                </a>
-            </li>
-        </ul>
+<style>
+/* Root container */
+#dashboardRoot {
+    position: relative;
+    width: 100%;
+}
+
+/* Hero section - center everything */
+.immersive-hero {
+    position: relative;
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* vertical centering */
+    align-items: center;     /* horizontal centering */
+    overflow: hidden;
+    padding: 1.5rem 2rem;
+    margin: 0;
+}
+
+/* Background and overlay */
+.immersive-bg {
+    position: absolute;
+    inset: 0;
+    background: center/cover no-repeat;
+    transition: filter .6s, opacity .6s;
+    z-index: 0;
+}
+
+.immersive-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.65) 70%);
+}
+
+.particles-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Main content wrapper */
+.hero-content {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 1300px;
+    padding: 2rem 1rem;
+    box-sizing: border-box;
+    color: #fff;
+}
+
+/* Header row */
+.header-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: flex-start;
+    justify-content: space-between;
+    min-width: 0;
+}
+
+.header-left .greet-short { font-size: 1.05rem; opacity: .95; }
+.header-left .greet-main { font-size: 2rem; font-weight: 700; line-height: 1.15; }
+
+.header-right { text-align: right; }
+.header-right .time { font-size: 1.2rem; font-weight: 600; }
+.header-right .date { font-size: .95rem; opacity: .9; }
+
+.btn-primary-solid, .btn-secondary-solid, .btn-dark-solid, .btn-ghost {
+    border: none !important; color: #fff !important; box-shadow: none !important;
+}
+
+.btn-primary-solid { background: #0d6efd !important; }
+.btn-secondary-solid { background: #6c757d !important; }
+.btn-dark-solid { background: #212529 !important; }
+.btn-ghost { background: rgba(255,255,255,.18) !important; border: 1px solid rgba(255,255,255,.25) !important; }
+
+.btn-primary-solid:hover, .btn-secondary-solid:hover, .btn-dark-solid:hover, .btn-ghost:hover {
+    filter: brightness(.95);
+}
+
+/* Chips */
+.chips { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+.chip { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .55rem; border-radius: 999px; font-size: .85rem; background: rgba(255,255,255,.2); color: #fff; border: 1px solid rgba(255,255,255,.25); }
+
+/* Plugins container */
+.plugins-wrap {
+    margin-top: 1rem;
+    background: rgba(0,0,0,.65); /* solid dark background, no blur */
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    padding: 1rem;
+    overflow: hidden;
+    width: 100%;
+    transition: none !important;
+    backdrop-filter: none !important;
+}
+
+/* Plugin header */
+.plugins-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    margin-bottom: .5rem;
+    color: #fff;
+}
+
+/* Plugin grid */
+.plugin-tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .75rem;
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+@media (min-width:768px){ .plugin-tiles { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width:1200px){ .plugin-tiles { grid-template-columns: repeat(5, 1fr); } }
+
+/* Plugin tiles */
+.plugin-tile {
+    display: flex;
+    flex-direction: column; /* allow text wrapping */
+    align-items: flex-start;
+    gap: .8rem;
+    padding: .8rem 1rem;
+    text-decoration: none;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.2);
+    background: rgba(255,255,255,.18);
+    color: #fff;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    transition: none !important; /* remove hover transform/shadow */
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Plugin icon */
+.plugin-tile .icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: rgba(255,255,255,.22);
+    flex: 0 0 46px;
+}
+.plugin-tile .icon img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+
+/* Plugin text — allow wrapping */
+.plugin-tile .name {
+    font-weight: 600;
+    min-width: 0;
+    font-size: 1rem;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+}
+.plugin-tile .desc {
+    opacity: .9;
+    min-width: 0;
+    font-size: .9rem;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+}
+
+/* Keep button text white on hover */
+.btn-primary-solid:hover,
+.btn-secondary-solid:hover,
+.btn-dark-solid:hover,
+.btn-ghost:hover {
+    color: #fff !important;  /* force white text */
+    filter: brightness(.95);  /* subtle hover effect */
+}
+
+@media (prefers-reduced-motion:reduce){ .plugin-tile,.immersive-bg { transition: none !important; } }
+
+/* Prevent horizontal overflow */
+html, body { overflow-x: hidden; }
+.immersive-hero, .hero-content, .header-row, .plugins-wrap, .plugin-tiles { min-width: 0; }
+
+</style>
+
+
+
+
+<div id="dashboardRoot">
+  <section class="immersive-hero">
+    <div id="immersiveBg" class="immersive-bg" aria-hidden="true"></div>
+    <canvas id="particles" class="particles-layer" aria-hidden="true"></canvas>
+    <div id="immersiveOverlay" class="immersive-overlay" aria-hidden="true"></div>
+
+    <div class="hero-content">
+      <!-- Header -->
+      <div class="header-row">
+        <div class="header-left">
+          <div class="greet-short" id="greetShort">Good day</div>
+          <div class="greet-main" id="greetMain">Hello, {{ user_first }}!</div>
+          <div class="chips" role="list">
+            <div class="chip" role="listitem"><i class="bi bi-plugin"></i> Total Plugins: {{ plugins|length }}</div>
+            {% if safe_updates and safe_updates.core is defined %}
+              <div class="chip" role="listitem">
+                <i class="bi {{ 'bi-exclamation-triangle' if safe_updates.core.update_available else 'bi-shield-check' }}"></i>
+                {{ 'Core update available' if safe_updates.core.update_available else 'Core up to date' }}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+       <div class="header-right">
+        <div class="time" id="liveClock">--:--</div>
+        <div class="date" id="liveDate">Loading date…</div>
+        <div class="quick-actions mt-2 d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-primary-solid" href="/plugins"><i class="bi bi-boxes me-1"></i> Plugins</a>
+            <a class="btn btn-sm btn-secondary-solid" href="/version"><i class="bi bi-arrow-repeat me-1"></i> Updates</a>
+            <a class="btn btn-sm btn-dark-solid" href="/core/settings"><i class="bi bi-gear me-1"></i> Settings</a>
+            <a class="btn btn-sm btn-dark-solid" href="/users"><i class="bi bi-people me-1"></i> Users</a>
+        </div>
+        </div>
+      </div>
+
+      <!-- Enabled plugins grid -->
+      <div class="plugins-wrap">
+        <div class="plugins-head">
+          <div class="fw-semibold">Enabled Plugins</div>
+          <a class="btn btn-sm btn-primary-solid" href="/plugins"><i class="bi bi-shop me-1"></i> Marketplace</a>
+        </div>
+
+        {% if plugins and plugins|length > 0 %}
+        <div class="plugin-tiles">
+          {% for plugin in plugins %}
+          <a class="plugin-tile d-flex flex-column align-items-start" href="/plugin/{{ plugin.system_name }}/" title="{{ plugin.name }}">
+            <div class="icon mb-2">
+              {% if plugin.icon %}
+                <img src="{{ url_for('routes.serve_plugin_icon', plugin_name=plugin.system_name, filename=plugin.icon) }}"
+                     alt="{{ plugin.name }}"
+                     width="32"
+                     height="32"
+                     onerror="this.replaceWith(window.__fallbackIcon.cloneNode(true));">
+              {% else %}
+                <svg viewBox="0 0 24 24" width="32" height="32" fill="white" aria-hidden="true">
+                  <path d="M10 3H3v7h7V3zm11 0h-7v7h7V3zM10 14H3v7h7v-7zm11 0h-7v7h7v-7z"/>
+                </svg>
+              {% endif %}
+            </div>
+            <div class="flex-grow-1 w-100">
+              <div class="name text-truncate fw-bold">{{ plugin.name }}</div>
+              {% if plugin.description %}
+                <div class="desc small text-truncate text-white-50">{{ plugin.description }}</div>
+              {% endif %}
+            </div>
+            <span class="badge bg-success align-self-start mt-2">On</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-white-50">No plugins installed. Go to Plugins to enable or install.</div>
+        {% endif %}
+      </div>
     </div>
-</nav>
-
-
-
-    <!-- Main Content -->
-    <main class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-        <div class="d-flex justify-content-between align-items-center my-4">
-            <h1>Welcome, {{ user.first_name }} {{ user.last_name }}!</h1>
-            <span class="badge bg-info fs-6">Core Version: {{ core_version }}</span>
-        </div>
-
-        <p>
-            You are logged in as <strong>{{ user.username }}</strong>.
-            Your current theme is set to <em>{{ config.theme_settings.theme }}</em>.
-        </p>
-        <!-- {{ user.theme }} -->
-        <hr>
-
-        <!-- System Info Section -->
-        <h3 class="mb-3">System Information</h3>
-        <div class="row">
-            <div class="col-md-4">
-                <div class="card shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-building fs-1 text-primary"></i>
-                        <h5 class="card-title mt-2">Company Name</h5>
-                        <p class="card-text">{{ config.site_settings.company_name }}</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-palette fs-1 text-success"></i>
-                        <h5 class="card-title mt-2">Current Theme</h5>
-                        <p class="card-text">{{ config.theme_settings.theme | capitalize }}</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4">
-                <div class="card shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-gear fs-1 text-danger"></i>
-                        <h5 class="card-title mt-2">Core Version</h5>
-                        <p class="card-text">{{ core_version }}</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </main>
+  </section>
 </div>
+
+<script>
+(function() {
+    'use strict';
+
+    /* Fallback icon for plugins */
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '24');
+    svg.setAttribute('height', '24');
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', 'M10 3H3v7h7V3zm11 0h-7v7h7V3zM10 14H3v7h7v-7zm11 0h-7v7h7v-7z');
+    path.setAttribute('fill', 'white');
+    svg.appendChild(path);
+    window.__fallbackIcon = svg;
+
+    /* Live greetings and background */
+    const userFirst = {{ user_first | tojson }};
+    const bg = document.getElementById('immersiveBg');
+    const overlay = document.getElementById('immersiveOverlay');
+    const greetShort = document.getElementById('greetShort');
+    const greetMain = document.getElementById('greetMain');
+    const liveClock = document.getElementById('liveClock');
+    const liveDate = document.getElementById('liveDate');
+
+    const periods = [
+        { id: 'night', s: 0, e: 5 },
+        { id: 'dawn', s: 5, e: 7 },
+        { id: 'day', s: 7, e: 17 },
+        { id: 'dusk', s: 17, e: 19 },
+        { id: 'evening', s: 19, e: 24 }
+    ];
+
+    const bgByPeriod = {
+        night: ["https://picsum.photos/id/1015/1600/900","https://picsum.photos/id/1003/1600/900"],
+        dawn: ["https://picsum.photos/id/1043/1600/900","https://picsum.photos/id/1021/1600/900"],
+        day: ["https://picsum.photos/id/1018/1600/900","https://picsum.photos/id/1025/1600/900","https://picsum.photos/id/1039/1600/900"],
+        dusk: ["https://picsum.photos/id/1016/1600/900","https://picsum.photos/id/1035/1600/900"],
+        evening: ["https://picsum.photos/id/1011/1600/900","https://picsum.photos/id/1032/1600/900"]
+    };
+
+    function getPeriod(date) {
+        const h = date.getHours();
+        for (const p of periods) {
+            if (h >= p.s && h < p.e) return p.id;
+        }
+        return 'day';
+    }
+
+    function pickImage(period) {
+        const list = bgByPeriod[period] || bgByPeriod.day;
+        const key = new Date().toDateString() + period;
+        let hash = 0;
+        for (let i = 0; i < key.length; i++) { hash = ((hash << 5) - hash) + key.charCodeAt(i); hash |= 0; }
+        return list[Math.abs(hash) % list.length];
+    }
+
+    function greeting(period) {
+        switch(period) {
+            case 'night': return ['Good night', 'Rest well, ' + userFirst];
+            case 'dawn': return ['Good morning', 'Fresh start, ' + userFirst];
+            case 'day': return ['Good day', 'Let’s get things done, ' + userFirst];
+            case 'dusk': return ['Good evening', 'Wrapping up, ' + userFirst];
+            case 'evening': return ['Good evening', 'Welcome back, ' + userFirst];
+            default: return ['Hello', 'Welcome back, ' + userFirst];
+        }
+    }
+
+    function applyPeriod(period) {
+        if(bg) {
+            const img = pickImage(period);
+            bg.style.opacity = 0;
+            setTimeout(()=>{ bg.style.backgroundImage = `url("${img}")`; bg.style.filter = (period==='night'||period==='evening')?'brightness(.55) contrast(1.05)':'brightness(1) contrast(1)'; bg.style.opacity=1; }, 150);
+        }
+        if(overlay) overlay.style.background = (period==='night'||period==='evening')?'linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.65) 70%)':'linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.65) 70%)';
+        const g = greeting(period);
+        if(greetShort) greetShort.textContent = g[0];
+        if(greetMain) greetMain.textContent = g[1];
+    }
+
+    function updateClock() {
+        const now = new Date();
+        if(liveClock) liveClock.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
+        if(liveDate) liveDate.textContent = now.toLocaleDateString([], { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+        return now;
+    }
+
+    function tick() {
+        const now = updateClock();
+        const period = getPeriod(now);
+        if(period!==tick._last){applyPeriod(period); tick._last=period;}
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){ tick(); setInterval(tick, 1000); });
+
+    /* Particles */
+    const canvas = document.getElementById('particles');
+    if(canvas){
+        const ctx = canvas.getContext('2d'); let w=window.innerWidth; let h=window.innerHeight; let particles=[];
+        const COUNT=Math.min(90, Math.max(40, Math.floor(window.innerWidth/18)));
+        function rnd(a,b){return a+Math.random()*(b-a);}
+        function seed(p){p.x=rnd(0,w);p.y=rnd(0,h);p.r=rnd(0.6,2.2);p.a=rnd(0.25,0.55);p.vx=rnd(-0.15,0.15);p.vy=rnd(0.05,0.25);}
+        function init(){particles=Array.from({length:COUNT},()=>{const p={}; seed(p); return p;});}
+        function resize(){w=canvas.width=window.innerWidth; h=canvas.height=window.innerHeight; particles.forEach(p=>{p.x=rnd(0,w); p.y=rnd(0,h);});}
+        function links(){for(let i=0;i<particles.length;i++){const p=particles[i]; for(let j=i+1;j<particles.length;j++){const q=particles[j];const dx=p.x-q.x,dy=p.y-q.y;const d2=dx*dx+dy*dy;if(d2<9000){ctx.strokeStyle=`rgba(255,255,255,${(0.06*(1-d2/9000)).toFixed(3)})`;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();}}}}
+        function draw(){links(); for(const p of particles){p.x+=p.vx; p.y+=p.vy; if(p.x<0||p.x>w)p.vx*=-1; if(p.y>h+5)p.y=-5; ctx.fillStyle=`rgba(255,255,255,${p.a.toFixed(2)})`;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();}}
+        function step(){ctx.clearRect(0,0,w,h); draw(); requestAnimationFrame(step);}
+        window.addEventListener('resize', resize); resize(); init(); step();
+    }
+})();
+</script>
 {% endblock %}

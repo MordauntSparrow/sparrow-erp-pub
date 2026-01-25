@@ -1,14 +1,14 @@
 {
-    "name": "Core Module",
-    "system_name": "Sparrow_ERP_Core",
-    "version": "1.0.0",
     "theme_settings": {
         "theme": "default",
         "custom_css_path": ""
     },
     "site_settings": {
-        "company_name": "Dragons Estate Pubs Limited",
+        "company_name": "Sparrow ERP",
         "branding": "logo",
-        "logo_path": "uploads/logo.png"
-    }
+        "logo_path": "uploads/logo-whitebg.png"
+    },
+    "name": "Core Module",
+    "system_name": "Sparrow_ERP_Core",
+    "version": "1.1.4"
 }

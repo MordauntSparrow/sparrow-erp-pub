@@ -1,0 +1,203 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-columns-gap me-2"></i> Edit Template
+        </h4>
+        <button id="btnSaveTpl" class="btn btn-primary btn-sm">
+            <i class="bi bi-save me-1"></i> Save
+        </button>
+    </div>
+
+    <!-- Template Details -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Name</label>
+                    <input class="form-control form-control-sm" id="tpl_name">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Job Type ID</label>
+                    <input class="form-control form-control-sm" id="tpl_job_type_id">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Client ID</label>
+                    <input class="form-control form-control-sm" id="tpl_client_name">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Site ID</label>
+                    <input class="form-control form-control-sm" id="tpl_site_name">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Version</label>
+                    <input class="form-control form-control-sm" id="tpl_version" type="number" min="1" step="1">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fields Section -->
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <h6 class="mb-0">Fields</h6>
+        <button id="btnAddField" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-plus-lg"></i> Add field
+        </button>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Label</th>
+                            <th>Type</th>
+                            <th>Key</th>
+                            <th>Required</th>
+                            <th>Options (JSON)</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fldBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const tplId = (location.hash.match(/edit-(\d+)/) || [])[1];
+        const $ = s => document.querySelector(s);
+
+        // Load template header info
+        async function loadHeader() {
+            const r = await fetch(`{{ url_for('internal_time_billing.get_template', tpl_id='__ID__') }}`.replace('__ID__', tplId));
+            if (!r.ok) return alert('Failed to load template');
+            const t = await r.json();
+            $('#tpl_name').value = t.name || '';
+            $('#tpl_job_type_id').value = t.job_type_id || '';
+            $('#tpl_client_name').value = t.client_name || '';
+            $('#tpl_site_name').value = t.site_name || '';
+            $('#tpl_version').value = t.version || 1;
+        }
+
+        // Load template fields
+        async function loadFields() {
+            const r = await fetch(`{{ url_for('internal_time_billing.get_template_fields', tpl_id='__ID__') }}`.replace('__ID__', tplId));
+            if (!r.ok) return alert('Failed to load fields');
+
+            const list = await r.json();
+            const body = $('#fldBody');
+            body.innerHTML = '';
+
+            if (!list.length) {
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No fields yet.</td></tr>';
+                return;
+            }
+
+            for (const f of list) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+        <td><input class="form-control form-control-sm js" data-field="label" value="${f.label || ''}"></td>
+        <td>
+          <select class="form-select form-select-sm js" data-field="type">
+            ${['text', 'number', 'date', 'time', 'select', 'checkbox', 'textarea']
+                        .map(v => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </td>
+        <td><input class="form-control form-control-sm js" data-field="key" value="${f.key || ''}"></td>
+        <td class="text-center">
+          <input class="form-check-input js" data-field="required" type="checkbox" ${f.required ? 'checked' : ''}>
+        </td>
+        <td><input class="form-control form-control-sm js" data-field="options_json" placeholder='e.g., {"choices":[{"id":1,"label":"A"}]}' value='${f.options_json || ""}'></td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary js-save">Save</button>
+            <button class="btn btn-outline-danger js-del">Delete</button>
+          </div>
+        </td>
+      `;
+                body.appendChild(tr);
+
+                // Save field
+                tr.querySelector('.js-save').addEventListener('click', async () => {
+                    const payload = collectRow(tr);
+                    const r2 = await fetch(`{{ url_for('internal_time_billing.update_template_field', tpl_id='__TID__', field_id='__FID__') }}`
+                        .replace('__TID__', tplId).replace('__FID__', f.id), {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!r2.ok) alert('Save failed');
+                    else alert('Saved');
+                });
+
+                // Delete field
+                tr.querySelector('.js-del').addEventListener('click', async () => {
+                    if (!confirm('Delete this field?')) return;
+                    const r3 = await fetch(`{{ url_for('internal_time_billing.delete_template_field', tpl_id='__TID__', field_id='__FID__') }}`
+                        .replace('__TID__', tplId).replace('__FID__', f.id), { method: 'DELETE' });
+                    if (!r3.ok) alert('Delete failed');
+                    else loadFields();
+                });
+            }
+        }
+
+        // Collect row data
+        function collectRow(tr) {
+            const get = f => {
+                const el = tr.querySelector(`.js[data-field="${f}"]`);
+                if (!el) return null;
+                if (el.type === 'checkbox') return el.checked;
+                return el.value;
+            };
+            return {
+                label: get('label'),
+                type: get('type'),
+                key: get('key'),
+                required: !!get('required'),
+                options_json: get('options_json') || null
+            };
+        }
+
+        // Add new field
+        document.getElementById('btnAddField').addEventListener('click', async () => {
+            const payload = { label: '', type: 'text', key: '', required: false, options_json: null };
+            const r = await fetch(`{{ url_for('internal_time_billing.add_template_field', tpl_id='__ID__') }}`.replace('__ID__', tplId), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!r.ok) alert('Create failed');
+            else loadFields();
+        });
+
+        // Save template header
+        document.getElementById('btnSaveTpl').addEventListener('click', async () => {
+            const payload = {
+                name: $('#tpl_name').value || '',
+                job_type_id: $('#tpl_job_type_id').value || null,
+                client_name: $('#tpl_client_name').value || null,
+                site_name: $('#tpl_site_name').value || null,
+                version: parseInt($('#tpl_version').value || '1', 10)
+            };
+            const r = await fetch(`{{ url_for('internal_time_billing.update_template', tpl_id='__ID__') }}`.replace('__ID__', tplId), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!r.ok) alert('Save failed');
+            else alert('Saved');
+        });
+
+        // Initialize
+        await loadHeader();
+        await loadFields();
+    })();
+</script>
+{% endblock %}

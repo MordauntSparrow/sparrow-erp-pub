@@ -1,0 +1,238 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-calendar3-week me-2"></i>
+      Timesheets Overview
+    </h4>
+    <div class="d-flex gap-2">
+      <button id="btnIssueBulk" class="btn btn-primary btn-sm">
+        <i class="bi bi-send me-1"></i> Issue (bulk)
+      </button>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form class="row g-2 mb-3" id="filterForm">
+    <div class="col-12 col-md-3">
+      <input class="form-control form-control-sm" type="text" name="q" placeholder="Search name/email">
+    </div>
+    <div class="col-6 col-md-2">
+      <select class="form-select form-select-sm" name="status">
+        <option value="">All statuses</option>
+        <option value="draft">Draft</option>
+        <option value="submitted">Submitted</option>
+        <option value="approved">Approved</option>
+        <option value="rejected">Rejected</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <input class="form-control form-control-sm" type="text" name="from_week_id" placeholder="From YYYYWW">
+    </div>
+    <div class="col-6 col-md-2">
+      <input class="form-control form-control-sm" type="text" name="to_week_id" placeholder="To YYYYWW">
+    </div>
+    <div class="col-6 col-md-3">
+      <input class="form-control form-control-sm" type="text" name="user_id" placeholder="Filter by User ID (optional)">
+    </div>
+    <div class="col-6 col-md-1 d-flex gap-2 justify-content-end">
+      <button class="btn btn-secondary btn-sm" type="submit">
+        <i class="bi bi-search me-1"></i> Apply
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" type="button" id="btnClear">Clear</button>
+    </div>
+  </form>
+
+  <!-- Timesheets Table -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Week</th>
+              <th>Week Ending</th>
+              <th>Status</th>
+              <th class="text-end">Hours</th>
+              <th class="text-end">Pay</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tsBody"></tbody>
+        </table>
+      </div>
+      <div class="d-flex justify-content-end gap-2 mt-2">
+        <button class="btn btn-outline-secondary btn-sm" id="prevPage">Prev</button>
+        <button class="btn btn-outline-secondary btn-sm" id="nextPage">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Route bases injected via url_for (real values only) -->
+  <div id="routeBases"
+       data-api-overview="{{ url_for('internal_time_billing.api_timesheets_overview') }}"
+       data-api-issue="{{ url_for('internal_time_billing.api_issue_timesheet') }}"
+       data-api-issue-bulk="{{ url_for('internal_time_billing.api_issue_timesheet_bulk') }}"
+       data-admin-prefix="{{ url_for('internal_time_billing.timesheets_overview_page') | replace('/timesheets', '') }}">
+  </div>
+
+</div>
+
+<script>
+(function(){
+  const form = document.getElementById('filterForm');
+  const body = document.getElementById('tsBody');
+  const bases = document.getElementById('routeBases').dataset;
+
+  // Real, server-generated URLs
+  const apiOverview  = bases.apiOverview;   // e.g., /plugin/time_billing_module/api/timesheets/overview
+  const apiIssue     = bases.apiIssue;      // e.g., /plugin/time_billing_module/api/timesheets/issue
+  const apiIssueBulk = bases.apiIssueBulk;  // e.g., /plugin/time_billing_module/api/timesheets/issue-bulk
+  const adminPrefix  = bases.adminPrefix;   // e.g., /plugin/time_billing_module
+
+  let page = 1, pageSize = 25, hasMore = false;
+
+  function params(){
+    const p = new URLSearchParams(new FormData(form));
+    p.set('page', page);
+    p.set('page_size', pageSize);
+    return p.toString();
+  }
+
+  function fmtDateISO(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+
+  const dd = String(d.getDate()).padStart(2,"0");
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const yyyy = d.getFullYear();
+
+  return `${dd}/${mm}/${yyyy}`;
+  }
+  async function load(){
+    const resp = await fetch(`${apiOverview}?${params()}`);
+    if(!resp.ok){
+      body.innerHTML = '<tr><td colspan="8" class="text-danger">Load failed</td></tr>';
+      return;
+    }
+    const data = await resp.json();
+    hasMore = !!data.has_more;
+    body.innerHTML = '';
+
+    if(!data.items || !data.items.length){
+      body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No results</td></tr>';
+      return;
+    }
+
+    for(const r of data.items){
+      // Build Open link using only real prefix, and dynamic IDs from API
+      const openHref = `${adminPrefix}/timesheets/${r.user_id}/${r.week_id}`;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${r.user_name||''}</td>
+        <td>${r.email||''}</td>
+        <td>${r.week_id}</td>
+        <td>${fmtDateISO(r.week_ending)}</td>
+        <td>
+          ${
+            r.status==='approved'  ? '<span class="badge bg-success">Approved</span>'  :
+            r.status==='submitted' ? '<span class="badge bg-primary">Submitted</span>' :
+            r.status==='rejected'  ? '<span class="badge bg-danger">Rejected</span>'  :
+                                     '<span class="badge bg-secondary">Draft</span>'
+          }
+        </td>
+        <td class="text-end">${(r.total_hours ?? 0).toFixed(2)}</td>
+        <td class="text-end">£${(r.total_pay ?? 0).toFixed(2)}</td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm">
+            <a class="btn btn-outline-primary" href="${openHref}">Open</a>
+            <button class="btn btn-outline-secondary js-issue disabled"
+                    data-uid="${r.user_id}"
+                    data-wid="${r.week_id}">Issue</button>
+          </div>
+        </td>
+      `;
+
+      tr.querySelector('.js-issue').addEventListener('click', async (e)=>{
+        const uid = e.currentTarget.dataset.uid;
+        const wid = e.currentTarget.dataset.wid;
+        const res = await fetch(apiIssue, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ user_id: uid, week_id: wid })
+        });
+        if(res.ok){
+          load();
+        } else {
+          alert('Issue failed');
+        }
+      });
+
+      body.appendChild(tr);
+    }
+
+    document.getElementById('prevPage').disabled = page <= 1;
+    document.getElementById('nextPage').disabled = !hasMore;
+  }
+
+  // Form events
+  form.addEventListener('submit', e=>{
+    e.preventDefault();
+    page = 1;
+    load();
+  });
+
+  document.getElementById('btnClear').addEventListener('click', ()=>{
+    form.reset();
+    page = 1;
+    load();
+  });
+
+  document.getElementById('prevPage').addEventListener('click', ()=>{
+    if(page > 1){
+      page--;
+      load();
+    }
+  });
+
+  document.getElementById('nextPage').addEventListener('click', ()=>{
+    if(hasMore){
+      page++;
+      load();
+    }
+  });
+
+  // Bulk issue
+  document.getElementById('btnIssueBulk').addEventListener('click', async ()=>{
+    const fromW = prompt('From week (YYYYWW):');
+    if(!fromW) return;
+
+    const toW = prompt('To week (YYYYWW):');
+    if(!toW) return;
+
+    if(!confirm(`Issue weeks ${fromW} to ${toW} to all active staff?`)) return;
+
+    const res = await fetch(apiIssueBulk, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ all_active: true, from_week_id: fromW, to_week_id: toW })
+    });
+
+    if(res.ok){
+      alert('Issued');
+      load();
+    } else {
+      alert('Bulk issue failed');
+    }
+  });
+
+  load();
+})();
+</script>
+{% endblock %}

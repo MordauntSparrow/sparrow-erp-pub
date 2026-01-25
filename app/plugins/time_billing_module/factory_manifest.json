@@ -1,0 +1,25 @@
+{
+"system_name": "time_billing_module",
+"name": "Shift Timesheets",
+"description": "Captures weekly contractor timesheets with auto rates, travel, and billing variance rollups.",
+"version": "0.0.1",
+"icon": "icon.png",
+"settings": {
+"week_start_day": { "value": "Monday", "editable": true },
+"date_format": { "value": "DD/MM/YYYY", "editable": true },
+"travel_parking_default": { "value": 0, "editable": true },
+"allowed_job_types": {
+"value": ["School Clean", "Residential", "Commercial", "Deep", "End of Tenancy"],
+"editable": false
+},
+"rate_school_res_comm": { "value": 14.5, "editable": false },
+"rate_deep_eot": { "value": 15, "editable": false },
+"submission_cutoff": { "value": "Friday 18:00", "editable": true }
+},
+"enabled": false,
+"dependencies": ["website_module"],
+"repository": "official",
+"download_url": "https://gitlab.com/sparrow-erp/Core/repository/files/plugins/official_plugin.zip",
+"changelog": "Initial release of Shift Timesheets (Time & Billing) module skeleton.",
+"repository_token": ""
+}

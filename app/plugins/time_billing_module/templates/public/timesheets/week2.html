@@ -1,0 +1,1703 @@
+{% extends "public/base_timesheet_billing_module.html" %}
+{% block content %}
+
+<style>
+/* === Timesheet Table Styles === */
+
+/* Wrapper */
+.ts-wrap {
+  overflow-x: auto;
+}
+
+.ts-table th,
+.ts-table td {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Column widths */
+.ts-col-date   { width: 140px; }
+.ts-col-client { width: 260px; max-width: 380px; }
+.ts-col-job    { width: 180px; }
+.ts-col-sched,
+.ts-col-actual { width: 220px; }
+.ts-col-break  { width: 95px; }
+.ts-col-rate,
+.ts-col-hours,
+.ts-col-pay    { width: 100px; text-align: right; }
+.ts-col-travel { width: 120px; }
+.ts-col-notes  { min-width: 220px; }
+.ts-col-actions{ width: 160px; }
+
+/* Inline helpers */
+.ts-time       { width: 95px; }
+.ts-inline     { display: inline-flex; gap: 6px; align-items: center; }
+
+/* View/edit toggle helpers */
+.ts-view.d-none,
+.ts-edit.d-none {
+  display: none !important;
+}
+
+/* Client input tweaks */
+.ts-col-client .form-control.form-control-sm {
+  padding-left: .35rem;
+  padding-right: .35rem;
+}
+
+/* Number alignment */
+.ts-input-number {
+  text-align: right;
+}
+
+/* === Mobile Cards (≤768px) === */
+@media (max-width: 768px) {
+  .ts-desktop { display: none !important; }
+
+  .ts-card {
+    border: 1px solid #e9ecef;
+    border-radius: .5rem;
+    padding: .75rem;
+    margin-bottom: .75rem;
+  }
+
+  .ts-card .row + .row { margin-top: .5rem; }
+  .ts-card .label       { font-size: .8rem; color: #6c757d; margin-bottom: .15rem; }
+  .ts-card .calc        { text-align: right; }
+
+  .ts-card .actions {
+    display: flex;
+    gap: .5rem;
+    margin-top: .5rem;
+  }
+}
+
+/* Hide mobile on larger screens */
+@media (min-width: 769px) {
+  .ts-mobile { display: none !important; }
+}
+</style>
+
+<!-- 
+DEV NOTES:
+- Live client-side calc with manual overrides.
+- Fallback dev rates (case-insensitive job_type_name contains):
+    • residential, commercial, school clean → £14.50
+    • end of tenancy, deep clean            → £15.00
+- If backend has no rates yet, user can set rate/pay manually and save.
+- Date is fully editable; no forced 'today' for new rows (defaults empty).
+-->
+
+<div class="container py-3">
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-pencil-square me-2"></i>
+      My Timesheet – Week {{ data.week.week_id }}
+    </h4>
+
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm"
+              data-bs-toggle="modal"
+              data-bs-target="#helpModal">
+        <i class="bi bi-question-circle me-1"></i> Help
+      </button>
+
+      <a class="btn btn-outline-dark btn-sm"
+         href="{{ url_for('public_time_billing.api_public_export_csv', week_id=data.week.week_id) }}">
+        <i class="bi bi-filetype-csv me-1"></i> CSV
+      </a>
+
+      <a class="btn btn-outline-secondary btn-sm"
+         href="{{ url_for('public_time_billing.api_public_export_pdf', week_id=data.week.week_id) }}">
+        <i class="bi bi-filetype-pdf me-1"></i> PDF
+      </a>
+
+      <button id="btnSubmit"
+              class="btn btn-primary btn-sm"
+              {% if data.week.status in ['submitted','approved'] %}disabled{% endif %}>
+        <i class="bi bi-send-check me-1"></i> Submit
+      </button>
+    </div>
+  </div>
+
+  <!-- Week Navigation -->
+  <div class="d-flex align-items-center gap-2 mb-3">
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('public_time_billing.public_week_page', week_id=data.prev_week_id) }}">
+      <i class="bi bi-chevron-left"></i> Prev
+    </a>
+
+    <span class="text-muted small">Week ending {{ data.week.week_ending }}</span>
+
+    <a class="btn btn-outline-secondary btn-sm"
+       href="{{ url_for('public_time_billing.public_week_page', week_id=data.next_week_id) }}">
+      Next <i class="bi bi-chevron-right"></i>
+    </a>
+  </div>
+
+  <!-- Totals -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Hours</div>
+          <div id="totalHours" class="fs-5 fw-semibold">
+            {{ '%.2f'|format(data.totals.hours or 0) }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Pay</div>
+          <div id="totalPay" class="fs-5 fw-semibold">
+            £{{ '%.2f'|format(data.totals.pay or 0) }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Travel/Parking</div>
+          <div id="totalTravel" class="fs-5 fw-semibold">
+            £{{ '%.2f'|format(data.totals.travel or 0) }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Status</div>
+          <div>
+            {% if data.week.status == 'approved' %}
+              <span class="badge bg-success">Approved</span>
+            {% elif data.week.status == 'submitted' %}
+              <span class="badge bg-primary">Submitted</span>
+            {% elif data.week.status == 'rejected' %}
+              <span class="badge bg-danger">Rejected</span>
+            {% else %}
+              <span class="badge bg-secondary">Draft</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="d-flex justify-content-end gap-2 mb-2">
+    <button class="btn btn-secondary btn-sm"
+            data-bs-toggle="modal"
+            data-bs-target="#wizardModal">
+      <i class="bi bi-magic me-1"></i> Add Shift (Wizard)
+    </button>
+  </div>
+
+  <!-- Desktop Table -->
+  <div class="card ts-desktop">
+    <div class="card-body ts-wrap">
+      <table class="table table-sm align-middle ts-table">
+        <thead>
+          <tr>
+            <th class="ts-col-date">Date</th>
+            <th class="ts-col-client">Client</th>
+            <th class="ts-col-job">Job Type</th>
+            <th class="ts-col-sched">Scheduled</th>
+            <th class="ts-col-actual">Actual</th>
+            <th class="ts-col-break">Break (mins)</th>
+            <th class="ts-col-rate text-end">Rate (£/h)</th>
+            <th class="ts-col-hours text-end">Hours</th>
+            <th class="ts-col-pay text-end">Pay (£)</th>
+            <th class="ts-col-travel">Travel/Parking (£)</th>
+            <th class="ts-col-notes">Notes</th>
+            <th class="ts-col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="entryBody">
+{% for e in data.entries %}
+<tr data-id="{{ e.id or '' }}" data-date="{{ e.work_date }}">
+    <!-- Date -->
+    <td class="ts-col-date">
+        <div class="ts-view" data-field-view="work_date">{{ e.work_date }}</div>
+        <div class="ts-edit d-none">
+            <input type="date"
+                         class="form-control form-control-sm js-edit js-date"
+                         data-field="work_date"
+                         value="{{ e.work_date }}">
+        </div>
+    </td>
+
+    <!-- Client -->
+    <td class="ts-col-client">
+        <div class="ts-view" data-field-view="client_text">{{ e.client_text or '' }}</div>
+        <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit"
+                         data-field="client_text"
+                         value="{{ e.client_text or '' }}"
+                         placeholder="Client name">
+        </div>
+    </td>
+
+    <!-- Job Type -->
+    <td class="ts-col-job">
+        <div class="ts-view" data-field-view="job_type_name">{{ e.job_type_name or '' }}</div>
+        <div class="ts-edit d-none">
+            <select class="form-select form-select-sm js-edit js-job-type"
+                            data-field="job_type_id"
+                            data-value="{{ e.job_type_id or '' }}">
+                <option value=""></option>
+            </select>
+        </div>
+    </td>
+
+    <!-- Scheduled -->
+    <td class="ts-col-sched">
+        <div class="ts-view" data-field-view="scheduled">
+            {{ e.scheduled_start or '' }}{% if e.scheduled_start %}–{% endif %}{{ e.scheduled_end or '' }}
+        </div>
+        <div class="ts-edit d-none ts-inline">
+            <input type="time"
+                         class="form-control form-control-sm js-edit ts-time js-sched-start"
+                         data-field="scheduled_start"
+                         value="{{ e.scheduled_start }}">
+            <span>–</span>
+            <input type="time"
+                         class="form-control form-control-sm js-edit ts-time js-sched-end"
+                         data-field="scheduled_end"
+                         value="{{ e.scheduled_end }}">
+        </div>
+    </td>
+
+    <!-- Actual -->
+    <td class="ts-col-actual">
+        <div class="ts-view" data-field-view="actual">
+            {{ e.actual_start }}{% if e.actual_start %}–{% endif %}{{ e.actual_end }}
+        </div>
+        <div class="ts-edit d-none ts-inline">
+            <input type="time"
+                         class="form-control form-control-sm js-edit ts-time js-actual-start"
+                         data-field="actual_start"
+                         value="{{ e.actual_start }}">
+            <span>–</span>
+            <input type="time"
+                         class="form-control form-control-sm js-edit ts-time js-actual-end"
+                         data-field="actual_end"
+                         value="{{ e.actual_end }}">
+        </div>
+    </td>
+
+    <!-- Break -->
+    <td class="ts-col-break">
+        <div class="ts-view" data-field-view="break_mins">{{ e.break_mins or 0 }}</div>
+        <div class="ts-edit d-none">
+            <input type="number"
+                         class="form-control form-control-sm js-edit text-end js-break"
+                         min="0" step="1"
+                         data-field="break_mins"
+                         value="{{ e.break_mins or 0 }}">
+        </div>
+    </td>
+
+    <!-- Rate -->
+    <td class="ts-col-rate text-end">
+        <div class="ts-view" data-field-view="rate">
+            £{{ '%.2f'|format(e.rate or 0) }}
+        </div>
+        <div class="ts-edit d-none">
+            <input type="number"
+                         class="form-control form-control-sm js-edit ts-input-number js-rate"
+                         min="0" step="0.01"
+                         data-field="rate"
+                         value="{{ e.rate or 0 }}">
+        </div>
+    </td>
+
+    <!-- Hours -->
+    <td class="ts-col-hours text-end">
+        <span class="ts-view" data-field-view="hours">
+            {{ '%.2f'|format(e.actual_hours or 0) }}
+        </span>
+    </td>
+
+    <!-- Pay -->
+    <td class="ts-col-pay text-end">
+        <div class="ts-view" data-field-view="pay">
+            £{{ '%.2f'|format(e.pay or 0) }}
+        </div>
+        <div class="ts-edit d-none">
+            <input type="number"
+                         class="form-control form-control-sm js-edit ts-input-number js-pay"
+                         min="0" step="0.01"
+                         data-field="pay"
+                         value="{{ e.pay or 0 }}">
+        </div>
+    </td>
+
+    <!-- Travel/Parking -->
+    <td class="ts-col-travel">
+        <div class="ts-view" data-field-view="travel_parking">
+            £{{ '%.2f'|format(e.travel_parking or 0) }}
+        </div>
+        <div class="ts-edit d-none">
+            <input type="number"
+                         class="form-control form-control-sm js-edit ts-input-number js-travel"
+                         min="0" step="0.01"
+                         data-field="travel_parking"
+                         value="{{ e.travel_parking or 0 }}">
+        </div>
+    </td>
+
+    <!-- Notes -->
+    <td class="ts-col-notes">
+        <div class="ts-view" data-field-view="notes">{{ e.notes or '' }}</div>
+        <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit"
+                         data-field="notes"
+                         value="{{ e.notes or '' }}">
+        </div>
+    </td>
+
+    <!-- Actions -->
+    <td class="ts-col-actions">
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-primary js-row-edit" title="Edit">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button type="button" class="btn btn-outline-success js-row-save d-none" title="Save">
+                <i class="bi bi-check2"></i>
+            </button>
+            <button type="button" class="btn btn-outline-secondary js-row-discard d-none" title="Discard">
+                <i class="bi bi-x-lg"></i>
+            </button>
+            <button type="button" class="btn btn-outline-danger js-row-delete" title="Delete">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+    </td>
+</tr>
+{% else %}
+<tr class="ts-empty">
+    <td colspan="12" class="text-center text-muted py-4">
+        No entries yet. Add your shifts.
+    </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<div class="d-flex justify-content-end">
+  <button id="btnAddRow" class="btn btn-secondary btn-sm">
+    <i class="bi bi-plus-lg me-1"></i> Add Row
+  </button>
+</div>
+</div>
+</div>
+<!-- Mobile Cards -->
+<div class="ts-mobile">
+  <div id="mobileBody">
+    {% for e in data.entries %}
+    <div class="ts-card" data-id="{{ e.id or '' }}" data-date="{{ e.work_date }}">
+      <div class="row">
+        <div class="col-6">
+          <div class="label">Date</div>
+          <div class="ts-view" data-field-view="work_date">{{ e.work_date }}</div>
+          <div class="ts-edit d-none">
+            <input type="date"
+                   class="form-control form-control-sm js-edit js-date"
+                   data-field="work_date"
+                   value="{{ e.work_date }}">
+          </div>
+        </div>
+        <div class="col-6 calc">
+          <div class="label">Hours / Pay</div>
+          <div class="ts-view js-calc-view">
+            {{ '%.2f'|format(e.actual_hours or 0) }}h • £{{ '%.2f'|format(e.pay or 0) }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Client -->
+      <div class="row">
+        <div class="col-12">
+          <div class="label">Client</div>
+          <div class="ts-view" data-field-view="client_text">{{ e.client_text or '' }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit"
+                   data-field="client_text"
+                   value="{{ e.client_text or '' }}"
+                   placeholder="Client name">
+          </div>
+        </div>
+      </div>
+
+      <!-- Job Type -->
+      <div class="row">
+        <div class="col-12">
+          <div class="label">Job Type</div>
+          <div class="ts-view" data-field-view="job_type_name">{{ e.job_type_name or '' }}</div>
+          <div class="ts-edit d-none">
+            <select class="form-select form-select-sm js-edit js-job-type"
+                    data-field="job_type_id"
+                    data-value="{{ e.job_type_id or '' }}">
+              <option value=""></option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Scheduled & Actual -->
+      <div class="row">
+        <div class="col-6">
+          <div class="label">Scheduled</div>
+          <div class="ts-view" data-field-view="scheduled">
+            {{ e.scheduled_start or '' }}{% if e.scheduled_start %}–{% endif %}{{ e.scheduled_end or '' }}
+          </div>
+          <div class="ts-edit d-none d-flex gap-2">
+            <input class="form-control form-control-sm js-edit js-sched-start"
+                   type="time"
+                   data-field="scheduled_start"
+                   value="{{ e.scheduled_start or '' }}">
+            <input class="form-control form-control-sm js-edit js-sched-end"
+                   type="time"
+                   data-field="scheduled_end"
+                   value="{{ e.scheduled_end or '' }}">
+          </div>
+        </div>
+        <div class="col-6">
+          <div class="label">Actual</div>
+          <div class="ts-view" data-field-view="actual">
+            {{ e.actual_start or '' }}{% if e.actual_start %}–{% endif %}{{ e.actual_end or '' }}
+          </div>
+          <div class="ts-edit d-none d-flex gap-2">
+            <input class="form-control form-control-sm js-edit js-actual-start"
+                   type="time"
+                   data-field="actual_start"
+                   value="{{ e.actual_start or '' }}">
+            <input class="form-control form-control-sm js-edit js-actual-end"
+                   type="time"
+                   data-field="actual_end"
+                   value="{{ e.actual_end or '' }}">
+          </div>
+        </div>
+      </div>
+
+      <!-- Break / Rate / Pay / Travel / Notes -->
+      <div class="row align-items-end">
+        <div class="col-4">
+          <div class="label">Break (mins)</div>
+          <div class="ts-view" data-field-view="break_mins">{{ e.break_mins or 0 }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit text-end js-break"
+                   type="number" min="0" step="1"
+                   data-field="break_mins"
+                   value="{{ e.break_mins or 0 }}">
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="label">Rate (£/h)</div>
+          <div class="ts-view" data-field-view="rate">£{{ '%.2f'|format(e.rate or 0) }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit ts-input-number js-rate"
+                   type="number" min="0" step="0.01"
+                   data-field="rate"
+                   value="{{ e.rate or 0 }}">
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="label">Pay (£)</div>
+          <div class="ts-view" data-field-view="pay">£{{ '%.2f'|format(e.pay or 0) }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit ts-input-number js-pay"
+                   type="number" min="0" step="0.01"
+                   data-field="pay"
+                   value="{{ e.pay or 0 }}">
+          </div>
+        </div>
+
+        <div class="col-12 mt-2">
+          <div class="label">Travel/Parking (£)</div>
+          <div class="ts-view" data-field-view="travel_parking">£{{ '%.2f'|format(e.travel_parking or 0) }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit ts-input-number js-travel"
+                   type="number" min="0" step="0.01"
+                   data-field="travel_parking"
+                   value="{{ e.travel_parking or 0 }}">
+          </div>
+        </div>
+
+        <div class="col-12 mt-2">
+          <div class="label">Notes</div>
+          <div class="ts-view" data-field-view="notes">{{ e.notes or '' }}</div>
+          <div class="ts-edit d-none">
+            <input class="form-control form-control-sm js-edit"
+                   data-field="notes"
+                   value="{{ e.notes or '' }}">
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button type="button" class="btn btn-outline-primary btn-sm js-row-edit">Edit</button>
+        <button type="button" class="btn btn-outline-success btn-sm js-row-save d-none">Save</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm js-row-discard d-none">Discard</button>
+        <button type="button" class="btn btn-outline-danger btn-sm ms-auto js-row-delete">Delete</button>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-4 ts-empty">No entries yet. Add your shifts.</div>
+    {% endfor %}
+  </div>
+
+  <div class="d-flex justify-content-end">
+    <button id="btnAddRowM" class="btn btn-secondary btn-sm">
+      <i class="bi bi-plus-lg me-1"></i> Add Row
+    </button>
+  </div>
+</div>
+
+<!-- Help Modal -->
+<div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-info-circle me-2"></i> How to fill your timesheet
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="mb-0">
+          <li><strong>Date:</strong> The day you worked.</li>
+          <li><strong>Client:</strong> Client name as agreed for this shift (free text).</li>
+          <li><strong>Job Type:</strong> Pick from the list set by admin. This determines your dev-rate fallback.</li>
+          <li><strong>Scheduled/Actual:</strong> Times you agreed and actually worked.</li>
+          <li><strong>Break (mins):</strong> Unpaid break time in minutes.</li>
+          <li><strong>Rate/Pay:</strong> Editable. Pay auto-calculates, but you can override.</li>
+          <li><strong>Travel/Parking (£):</strong> Parking, tolls, etc.</li>
+          <li><strong>Notes:</strong> Anything approvers should know.</li>
+          <li>Your entries auto-save after a short pause. Submit when done.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Wizard Modal -->
+<div class="modal fade" id="wizardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" id="wizardForm">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-magic me-2"></i> Add Shift
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Date</label>
+          <input type="date" class="form-control form-control-sm" name="work_date">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Client</label>
+          <input type="text" class="form-control form-control-sm" name="client_text" placeholder="Client name">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Job Type</label>
+          <select class="form-select form-select-sm" name="job_type_id">
+            <option value=""></option>
+          </select>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label">Scheduled Start</label>
+            <input type="time" class="form-control form-control-sm" name="scheduled_start">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Scheduled End</label>
+            <input type="time" class="form-control form-control-sm" name="scheduled_end">
+          </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label">Actual Start</label>
+            <input type="time" class="form-control form-control-sm" name="actual_start">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Actual End</label>
+            <input type="time" class="form-control form-control-sm" name="actual_end">
+          </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-4">
+            <label class="form-label">Break (mins)</label>
+            <input type="number" min="0" step="1" class="form-control form-control-sm" name="break_mins" value="0">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Rate (£/h)</label>
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm" name="rate">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Pay (£)</label>
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm" name="pay">
+          </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label">Travel/Parking (£)</label>
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm" name="travel_parking" value="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Notes</label>
+            <input type="text" class="form-control form-control-sm" name="notes">
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Add Shift</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        // References to desktop & mobile timesheet containers
+        const bodyDesktop = document.getElementById('entryBody');
+        const bodyMobile = document.getElementById('mobileBody');
+
+        // API endpoints
+        const API = {
+            jobs: "/time-billing/api/refs/job-types",
+            totals: "/time-billing/api/weeks/{{ data.week.week_id }}/totals"
+        };
+
+        let jobTypes = []; // cache of job types from backend
+
+        // Dev-only fallback rates (in case backend has no rates yet)
+        const DEV_RATES = [
+            { pattern: /^(residential|commercial|school clean)$/i, rate: 14.50 },
+            { pattern: /^(end of tenancy|deep clean)$/i, rate: 15.00 }
+        ];
+
+        // --- Utility helpers ---------------------------------------------------
+
+        // Clamp value to a number (with default if invalid)
+        const clampNum = (v, d = 0) => isNaN(Number(v)) ? d : Number(v);
+
+        // Format number to 2 decimal places
+        const fmt2 = (n) => (clampNum(n)).toFixed(2);
+
+        // Format as money (GBP)
+        const money = (n) => '£' + fmt2(n);
+
+        // Parse "HH:mm" string into total minutes since midnight
+        function parseTime(t) {
+            if (!t) return null;
+            const [h, m] = String(t).split(':').map(Number);
+            if (isNaN(h) || isNaN(m)) return null;
+            return h * 60 + m;
+        }
+
+        // Normalize time string → "HH:mm" or "HH:mm:ss"
+        function normTime(v) {
+            if (!v) return '';
+            const s = String(v).trim();
+            const m = s.match(/^(\d{1,2}):([0-5]\d)(?::([0-5]\d))?$/);
+            if (!m) return '';
+            const hh = parseInt(m[1], 10);
+            const mm = m[2];
+            const ss = m[3];
+            if (isNaN(hh) || hh < 0 || hh > 23) return '';
+            const hh2 = String(hh).padStart(2, '0');
+            if (ss !== undefined) return `${hh2}:${mm}:${String(ss).padStart(2, '0')}`;
+            return `${hh2}:${mm}`;
+        }
+
+        // Calculate worked hours (minus breaks)
+        function calcHours(actualStart, actualEnd, breakMins) {
+            const s = parseTime(actualStart);
+            const e = parseTime(actualEnd);
+            const b = clampNum(breakMins, 0);
+            if (s == null || e == null) return 0;
+            let mins = e - s - b;
+            if (mins < 0) mins = 0;
+            return mins / 60;
+        }
+
+        // Guess a fallback hourly rate based on job type name (dev-only)
+        function guessDevRate(jobTypeName) {
+            const name = (jobTypeName || '').trim();
+            if (!name) return null;
+            for (const r of DEV_RATES) {
+                if (r.pattern.test(name)) return r.rate;
+            }
+            return null;
+        }
+
+        // Fetch helper (returns ok, data, status)
+        async function fetchJSON(url, opts) {
+            const r = await fetch(url, opts);
+            let j = null;
+            try { j = await r.json(); } catch (_) {}
+            return { ok: r.ok, data: j, status: r.status };
+        }
+
+        // --- Job Types ---------------------------------------------------------
+
+        // Load job types (cached after first fetch)
+        async function ensureJobTypes() {
+            if (jobTypes.length) return;
+            const { ok, data } = await fetchJSON(API.jobs);
+            if (ok) jobTypes = data?.items || [];
+        }
+
+        // Fill <select> with job type options
+        function fillJobTypeSelect(sel, selectedId) {
+            if (!sel) return;
+            sel.innerHTML = '<option value=""></option>';
+            for (const jt of jobTypes) {
+                const opt = document.createElement('option');
+                opt.value = jt.id;
+                opt.textContent = jt.name;
+                if (String(jt.id) === String(selectedId || '')) opt.selected = true;
+                sel.appendChild(opt);
+            }
+        }
+
+        // --- Totals (Hours / Pay / Travel) -------------------------------------
+
+        // Update totals client-side by summing DOM values
+        function updateTotalsUIClientSide() {
+            let totalHours = 0, totalPay = 0, totalTravel = 0;
+
+            document.querySelectorAll('#entryBody tr[data-date], .ts-mobile .ts-card[data-date]')
+                .forEach(row => {
+                    const hEl = row.querySelector('[data-field-view="hours"]');
+                    const pEl = row.querySelector('[data-field-view="pay"]');
+                    const tEl = row.querySelector('[data-field-view="travel_parking"]');
+                    if (hEl) totalHours += clampNum(hEl.textContent.replace(/[^\d.]/g, ''));
+                    if (pEl) totalPay += clampNum(pEl.textContent.replace(/[^\d.]/g, ''));
+                    if (tEl) totalTravel += clampNum(tEl.textContent.replace(/[^\d.]/g, ''));
+                });
+
+            const th = document.getElementById('totalHours');
+            const tp = document.getElementById('totalPay');
+            const tt = document.getElementById('totalTravel');
+            if (th) th.textContent = fmt2(totalHours);
+            if (tp) tp.textContent = money(totalPay);
+            if (tt) tt.textContent = money(totalTravel);
+        }
+
+        // Fetch totals from backend; fallback to client calc if fails
+        async function refreshTotals() {
+            const { ok, data } = await fetchJSON(API.totals);
+            if (ok && data) {
+                const th = document.getElementById('totalHours');
+                const tp = document.getElementById('totalPay');
+                const tt = document.getElementById('totalTravel');
+                if (th) th.textContent = fmt2(data.hours || 0);
+                if (tp) tp.textContent = money(data.pay || 0);
+                if (tt) tt.textContent = money(data.travel || 0);
+            } else {
+                updateTotalsUIClientSide();
+            }
+        }
+
+        // --- Empty state placeholders ------------------------------------------
+
+        // Remove "no entries yet" placeholders
+        function removeEmptyPlaceholders() {
+            bodyDesktop?.querySelector('.ts-empty')?.remove();
+            document.querySelectorAll('.ts-mobile .ts-empty').forEach(n => n.remove());
+        }
+
+        // Add "no entries yet" placeholders if table/card is empty
+        function maybeShowEmptyPlaceholders() {
+            const hasDesktop = bodyDesktop && bodyDesktop.querySelector('tr[data-id], tr[data-date]');
+            const hasMobile = bodyMobile && bodyMobile.querySelector('.ts-card[data-id], .ts-card[data-date]');
+
+            if (!hasDesktop && bodyDesktop && !bodyDesktop.querySelector('.ts-empty')) {
+                const tr = document.createElement('tr');
+                tr.className = 'ts-empty';
+                tr.innerHTML = `<td colspan="12" class="text-center text-muted py-4">No entries yet. Add your shifts.</td>`;
+                bodyDesktop.appendChild(tr);
+            }
+
+            if (!hasMobile && bodyMobile && !bodyMobile.querySelector('.ts-empty')) {
+                const div = document.createElement('div');
+                div.className = 'text-center text-muted py-4 ts-empty';
+                div.textContent = 'No entries yet. Add your shifts.';
+                bodyMobile.appendChild(div);
+            }
+        }
+
+        // --- Row recalculation -------------------------------------------------
+
+        // Recalculate hours, rate, pay, and update UI
+        function recalcContainer(container) {
+            const actualStart = container.querySelector('.js-actual-start')?.value || '';
+            const actualEnd = container.querySelector('.js-actual-end')?.value || '';
+            const breakMins = clampNum(container.querySelector('.js-break')?.value || 0);
+            const rateInput = container.querySelector('.js-rate');
+            const payInput = container.querySelector('.js-pay');
+
+            const jobTypeName =
+                container.querySelector('[data-field-view="job_type_name"]')?.textContent ||
+                container.querySelector('select.js-job-type')?.selectedOptions?.[0]?.text ||
+                '';
+
+            // Hours
+            const hours = calcHours(actualStart, actualEnd, breakMins);
+            const hoursView = container.querySelector('[data-field-view="hours"]');
+            if (hoursView) hoursView.textContent = fmt2(hours);
+
+            // Rate (guess if empty)
+            let rate = clampNum(rateInput?.value || 0);
+            if ((!rate || rate <= 0) && jobTypeName) {
+                const guess = guessDevRate(jobTypeName);
+                if (guess != null) {
+                    rate = guess;
+                    if (rateInput) rateInput.value = fmt2(rate);
+                    const rateView = container.querySelector('[data-field-view="rate"]');
+                    if (rateView) rateView.textContent = money(rate);
+                }
+            }
+
+            // Pay (hours × rate if not already set)
+            let pay = clampNum(payInput?.value || 0);
+            const payWasEmpty = (payInput && (payInput.value === '' || payInput.value == null));
+            if (payWasEmpty || pay === 0) {
+                pay = hours * rate;
+                if (payInput) payInput.value = fmt2(pay);
+            }
+
+            const payView = container.querySelector('[data-field-view="pay"]');
+            if (payView) payView.textContent = money(pay);
+
+            // Mobile summary (e.g. "3.50h • £42.00")
+            const calcMobile = container.querySelector('.calc .ts-view');
+            if (calcMobile) calcMobile.textContent = `${fmt2(hours)}h • ${money(pay)}`;
+
+            // Refresh overall totals
+            refreshTotals();
+        }
+
+        // Attach listeners to inputs in a row for live recalculation
+        function bindCalcListeners(container) {
+            const inputs = container.querySelectorAll(
+                '.js-actual-start, .js-actual-end, .js-break, .js-rate, .js-pay, .js-travel, .js-date, .js-sched-start, .js-sched-end'
+            );
+            inputs.forEach(el => {
+                el.addEventListener('input', () => recalcContainer(container));
+                el.addEventListener('change', () => recalcContainer(container));
+            });
+
+            // Update job type name on change
+            const jobSel = container.querySelector('select.js-job-type');
+            if (jobSel) {
+                jobSel.addEventListener('change', () => {
+                    const view = container.querySelector('[data-field-view="job_type_name"]');
+                    if (view) view.textContent = jobSel.selectedOptions?.[0]?.text || '';
+                    recalcContainer(container);
+                });
+            }
+        }
+
+        // --- Expose helpers globally -------------------------------------------
+        window.__TS = {
+            ensureJobTypes,
+            fillJobTypeSelect,
+            recalcContainer,
+            bindCalcListeners,
+            removeEmptyPlaceholders,
+            maybeShowEmptyPlaceholders,
+            refreshTotals,
+            fmt2,
+            money,
+            clampNum,
+            normTime
+        };
+    })();
+});
+
+</script>
+
+<!-- Timesheet: client-side row management (add/edit/save/delete, autosave, rate lookup) -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        // ------------------------------------------------------------------
+        // 1) DOM references
+        // ------------------------------------------------------------------
+        const bodyDesktop   = document.getElementById('entryBody');
+        const bodyMobile    = document.getElementById('mobileBody');
+        const addBtnD       = document.getElementById('btnAddRow');
+        const addBtnM       = document.getElementById('btnAddRowM');
+        const wizardForm    = document.getElementById('wizardForm');
+        const wizardModalEl = document.getElementById('wizardModal');
+        const submitBtn     = document.getElementById('btnSubmit');
+
+        // ------------------------------------------------------------------
+        // 2) API endpoints & local state
+        // ------------------------------------------------------------------
+        const API = {
+            upsert:   "{{ url_for('public_time_billing.api_public_upsert', week_id=data.week.week_id) }}",
+            deleteEntry: (id) => `/time-billing/api/weeks/{{ data.week.week_id }}/entry/${id}`,
+            totals:   "/time-billing/api/weeks/{{ data.week.week_id }}/totals",
+            jobTypes: "/time-billing/api/refs/job-types",
+            // rateFor returns a REST URL to fetch rate for job type on a given date
+            rateFor:  (jobTypeId, onDate) =>
+                `/time-billing/api/rates?job_type_id=${encodeURIComponent(jobTypeId||'')}&on=${encodeURIComponent(onDate||'')}`
+        };
+
+        let pending = {};   // autosave queue keyed by id or temporary key
+        let timer   = null; // autosave debounce timer
+
+        // ------------------------------------------------------------------
+        // 3) Helpers pulled from the shared __TS module (part 1)
+        // ------------------------------------------------------------------
+        const {
+            ensureJobTypes,
+            fillJobTypeSelect,
+            recalcContainer,
+            bindCalcListeners,
+            removeEmptyPlaceholders,
+            maybeShowEmptyPlaceholders,
+            refreshTotals,
+            fmt2,
+            money,
+            clampNum,
+            normTime
+        } = window.__TS || {};
+
+        const NT = typeof normTime === 'function' ? normTime : (x => x);
+
+        // ------------------------------------------------------------------
+        // 4) Local utility helpers
+        // ------------------------------------------------------------------
+        async function fetchJSON(url, opts) {
+            const r = await fetch(url, opts);
+            let j = null;
+            try { j = await r.json(); } catch (_) {}
+            return { ok: r.ok, data: j, status: r.status };
+        }
+
+        /**
+         * Try to fetch a backend rate for a row given its job-type and date.
+         * If a positive rate is returned, populate the rate input/view and recalc.
+         */
+        async function tryFillRateFromBackend(container) {
+            const sel       = container.querySelector('select.js-job-type');
+            const rateInput = container.querySelector('.js-rate');
+            const rateView  = container.querySelector('[data-field-view="rate"]');
+            const dateISO   = container.querySelector('.js-date')?.value || container.getAttribute('data-date') || '';
+            const jobTypeId = sel ? sel.value : '';
+
+            if (!jobTypeId || !dateISO) return;
+
+            const { ok, data } = await fetchJSON(API.rateFor(jobTypeId, dateISO));
+            const rate = ok ? Number(data?.rate ?? 0) : 0;
+
+            if (rate > 0) {
+                if (rateInput) rateInput.value = fmt2(rate);
+                if (rateView)  rateView.textContent = money(rate);
+                recalcContainer(container);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 5) Row/card templates (used when adding new rows client-side)
+        //    Returns HTML strings for desktop table row and mobile card.
+        // ------------------------------------------------------------------
+        function makeDesktopRowHtml(dateISO = '') {
+            return `
+<tr data-date="${dateISO}">
+    <td class="ts-col-date">
+        <div class="ts-view d-none" data-field-view="work_date">${dateISO}</div>
+        <div class="ts-edit">
+            <input type="date" class="form-control form-control-sm js-edit js-date"
+                         data-field="work_date" value="${dateISO}">
+        </div>
+    </td>
+
+    <td class="ts-col-client">
+        <div class="ts-view d-none" data-field-view="client_text"></div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit" data-field="client_text" placeholder="Client name">
+        </div>
+    </td>
+
+    <td class="ts-col-job">
+        <div class="ts-view d-none" data-field-view="job_type_name"></div>
+        <div class="ts-edit">
+            <select class="form-select form-select-sm js-edit js-job-type" data-field="job_type_id">
+                <option value=""></option>
+            </select>
+        </div>
+    </td>
+
+    <td class="ts-col-sched">
+        <div class="ts-view d-none" data-field-view="scheduled"></div>
+        <div class="ts-edit ts-inline">
+            <input class="form-control form-control-sm js-edit ts-time js-sched-start" type="time" data-field="scheduled_start">
+            <span>–</span>
+            <input class="form-control form-control-sm js-edit ts-time js-sched-end" type="time" data-field="scheduled_end">
+        </div>
+    </td>
+
+    <td class="ts-col-actual">
+        <div class="ts-view d-none" data-field-view="actual"></div>
+        <div class="ts-edit ts-inline">
+            <input class="form-control form-control-sm js-edit ts-time js-actual-start" type="time" data-field="actual_start">
+            <span>–</span>
+            <input class="form-control form-control-sm js-edit ts-time js-actual-end" type="time" data-field="actual_end">
+        </div>
+    </td>
+
+    <td class="ts-col-break">
+        <div class="ts-view d-none" data-field-view="break_mins">0</div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit text-end js-break" type="number" min="0" step="1" data-field="break_mins" value="0">
+        </div>
+    </td>
+
+    <td class="ts-col-rate text-end">
+        <div class="ts-view d-none" data-field-view="rate">£0.00</div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit ts-input-number js-rate" type="number" min="0" step="0.01" data-field="rate" value="">
+        </div>
+    </td>
+
+    <td class="ts-col-hours text-end">
+        <span class="ts-view d-none" data-field-view="hours">0.00</span>
+    </td>
+
+    <td class="ts-col-pay text-end">
+        <div class="ts-view d-none" data-field-view="pay">£0.00</div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit ts-input-number js-pay" type="number" min="0" step="0.01" data-field="pay" value="">
+        </div>
+    </td>
+
+    <td class="ts-col-travel">
+        <div class="ts-view d-none" data-field-view="travel_parking">£0.00</div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit ts-input-number js-travel" type="number" min="0" step="0.01" data-field="travel_parking" value="0">
+        </div>
+    </td>
+
+    <td class="ts-col-notes">
+        <div class="ts-view d-none" data-field-view="notes"></div>
+        <div class="ts-edit">
+            <input class="form-control form-control-sm js-edit" data-field="notes">
+        </div>
+    </td>
+
+    <td class="ts-col-actions">
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-primary js-row-edit d-none" title="Edit"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="btn btn-outline-success js-row-save" title="Save"><i class="bi bi-check2"></i></button>
+            <button type="button" class="btn btn-outline-secondary js-row-discard" title="Discard"><i class="bi bi-x-lg"></i></button>
+            <button type="button" class="btn btn-outline-danger js-row-delete" title="Delete"><i class="bi bi-trash"></i></button>
+        </div>
+    </td>
+</tr>`;
+        }
+
+        function makeMobileCardHtml(dateISO = '') {
+            return `
+<div class="ts-card" data-date="${dateISO}">
+    <div class="row">
+        <div class="col-6">
+            <div class="label">Date</div>
+            <div class="ts-view d-none" data-field-view="work_date">${dateISO}</div>
+            <div class="ts-edit">
+                <input type="date" class="form-control form-control-sm js-edit js-date" data-field="work_date" value="${dateISO}">
+            </div>
+        </div>
+        <div class="col-6 calc">
+            <div class="label">Hours / Pay</div>
+            <div class="ts-view d-none">0.00h • £0.00</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="label">Client</div>
+            <div class="ts-view d-none" data-field-view="client_text"></div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit" data-field="client_text" placeholder="Client name">
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="label">Job Type</div>
+            <div class="ts-view d-none" data-field-view="job_type_name"></div>
+            <div class="ts-edit">
+                <select class="form-select form-select-sm js-edit js-job-type" data-field="job_type_id">
+                    <option value=""></option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-6">
+            <div class="label">Scheduled (agreed)</div>
+            <div class="ts-view d-none" data-field-view="scheduled"></div>
+            <div class="ts-edit d-flex gap-2">
+                <input class="form-control form-control-sm js-edit js-sched-start" type="time" data-field="scheduled_start">
+                <input class="form-control form-control-sm js-edit js-sched-end"   type="time" data-field="scheduled_end">
+            </div>
+        </div>
+        <div class="col-6">
+            <div class="label">Actual (worked)</div>
+            <div class="ts-view d-none" data-field-view="actual"></div>
+            <div class="ts-edit d-flex gap-2">
+                <input class="form-control form-control-sm js-edit js-actual-start" type="time" data-field="actual_start">
+                <input class="form-control form-control-sm js-edit js-actual-end"   type="time" data-field="actual_end">
+            </div>
+        </div>
+    </div>
+
+    <div class="row align-items-end">
+        <div class="col-4">
+            <div class="label">Break (mins)</div>
+            <div class="ts-view d-none" data-field-view="break_mins">0</div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit text-end js-break" type="number" min="0" step="1" data-field="break_mins" value="0">
+            </div>
+        </div>
+
+        <div class="col-4">
+            <div class="label">Rate (£/h)</div>
+            <div class="ts-view d-none" data-field-view="rate">£0.00</div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit ts-input-number js-rate" type="number" min="0" step="0.01" data-field="rate" value="">
+            </div>
+        </div>
+
+        <div class="col-4">
+            <div class="label">Pay (£)</div>
+            <div class="ts-view d-none" data-field-view="pay">£0.00</div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit ts-input-number js-pay" type="number" min="0" step="0.01" data-field="pay" value="">
+            </div>
+        </div>
+
+        <div class="col-12 mt-2">
+            <div class="label">Travel/Parking (£)</div>
+            <div class="ts-view d-none" data-field-view="travel_parking">£0.00</div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit ts-input-number js-travel" type="number" min="0" step="0.01" data-field="travel_parking" value="0">
+            </div>
+        </div>
+
+        <div class="col-12 mt-2">
+            <div class="label">Notes</div>
+            <div class="ts-view d-none" data-field-view="notes"></div>
+            <div class="ts-edit">
+                <input class="form-control form-control-sm js-edit" data-field="notes">
+            </div>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button type="button" class="btn btn-outline-primary btn-sm js-row-edit d-none">Edit</button>
+        <button type="button" class="btn btn-outline-success btn-sm js-row-save">Save</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm js-row-discard">Discard</button>
+        <button type="button" class="btn btn-outline-danger btn-sm ms-auto js-row-delete">Delete</button>
+    </div>
+</div>`;
+        }
+    })();
+});
+</script>
+
+<script>
+/* Row mode, autosave queue, CRUD actions, binders, and init */
+document.addEventListener('DOMContentLoaded', function () {
+    (function () {
+        // Note: these helpers reference functions exposed by the previous script
+        // and global API constants that are available in outer scope.
+        // For clarity we redeclare the DOM refs used here.
+        const bodyDesktop   = document.getElementById('entryBody');
+        const bodyMobile    = document.getElementById('mobileBody');
+        const addBtnD       = document.getElementById('btnAddRow');
+        const addBtnM       = document.getElementById('btnAddRowM');
+        const wizardForm    = document.getElementById('wizardForm');
+        const wizardModalEl = document.getElementById('wizardModal');
+        const submitBtn     = document.getElementById('btnSubmit');
+
+        // Local references to shared helpers & API
+        const {
+            ensureJobTypes,
+            fillJobTypeSelect,
+            recalcContainer,
+            bindCalcListeners,
+            removeEmptyPlaceholders,
+            maybeShowEmptyPlaceholders,
+            refreshTotals,
+            fmt2,
+            money,
+            clampNum,
+            normTime
+        } = window.__TS || {};
+        const NT = typeof normTime === 'function' ? normTime : (x => x);
+
+        // The API constant/functions defined previously are used here too.
+        // Autosave queue (shared with top-level script) is recreated locally:
+        let pending = {};
+        let timer   = null;
+
+        // -------------------------
+        // Row mode helpers
+        // -------------------------
+        function setRowMode(container, mode) {
+            const showEdit = (mode === 'edit');
+
+            container.querySelectorAll('.ts-view')
+                .forEach(n => n.classList.toggle('d-none', showEdit));
+
+            container.querySelectorAll('.ts-edit')
+                .forEach(n => n.classList.toggle('d-none', !showEdit));
+
+            const editBtn = container.querySelector('.js-row-edit');
+            const saveBtn = container.querySelector('.js-row-save');
+            const discBtn = container.querySelector('.js-row-discard');
+
+            if (editBtn) editBtn.classList.toggle('d-none', showEdit);
+            if (saveBtn) saveBtn.classList.toggle('d-none', !showEdit);
+            if (discBtn) discBtn.classList.toggle('d-none', !showEdit);
+        }
+
+        function snapshotRow(container) {
+            const snap = {};
+            container.querySelectorAll('.js-edit').forEach(el => {
+                snap[el.dataset.field] = el.value;
+            });
+            container._snapshot = snap;
+        }
+
+        function revertRow(container) {
+            const snap = container._snapshot || {};
+            container.querySelectorAll('.js-edit').forEach(el => {
+                const f = el.dataset.field;
+                if (f in snap) el.value = snap[f];
+            });
+            recalcContainer(container);
+        }
+
+        // -------------------------
+        // Autosave queue
+        // -------------------------
+        function queueChange(container, field, value) {
+            const id = container.dataset.id || null;
+            const key = id || (container._tmpKey ||= 'new_' + Math.random().toString(36).slice(2));
+
+            if (!pending[key]) pending[key] = { id };
+
+            // Normalize
+            if (field === 'break_mins') value = value ? parseInt(value, 10) : 0;
+            if (['rate', 'pay', 'travel_parking'].includes(field)) value = value ? parseFloat(value) : 0;
+
+            pending[key][field] = value;
+
+            const wd = container.querySelector('.js-date')?.value || container.getAttribute('data-date') || null;
+            if (wd) pending[key].work_date = wd;
+
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(saveAll, 450);
+        }
+
+        async function fetchJSON(url, opts) {
+            const r = await fetch(url, opts);
+            let j = null;
+            try { j = await r.json(); } catch (_) {}
+            return { ok: r.ok, data: j, status: r.status };
+        }
+
+        /**
+         * Save all pending queued entries to the backend (bulk upsert).
+         * On success, update DOM nodes with returned authoritative values.
+         */
+        async function saveAll() {
+            const entries = Object.values(pending);
+            if (!entries.length) return;
+            pending = {};
+
+            const { ok, data, status } = await fetchJSON(API.upsert, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    entries,
+                    client_updated_at: new Date().toISOString()
+                })
+            });
+
+            if (!ok || data?.ok === false) {
+                alert(data?.message || `Failed to save (${status}).`);
+                return;
+            }
+
+            if (Array.isArray(data.entries)) {
+                for (const e of data.entries) {
+                    const node =
+                        document.querySelector(`[data-id="${e.id}"]`) ||
+                        document.querySelector(`[data-date="${e.work_date}"]`);
+                    if (!node) continue;
+
+                    if (e.id) node.dataset.id = e.id;
+
+                    if (e.actual_hours != null) {
+                        const hView = node.querySelector('[data-field-view="hours"]');
+                        if (hView) hView.textContent = (e.actual_hours).toFixed(2);
+                    }
+
+                    if (e.pay != null) {
+                        const pView = node.querySelector('[data-field-view="pay"]');
+                        if (pView) pView.textContent = '£' + (Number(e.pay).toFixed(2));
+
+                        const calc = node.querySelector('.calc .ts-view');
+                        if (calc) {
+                            const h = node.querySelector('[data-field-view="hours"]')?.textContent || '0.00';
+                            calc.textContent = `${h}h • £${Number(e.pay).toFixed(2)}`;
+                        }
+                    }
+
+                    if (e.rate != null) {
+                        const rView = node.querySelector('[data-field-view="rate"]');
+                        if (rView) rView.textContent = '£' + Number(e.rate).toFixed(2);
+                    }
+                }
+            }
+
+            refreshTotals();
+        }
+
+        // -------------------------
+        // Save a single row (explicit Save button)
+        // -------------------------
+        async function saveRow(container) {
+            const entry = {};
+            container.querySelectorAll('.js-edit').forEach(el => {
+                const f = el.dataset.field;
+                let v = el.value;
+                if (f === 'break_mins') v = v ? parseInt(v, 10) : 0;
+                if (['rate', 'pay', 'travel_parking'].includes(f)) v = v ? parseFloat(v) : 0;
+                entry[f] = v;
+            });
+
+            entry.work_date =
+                entry.work_date ||
+                container.querySelector('.js-date')?.value ||
+                container.getAttribute('data-date') ||
+                null;
+
+            const id = container.dataset.id || null;
+            if (id) entry.id = parseInt(id, 10);
+
+            const { ok, data, status } = await fetchJSON(API.upsert, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    entries: [entry],
+                    client_updated_at: new Date().toISOString()
+                })
+            });
+
+            if (!ok || data?.ok === false) {
+                alert(data?.message || `Failed to save (${status}).`);
+                return false;
+            }
+
+            const r = Array.isArray(data.entries) && data.entries[0] ? data.entries[0] : null;
+            if (r?.id) container.dataset.id = r.id;
+
+            // Sync visible view fields from inputs
+            container.querySelectorAll('[data-field-view]').forEach(v => {
+                const f = v.getAttribute('data-field-view');
+                if (f === 'scheduled') {
+                    const s = container.querySelector('[data-field="scheduled_start"]')?.value || '';
+                    const e = container.querySelector('[data-field="scheduled_end"]')?.value || '';
+                    v.textContent = s && e ? `${s}–${e}` : s || e || '';
+                } else if (f === 'actual') {
+                    const s = container.querySelector('[data-field="actual_start"]')?.value || '';
+                    const e = container.querySelector('[data-field="actual_end"]')?.value || '';
+                    v.textContent = s && e ? `${s}–${e}` : s || e || '';
+                } else if (f === 'travel_parking') {
+                    const t = container.querySelector('[data-field="travel_parking"]')?.value || 0;
+                    v.textContent = '£' + Number(t).toFixed(2);
+                } else if (f === 'rate') {
+                    const t = container.querySelector('[data-field="rate"]')?.value || 0;
+                    v.textContent = '£' + Number(t).toFixed(2);
+                } else if (f === 'pay') {
+                    const t = container.querySelector('[data-field="pay"]')?.value || 0;
+                    v.textContent = '£' + Number(t).toFixed(2);
+                } else if (f === 'hours') {
+                    // hours is recalculated live; not overwritten here
+                } else if (f === 'job_type_name') {
+                    const sel = container.querySelector('select.js-job-type');
+                    v.textContent = sel?.selectedOptions?.[0]?.text || '';
+                } else {
+                    const src = container.querySelector(`[data-field="${f}"]`);
+                    v.textContent = src?.value || '';
+                }
+            });
+
+            // Update mobile calc line if present
+            const calc = container.querySelector('.calc .ts-view');
+            if (calc) {
+                const h = container.querySelector('[data-field-view="hours"]')?.textContent || '0.00';
+                const p = container.querySelector('[data-field-view="pay"]')?.textContent || '£0.00';
+                calc.textContent = `${h}h • ${p}`;
+            }
+
+            snapshotRow(container);
+            setRowMode(container, 'view');
+            refreshTotals();
+            return true;
+        }
+
+        // -------------------------
+        // Delete a row (local or backend)
+        // -------------------------
+        async function deleteRow(container) {
+            const id = container.dataset.id;
+            if (!id) {
+                container.remove();
+                maybeShowEmptyPlaceholders();
+                refreshTotals();
+                return;
+            }
+            if (!confirm('Delete this entry?')) return;
+
+            const { ok, data, status } = await fetchJSON(API.deleteEntry(id), { method: 'DELETE' });
+            if (!ok || data?.ok === false) {
+                alert(data?.message || `Failed to delete (${status}).`);
+                return;
+            }
+
+            container.remove();
+            maybeShowEmptyPlaceholders();
+            refreshTotals();
+        }
+
+        // -------------------------
+        // Bind listeners for a given row/card container
+        // -------------------------
+        function bindContainer(container) {
+            container.querySelectorAll('.js-edit').forEach(el => {
+                const field = el.dataset.field;
+                el.addEventListener('input', () => recalcContainer(container));
+                el.addEventListener('change', async () => {
+                    let val = el.value;
+                    if (field === 'break_mins') val = val ? parseInt(val, 10) : 0;
+                    if (['rate', 'pay', 'travel_parking'].includes(field)) val = val ? parseFloat(val) : 0;
+
+                    queueChange(container, field, val);
+
+                    if (field === 'work_date') container.setAttribute('data-date', el.value || '');
+
+                    // If job type or date changed, attempt to pre-fill rate from backend
+                    if (field === 'job_type_id' || field === 'work_date') {
+                        await tryFillRateFromBackend(container);
+                    }
+                });
+            });
+
+            // Pre-fill select (if data-value present) and label
+            const sel = container.querySelector('select.js-job-type');
+            if (sel) {
+                const pre = sel.getAttribute('data-value');
+                if (pre) fillJobTypeSelect(sel, pre);
+                const v = container.querySelector('[data-field-view="job_type_name"]');
+                if (v) v.textContent = sel?.selectedOptions?.[0]?.text || '';
+            }
+
+            bindCalcListeners(container);
+
+            // New rows start in edit mode; saved/loaded rows in view mode
+            if (!container.dataset.id) {
+                setRowMode(container, 'edit');
+            } else {
+                setRowMode(container, 'view');
+            }
+
+            snapshotRow(container);
+            recalcContainer(container);
+        }
+
+        // -------------------------
+        // Add a new blank row (desktop + mobile)
+        // -------------------------
+        async function addNewRow() {
+            await ensureJobTypes();
+            removeEmptyPlaceholders();
+
+            // Desktop row
+            const tempRow = document.createElement('tbody');
+            tempRow.innerHTML = makeDesktopRowHtml('');
+            const row = tempRow.firstElementChild;
+            fillJobTypeSelect(row.querySelector('select.js-job-type'), null);
+            bodyDesktop.appendChild(row);
+            bindContainer(row);
+
+            // Mobile card
+            const tempCard = document.createElement('div');
+            tempCard.innerHTML = makeMobileCardHtml('');
+            const card = tempCard.firstElementChild;
+            fillJobTypeSelect(card.querySelector('select.js-job-type'), null);
+            bodyMobile.appendChild(card);
+            bindContainer(card);
+        }
+
+        // -------------------------
+        // Wizard modal submit: create row(s) locally and attempt to fetch rates
+        // -------------------------
+        wizardForm?.addEventListener('submit', async ev => {
+            ev.preventDefault();
+            await ensureJobTypes();
+
+            const fd = new FormData(wizardForm);
+            const entry = {
+                work_date:      fd.get('work_date') || '',
+                client_text:    fd.get('client_text') || '',
+                job_type_id:    fd.get('job_type_id') ? parseInt(fd.get('job_type_id'), 10) : null,
+                scheduled_start:fd.get('scheduled_start') || '',
+                scheduled_end:  fd.get('scheduled_end') || '',
+                actual_start:   fd.get('actual_start') || '',
+                actual_end:     fd.get('actual_end') || '',
+                break_mins:     fd.get('break_mins') ? parseInt(fd.get('break_mins'), 10) : 0,
+                rate:           fd.get('rate') ? parseFloat(fd.get('rate')) : 0,
+                pay:            fd.get('pay') ? parseFloat(fd.get('pay')) : 0,
+                travel_parking: fd.get('travel_parking') ? parseFloat(fd.get('travel_parking')) : 0,
+                notes:          fd.get('notes') || ''
+            };
+
+            removeEmptyPlaceholders();
+
+            // Desktop: create row and populate fields
+            const tempRow = document.createElement('tbody');
+            tempRow.innerHTML = makeDesktopRowHtml(entry.work_date || '');
+            const row = tempRow.firstElementChild;
+            bodyDesktop.appendChild(row);
+
+            row.querySelector('[data-field="client_text"]').value = entry.client_text;
+            fillJobTypeSelect(row.querySelector('select.js-job-type'), entry.job_type_id);
+            row.querySelector('[data-field="scheduled_start"]').value = entry.scheduled_start ? NT(entry.scheduled_start) : '';
+            row.querySelector('[data-field="scheduled_end"]').value   = entry.scheduled_end   ? NT(entry.scheduled_end)   : '';
+            row.querySelector('[data-field="actual_start"]').value    = entry.actual_start    ? NT(entry.actual_start)    : '';
+            row.querySelector('[data-field="actual_end"]').value      = entry.actual_end      ? NT(entry.actual_end)      : '';
+            row.querySelector('[data-field="break_mins"]').value      = entry.break_mins;
+            row.querySelector('[data-field="rate"]').value            = entry.rate || '';
+            row.querySelector('[data-field="pay"]').value             = entry.pay || '';
+            row.querySelector('[data-field="travel_parking"]').value  = entry.travel_parking;
+            row.querySelector('[data-field="notes"]').value           = entry.notes;
+            bindContainer(row);
+            await tryFillRateFromBackend(row);
+
+            // Mobile: same population for card
+            const tempCard = document.createElement('div');
+            tempCard.innerHTML = makeMobileCardHtml(entry.work_date || '');
+            const card = tempCard.firstElementChild;
+            bodyMobile.appendChild(card);
+
+            card.querySelector('[data-field="client_text"]').value = entry.client_text;
+            fillJobTypeSelect(card.querySelector('select.js-job-type'), entry.job_type_id);
+            card.querySelector('[data-field="scheduled_start"]').value = entry.scheduled_start ? NT(entry.scheduled_start) : '';
+            card.querySelector('[data-field="scheduled_end"]').value   = entry.scheduled_end   ? NT(entry.scheduled_end)   : '';
+            card.querySelector('[data-field="actual_start"]').value    = entry.actual_start    ? NT(entry.actual_start)    : '';
+            card.querySelector('[data-field="actual_end"]').value      = entry.actual_end      ? NT(entry.actual_end)      : '';
+            card.querySelector('[data-field="break_mins"]').value      = entry.break_mins;
+            card.querySelector('[data-field="rate"]').value            = entry.rate || '';
+            card.querySelector('[data-field="pay"]').value             = entry.pay || '';
+            card.querySelector('[data-field="travel_parking"]').value  = entry.travel_parking;
+            card.querySelector('[data-field="notes"]').value           = entry.notes;
+            bindContainer(card);
+            await tryFillRateFromBackend(card);
+
+            // Close modal and reset
+            try {
+                const modal = bootstrap?.Modal?.getOrCreateInstance(wizardModalEl);
+                modal?.hide();
+            } catch (_) {}
+
+            wizardForm.reset();
+        });
+
+        // Toolbar: add new rows
+        addBtnD?.addEventListener('click', addNewRow);
+        addBtnM?.addEventListener('click', addNewRow);
+
+        // -------------------------
+        // Delegate actions for both desktop and mobile containers
+        // -------------------------
+        [bodyDesktop, bodyMobile].forEach(container => {
+            container?.addEventListener('click', async e => {
+                const row = e.target.closest('.ts-card, tr');
+                if (!row) return;
+
+                if (e.target.closest('.js-row-edit')) setRowMode(row, 'edit');
+                if (e.target.closest('.js-row-save'))  await saveRow(row);
+                if (e.target.closest('.js-row-discard')) {
+                    revertRow(row);
+                    setRowMode(row, 'view');
+                }
+                if (e.target.closest('.js-row-delete')) deleteRow(row);
+            });
+        });
+
+        // -------------------------
+        // Initialization: normalize times, pre-fill job type selects and bind existing rows
+        // -------------------------
+        (async function init() {
+            await ensureJobTypes();
+
+            // Normalize times on server-rendered inputs to consistent format
+            document.querySelectorAll('.js-sched-start, .js-sched-end, .js-actual-start, .js-actual-end')
+                .forEach(inp => { inp.value = NT(inp.value); });
+
+            // Fill job-type selects rendered by the server and set visible labels
+            document.querySelectorAll('select.js-job-type').forEach(sel => {
+                const pre = sel.getAttribute('data-value');
+                fillJobTypeSelect(sel, pre);
+                const v = sel.closest('.ts-card, tr')?.querySelector('[data-field-view="job_type_name"]');
+                if (v) v.textContent = sel?.selectedOptions?.[0]?.text || '';
+            });
+
+            // Bind any rows/cards already present in the template
+            document.querySelectorAll('#entryBody tr[data-date], .ts-mobile .ts-card[data-date]')
+                .forEach(node => {
+                    const id = node.getAttribute('data-id');
+                    if (id) setRowMode(node, 'view');
+                    bindContainer(node);
+                });
+
+            maybeShowEmptyPlaceholders();
+            refreshTotals();
+        })();
+    })();
+});
+</script>
+
+{% endblock %}

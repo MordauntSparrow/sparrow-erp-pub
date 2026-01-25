@@ -1,0 +1,184 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-sliders2-vertical me-2"></i> Edit Policy
+        </h4>
+        <div class="d-flex gap-2">
+            <button id="btnValidate" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-spellcheck me-1"></i> Validate
+            </button>
+            <button id="btnSave" class="btn btn-primary btn-sm">
+                <i class="bi bi-save me-1"></i> Save
+            </button>
+        </div>
+    </div>
+
+    <!-- Policy Header -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Name</label>
+                    <input class="form-control form-control-sm" id="pol_name">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Scope</label>
+                    <select class="form-select form-select-sm" id="pol_scope">
+                        <option value="global">global</option>
+                        <option value="client">client</option>
+                        <option value="site">site</option>
+                        <option value="job_type">job_type</option>
+                        <option value="role">role</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Version</label>
+                    <input class="form-control form-control-sm" id="pol_version" type="number" min="1" step="1">
+                </div>
+                <div class="col-6 col-md-2 d-flex align-items-end">
+                    <div class="form-check">
+                        <input class="form-check-input" id="pol_active" type="checkbox">
+                        <label class="form-check-label" for="pol_active">Active</label>
+                    </div>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Priority</label>
+                    <input class="form-control form-control-sm" id="pol_priority" type="number" step="1" value="0">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rules JSON -->
+    <div class="card">
+        <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between">
+                <h6 class="mb-2">Rules (JSON)</h6>
+                <button id="btnInsertExample" class="btn btn-outline-dark btn-sm">Insert example</button>
+            </div>
+            <textarea id="rules" class="form-control" rows="16" spellcheck="false" placeholder='[]'></textarea>
+            <div class="form-text">
+                Tips: Provide an array of rules. Each rule supports keys like "when", "apply", and "notes".
+            </div>
+            <pre id="validation" class="small mt-2 text-muted"></pre>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    (async function () {
+        const polId = (location.hash.match(/edit-(\d+)/) || [])[1];
+        const $ = (s) => document.querySelector(s);
+        const validation = $('#validation');
+
+        async function load() {
+            const r = await fetch(`{{ url_for('internal_time_billing.get_policies') }}`);
+            const list = await r.json();
+            const p = (list || []).find(x => String(x.id) === String(polId));
+
+            if (!p) {
+                alert('Policy not found');
+                history.back();
+                return;
+            }
+
+            $('#pol_name').value = p.name || '';
+            $('#pol_scope').value = p.scope || 'global';
+            $('#pol_version').value = p.version || 1;
+            $('#pol_active').checked = !!p.active;
+            $('#pol_priority').value = p.priority != null ? p.priority : 0;
+            $('#rules').value = p.rules_json || JSON.stringify(p.rules || [], null, 2);
+        }
+
+        function getPayload() {
+            let rules = [];
+            const rulesRaw = $('#rules').value;
+
+            try { rules = JSON.parse(rulesRaw || '[]'); } catch (e) { /* validation will catch */ }
+
+            return {
+                name: $('#pol_name').value || '',
+                scope: $('#pol_scope').value || 'global',
+                version: parseInt($('#pol_version').value || '1', 10),
+                active: $('#pol_active').checked,
+                priority: parseInt($('#pol_priority').value || '0', 10),
+                rules: rules,
+                rules_json: rulesRaw // optional raw JSON text
+            };
+        }
+
+        function validatePayload() {
+            validation.textContent = '';
+            try {
+                const p = getPayload();
+                if (!p.name) throw new Error('Name is required');
+                if (!Array.isArray(p.rules)) throw new Error('Rules must be an array');
+
+                // Minimal rule schema check
+                for (const [i, r] of p.rules.entries()) {
+                    if (typeof r !== 'object' || r === null) throw new Error(`Rule ${i + 1} must be an object`);
+                    if (r.when && typeof r.when !== 'object') throw new Error(`Rule ${i + 1} "when" must be an object`);
+                    if (r.apply && typeof r.apply !== 'object') throw new Error(`Rule ${i + 1} "apply" must be an object`);
+                }
+
+                validation.textContent = 'Looks good.';
+                validation.className = 'small mt-2 text-success';
+                return true;
+            } catch (e) {
+                validation.textContent = e.message || 'Invalid';
+                validation.className = 'small mt-2 text-danger';
+                return false;
+            }
+        }
+
+        $('#btnInsertExample').addEventListener('click', () => {
+            const example = [
+                {
+                    notes: "Time-of-day premium 20% for night work",
+                    when: { time_range: ["22:00", "06:00"] },
+                    apply: { pay_multiplier: 1.2 }
+                },
+                {
+                    notes: "Weekend uplift flat £15 per shift",
+                    when: { weekday_in: ["Sat", "Sun"] },
+                    apply: { pay_add: 15.0 }
+                },
+                {
+                    notes: "Travel cap",
+                    when: { travel_cost_gt: 30 },
+                    apply: { travel_cap: 30 }
+                }
+            ];
+            $('#rules').value = JSON.stringify(example, null, 2);
+        });
+
+        $('#btnValidate').addEventListener('click', validatePayload);
+
+        $('#btnSave').addEventListener('click', async () => {
+            if (!validatePayload()) return;
+            const payload = getPayload();
+
+            const r = await fetch('{{ url_for("internal_time_billing.create_policy") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(Object.assign({ id: polId }, payload))
+            });
+
+            if (!r.ok) {
+                alert('Save failed');
+                return;
+            }
+
+            alert('Saved');
+        });
+
+        // Initial load
+        load();
+    })();
+</script>
+{% endblock %}

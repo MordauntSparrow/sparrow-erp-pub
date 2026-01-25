@@ -1,0 +1,153 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-ui-checks-grid me-2"></i> Runsheet Templates
+    </h4>
+    <button id="btnNewTpl" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-lg me-1"></i> New Template
+    </button>
+  </div>
+
+  <!-- Templates Table -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Job Type</th>
+              <th>Client</th>
+              <th>Site</th>
+              <th>Version</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tplBody">
+            <tr>
+              <td colspan="7" class="text-center py-4 text-muted">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (async function () {
+    const body = document.getElementById("tplBody");
+
+    // Helper: escape HTML to prevent XSS
+    function escapeHtml(str) {
+      if (!str) return "";
+      return str.replace(/[&<>"']/g, (m) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#039;",
+        }[m])
+      );
+    }
+
+    // Render table rows
+    function renderRows(data) {
+      body.innerHTML = "";
+
+      if (!data || !data.length) {
+        body.innerHTML =
+          '<tr><td colspan="7" class="text-center text-muted py-4">No templates yet.</td></tr>';
+        return;
+      }
+
+      for (const t of data) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${t.id}</td>
+          <td>${escapeHtml(t.name)}</td>
+          <td>${escapeHtml(t.job_type_name || t.job_type_id)}</td>
+          <td>${escapeHtml(t.client_name || t.client_id)}</td>
+          <td>${escapeHtml(t.site_name || t.site_name)}</td>
+          <td>${t.version ?? 1}</td>
+          <td class="text-end">
+            <div class="btn-group btn-group-sm">
+              <a class="btn btn-outline-primary" data-id="${t.id}" data-action="edit">Edit</a>
+              <a class="btn btn-outline-secondary" data-id="${t.id}" data-action="preview">Preview</a>
+            </div>
+          </td>
+        `;
+        body.appendChild(tr);
+      }
+    }
+
+    // Load templates
+    async function load() {
+      body.innerHTML =
+        '<tr><td colspan="7" class="text-center py-4">Loading…</td></tr>';
+      try {
+        const resp = await fetch(
+          "{{ url_for('internal_time_billing.list_templates') }}"
+        );
+        if (!resp.ok) throw new Error("Failed to fetch templates");
+        const data = await resp.json();
+        renderRows(data);
+      } catch (err) {
+        console.error(err);
+        body.innerHTML =
+          '<tr><td colspan="7" class="text-center text-danger py-4">Error loading templates</td></tr>';
+      }
+    }
+
+    // Handle create new template
+    document
+      .getElementById("btnNewTpl")
+      .addEventListener("click", async () => {
+        const name = prompt("Template name:");
+        if (!name) return;
+
+        try {
+          const resp = await fetch(
+            "{{ url_for('internal_time_billing.create_template') }}",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name }),
+            }
+          );
+          if (resp.ok) {
+            load();
+          } else {
+            alert("Failed to create template");
+          }
+        } catch (err) {
+          alert("Error creating template");
+          console.error(err);
+        }
+      });
+
+    // Handle action clicks (edit/preview)
+    body.addEventListener("click", (e) => {
+      if (e.target.matches("[data-action]")) {
+        const id = e.target.getAttribute("data-id");
+        const action = e.target.getAttribute("data-action");
+
+        if (action === "edit") {
+          window.location.href = `/time-billing/templates/edit/${id}`;
+        } else if (action === "preview") {
+          window.location.href = `/time-billing/templates/preview/${id}`;
+        }
+      }
+    });
+
+    // Initial load
+    load();
+  })();
+</script>
+{% endblock %}

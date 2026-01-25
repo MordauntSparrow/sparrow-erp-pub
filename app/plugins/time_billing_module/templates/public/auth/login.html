@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ config.site_settings.company_name or 'Sparrow ERP' }} - Login</title>
+
+  <!-- Bootstrap & Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet"
+    crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      --card-bg: rgba(255, 255, 255, 0.14);
+      --card-border: rgba(255, 255, 255, 0.25);
+      --overlay-top: rgba(0, 0, 0, 0.18);
+      --overlay-bottom: rgba(0, 0, 0, 0.6);
+      --primary: #0d6efd;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      background: #0b1220;
+      color: #fff;
+      font-family: "Segoe UI", Roboto, sans-serif;
+    }
+
+    .immersive-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    .bg-image {
+      position: absolute;
+      inset: 0;
+      background: center/cover no-repeat;
+      filter: brightness(.9) contrast(1.02);
+      transition: none !important;
+    }
+
+    .bg-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, var(--overlay-top), var(--overlay-bottom) 75%);
+    }
+
+    .particles {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .login-shell {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: 460px;
+      padding: 20px;
+    }
+
+    .login-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      backdrop-filter: blur(10px) saturate(120%);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+      padding: 32px 28px;
+    }
+
+    .brand-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .brand-logo {
+      max-height: 72px;
+      max-width: 220px;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-weight: 700;
+      font-size: 1.5rem;
+      letter-spacing: 0.3px;
+    }
+
+    .login-title {
+      font-size: 1.125rem;
+      margin: 0.5rem 0 1.25rem;
+      font-weight: 600;
+      opacity: .95;
+      text-align: center;
+    }
+
+    .input-group {
+      position: relative;
+      margin-bottom: 18px;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: rgba(255, 255, 255, .8);
+      font-size: 15px;
+    }
+
+    .form-control {
+      padding-left: 42px;
+      height: 48px;
+      border-radius: 30px;
+      font-size: 1rem;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      transition: all .2s ease;
+    }
+
+    .form-control::placeholder {
+      color: rgba(255, 255, 255, .7);
+    }
+
+    .form-control:focus {
+      border-color: rgba(13, 110, 253, .8);
+      box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .2);
+      background: rgba(255, 255, 255, .18);
+      color: #fff;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      border-color: var(--primary);
+      border-radius: 28px;
+      width: 100%;
+      padding: 12px;
+      font-weight: 700;
+      transition: all .2s ease;
+    }
+
+    .btn-primary:hover {
+      filter: brightness(.95);
+      transform: translateY(-1px);
+      color: #fff;
+    }
+
+    .footer-text {
+      margin-top: 18px;
+      font-size: .9rem;
+      color: rgba(255, 255, 255, .85);
+      text-align: center;
+    }
+
+    .small-muted {
+      font-size: .85rem;
+      color: rgba(255, 255, 255, .75);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="immersive-wrap">
+    <div id="bg" class="bg-image"></div>
+    <canvas id="particles" class="particles"></canvas>
+    <div class="bg-overlay"></div>
+  </div>
+
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="brand-wrap">
+        {% if config.site_settings.branding == 'logo' and config.site_settings.logo_path %}
+        <img src="{{ url_for('static', filename=config.site_settings['logo_path']) }}"
+          alt="{{ config.site_settings.company_name }}" class="brand-logo">
+        {% else %}
+        <h1 class="brand-title">{{ config.site_settings.company_name or 'Sparrow ERP' }}</h1>
+        {% endif %}
+        <div class="login-title">Sign In</div>
+      </div>
+
+      <form method="POST"
+        action="{{ url_for('public_time_billing.login_submit', next=request.args.get('next') or url_for('public_time_billing.public_dashboard_page')) }}">
+        <div class="input-group">
+          <span class="input-icon"><i class="fas fa-user"></i></span>
+          <input type="email" class="form-control" name="email" placeholder="Email" required autocomplete="username">
+        </div>
+        <div class="input-group">
+          <span class="input-icon"><i class="fas fa-lock"></i></span>
+          <input type="password" class="form-control" name="password" placeholder="Password" required
+            autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary">Sign In</button>
+      </form>
+
+      <div class="footer-text">
+        <div class="small-muted">&copy; 2025 {{ config.site_settings.company_name or 'Sparrow ERP' }}. All rights
+          reserved.
+        </div>
+        <div class="small-muted">Powered by Sparrow ERP</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      const bg = document.getElementById('bg');
+      const periods = [
+        { id: 'night', s: 0, e: 5 }, { id: 'dawn', s: 5, e: 7 }, { id: 'day', s: 7, e: 17 },
+        { id: 'dusk', s: 17, e: 19 }, { id: 'evening', s: 19, e: 24 }
+      ];
+      const imgs = {
+        night: ["https://picsum.photos/id/1015/1920/1080", "https://picsum.photos/id/1003/1920/1080"],
+        dawn: ["https://picsum.photos/id/1043/1920/1080", "https://picsum.photos/id/1021/1920/1080"],
+        day: ["https://picsum.photos/id/1018/1920/1080", "https://picsum.photos/id/1025/1920/1080", "https://picsum.photos/id/1039/1920/1080"],
+        dusk: ["https://picsum.photos/id/1016/1920/1080", "https://picsum.photos/id/1035/1920/1080"],
+        evening: ["https://picsum.photos/id/1011/1920/1080", "https://picsum.photos/id/1032/1920/1080"]
+      };
+      function period(d) { const h = d.getHours(); for (const p of periods) { if (h >= p.s && h < p.e) return p.id } return 'day'; }
+      function pick(list, key) { let hash = 0; for (let i = 0; i < key.length; i++) { hash = ((hash << 5) - hash) + key.charCodeAt(i); hash |= 0; } return list[Math.abs(hash) % list.length]; }
+      function setBg() { const now = new Date(); const per = period(now); const url = pick(imgs[per] || imgs.day, now.toDateString() + per); bg.style.backgroundImage = 'url("' + url + '")'; bg.style.filter = (per === 'night' || per === 'evening') ? 'brightness(.6) contrast(1.05)' : 'brightness(1) contrast(1)'; }
+      setBg();
+
+      const canvas = document.getElementById('particles');
+      const ctx = canvas.getContext('2d');
+      function measure() { const r = document.body.getBoundingClientRect(); return { w: Math.max(1, Math.round(r.width)), h: Math.max(1, Math.round(r.height)) }; }
+      let size = measure(); canvas.width = size.w; canvas.height = size.h; canvas.style.width = size.w + 'px'; canvas.style.height = size.h + 'px';
+      let w = size.w, h = size.h;
+      const COUNT = Math.min(90, Math.max(40, Math.floor(w / 18)));
+      function rnd(a, b) { return a + Math.random() * (b - a); }
+      const parts = Array.from({ length: COUNT }, () => ({ x: rnd(0, w), y: rnd(0, h), r: rnd(.6, 2.2), a: rnd(.25, .55), vx: rnd(-.15, .15), vy: rnd(.05, .25) }));
+
+      function link() { for (let i = 0; i < parts.length; i++) { const p = parts[i]; for (let j = i + 1; j < parts.length; j++) { const q = parts[j]; const dx = p.x - q.x, dy = p.y - q.y; const d2 = dx * dx + dy * dy; if (d2 < 9000) { ctx.strokeStyle = 'rgba(255,255,255,' + (0.06 * (1 - d2 / 9000)).toFixed(3) + ')'; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke(); } } } }
+      function draw() { ctx.clearRect(0, 0, w, h); link(); for (const p of parts) { p.x += p.vx; p.y += p.vy; if (p.x < 0 || p.x > w) p.vx *= -1; if (p.y > h + 5) p.y = -5; ctx.fillStyle = 'rgba(255,255,255,' + p.a.toFixed(2) + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); } requestAnimationFrame(draw); }
+      function resize() { const m = measure(); w = canvas.width = m.w; h = canvas.height = m.h; canvas.style.width = w + 'px'; canvas.style.height = h + 'px'; for (const p of parts) { if (p.x > w) p.x = w - 1; if (p.y > h) p.y = h - 1; } }
+      window.addEventListener('resize', resize); draw();
+    })();
+  </script>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"
+    crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.min.js"
+    crossorigin="anonymous"></script>
+</body>
+
+</html>

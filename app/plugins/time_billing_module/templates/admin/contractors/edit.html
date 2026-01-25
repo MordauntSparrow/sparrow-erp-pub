@@ -1,0 +1,239 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-person-gear me-2"></i>
+      Edit Contractor
+    </h4>
+    <div class="d-flex gap-2">
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.contractors_page') }}">
+        <i class="bi bi-arrow-left me-1"></i> Back
+      </a>
+      <button id="btnSave" class="btn btn-primary btn-sm" type="button">
+        <i class="bi bi-save me-1"></i> Save
+      </button>
+    </div>
+  </div>
+
+  <!-- Contractor Form -->
+  <div class="card">
+    <div class="card-body">
+      <div class="row g-2">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Email</label>
+          <input id="email" class="form-control form-control-sm" disabled>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Name</label>
+          <input id="name" class="form-control form-control-sm" required>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Status</label>
+          <select id="status" class="form-select form-select-sm" required>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label">Role (single)</label>
+          <select id="role_id" class="form-select form-select-sm" required>
+            <option value="">Select a role</option>
+          </select>
+          <div class="form-text">Primary role determines pay mapping.</div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label">Wage Rate Card</label>
+          <select id="wage_rate_card_id" class="form-select form-select-sm">
+            <option value="">Select a wage card</option>
+          </select>
+        </div>
+      </div>
+
+      <hr>
+
+      <!-- Password Reset -->
+      <div class="row g-2">
+        <div class="col-12 col-md-6 col-lg-4">
+          <label class="form-label">Reset password</label>
+          <div class="input-group input-group-sm">
+            <input id="new_pw" type="password" class="form-control"
+                   placeholder="New password (min 8 chars)" autocomplete="new-password">
+            <button id="btnSetPw" class="btn btn-outline-secondary" type="button">Set</button>
+          </div>
+          <div class="form-text">This immediately overwrites the user’s password.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Message Modal -->
+<div class="modal fade" id="msgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="msgTitle"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="msgBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const $ = (s) => document.querySelector(s);
+  const idMatch = location.hash.match(/edit-(\d+)/);
+  const userId = idMatch ? idMatch[1] : null;
+
+  // Modal guard: support bootstrap or MDB
+  const ModalClass = (window.bootstrap && bootstrap.Modal)
+    ? bootstrap.Modal
+    : (window.mdb && mdb.Modal);
+  const msgModalInst = ModalClass ? new ModalClass(document.getElementById('msgModal')) : null;
+
+  function showMsg(title, body) {
+    document.getElementById('msgTitle').textContent = title;
+    document.getElementById('msgBody').textContent = body;
+    if (msgModalInst) msgModalInst.show();
+    else alert(`${title}: ${body}`);
+  }
+
+  // Elements
+  const emailEl = $('#email');
+  const nameEl = $('#name');
+  const statusEl = $('#status');
+  const roleIdEl = $('#role_id');
+  const wageCardEl = $('#wage_rate_card_id');
+  const newPwEl = $('#new_pw');
+
+  // API endpoints (build base paths server-side, append id client-side)
+  const GET_BASE = "{{ url_for('internal_time_billing.api_get_contractor', user_id=0) }}".replace(/0$/, "");
+  const UPDATE_BASE = "{{ url_for('internal_time_billing.api_update_contractor', user_id=0) }}".replace(/0$/, "");
+  const SETPW_BASE = "{{ url_for('internal_time_billing.api_contractor_set_password', user_id=0) }}".replace(/0\/set-password$/, "");
+  const ROLES_URL = "{{ url_for('internal_time_billing.api_list_roles') }}";
+  const WAGE_CARDS_URL = "{{ url_for('internal_time_billing.get_wage_cards') }}";
+
+  const GET_URL = (id) => `${GET_BASE}${id}`;
+  const UPDATE_URL = (id) => `${UPDATE_BASE}${id}`;
+  const SETPW_URL = (id) => `${SETPW_BASE}/${id}/set-password`;
+
+  async function loadRoles() {
+    const r = await fetch(ROLES_URL);
+    if (!r.ok) throw new Error("Failed to load roles");
+    const data = await r.json();
+    const items = data.items || [];
+    roleIdEl.innerHTML =
+      '<option value="">Select a role</option>' +
+      items.map(x => `<option value="${x.id}">${x.name}</option>`).join("");
+  }
+
+  async function loadWageCards() {
+    const r = await fetch(WAGE_CARDS_URL);
+    if (!r.ok) return;
+    const data = await r.json();
+    const list = Array.isArray(data) ? data : (data.items || []);
+    wageCardEl.innerHTML =
+      '<option value="">Select a wage card</option>' +
+      list.map(x => `<option value="${x.id}">${x.name || ('Card #' + x.id)}</option>`).join("");
+  }
+
+  async function loadContractor() {
+    if (!userId) {
+      showMsg('Error', 'No user id provided');
+      return;
+    }
+
+    // Load refs first (so selects exist)
+    await Promise.all([loadRoles(), loadWageCards()]);
+
+    const r = await fetch(GET_URL(userId));
+    if (r.status === 404) {
+      showMsg('Error', 'User not found');
+      history.back();
+      return;
+    }
+    if (!r.ok) {
+      showMsg('Error', 'Failed to load user');
+      return;
+    }
+
+    const c = await r.json();
+    emailEl.value = c.email || '';
+    nameEl.value = c.name || '';
+    statusEl.value = (c.status || 'active').toLowerCase();
+
+    // Preselect role_id and wage card if present
+    if (c.role_id != null) roleIdEl.value = String(c.role_id);
+    if (c.wage_rate_card_id != null) wageCardEl.value = String(c.wage_rate_card_id);
+  }
+
+  async function save() {
+    const name = (nameEl.value || '').trim();
+    const status = (statusEl.value || 'active').toLowerCase();
+    const role_id = roleIdEl.value ? parseInt(roleIdEl.value, 10) : null;
+    const wage_rate_card_id = wageCardEl.value ? parseInt(wageCardEl.value, 10) : null;
+
+    if (!name) return showMsg('Validation Error', 'Name cannot be empty');
+    if (!role_id) return showMsg('Validation Error', 'Please select a primary role');
+
+    const payload = { name, status, role_id, wage_rate_card_id };
+
+    const r = await fetch(UPDATE_URL(userId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'Save failed' }));
+      showMsg('Error', err.error || 'Save failed');
+      return;
+    }
+
+    showMsg('Success', 'Contractor updated successfully');
+  }
+
+  async function setPassword() {
+    const pw = newPwEl.value || '';
+    if (pw.length < 8) return showMsg('Validation Error', 'Password must be at least 8 characters');
+
+    const r = await fetch(SETPW_URL(userId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'Password update failed' }));
+      showMsg('Error', err.error || 'Password update failed');
+      return;
+    }
+
+    newPwEl.value = '';
+    showMsg('Success', 'Password updated successfully');
+  }
+
+  document.getElementById('btnSave').addEventListener('click', save);
+  document.getElementById('btnSetPw').addEventListener('click', setPassword);
+
+  // Init
+  loadContractor().catch(err =>
+    showMsg('Error', err.message || 'Failed to initialize')
+  );
+
+})();
+</script>
+{% endblock %}

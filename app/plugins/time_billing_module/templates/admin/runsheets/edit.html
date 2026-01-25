@@ -1,0 +1,184 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-clipboard2-plus me-2"></i> Edit Runsheet
+        </h4>
+        <div class="d-flex gap-2">
+            <button id="btnSave" class="btn btn-primary btn-sm">
+                <i class="bi bi-save me-1"></i> Save
+            </button>
+            <button id="btnPublish" class="btn btn-success btn-sm">
+                <i class="bi bi-upload me-1"></i> Publish
+            </button>
+        </div>
+    </div>
+
+    <!-- Runsheet Form -->
+    <div id="rsForm" class="card">
+        <div class="card-body">
+
+            <!-- Header Fields -->
+            <div class="row g-2">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Client ID</label>
+                    <input class="form-control form-control-sm" id="client_name">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Job Type ID</label>
+                    <input class="form-control form-control-sm" id="job_type_id">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Work Date</label>
+                    <input class="form-control form-control-sm" id="work_date" placeholder="YYYY-MM-DD">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select form-select-sm" id="status">
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                    </select>
+                </div>
+            </div>
+            <hr>
+
+            <!-- Assignments Section -->
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <h6 class="mb-0">Assignments</h6>
+                <button class="btn btn-outline-secondary btn-sm" id="btnAddAssign">
+                    <i class="bi bi-plus-lg"></i> Add assignment
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="assignTbl">
+                    <thead>
+                        <tr>
+                            <th>Contractor ID</th>
+                            <th>Scheduled</th>
+                            <th>Actual</th>
+                            <th>Notes</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        // Get runsheet ID from hash: #edit-<id>
+        const rsId = (location.hash.match(/edit-(\d+)/) || [])[1];
+        const q = (sel) => document.querySelector(sel);
+
+        // Add assignment row
+        function addAssignmentRow(a = {}) {
+            const tbody = q('#assignTbl tbody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+      <td>
+        <input class="form-control form-control-sm js" data-field="contractor_id" value="${a.contractor_id || ''}">
+      </td>
+      <td class="d-flex gap-1">
+        <input class="form-control form-control-sm js" data-field="scheduled_start" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_start || ''}">
+        <span>–</span>
+        <input class="form-control form-control-sm js" data-field="scheduled_end" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_end || ''}">
+      </td>
+      <td class="d-flex gap-1">
+        <input class="form-control form-control-sm js" data-field="actual_start" style="max-width:90px" placeholder="HH:MM" value="${a.actual_start || ''}">
+        <span>–</span>
+        <input class="form-control form-control-sm js" data-field="actual_end" style="max-width:90px" placeholder="HH:MM" value="${a.actual_end || ''}">
+      </td>
+      <td>
+        <input class="form-control form-control-sm js" data-field="notes" value="${a.notes || ''}">
+      </td>
+      <td class="text-end">
+        <button class="btn btn-outline-danger btn-sm js-del" type="button">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    `;
+            tbody.appendChild(tr);
+            tr.querySelector('.js-del').addEventListener('click', () => tr.remove());
+            return tr;
+        }
+
+        // Load runsheet data
+        async function load() {
+            if (!rsId) return;
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_get_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId));
+            if (!resp.ok) { alert('Failed to load runsheet'); return; }
+            const d = await resp.json();
+            q('#client_name').value = d.client_name || '';
+            q('#job_type_id').value = d.job_type_id || '';
+            q('#work_date').value = d.work_date || '';
+            q('#status').value = d.status || 'draft';
+
+            const tbody = q('#assignTbl tbody');
+            tbody.innerHTML = '';
+            (d.assignments || []).forEach(addAssignmentRow);
+        }
+
+        // Collect form data
+        function collect() {
+            const payload = {
+                client_name: q('#client_name').value ? parseInt(q('#client_name').value, 10) : null,
+                job_type_id: q('#job_type_id').value ? parseInt(q('#job_type_id').value, 10) : null,
+                work_date: q('#work_date').value || null,
+                status: q('#status').value || 'draft',
+                assignments: []
+            };
+            q('#assignTbl tbody').querySelectorAll('tr').forEach(tr => {
+                const get = (f) => {
+                    const el = tr.querySelector(`.js[data-field="${f}"]`);
+                    return el ? el.value : null;
+                };
+                payload.assignments.push({
+                    contractor_id: get('contractor_id') ? parseInt(get('contractor_id'), 10) : null,
+                    scheduled_start: get('scheduled_start') || null,
+                    scheduled_end: get('scheduled_end') || null,
+                    actual_start: get('actual_start') || null,
+                    actual_end: get('actual_end') || null,
+                    notes: get('notes') || null
+                });
+            });
+            return payload;
+        }
+
+        // Save runsheet
+        async function save() {
+            if (!rsId) { alert('Open from list to get an ID'); return; }
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_update_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collect())
+            });
+            alert(resp.ok ? 'Saved' : 'Save failed');
+        }
+
+        // Publish runsheet
+        async function publish() {
+            if (!rsId) { alert('Open from list to get an ID'); return; }
+            if (!confirm('Publish this runsheet?')) return;
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_publish_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId), { method: 'POST' });
+            alert(resp.ok ? 'Published' : 'Publish failed');
+        }
+
+        // Event bindings
+        document.getElementById('btnAddAssign').addEventListener('click', () => addAssignmentRow());
+        document.getElementById('btnSave').addEventListener('click', save);
+        document.getElementById('btnPublish').addEventListener('click', publish);
+
+        // Initialize
+        load();
+
+    })();
+</script>
+{% endblock %}

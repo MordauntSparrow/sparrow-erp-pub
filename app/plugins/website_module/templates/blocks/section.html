@@ -1,0 +1,6 @@
+{% set bg_class = 'bg-light' if bg=='light' else ('bg-dark text-white' if bg=='dark' else '') %}
+<section class="py-4 {{ bg_class }}">
+  <div class="container">
+    {{ blocks_html|safe }}
+  </div>
+</section>

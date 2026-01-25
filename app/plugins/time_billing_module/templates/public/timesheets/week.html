@@ -1,0 +1,692 @@
+{% extends "public/base_timesheet_billing_module.html" %}
+
+{% block title %}
+Timesheet – Week {{ data.week.week_id }}
+{% endblock %}
+
+{% block content %}
+<div class="container my-4" id="ts-root" data-week-id="{{ data.week.week_id }}">
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
+    <div>
+      <h3 class="mb-1">Timesheet – Week {{ data.week.week_id }}</h3>
+      <div class="text-muted small">
+        Week ending: {{ data.week.week_ending }} •
+        Status:
+      <span
+      id="ts-status"
+      class="badge
+      {% if data.week.status == 'approved' %}bg-success
+      {% elif data.week.status == 'submitted' %}bg-primary
+      {% elif data.week.status == 'rejected' %}bg-danger
+      {% elif data.week.status in ['draft', 'pending', None, ''] %}bg-secondary
+      {% else %}bg-secondary{% endif %}">
+      {{ data.week.status or 'draft' }}
+      </span>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" target="_blank"
+         href="/time-billing/api/weeks/{{ data.week.week_id }}/export.csv">Export CSV</a>
+      <a class="btn btn-outline-secondary" target="_blank"
+         href="/time-billing/api/weeks/{{ data.week.week_id }}/export.pdf">Open Print View</a>
+      <button id="btn-submit-week" class="btn btn-primary {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Submit Week</button>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <div class="d-flex gap-2">
+      <button id="btn-add-entry" class="btn btn-success {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Add Shift</button>
+      <button id="btn-help" class="btn btn-light">Help</button>
+    </div>
+    <div class="text-muted small">
+      Last updated: <span id="ts-updated">{{ data.week.updated_at or '—' }}</span>
+    </div>
+  </div>
+
+  <!-- Desktop Table -->
+  <div class="table-responsive d-none d-md-block">
+    <table class="table table-sm align-middle" id="ts-table">
+      <thead class="table-light"> 
+        <tr> 
+          <th style="width: 110px;">Date</th> 
+          <th style="min-width: 200px;">Location</th> 
+          <th style="min-width: 140px;">Job Type</th> 
+          <th style="min-width: 220px;">Times</th> 
+          <th class="text-end" style="width: 80px;">Break</th> 
+          <th class="text-end" style="width: 90px;">Hours</th> 
+          <th class="text-end" style="width: 90px;">Rate</th> 
+          <th class="text-end" style="width: 100px;">Pay</th> 
+          <th class="text-end" style="width: 100px;">Travel</th> 
+          <th style="min-width: 160px;">Notes</th> 
+          <th style="width: 160px;">Actions</th> 
+        </tr> 
+      </thead>
+      <tbody id="ts-tbody-desktop"></tbody>
+      <tfoot>
+        <tr class="table-light">
+          <th colspan="7" class="text-end">Totals:</th>
+          <th id="tot-hours">{{ '%.2f' % (data.totals.hours or 0) }}</th>
+          <th></th>
+          <th id="tot-pay">£{{ '%.2f' % (data.totals.pay or 0) }}</th>
+          <th id="tot-travel">£{{ '%.2f' % (data.totals.travel or 0) }}</th>
+          <th colspan="2"></th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- Mobile Cards -->
+  <div class="d-md-none" id="ts-cards"></div>
+
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal fade" id="ts-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <form class="modal-content" id="ts-form">
+      <div class="modal-header">
+        <h5 class="modal-title" id="ts-modal-title">Add Shift</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="f-id">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" id="f-work-date" required>
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label">Job Type</label>
+            <select class="form-select" id="f-job-type" required></select>
+          </div>
+
+          <div class="col-12 col-md-4">
+            <label class="form-label">Break</label>
+            <input type="number" class="form-control" id="f-break" min="0" step="1" value="0">
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Client</label>
+            <input type="text" class="form-control" id="f-client-name"
+                   placeholder="e.g., Rose & Crown Pub">
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Site (If Appl.)</label>
+            <input type="text" class="form-control" id="f-site-name"
+                   placeholder="e.g., Main Bar">
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Scheduled Times</label>
+            <div class="input-group">
+              <input type="time" class="form-control" id="f-sched-start" required>
+              <span class="input-group-text">to</span>
+              <input type="time" class="form-control" id="f-sched-end" required>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Actual Times</label>
+            <div class="input-group">
+              <input type="time" class="form-control" id="f-actual-start" required>
+              <span class="input-group-text">to</span>
+              <input type="time" class="form-control" id="f-actual-end" required>
+            </div>
+          </div>
+
+          <div class="col-12 col-md-6">
+            <label class="form-label">Travel/Parking (£)</label>
+            <input type="number" class="form-control" id="f-travel" step="0.01" min="0" value="0.00">
+          </div>
+
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" id="f-notes" rows="2"
+                      placeholder="Optional notes"></textarea>
+          </div>
+
+          <!-- Preview (non-authoritative) -->
+          <div class="col-12">
+            <div class="alert alert-secondary py-2 mb-0 small">
+              Preview (est.): Hours <span id="pv-hours">0.00</span> • Pay £<span id="pv-pay">0.00</span>
+              <span class="text-muted">(Calculated on Server)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-success" id="btn-save-entry">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Help Modal -->
+<div class="modal fade" id="ts-help" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Timesheet Help</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body small">
+      - <strong>Date</strong>: The day you worked the shift.<br>
+      - <strong>Client</strong>: The customer name (Optional if typed site)<br>
+      - <strong>Site</strong>: The location you worked at (Optional if typed client)<br>
+      - <strong>Job Type</strong>: The type of work performed (e.g., shift, call-out, standby).<br>
+      - <strong>Scheduled Start / End</strong>: The planned shift times from the rota (optional).<br>
+      - <strong>Actual Start / End</strong>: The real times you started and finished work.<br>
+      - <strong>Break (mins)</strong>: Total break time taken during the shift (unpaid).<br>
+      - <strong>Notes</strong>: Any comments for admin (e.g., travel, issues, site info).<br>
+      - <strong>Hours / Rate / Pay</strong>: These are calculated automatically by the system.<br>
+      - <strong>Exports</strong>: Use to download your timesheet in print-friendly format or CSV.<br>
+      - If you see a <em>conflict</em> message, another update happened — refresh the page and try again.
+    </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" data-bs-dismiss="modal">Got it</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const weekId = document.getElementById("ts-root").dataset.weekId;
+
+  let jobTypes = [];
+  let weekUpdatedAt = window.INIT_WEEK_UPDATED_AT || null; // optionally set from server
+  let entriesCache = window.INIT_ENTRIES || []; // optionally set from server
+
+  // Elements
+  const tbody       = document.getElementById("ts-tbody-desktop");
+  const cards       = document.getElementById("ts-cards");
+  const totHoursEl  = document.getElementById("tot-hours");
+  const totPayEl    = document.getElementById("tot-pay");
+  const totTravelEl = document.getElementById("tot-travel");
+  const statusEl    = document.getElementById("ts-status");
+  const updatedEl   = document.getElementById("ts-updated");
+
+  // Modal refs
+  const modalEl   = document.getElementById("ts-modal");
+  const modal     = new bootstrap.Modal(modalEl);
+  const form      = document.getElementById("ts-form");
+  const titleEl   = document.getElementById("ts-modal-title");
+  const fId       = document.getElementById("f-id");
+  const fDate     = document.getElementById("f-work-date");
+  const fJob      = document.getElementById("f-job-type");
+  const fBreak    = document.getElementById("f-break");
+  const fClientName = document.getElementById("f-client-name");
+  const fSiteName   = document.getElementById("f-site-name");
+  const fSchedStart = document.getElementById("f-sched-start");
+  const fSchedEnd   = document.getElementById("f-sched-end");
+  const fActStart   = document.getElementById("f-actual-start");
+  const fActEnd     = document.getElementById("f-actual-end");
+  const fTravel     = document.getElementById("f-travel");
+  const fNotes      = document.getElementById("f-notes");
+  const pvHours     = document.getElementById("pv-hours");
+  const pvPay       = document.getElementById("pv-pay");
+
+  // ============================
+  // Utils
+  // ============================
+  function money(v) {
+    return Number(v || 0).toFixed(2);
+  }
+
+  function hhmmToMinutes(str) {
+    if (!str) return 0;
+    const [h, m] = str.split(":").map(Number);
+    return (h * 60) + (m || 0);
+  }
+
+  function hoursBetween(startHHMM, endHHMM, breakMins) {
+    const s = hhmmToMinutes(startHHMM);
+    let e   = hhmmToMinutes(endHHMM);
+    if (e < s) e += 24 * 60; // cross-midnight
+    const mins = Math.max(0, (e - s) - (Number(breakMins || 0)));
+    return mins / 60;
+  }
+  function toHHMM(v) {
+  if (v == null) return "";
+  if (typeof v === "string") {
+  const s = v.trim();
+  if (!s || s === "--:--") return "";
+  // Match H:MM, HH:MM, H:MM:SS, HH:MM:SS
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?/);
+  if (m) {
+  const hh = String(Number(m[1])).padStart(2, "0"); // pad single-digit hour
+  const mm = m[2];
+  return `${hh}:${mm}`;
+  }
+  // HHMM or HMM
+  if (/^\d{3,4}/.test(s)) {
+  const pad = s.length === 3 ? "0" + s : s;
+  return pad.slice(0, 2) + ":" + pad.slice(2);
+  }
+  return "";
+  }
+  try {
+  const d = new Date(v);
+  if (!Number.isNaN(d.getTime())) {
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+  }
+  } catch {}
+  return "";
+  }
+
+  function showToast(msg, type = "success", timeout = 1500) {
+    // type: 'success' | 'info' | 'warning' | 'danger'
+    let container = document.getElementById("ts-toast-container");
+    if (!container) {
+    container = document.createElement("div");
+    container.id = "ts-toast-container";
+    container.style.position = "fixed";
+    container.style.top = "1rem";
+    container.style.right = "1rem";
+    container.style.zIndex = "2000";
+    document.body.appendChild(container);
+    }
+    const el = document.createElement("div");
+    el.className = `alert alert-${type} shadow-sm py-2 px-3 mb-2`;
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => {
+    el.remove();
+    // Cleanup container if empty
+    if (!container.children.length) container.remove();
+    }, timeout);
+    }
+
+  // ============================
+  // API
+  // ============================
+  async function fetchJSON(url, opts) {
+    const res = await fetch(url, Object.assign({
+      headers: { "Content-Type": "application/json" }
+    }, opts || {}));
+
+    if (!res.ok) {
+      let txt = "";
+      try { txt = await res.text(); } catch {}
+      throw new Error(txt || ("HTTP " + res.status));
+    }
+    return res.json();
+  }
+
+  async function loadJobTypes() {
+    const r = await fetchJSON("/time-billing/api/refs/job-types");
+    jobTypes = r.items || [];
+    fillJobTypes();
+  }
+
+  async function refreshWeek() {
+    const d = await fetchJSON(`/time-billing/api/weeks/${weekId}`);
+    renderDesktop(d.entries || []);
+    renderMobile(d.entries || []);
+    setTotals(d.totals || { hours: 0, pay: 0, travel: 0 });
+    statusEl.textContent   = d.week.status;
+    weekUpdatedAt          = d.week.updated_at;
+    updatedEl.textContent  = weekUpdatedAt || "—";
+    entriesCache           = d.entries || [];
+  }
+
+  async function upsertEntries(entryList) {
+    const body = { entries: entryList, client_updated_at: weekUpdatedAt || null };
+
+    const res = await fetchJSON(`/time-billing/api/weeks/${weekId}/upsert`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    }).catch(async (err) => {
+      try {
+        const r = await (await fetch(`/time-billing/api/weeks/${weekId}/upsert`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })).json();
+        throw new Error(r.message || err.message);
+      } catch {
+        throw err;
+      }
+    });
+
+    if (res.ok === false && res.conflicts) {
+      showToast(res.message || "Conflict: Server has newer data. Please refresh.", "warning");
+      return { ok: false, conflicts: true };
+    }
+
+    const map = new Map((entriesCache || []).map(e => [e.id, e]));
+    (res.entries || []).forEach(e => map.set(e.id, e));
+
+    entriesCache = Array.from(map.values())
+      .sort((a, b) => (a.work_date + (a.actual_start || ""))
+      .localeCompare(b.work_date + (b.actual_start || "")));
+
+    renderDesktop(entriesCache);
+    renderMobile(entriesCache);
+    setTotals(res.totals || { hours: 0, pay: 0, travel: 0 });
+
+    await refreshHeaderOnly();
+    return { ok: true };
+  }
+
+  async function refreshHeaderOnly() {
+    const d = await fetchJSON(`/time-billing/api/weeks/${weekId}`);
+    statusEl.textContent   = d.week.status;
+    weekUpdatedAt          = d.week.updated_at;
+    updatedEl.textContent  = weekUpdatedAt || "—";
+  }
+
+  async function deleteEntry(id) {
+    const res = await fetchJSON(`/time-billing/api/weeks/${weekId}/entry/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      entriesCache = (entriesCache || []).filter(x => x.id !== id);
+      renderDesktop(entriesCache);
+      renderMobile(entriesCache);
+      setTotals(res.totals || { hours: 0, pay: 0, travel: 0 });
+      await refreshHeaderOnly();
+    }
+  }
+
+  async function submitWeek() {
+    const res = await fetchJSON(`/time-billing/api/weeks/${weekId}/submit`, { method: "POST" });
+    if (res.ok) {
+    // Update header (optional)
+    await refreshHeaderOnly();
+    // Notify then redirect
+    showToast("Timesheet submitted. Redirecting…", "success", 1800);
+    setTimeout(() => {
+    window.location.assign("/time-billing/");
+    }, 1800);
+    } else {
+    showToast("Submit failed. Please try again.", "danger", 2500);
+    }
+  }
+
+  document.getElementById("btn-submit-week").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+    await submitWeek();
+    } catch (err) {
+    showToast(err.message || "Submit failed", "danger", 2500);
+    } finally {
+    // It will redirect on success; if not, re-enable
+    btn.disabled = false;
+    }
+    });
+
+  // ============================
+  // DOM helpers
+  // ============================
+  function fillJobTypes() {
+    fJob.innerHTML = "";
+    jobTypes.forEach(j => {
+      const opt = document.createElement("option");
+      opt.value = j.id;
+      opt.textContent = j.name;
+      fJob.appendChild(opt);
+    });
+  }
+
+  function setTotals(t) {
+    totHoursEl.textContent  = (t.hours || 0).toFixed(2);
+    totPayEl.textContent    = "£" + money(t.pay);
+    totTravelEl.textContent = "£" + money(t.travel);
+  }
+
+  // ============================
+  // Renderers
+  // ============================
+  function renderDesktop(list) {
+    tbody.innerHTML = "";
+    if (!list || !list.length) {
+      const tr = document.createElement("tr");
+      tr.className = "ts-empty-row";
+      tr.innerHTML = `<td colspan="11" class="text-center text-muted py-4">No entries yet. Click “Add Shift”.</td>`;
+      tbody.appendChild(tr);
+      return;
+    }
+
+    list.forEach(e => {
+      const clientTxt   = (e.client_name || "").trim();
+      const siteTxt     = (e.site_name || "").trim();
+      const locationTxt = clientTxt && siteTxt ? `${clientTxt} — ${siteTxt}` : (clientTxt || siteTxt || "");
+
+      const tr = document.createElement("tr");
+      tr.dataset.id = e.id;
+      tr.innerHTML = `
+        <td class="text-nowrap">${e.work_date || ""}</td>
+        <td>${locationTxt}</td>
+        <td class="text-nowrap">${e.job_type_name || ""}</td>
+        <td class="text-nowrap">
+          <span class="text-muted">Scheduled</span> ${(e.scheduled_start || "").slice(0,5)}–${(e.scheduled_end || "").slice(0,5)}
+          <span class="text-muted">/ Actual</span> ${(e.actual_start || "").slice(0,5)}–${(e.actual_end || "").slice(0,5)}
+        </td>
+        <td class="text-end">${e.break_mins ?? 0}</td>
+        <td class="text-end">${Number(e.actual_hours || 0).toFixed(2)}</td>
+        <td class="text-end">£${money(e.wage_rate_used)}</td>
+        <td class="text-end">£${money(e.pay)}</td>
+        <td class="text-end">£${money(e.travel_parking)}</td>
+        <td>${(e.notes || "").replace(/</g, "&lt;")}</td>
+        <td>
+          <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary ts-edit {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Edit</button>
+            <button class="btn btn-outline-danger ts-delete {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Delete</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderMobile(list) {
+    cards.innerHTML = "";
+    if (!list || !list.length) {
+      cards.innerHTML = `<div class="text-center text-muted py-4 ts-empty-card">No entries yet. Tap “Add Shift”.</div>`;
+      return;
+    }
+
+    list.forEach(e => {
+      const clientTxt   = (e.client_name || "").trim();
+      const siteTxt     = (e.site_name || "").trim();
+      const locationTxt = clientTxt && siteTxt ? `${clientTxt} — ${siteTxt}` : (clientTxt || siteTxt || "");
+
+      const card = document.createElement("div");
+      card.className = "card mb-2";
+      card.dataset.id = e.id;
+      card.innerHTML = `
+        <div class="card-body">
+          <div class="d-flex justify-content-between">
+            <div>
+              <div class="fw-bold">${e.work_date || ""}</div>
+              <div class="text-muted small">${e.job_type_name || ""}</div>
+            </div>
+            <div class="text-end small">
+              <div>${(e.scheduled_start || "").slice(0, 5)}–${(e.scheduled_end || "").slice(0, 5)}</div>
+              <div>${(e.actual_start || "").slice(0, 5)}–${(e.actual_end || "").slice(0, 5)}</div>
+            </div>
+          </div>
+          <div class="mt-2 small">
+            ${locationTxt ? `<div><span class="text-muted">Location:</span> ${locationTxt}</div>` : ""}
+            <div><span class="text-muted">Break:</span> ${e.break_mins ?? 0} mins</div>
+            <div>
+              <span class="text-muted">Hours:</span> ${Number(e.actual_hours || 0).toFixed(2)} •
+              <span class="text-muted">Rate:</span> £${money(e.wage_rate_used)} •
+              <span class="text-muted">Pay:</span> £${money(e.pay)} •
+              <span class="text-muted">Travel:</span> £${money(e.travel_parking)}
+            </div>
+            ${e.notes ? `<div class="mt-1"><span class="text-muted">Notes:</span> ${(e.notes || "").replace(/</g, "&lt;")}</div>` : ""}
+          </div>
+          <div class="mt-2 d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary ts-edit w-50 {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Edit</button>
+            <button class="btn btn-sm btn-outline-danger ts-delete w-50 {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Delete</button>
+          </div>
+        </div>
+      `;
+      cards.appendChild(card);
+    });
+  }
+
+  // ============================
+  // Modal helpers
+  // ============================
+  function openModal(entry) {
+    titleEl.textContent = entry && entry.id ? "Edit Shift" : "Add Shift";
+    fId.value = entry?.id || "";
+    fDate.value = entry?.work_date || "";
+    fJob.value = entry?.job_type_id || (jobTypes[0]?.id || "");
+    fBreak.value = entry?.break_mins ?? 0;
+    fClientName.value = entry?.client_name || "";
+    fSiteName.value = entry?.site_name || "";
+    // Normalize all time inputs
+
+    fSchedStart.value = toHHMM(entry?.scheduled_start);
+    fSchedEnd.value = toHHMM(entry?.scheduled_end);
+    fActStart.value = toHHMM(entry?.actual_start);
+    fActEnd.value = toHHMM(entry?.actual_end);
+    fTravel.value = (Number(entry?.travel_parking || 0)).toFixed(2);
+    fNotes.value = entry?.notes || "";
+    updatePreview();
+    modal.show();
+    }
+
+  function buildEntryFromForm() {
+    const eid = fId.value ? Number(fId.value) : undefined;
+    return {
+      ...(eid ? { id: eid } : {}),
+      work_date: fDate.value,
+      client_name: fClientName.value.trim() || null,
+      site_name: fSiteName.value.trim() || null,
+      job_type_id: Number(fJob.value),
+      scheduled_start: fSchedStart.value,
+      scheduled_end: fSchedEnd.value,
+      actual_start: fActStart.value,
+      actual_end: fActEnd.value,
+      break_mins: Number(fBreak.value || 0),
+      travel_parking: Number(fTravel.value || 0),
+      notes: fNotes.value || null
+    };
+  }
+
+  function updatePreview() {
+    const hrs = hoursBetween(fActStart.value, fActEnd.value, Number(fBreak.value || 0));
+    pvHours.textContent = hrs.toFixed(2);
+
+    const eid      = fId.value ? Number(fId.value) : null;
+    const existing = eid ? entriesCache.find(x => x.id === eid) : null;
+    const rate     = existing ? Number(existing.wage_rate_used || 0) : 0;
+
+    pvPay.textContent = (hrs * rate).toFixed(2);
+  }
+
+  // ============================
+  // Events
+  // ============================
+  document.getElementById("btn-add-entry")
+    .addEventListener("click", () => openModal(null));
+
+  document.getElementById("btn-help")
+    .addEventListener("click", () => new bootstrap.Modal(document.getElementById("ts-help")).show());
+
+  document.getElementById("btn-submit-week")
+    .addEventListener("click", async () => {
+      try {
+        await submitWeek();
+      } catch (e) {
+        showToast(e.message || "Submit failed", "danger");
+      }
+    });
+
+  [fActStart, fActEnd, fBreak].forEach(el =>
+    el.addEventListener("input", updatePreview)
+  );
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const entry = buildEntryFromForm();
+
+    if (!entry.work_date || !entry.job_type_id || !entry.scheduled_start ||
+        !entry.scheduled_end || !entry.actual_start || !entry.actual_end) {
+      showToast("Please fill required fields.", "warning");
+      return;
+    }
+
+    try {
+      const res = await upsertEntries([entry]);
+      if (res.ok) modal.hide();
+    } catch (e) {
+      showToast(e.message || "Save failed", "danger");
+    }
+  });
+
+  tbody.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+
+    const tr   = ev.target.closest("tr");
+    const id   = Number(tr?.dataset?.id);
+    const entry = entriesCache.find(x => x.id === id);
+
+    if (btn.classList.contains("ts-edit")) {
+      openModal(entry);
+    } else if (btn.classList.contains("ts-delete")) {
+      if (confirm("Delete this entry?")) {
+        deleteEntry(id).catch(e => showToast(e.message || "Delete failed", "danger"));
+      }
+    }
+  });
+
+  cards.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (!btn) return;
+
+    const card  = ev.target.closest(".card");
+    const id    = Number(card?.dataset?.id);
+    const entry = entriesCache.find(x => x.id === id);
+
+    if (btn.classList.contains("ts-edit")) {
+      openModal(entry);
+    } else if (btn.classList.contains("ts-delete")) {
+      if (confirm("Delete this entry?")) {
+        deleteEntry(id).catch(e => showToast(e.message || "Delete failed", "danger"));
+      }
+    }
+  });
+
+  // ============================
+  // Init
+  // ============================
+  (async function init() {
+    try {
+      await loadJobTypes();
+      renderDesktop(entriesCache || []);
+      renderMobile(entriesCache || []);
+
+      if (!entriesCache || !entriesCache.length) {
+        await refreshWeek();
+      }
+
+      if (!weekUpdatedAt) {
+        await refreshHeaderOnly();
+      }
+    } catch (e) {
+      showToast("Failed to initialize UI", "danger");
+    }
+  })();
+
+})();
+</script>
+
+
+{% endblock %}

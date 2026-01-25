@@ -1,0 +1,16 @@
+{% extends "public/base.html" %}
+
+{% block title %}{{ title or "Policy" }}{% endblock %}
+
+{% block description %}{{ description or "Read our policy information for details on how we protect your data." }}{% endblock %}
+
+{% block keywords %}{{ keywords or "privacy, policy, GDPR, cookies, Sparrow ERP" }}{% endblock %}
+
+{% block content %}
+<section class="container my-5">
+    <div class="policy-content bg-white p-4 rounded shadow-sm mx-auto" style="max-width: 800px;">
+        <h1 class="mb-4">{{ title }}</h1>
+        {{ policy|safe }}
+    </div>
+</section>
+{% endblock %}
