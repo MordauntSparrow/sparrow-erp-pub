@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Core Module Settings{% endblock %}
+
+{% block content %}
+<h1>Core Module Settings</h1>
+<form method="POST" enctype="multipart/form-data">
+    <!-- Company Name -->
+    <div class="form-group mb-3">
+        <label for="company_name">Company Name</label>
+        <input type="text" id="company_name" name="company_name" class="form-control" 
+               value="{{ config.site_settings.company_name }}" required>
+    </div>
+
+    <!-- Branding Preference -->
+    <div class="form-group mb-3">
+        <label for="branding">Navbar Branding</label>
+        <select id="branding" name="branding" class="form-select">
+            <option value="name" {% if config.site_settings.branding == 'name' %}selected{% endif %}>Company Name</option>
+            <option value="logo" {% if config.site_settings.branding == 'logo' %}selected{% endif %}>Logo</option>
+        </select>
+    </div>
+
+    <!-- Logo Upload -->
+    <div class="form-group mb-3">
+        <label for="logo">Company Logo</label>
+        <input type="file" id="logo" name="logo" class="form-control" accept="image/*">
+        {% if config.site_settings.logo_path %}
+            <img src="{{ url_for('static', filename=config.site_settings.logo_path) }}" 
+                 alt="Logo Preview" class="img-thumbnail mt-2" style="max-height: 100px;">
+        {% endif %}
+    </div>
+
+    <!-- Theme Selection -->
+    <div class="form-group mb-3">
+        <label for="theme">Theme</label>
+        <select id="theme" name="theme" class="form-select">
+            <option value="default" {% if config.theme_settings.theme == 'default' %}selected{% endif %}>Default</option>
+            <option value="dark" {% if config.theme_settings.theme == 'dark' %}selected{% endif %}>Dark</option>
+            <option value="modern" {% if config.theme_settings.theme == 'modern' %}selected{% endif %}>Modern</option>
+        </select>
+    </div>
+
+    <!-- Custom CSS Upload -->
+    <div class="form-group mb-3">
+        <label for="custom_css">Custom CSS</label>
+        <input type="file" id="custom_css" name="custom_css" class="form-control" accept=".css">
+        {% if config.theme_settings.custom_css_path %}
+            <p class="mt-2">Current Custom CSS: 
+                <a href="{{ url_for('static', filename=config.theme_settings.custom_css_path) }}" target="_blank">
+                    {{ config.theme_settings.custom_css_path.split('/')[-1] }}
+                </a>
+            </p>
+        {% endif %}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</form>
+
+<!-- Back to Dashboard -->
+<a href="{{ url_for('routes.dashboard') }}" class="btn btn-secondary mt-3">Back to Dashboard</a>
+{% endblock %}

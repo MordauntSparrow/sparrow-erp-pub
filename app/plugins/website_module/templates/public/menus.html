@@ -1,0 +1,259 @@
+{% extends "public/base.html" %}
+
+{% block head %}
+<style>
+  /* -------------------------------
+     HERO (VIDEO) BANNER
+     ------------------------------- */
+  #menu-hero {
+    position: relative;
+    background-color: #1B4D3E; /* forest green fallback */
+    height: 50vh;
+    min-height: 20rem;
+    width: 100%;
+    overflow: hidden;
+  }
+  #menu-hero video {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    min-width: 100vw;
+    min-height: 100vh;
+    width: auto;
+    height: auto;
+    transform: translate(-50%, -50%);
+    object-fit: cover;
+    z-index: 0;
+    pointer-events: none;          /* disable hover/darken */
+    filter: brightness(1) !important;
+    transition: none;
+  }
+  #menu-hero .overlay {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 1;
+  }
+  #menu-hero .hero-content {
+    position: relative;
+    z-index: 2;
+    color: #CCAA33; /* gold */
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    padding: 0 1rem;
+  }
+  #menu-hero .hero-content h1 {
+    font-size: 3rem;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  }
+
+  /* -------------------------------
+     MENU GRID CARDS
+     ------------------------------- */
+  .menu-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+  }
+  .menu-card {
+    position: relative;
+    height: 260px;
+    border-radius: 10px;
+    overflow: hidden;
+    color: #fff;
+    display: flex;
+    align-items: flex-end;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    transition: transform 0.25s, box-shadow 0.25s;
+  }
+  .menu-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .menu-card .card-bg {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    filter: brightness(0.6) saturate(0.95);
+    transition: filter 0.25s;
+  }
+  .menu-card:hover .card-bg { filter: brightness(0.55) saturate(1); }
+  .card-bg-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: brightness(0.6) saturate(0.95);
+    transition: filter 0.25s;
+  }
+  .menu-card:hover .card-bg-img { filter: brightness(0.55) saturate(1); }
+  .menu-card .card-content {
+    position: relative;
+    z-index: 2;
+    padding: 1.25rem;
+    width: 100%;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.45) 60%, rgba(0,0,0,0.7) 100%);
+  }
+  .menu-card h3 {
+    margin: 0 0 0.5rem 0;
+    color: #fff;
+  }
+  .menu-card p { color: rgba(255,255,255,0.9); margin-bottom: 0.75rem; }
+  .menu-card a.btn { width: 100%; }
+  .menu-card.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .menu-card.disabled h3,
+  .menu-card.disabled p {
+    color: #666;
+  }
+
+  /* -------------------------------
+     BUTTON STYLES (reuse from main CSS)
+     ------------------------------- */
+  .btn-reserve {
+    background-color: #CCAA33; /* gold */
+    border-color: #CCAA33;
+    color: #FFFFFF !important;
+    text-decoration: none;
+  }
+  .btn-reserve:hover,
+  .btn-reserve:focus {
+    background-color: #B5982E;
+    border-color: #B5982E;
+    color: #FFFFFF !important;
+    text-decoration: none;
+  }
+  .btn-secondary {
+    background-color: #1B4D3E; /* forest green */
+    border-color: #1B4D3E;
+    color: #FFFFFF !important;
+    text-decoration: none;
+  }
+  .btn-secondary:hover,
+  .btn-secondary:focus {
+    background-color: #163F31;
+    border-color: #163F31;
+    color: #FFFFFF !important;
+    text-decoration: none;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- HERO (VIDEO) BANNER -->
+<section id="menu-hero">
+  <video playsinline autoplay muted loop>
+    <source src="{{ url_for('static', filename='uploads/restaurantVideo.mp4') }}" type="video/mp4">
+  </video>
+  <div class="overlay"></div>
+  <div class="hero-content">
+    <h1 class="fw-bold">Our Menus</h1>
+  </div>
+</section>
+
+<!-- MENU CARDS -->
+<section class="py-5">
+  <div class="container">
+    <div class="menu-grid">
+      <!-- Main Menu -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='main.png') }}" alt="Main menu background">
+        <div class="card-content">
+          <h3>Main Menu</h3>
+          <p>Our principal menu featuring seasonal dishes and pub classics.</p>
+          <a href="https://imenupro.com/+1rrs-r" target="_blank" class="btn btn-reserve">View Main Menu</a>
+        </div>
+      </div>
+
+      <!-- Kids Menu -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='kids.png') }}" alt="Kids menu background">
+        <div class="card-content">
+          <h3>Kids Menu</h3>
+          <p>Smaller portions and favourites for little appetites.</p>
+          <a href="https://imenupro.com/+1rrs-4" target="_blank" class="btn btn-reserve">View Kids Menu</a>
+        </div>
+      </div>
+
+      <!-- Sunday Menu -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='sunday.png') }}" alt="Sunday menu background">
+        <div class="card-content">
+          <h3>Sunday Menu</h3>
+          <p>Traditional roasts &amp; comfort food every Sunday.</p>
+          <a href="https://imenupro.com/+1rrs-u" target="_blank" class="btn btn-reserve">View Sunday Menu</a>
+        </div>
+      </div>
+
+      <!-- Buffets -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='buffet.png') }}" alt="Buffet menu background">
+        <div class="card-content">
+          <h3>Buffets</h3>
+          <p>Catered buffet options for parties and events.</p>
+          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/buffetMenu.pdf') }}">View Buffets</a>
+        </div>
+      </div>
+
+      <!-- Canapés -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='canapes.jpg') }}" alt="Canapes menu background">
+        <div class="card-content">
+          <h3>Canapés</h3>
+          <p>Perfect bite-sized options for standing receptions and drinks parties.</p>
+          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/canapesMenu.pdf') }}">View Canapés</a>
+        </div>
+      </div>
+
+      <!-- Celebrations -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='celebration.jpg') }}" alt="Celebration menu background">
+        <div class="card-content">
+          <h3>Celebrations</h3>
+          <p>Bespoke menus for birthdays, anniversaries and special events.</p>
+          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/celebrationMenu.pdf') }}">View Celebrations</a>
+        </div>
+      </div>
+
+      <!-- Drinks List (disabled - menu not available yet) -->
+      <div class="menu-card disabled">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='drink.png') }}" alt="Drinks list background" style="filter:brightness(0.35);">
+        <div class="card-content">
+          <h3>Drinks List</h3>
+          <p>Currently being tailored for you.</p>
+          <a class="btn btn-secondary disabled" aria-disabled="true">Coming Soon</a>
+        </div>
+      </div>
+
+      <!-- Wine List -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='wine.png') }}" alt="Wine list background">
+        <div class="card-content">
+          <h3>Wine List</h3>
+          <p>Hand-picked wines to pair with your meal.</p>
+          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/wineMenu.pdf') }}">View Wine List</a>
+        </div>
+      </div>
+
+      <!-- Gin List -->
+      <div class="menu-card">
+        <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='gin.jpg') }}" alt="Gin list background">
+        <div class="card-content">
+          <h3>Gin List</h3>
+          <p>A curated selection of gins and tonics.</p>
+          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/ginMenu.pdf') }}">View Gin List</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

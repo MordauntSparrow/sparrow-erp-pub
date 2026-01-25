@@ -1,0 +1,32 @@
+{% extends "public/base.html" %}
+
+{% block title %}Book a Table{% endblock %}
+
+{% block content %}
+<section class="container py-5 page-content text-center">
+  <div class="mx-auto" style="max-width:880px;">
+    <h1 class="mb-3">Book a Table</h1>
+    <p class="lead">Reserve your table at The George &amp; Dragon</p>
+
+    <p>We look forward to welcoming you to The George &amp; Dragon, our cosy 16th-century country pub in Dragons Green, Shipley. Whether you’re joining us for a relaxed lunch, a family meal, Sunday roast, dinner with friends or a special celebration, we recommend booking a table to guarantee your spot.</p>
+
+    <p>Enjoy fresh, home-cooked food, a warm atmosphere and friendly service in the heart of the Sussex countryside.</p>
+
+    <h4 class="mt-4">How to Book</h4>
+    <p>Booking a table is quick and easy. Use our online booking system or get in touch with our team directly.</p>
+
+    <p class="mb-1"><strong>Phone:</strong> <a href="tel:+441403741320">01403 741320</a></p>
+    <p class="mb-3"><strong>Email:</strong> <a href="mailto:bookings@dragonpub.co.uk">bookings@dragonpub.co.uk</a></p>
+
+    <p>Walk-ins are always welcome, but tables during evenings, weekends and Sunday lunch can fill up quickly — booking ahead is highly recommended.</p>
+
+    <div class="d-flex justify-content-center mt-4 flex-wrap gap-3">
+      <a href="https://tableagent.com/west-sussex/the-george-dragon-pub/" target="_blank" rel="noopener" class="btn btn-reserve btn-lg">Reserve Table</a>
+      
+      <a href="mailto:bookings@dragonpub.co.uk" class="btn btn-pdf btn-lg">Email Us</a>
+    
+        <a href="tel:+441403741320" class="btn btn-secondary btn-lg">Call Now</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

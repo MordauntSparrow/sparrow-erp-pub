@@ -1,0 +1,14 @@
+{
+    "system_name": "website_module",
+    "name": "Website Module",
+    "description": "Manages the website's content and display",
+    "version": "1.1.5",
+    "icon": "icon.png",
+    "control_mode": "erp",
+    "repository": "official",
+    "dependencies": [],
+    "changelog": "Initial release of Official Plugin.",
+    "repository_token": "",
+    "enabled": false,
+    "settings": {}
+}

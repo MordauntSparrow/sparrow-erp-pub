@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+
+{% block title %}User Management - Sparrow ERP{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+  <h1 class="mb-4">User Management</h1>
+  
+  <!-- Button to trigger the Add User modal -->
+  <button type="button" class="btn btn-success mb-3" data-mdb-toggle="modal" data-mdb-target="#addUserModal">
+    Add New User
+  </button>
+  
+  <!-- Live Search Bar -->
+  <div class="mb-3">
+    <input type="text" id="searchInput" class="form-control" placeholder="Search by username or email">
+  </div>
+  
+  <!-- Users Table -->
+  <div id="usersTableContainer">
+    <table class="table table-bordered table-striped" id="usersTable">
+      <thead class="table-light">
+        <tr>
+          <th>Username</th>
+          <th>First Name</th>
+          <th>Last Name</th>
+          <th>Email</th>
+          <th>Role</th>
+          <th>Permissions</th>
+          <th>Created At</th>
+          <th>Last Login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user.username }}</td>
+          <td>{{ user.first_name }}</td>
+          <td>{{ user.last_name }}</td>
+          <td>{{ user.email }}</td>
+          <td>{{ user.role }}</td>
+          <td>{{ user.permissions }}</td>
+          <td>{{ user.created_at }}</td>
+          <td>{{ user.last_login or "Never" }}</td>
+          <td>
+            <button class="btn btn-sm btn-primary edit-user-btn"
+                    data-user-id="{{ user.id }}"
+                    data-username="{{ user.username }}"
+                    data-first-name="{{ user.first_name }}"
+                    data-last-name="{{ user.last_name }}"
+                    data-email="{{ user.email }}"
+                    data-role="{{ user.role }}"
+                    data-permissions='{{ user.permissions|tojson }}'>
+              Edit
+            </button>
+            {% if current_user.role|lower == 'superuser' or user.role|lower != 'superuser' %}
+            <form action="{{ url_for('routes.delete_user', user_id=user.id) }}" method="POST" class="d-inline">
+              <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?');">
+                Delete
+              </button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add User Modal -->
+<div class="modal fade" id="addUserModal" tabindex="-1" aria-labelledby="addUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="addUserForm" method="POST" action="{{ url_for('routes.add_user') }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addUserModalLabel">Add New User</h5>
+          <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Username -->
+          <div class="mb-3">
+            <label for="addUsername" class="form-label">Username</label>
+            <input type="text" class="form-control" id="addUsername" name="username" required>
+          </div>
+          <!-- First Name -->
+          <div class="mb-3">
+            <label for="addFirstName" class="form-label">First Name</label>
+            <input type="text" class="form-control" id="addFirstName" name="first_name" required>
+          </div>
+          <!-- Last Name -->
+          <div class="mb-3">
+            <label for="addLastName" class="form-label">Last Name</label>
+            <input type="text" class="form-control" id="addLastName" name="last_name" required>
+          </div>
+          <!-- Email -->
+          <div class="mb-3">
+            <label for="addEmail" class="form-label">Email</label>
+            <input type="email" class="form-control" id="addEmail" name="email" required>
+          </div>
+          <!-- Role -->
+          <div class="mb-3">
+            <label for="addRole" class="form-label">Role</label>
+            <select id="addRole" name="role" class="form-select">
+              <option value="admin">Admin</option>
+              <option value="staff">Staff</option>
+              <option value="crew">Crew</option>
+              <!-- You might choose not to allow role assignment for superuser/clinical_lead here -->
+            </select>
+          </div>
+          <!-- Password -->
+          <div class="mb-3">
+            <label for="addPassword" class="form-label">Password</label>
+            <input type="password" class="form-control" id="addPassword" name="password" required>
+          </div>
+          <!-- Confirm Password -->
+          <div class="mb-3">
+            <label for="addConfirmPassword" class="form-label">Confirm Password</label>
+            <input type="password" class="form-control" id="addConfirmPassword" name="confirm_password" required>
+          </div>
+          <!-- Permissions -->
+          <div class="mb-3">
+            <label for="addPermissions" class="form-label">Permissions</label>
+            <select id="addPermissions" name="permissions" multiple class="form-select">
+              {% for perm in available_permissions %}
+              <option value="{{ perm }}">{{ perm }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Hold down Ctrl (or Cmd on Mac) to select multiple permissions.</div>
+          </div>
+          <!-- Personal PIN -->
+          <div class="mb-3">
+            <label for="addPersonalPin" class="form-label">Personal PIN</label>
+            <input type="password" class="form-control" id="addPersonalPin" name="personal_pin" maxlength="6" placeholder="Enter 6-digit PIN (optional)">
+            <div class="form-text">Leave blank if not setting initially. Users must set a PIN before accessing sensitive sections.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Add User</button>
+          <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Edit User Modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-labelledby="editUserModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="editUserForm" method="POST">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editUserModalLabel">Edit User: <span id="modalUsername"></span></h5>
+          <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Hidden field for user ID -->
+          <input type="hidden" name="user_id" id="modalUserId">
+          <!-- First Name -->
+          <div class="mb-3">
+            <label for="modalFirstName" class="form-label">First Name</label>
+            <input type="text" class="form-control" id="modalFirstName" name="first_name" required>
+          </div>
+          <!-- Last Name -->
+          <div class="mb-3">
+            <label for="modalLastName" class="form-label">Last Name</label>
+            <input type="text" class="form-control" id="modalLastName" name="last_name" required>
+          </div>
+          <!-- Email -->
+          <div class="mb-3">
+            <label for="modalEmail" class="form-label">Email</label>
+            <input type="email" class="form-control" id="modalEmail" name="email" required>
+          </div>
+          <!-- Role -->
+          <div class="mb-3">
+            <label for="modalRole" class="form-label">Role</label>
+            <select id="modalRole" name="role" class="form-select">
+              <option value="admin">Admin</option>
+              <option value="staff">Staff</option>
+              <option value="crew">Crew</option>
+              <option value="superuser">Superuser</option>
+              <option value="clinical_lead">Clinical Lead</option>
+            </select>
+          </div>
+          <!-- New Password (optional) -->
+          <div class="mb-3">
+            <label for="modalNewPassword" class="form-label">New Password (optional)</label>
+            <input type="password" class="form-control" id="modalNewPassword" name="new_password">
+          </div>
+          <!-- Confirm New Password (optional) -->
+          <div class="mb-3">
+            <label for="modalConfirmNewPassword" class="form-label">Confirm New Password (optional)</label>
+            <input type="password" class="form-control" id="modalConfirmNewPassword" name="confirm_new_password">
+          </div>
+          <!-- Permissions -->
+          <div class="mb-3">
+            <label for="modalPermissions" class="form-label">Permissions</label>
+            <select id="modalPermissions" name="permissions" multiple class="form-select">
+              {% for perm in available_permissions %}
+              <option value="{{ perm }}">{{ perm }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Hold down Ctrl (or Cmd on Mac) to select multiple permissions.</div>
+          </div>
+          <!-- Personal PIN Reset Section for all users -->
+          <div class="mb-3">
+            <label for="modalPersonalPin" class="form-label">New Personal PIN (optional)</label>
+            <input type="password" class="form-control" id="modalPersonalPin" name="personal_pin" maxlength="6" placeholder="Enter new 6-digit PIN">
+          </div>
+          <div class="mb-3">
+            <label for="modalConfirmPersonalPin" class="form-label">Confirm New Personal PIN (optional)</label>
+            <input type="password" class="form-control" id="modalConfirmPersonalPin" name="confirm_personal_pin" maxlength="6" placeholder="Re-enter new PIN">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Update User</button>
+          <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- MDBootstrap Bundle JS (includes Popper) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.0.0/mdb.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  // Precompute the base URL for the delete endpoint.
+  const deleteUserBaseUrl = "{{ url_for('routes.delete_user', user_id='') }}";
+
+  // Live search: Trigger AJAX call when typing in search input.
+  const searchInput = document.getElementById("searchInput");
+  searchInput.addEventListener("input", function() {
+    const query = this.value.trim();
+    fetch(`/users/search?q=${encodeURIComponent(query)}`)
+      .then(response => response.json())
+      .then(data => {
+        renderUsersTable(data);
+      })
+      .catch(error => console.error("Error fetching users:", error));
+  });
+
+  // Function to render the users table using fetched JSON data.
+  function renderUsersTable(users) {
+  const tbody = document.querySelector("#usersTable tbody");
+  tbody.innerHTML = "";
+  users.forEach(user => {
+    const tr = document.createElement("tr");
+
+    // Use JavaScript to decide whether to show the delete button.
+    let deleteButtonHtml = "";
+    if (currentUserIsSuperuser || user.role.toLowerCase() !== 'superuser') {
+      deleteButtonHtml = `
+        <form action="${deleteUserBaseUrl}${user.id}" method="POST" class="d-inline">
+          <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?');">
+            Delete
+          </button>
+        </form>
+      `;
+    }
+
+    tr.innerHTML = `
+      <td>${user.username}</td>
+      <td>${user.first_name}</td>
+      <td>${user.last_name}</td>
+      <td>${user.email}</td>
+      <td>${user.role}</td>
+      <td>${user.permissions}</td>
+      <td>${user.created_at}</td>
+      <td>${user.last_login || "Never"}</td>
+      <td>
+        <button class="btn btn-sm btn-primary edit-user-btn"
+                data-user-id="${user.id}"
+                data-username="${user.username}"
+                data-first-name="${user.first_name}"
+                data-last-name="${user.last_name}"
+                data-email="${user.email}"
+                data-role="${user.role}"
+                data-permissions='${JSON.stringify(user.permissions)}'>
+          Edit
+        </button>
+        ${deleteButtonHtml}
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+  attachEditButtons();
+}
+
+  // Initialize the Edit User modal once outside the loop.
+  const editUserModalEl = document.getElementById('editUserModal');
+  if (!editUserModalEl) {
+    console.error("Edit User Modal element not found.");
+    return;
+  }
+  const editUserModal = new mdb.Modal(editUserModalEl);
+
+  // Flag to indicate if the current editor is superuser.
+  const currentUserIsSuperuser = {{ 'true' if current_user.role|lower == 'superuser' else 'false' }};
+
+  // Attach event listeners to all Edit buttons.
+  function attachEditButtons() {
+    const editButtons = document.querySelectorAll('.edit-user-btn');
+    console.log("Found edit buttons:", editButtons.length);
+    editButtons.forEach(button => {
+      button.addEventListener('click', function() {
+        const userId = this.getAttribute('data-user-id');
+        const username = this.getAttribute('data-username');
+        const firstName = this.getAttribute('data-first-name');
+        const lastName = this.getAttribute('data-last-name');
+        const email = this.getAttribute('data-email');
+        const role = this.getAttribute('data-role');
+        let permissions;
+        try {
+          permissions = JSON.parse(this.getAttribute('data-permissions'));
+        } catch (e) {
+          permissions = [];
+        }
+        if (!Array.isArray(permissions)) {
+          permissions = [];
+        }
+        console.log("Editing user:", userId, username, firstName, lastName, email, role, permissions);
+        document.getElementById('modalUserId').value = userId;
+        document.getElementById('modalUsername').innerText = username;
+        document.getElementById('modalEmail').value = email;
+        document.getElementById('modalRole').value = role;
+        document.getElementById('modalFirstName').value = firstName;
+        document.getElementById('modalLastName').value = lastName;
+        
+        const permissionsSelect = document.getElementById('modalPermissions');
+        for (let i = 0; i < permissionsSelect.options.length; i++) {
+          permissionsSelect.options[i].selected = false;
+        }
+        permissions.forEach(perm => {
+          for (let i = 0; i < permissionsSelect.options.length; i++) {
+            if (permissionsSelect.options[i].value === perm) {
+              permissionsSelect.options[i].selected = true;
+            }
+          }
+        });
+        
+        // Disable the role dropdown if the edited user's role is superuser or clinical_lead and the editor is not a superuser.
+        const modalRoleSelect = document.getElementById('modalRole');
+        if ((role.toLowerCase() === "superuser" || role.toLowerCase() === "clinical_lead") && !currentUserIsSuperuser) {
+          modalRoleSelect.disabled = true;
+        } else {
+          modalRoleSelect.disabled = false;
+        }
+        
+        document.getElementById('editUserForm').action = "/users/edit/" + userId;
+        editUserModal.show();
+      });
+    });
+  }
+  attachEditButtons();
+});
+</script>
+{% endblock %}

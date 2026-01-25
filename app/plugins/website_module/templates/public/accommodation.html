@@ -1,0 +1,93 @@
+{% extends "public/base.html" %}
+
+{% block title %}Accommodation at The George & Dragon{% endblock %}
+
+{% block content %}
+<section class="container py-5">
+  <div class="text-center mb-4 page-content">
+    <h1>Accommodation at The George &amp; Dragon</h1>
+    <p class="lead">Stay in the heart of the Sussex countryside</p>
+    <p class="mx-auto" style="max-width:900px;">Escape to the tranquillity of Dragons Green and enjoy a peaceful stay at The George &amp; Dragon, our beautifully restored 16th-century country pub in Shipley, West Sussex. Surrounded by rolling countryside, walking routes, historic villages and cosy local charm, our accommodation offers the perfect blend of comfort, character and relaxation.</p>
+    <p class="mx-auto" style="max-width:900px;">Whether you’re exploring West Sussex, attending a local event, visiting family, or simply treating yourself to a countryside break, our rooms provide a warm and welcoming place to rest.</p>
+    <h3 class="mt-4">Enjoy Country Pub Comfort</h3>
+    <p class="mx-auto" style="max-width:900px;">Staying with us means you can enjoy everything our much-loved country pub has to offer:</p>
+    <ul class="icon-list mx-auto text-center" style="max-width:720px;">
+      <li><span class="material-symbols-outlined">restaurant_menu</span> Fresh, home-cooked food served daily</li>
+      <li><span class="material-symbols-outlined">local_bar</span> A friendly bar with local ales, wines and spirits</li>
+      <li><span class="material-symbols-outlined">fireplace</span> Cosy fireside seating in winter</li>
+      <li><span class="material-symbols-outlined">deck</span> A spacious south-facing garden with heated booths</li>
+      <li><span class="material-symbols-outlined">local_parking</span> Free parking</li>
+      <li><span class="material-symbols-outlined">park</span> A peaceful countryside setting</li>
+      <li><span class="material-symbols-outlined">directions_walk</span> Walking and cycling routes right from the doorstep</li>
+    </ul>
+    <p class="mx-auto mt-3" style="max-width:900px;">Whether you’re here for a getaway, a celebration, business, or to explore the Sussex countryside, you’ll be looked after from the moment you arrive.</p>
+    <p class="mx-auto" style="max-width:900px;">Perfectly Located for Exploring West Sussex</p>
+    <p class="mx-auto" style="max-width:900px;">Our location makes us an ideal base for visiting:</p>
+    <ul class="icon-list mx-auto text-center" style="max-width:720px;">
+      <li><span class="material-symbols-outlined">park</span> South Downs National Park</li>
+      <li><span class="material-symbols-outlined">castle</span> Knepp Castle &amp; Rewilding Estate</li>
+      <li><span class="material-symbols-outlined">location_city</span> Horsham, Worthing &amp; Brighton</li>
+      <li><span class="material-symbols-outlined">account_balance</span> Arundel Castle</li>
+      <li><span class="material-symbols-outlined">local_florist</span> Local vineyards, farms and historic villages</li>
+    </ul>
+    <div class="mt-3">
+      <a href="#the-apartment" class="btn btn-reserve me-2">Book The Apartment</a>
+      <a href="#the-stable" class="btn btn-reserve me-2">Book The Stable</a>
+      <a href="#the-hayloft" class="btn btn-reserve">Book The Hayloft</a>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-md-4">
+      <div class="card" style="height:100%; overflow:hidden; border-radius:10px;">
+        <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='apartment.jpg') }}" alt="The Apartment" style="height:220px;width:100%;object-fit:cover;display:block;">
+        <div class="p-3 text-center d-flex flex-column">
+          <h5 class="mb-1">The Apartment</h5>
+          <p class="mb-2">Spacious self-contained apartment featuring one double room and one twin single room. Ideal for families or groups, with a fully equipped kitchenette and private lounge area.</p>
+          <ul class="icon-list text-center mb-3">
+            <li><span class="material-symbols-outlined">king_bed</span> Double Room</li>
+            <li><span class="material-symbols-outlined">single_bed</span> Twin Single Room</li>
+            <li><span class="material-symbols-outlined">lunch_dining</span> Kitchenette &amp; Lounge</li>
+            <li><span class="material-symbols-outlined">bathtub</span> Shared Bathroom</li>
+          </ul>
+          <a href="https://bookings.mordauntgroup.co.uk/en/the-george-dragon-pub---the-apartment" target="_blank" class="btn btn-reserve mt-auto">Book Apartment</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card" style="height:100%; overflow:hidden; border-radius:10px;">
+        <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='stable.jpg') }}" alt="The Stable" style="height:220px;width:100%;object-fit:cover;display:block;">
+        <div class="p-3 text-center d-flex flex-column">
+          <h5 class="mb-1">The Stable</h5>
+          <p class="mb-2">Ground-floor double bed room with ensuite bathroom. Features hard flooring, is fully dog-friendly, and offers easy access for guests with mobility needs.</p>
+          <ul class="icon-list text-center mb-3">
+            <li><span class="material-symbols-outlined">king_bed</span> Double Bed</li>
+            <li><span class="material-symbols-outlined">bathtub</span> Ensuite Bathroom</li>
+            <li><span class="material-symbols-outlined">wheelchair_pickup</span> Ground Floor / Easy Access</li>
+            <li><span class="material-symbols-outlined">pets</span> Dog-Friendly (Hardfloor)</li>
+          </ul>
+          <a href="https://bookings.mordauntgroup.co.uk/en/the-george-dragon-pub---the-stable" target="_blank" class="btn btn-reserve mt-auto">Book The Stable</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card" style="height:100%; overflow:hidden; border-radius:10px;">
+        <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='hayloft.jpg') }}" alt="The Hayloft" style="height:220px;width:100%;object-fit:cover;display:block;">
+        <div class="p-3 text-center d-flex flex-column">
+          <h5 class="mb-1">The Hayloft</h5>
+          <p class="mb-2">Upstairs double bed room with ensuite bathroom. Cosy carpeted floors, offering charming views — please note, no pets allowed in this room.</p>
+          <ul class="icon-list text-center mb-3">
+            <li><span class="material-symbols-outlined">king_bed</span> Double Bed</li>
+            <li><span class="material-symbols-outlined">bathtub</span> Ensuite Bathroom</li>
+            <li><span class="material-symbols-outlined">stairs</span> First Floor (Stairs)</li>
+            <li><span class="material-symbols-outlined">no_food</span> Carpeted (No Dogs)</li>
+          </ul>
+          <a href="https://bookings.mordauntgroup.co.uk/en/the-george-dragon-pub---the-hayloft" target="_blank" class="btn btn-reserve mt-auto">Book The Hayloft</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+</section>
+{% endblock %}

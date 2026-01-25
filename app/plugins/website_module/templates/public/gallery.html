@@ -1,0 +1,32 @@
+{% extends "public/base.html" %}
+
+{% block title %}Gallery - The George & Dragon{% endblock %}
+
+{% block content %}
+<section class="container py-5 page-content">
+  <h1 class="mb-2">Our Favourite Moments</h1>
+  <p class="text-muted mb-5">A collection of our favourite pictures from around the pub, garden, and special occasions.</p>
+
+  <div class="row g-3 mb-5">
+    {% set imgs = ['main.png','stable.jpg','hayloft.jpg','apartment.jpg','event.png','sunday.png'] %}
+    {% for img in imgs %}
+      <div class="col-sm-6 col-md-4">
+        <div class="card">
+          <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename=img) }}" class="img-fluid" alt="Gallery image {{ loop.index }}">
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <!-- Google Reviews CTA -->
+  <div class="row justify-content-center mt-5 pt-5 border-top">
+    <div class="col-md-8 text-center">
+      <h3 class="mb-3">See More Photos From Our Guests</h3>
+      <p class="mb-4">Visit our Google Business page to view photos and reviews shared by our wonderful customers.</p>
+      <a href="https://maps.app.goo.gl/tGce9gLd3m478KC97" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg">
+        <i class="bi bi-google me-2"></i>View on Google Maps
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,62 @@
+[
+    {
+        "title": "Home",
+        "route": "/",
+        "header": true,
+        "footer": true,
+        "meta": {
+            "title": "The George & Dragon - Home",
+            "description": "A cosy 16th-century country pub in Shipley, West Sussex.",
+            "keywords": ["George & Dragon", "pub", "Shipley"]
+        }
+    },
+    {
+        "title": "About Us",
+        "route": "/about-us",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "About The George & Dragon", "description": "About The George & Dragon", "keywords": ["about", "George & Dragon"]}
+    },
+    {
+        "title": "Menus",
+        "route": "/menus",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Our Menus", "description": "View our menus", "keywords": ["menu"]}
+    },
+    {
+        "title": "Accommodation",
+        "route": "/accommodation",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Accommodation", "description": "Stay at The George & Dragon", "keywords": ["accommodation"]}
+    },
+    {
+        "title": "Events & Functions",
+        "route": "/functions",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Events & Functions", "description": "Events & functions at the pub", "keywords": ["events"]}
+    },
+    {
+        "title": "Book a Table",
+        "route": "/book-a-table",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Book a Table", "description": "Reserve a table", "keywords": ["booking", "table"]}
+    },
+    {
+        "title": "Gallery",
+        "route": "/gallery",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Gallery", "description": "Photo gallery", "keywords": ["gallery"]}
+    },
+    {
+        "title": "Contact Us",
+        "route": "/contact",
+        "header": true,
+        "footer": true,
+        "meta": {"title": "Contact Us", "description": "Contact The George & Dragon", "keywords": ["contact"]}
+    }
+]

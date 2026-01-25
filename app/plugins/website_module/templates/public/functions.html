@@ -1,0 +1,140 @@
+{% extends "public/base.html" %}
+
+{% block title %}Events & Functions - The George & Dragon{% endblock %}
+
+{% block head %}
+<style>
+  /* Scoped styles for Functions page */
+  .functions-why h4 { font-size: 1.5rem; margin-bottom: .75rem; }
+  .functions-why p, .functions-why li { font-size: 1.05rem; line-height:1.7; }
+  .functions-why ul { list-style: none; padding-left: 0; max-width:720px; margin: 0; }
+  .enquire-cta .btn { font-size: 1.125rem; padding: .85rem 1.6rem; border-radius: .6rem; }
+  @media (max-width: 768px) {
+    .enquire-cta .btn { width: 100%; }
+  }
+</style>
+{% endblock %}
+{% block content %}
+<section class="container py-5 page-content">
+  <h1 class="mb-3">Events & Functions at The George &amp; Dragon</h1>
+  <p class="lead mb-2">Your countryside venue for every occasion</p>
+  <p class="mb-4">Nestled in the heart of Dragons Green, our beautifully restored 16th-century country pub offers a charming and versatile setting for all kinds of events and celebrations. Whether you’re planning an intimate gathering, a family occasion, a corporate event, a wedding or a celebration of life, The George &amp; Dragon provides warm hospitality, delicious food and a relaxed, countryside atmosphere that your guests will love.</p>
+  <p class="mb-4">From birthdays and engagements to weddings, baby showers and business meetings, we tailor every event to suit your needs.</p>
+
+  <h3 class="mt-4">A Beautiful &amp; Flexible Space</h3>
+  <p class="mb-4">With both indoor and outdoor areas available, our venue can accommodate a wide range of events:</p>
+
+  <div class="row g-4">
+    <div class="col-md-6">
+      <div class="card h-100 overflow-hidden">
+        <div style="height:240px; overflow:hidden;">
+          <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='restaurant.png') }}" alt="The Restaurant" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div class="card-body text-center d-flex flex-column">
+          <h5 class="card-title">The Restaurant</h5>
+          <p class="card-text">A large area with character-filled spaces complete with oak beams, cosy fires and a warm, welcoming atmosphere. Perfect for private dining, celebrations, meetings and gatherings. Our restaurant space can hold up to 60 seated guests.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card h-100 overflow-hidden">
+        <div style="height:240px; overflow:hidden;">
+          <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='event.png') }}" alt="The Garden" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div class="card-body text-center d-flex flex-column">
+          <h5 class="card-title">The Garden</h5>
+          <p class="card-text">Our large garden is ideal for celebrations, summer parties, barbecues and relaxed evening events. The back garden can seat up to 130 people and the front garden up to 60 people.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card h-100 overflow-hidden">
+        <div style="height:240px; overflow:hidden;">
+          <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='greenRoom.png') }}" alt="The Green Room" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div class="card-body text-center d-flex flex-column">
+          <h5 class="card-title">The Green Room</h5>
+          <p class="card-text">A private room perfect for small private gatherings, meetings or intimate dinners. This room can comfortably seat up to 12 people.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card h-100 overflow-hidden">
+        <div style="height:240px; overflow:hidden;">
+          <img loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='pub.png') }}" alt="Main Pub" style="width:100%;height:100%;object-fit:cover;">
+        </div>
+        <div class="card-body text-center d-flex flex-column">
+          <h5 class="card-title">Main Pub</h5>
+          <p class="card-text">Our main pub area seats around 42 people, with additional bar stools and standing room. Complete with oak beams, cosy fires and comfortable seating — it's ideal for relaxed, convivial gatherings.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <h4>Exclusive Hire</h4>
+    <p>For larger occasions, The George &amp; Dragon can be hired exclusively, giving you private access to the entire pub, garden and accommodation for a truly bespoke experience.</p>
+    <p>For more information and tailored packages please <a href="/contact">contact us</a> and our events team will be happy to help.</p>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-md-8 functions-why">
+      <h4>Why choose us?</h4>
+      <p>We create memorable events with attention to detail, excellent food and a warm, personal service. Our experienced team will work with you from initial enquiry through to delivery so your event runs smoothly.</p>
+      <ul class="mt-3 icon-list">
+        <li><span class="material-symbols-outlined">check_circle</span> Personal event manager assigned to every booking</li>
+        <li><span class="material-symbols-outlined">check_circle</span> Locally sourced seasonal menus with bespoke options</li>
+        <li><span class="material-symbols-outlined">check_circle</span> Flexible spaces: restaurant, garden and private areas</li>
+        <li><span class="material-symbols-outlined">check_circle</span> On-site accommodation for guest convenience</li>
+        <li><span class="material-symbols-outlined">check_circle</span> Audio and basic AV support available on request</li>
+      </ul>
+    </div>
+    <div class="col-md-4 text-center">
+      <h5>Brochures</h5>
+      <p class="small">Download our brochures or contact us for tailored packages.</p>
+      <!-- Tabs for brochures -->
+      <ul class="nav nav-tabs justify-content-center" id="brochureTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-events" data-mdb-toggle="tab" data-mdb-target="#pane-events" type="button" role="tab" aria-controls="pane-events" aria-selected="true">Events Brochure</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-wedding" data-mdb-toggle="tab" data-mdb-target="#pane-wedding" type="button" role="tab" aria-controls="pane-wedding" aria-selected="false">Wedding Brochure</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-celebration" data-mdb-toggle="tab" data-mdb-target="#pane-celebration" type="button" role="tab" aria-controls="pane-celebration" aria-selected="false">Celebration of Life</button>
+        </li>
+      </ul>
+      <div class="tab-content mt-3" id="brochureTabsContent">
+        <div class="tab-pane fade show active" id="pane-events" role="tabpanel" aria-labelledby="tab-events">
+          {% if brochures and brochures.get('events') %}
+            <a class="btn btn-reserve btn-lg" href="{{ url_for('static', filename='menus/' + brochure_files['events']) }}" target="_blank">Download Events Brochure</a>
+          {% else %}
+            <button class="btn btn-secondary btn-lg" disabled aria-disabled="true">Events Brochure — Coming Soon</button>
+          {% endif %}
+        </div>
+        <div class="tab-pane fade" id="pane-wedding" role="tabpanel" aria-labelledby="tab-wedding">
+          {% if brochures and brochures.get('wedding') %}
+            <a class="btn btn-reserve btn-lg" href="{{ url_for('static', filename='menus/' + brochure_files['wedding']) }}" target="_blank">Download Wedding Brochure</a>
+          {% else %}
+            <button class="btn btn-secondary btn-lg" disabled aria-disabled="true">Wedding Brochure — Coming Soon</button>
+          {% endif %}
+        </div>
+        <div class="tab-pane fade" id="pane-celebration" role="tabpanel" aria-labelledby="tab-celebration">
+          {% if brochures and brochures.get('celebration') %}
+            <a class="btn btn-reserve btn-lg" href="{{ url_for('static', filename='menus/' + brochure_files['celebration']) }}" target="_blank">Download Celebration Brochure</a>
+          {% else %}
+            <button class="btn btn-secondary btn-lg" disabled aria-disabled="true">Celebration Brochure — Coming Soon</button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="text-center mt-5 enquire-cta">
+    <a href="/contact" class="btn btn-reserve btn-lg">Enquire About Hiring</a>
+  </div>
+</section>
+{% endblock %}

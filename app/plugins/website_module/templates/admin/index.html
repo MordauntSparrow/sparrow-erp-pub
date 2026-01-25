@@ -1,0 +1,212 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Website Module Dashboard{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-4">{{ title }}</h1>
+  <p>Welcome to the website module admin dashboard. Use the options below to manage your website.</p>
+  
+  <!-- Navigation Links -->
+  <div class="list-group mb-4">
+    <a href="{{ url_for('website_admin_routes.page_manager') }}" class="list-group-item list-group-item-action">
+      Manage Pages
+    </a>
+    <a href="{{ url_for('website_admin_routes.contact_config') }}" class="list-group-item list-group-item-action">
+      Contact Form Configuration
+    </a>
+    <a href="{{ url_for('routes.dashboard') }}" class="list-group-item list-group-item-action">
+      Back to ERP Dashboard
+    </a>
+  </div>
+  
+  <!-- Analytics Tiles & Charts -->
+  <div class="row">
+    <!-- Total Page Views Tile -->
+    <div class="col-md-4 mb-4">
+      <div class="card text-white bg-info h-100">
+        <div class="card-body">
+          <h5 class="card-title">Total Page Views</h5>
+          <p class="card-text display-4">{{ analytics.total_views }}</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Views by Hour Chart -->
+    <div class="col-md-4 mb-4">
+      <div class="card">
+        <div class="card-header bg-primary text-white">
+          Views by Hour
+        </div>
+        <div class="card-body">
+          <canvas id="viewsByHourChart" width="400" height="300"></canvas>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Views by Weekday Chart -->
+    <div class="col-md-4 mb-4">
+      <div class="card">
+        <div class="card-header bg-success text-white">
+          Views by Weekday
+        </div>
+        <div class="card-body">
+          <canvas id="viewsByWeekdayChart" width="400" height="300"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Most Popular Pages Table with Percentage Change -->
+  <div class="card mb-4">
+    <div class="card-header bg-warning text-dark">
+      Most Popular Pages
+      <div class="float-end">
+        <a href="{{ url_for('website_admin_routes.admin_index', period='today') }}" class="btn btn-sm btn-outline-secondary {% if analytics.current_period == 'today' %}active{% endif %}">Today</a>
+        <a href="{{ url_for('website_admin_routes.admin_index', period='weekly') }}" class="btn btn-sm btn-outline-secondary {% if analytics.current_period == 'weekly' %}active{% endif %}">Weekly</a>
+        <a href="{{ url_for('website_admin_routes.admin_index', period='monthly') }}" class="btn btn-sm btn-outline-secondary {% if analytics.current_period == 'monthly' %}active{% endif %}">Monthly</a>
+        <a href="{{ url_for('website_admin_routes.admin_index', period='year') }}" class="btn btn-sm btn-outline-secondary {% if analytics.current_period == 'year' %}active{% endif %}">Year</a>
+        <a href="{{ url_for('website_admin_routes.admin_index', period='alltime') }}" class="btn btn-sm btn-outline-secondary {% if analytics.current_period == 'alltime' %}active{% endif %}">All Time</a>
+      </div>
+    </div>
+    <div class="card-body">
+      <table class="table table-hover">
+        <thead>
+          <tr>
+            <th>Page</th>
+            <th>Views</th>
+            <th>Change</th>
+            <th>Top Country</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in analytics.popular_pages_detailed %}
+          <tr>
+            <td>{{ entry.page }}</td>
+            <td>{{ entry.views }}</td>
+            <td>
+              {% if entry.change is defined %}
+                {% if entry.change >= 0 %}
+                  <span class="text-success"><i class="bi bi-arrow-up"></i> {{ entry.change }}%</span>
+                {% else %}
+                  <span class="text-danger"><i class="bi bi-arrow-down"></i> {{ entry.change | abs }}%</span>
+                {% endif %}
+              {% else %}
+                N/A
+              {% endif %}
+            </td>
+            <td>
+              {# For demonstration, we take the top country from the overall analytics.requests_by_country #}
+              {% set top_country = (analytics.requests_by_country | dictsort(true))[0][0] if analytics.requests_by_country|length > 0 else "N/A" %}
+              {{ top_country }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  
+  <!-- Requests by Country Map -->
+  <div class="card mb-4">
+    <div class="card-header bg-secondary text-white">
+      Requests by Country (Map)
+    </div>
+    <div class="card-body">
+      <div id="geoChart" style="width: 100%; height: 400px;"></div>
+      <p class="mt-2">This map displays the number of requests per country.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Include Chart.js from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Build the Views by Hour Chart -->
+<script>
+  var ctxHour = document.getElementById('viewsByHourChart').getContext('2d');
+  var hourLabels = [{% for hour in analytics.views_by_hour.keys() %}"{{ hour }}:00", {% endfor %}];
+  var hourData = [{% for count in analytics.views_by_hour.values() %}{{ count }}, {% endfor %}];
+  new Chart(ctxHour, {
+    type: 'bar',
+    data: {
+      labels: hourLabels,
+      datasets: [{
+        label: 'Views by Hour',
+        data: hourData,
+        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+        borderColor: 'rgba(54, 162, 235, 1)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 } }
+      }
+    }
+  });
+</script>
+
+<!-- Build the Views by Weekday Chart -->
+<script>
+  var weekdayMapping = {"0": "Mon", "1": "Tue", "2": "Wed", "3": "Thu", "4": "Fri", "5": "Sat", "6": "Sun"};
+  var rawWeekdayData = {{ analytics.views_by_weekday | tojson }};
+  var weekdayLabels = [];
+  var weekdayData = [];
+  for (var key in rawWeekdayData) {
+      weekdayLabels.push(weekdayMapping[key] || key);
+      weekdayData.push(rawWeekdayData[key]);
+  }
+  var ctxWeekday = document.getElementById('viewsByWeekdayChart').getContext('2d');
+  new Chart(ctxWeekday, {
+    type: 'pie',
+    data: {
+      labels: weekdayLabels,
+      datasets: [{
+        label: 'Views by Weekday',
+        data: weekdayData,
+        backgroundColor: [
+          'rgba(255, 99, 132, 0.6)',
+          'rgba(54, 162, 235, 0.6)',
+          'rgba(255, 206, 86, 0.6)',
+          'rgba(75, 192, 192, 0.6)',
+          'rgba(153, 102, 255, 0.6)',
+          'rgba(255, 159, 64, 0.6)',
+          'rgba(100, 100, 100, 0.6)'
+        ]
+      }]
+    },
+    options: {
+      responsive: true
+    }
+  });
+</script>
+
+<!-- Build the Requests by Country Map using Google GeoChart -->
+<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+<script type="text/javascript">
+  google.charts.load('current', {'packages':['geochart']});
+  google.charts.setOnLoadCallback(drawRegionsMap);
+
+  function drawRegionsMap() {
+    var dataArray = [['Country', 'Views']];
+    var countryData = {{ analytics.requests_by_country | tojson }};
+    for (var country in countryData) {
+      var mappedCountry = country;
+      if (country === "UK") {
+          mappedCountry = "United Kingdom";
+      }
+      dataArray.push([mappedCountry, countryData[country]]);
+    }
+    var data = google.visualization.arrayToDataTable(dataArray);
+    var options = {
+      colorAxis: {colors: ['#e0f7fa', '#006064']},
+      backgroundColor: '#f5f5f5',
+      datalessRegionColor: '#eeeeee',
+      defaultColor: '#f5f5f5'
+    };
+    var chart = new google.visualization.GeoChart(document.getElementById('geoChart'));
+    chart.draw(data, options);
+  }
+</script>
+{% endblock %}

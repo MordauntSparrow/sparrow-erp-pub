@@ -1,0 +1,54 @@
+/* Site-wide custom styles for The George & Dragon */
+
+:root{
+  --forest:#1B4D3E;
+  --forest-dark:#163F31;
+  --gold:#CCAA33;
+  --muted:#6c757d;
+}
+
+/* Buttons */
+.btn-book, .btn-reserve, .btn-primary, .btn-secondary {
+  border-radius: 8px;
+  padding: .65rem 1rem;
+  font-weight:600;
+}
+.btn-book { background: var(--forest); color:#fff; border-color:var(--forest); }
+.btn-reserve { background: var(--gold); color:var(--forest); border-color:var(--gold); }
+.btn-book:hover, .btn-reserve:hover, .btn-primary:hover { opacity:0.95; }
+
+/* CTA cards on homepage */
+.menu-card, .menu-card .card-content { border-radius:10px; }
+.menu-card { min-height: 240px; display:flex; align-items:flex-end; }
+.menu-card .card-content { padding:1.25rem; width:100%; }
+.menu-card h3 { font-size:1.25rem; margin-bottom:.25rem; }
+
+/* background image <img> used as cover */
+.card-bg-img{ width:100%; height:100%; object-fit:cover; position:absolute; inset:0; }
+
+/* Accommodation cards */
+.accommodation .card { border:0; overflow:hidden; border-radius:10px; }
+.accommodation img { display:block; width:100%; height:220px; object-fit:cover; }
+
+/* Gallery */
+.gallery .card { border:0; border-radius:8px; overflow:hidden; }
+.gallery img { width:100%; height:180px; object-fit:cover; display:block; }
+
+/* Footer map responsiveness */
+.footer .map-wrapper{ width:100%; height:200px; border-radius:8px; overflow:hidden; }
+.footer .map-wrapper iframe{ width:100%; height:100%; border:0; }
+
+/* Utility tweaks */
+@media (max-width: 768px){
+  .menu-card{ min-height:200px; }
+  .gallery img{ height:150px; }
+}
+
+/* Slight spacing improvements */
+.section-heading{ color:var(--forest); margin-bottom:1rem; }
+
+/* Page content utility used by About/Events/Accommodation pages */
+.page-content { text-align: center; color: #333; }
+.page-content h1 { color: var(--gold); margin-bottom: .5rem; }
+.page-content h3 { color: var(--forest); }
+

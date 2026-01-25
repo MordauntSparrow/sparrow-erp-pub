@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}Email Configuration{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h1>Email Configuration</h1>
+  <form method="post">
+    <div class="mb-3">
+      <label for="host" class="form-label">SMTP Host</label>
+      <input type="text" class="form-control" id="host" name="host" value="{{ email_config.host }}">
+    </div>
+    <div class="mb-3">
+      <label for="port" class="form-label">SMTP Port</label>
+      <input type="text" class="form-control" id="port" name="port" value="{{ email_config.port }}">
+    </div>
+    <div class="mb-3">
+      <label for="username" class="form-label">SMTP Username</label>
+      <input type="text" class="form-control" id="username" name="username" value="{{ email_config.username }}">
+    </div>
+    <div class="mb-3">
+      <label for="password" class="form-label">SMTP Password</label>
+      <input type="password" class="form-control" id="password" name="password" value="{{ email_config.password }}">
+    </div>
+    <div class="mb-3">
+      <label for="use_tls" class="form-label">Use TLS</label>
+      <select class="form-select" id="use_tls" name="use_tls">
+        <option value="true" {% if email_config.use_tls %}selected{% endif %}>Yes</option>
+        <option value="false" {% if not email_config.use_tls %}selected{% endif %}>No</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Configuration</button>
+  </form>
+</div>
+{% endblock %}

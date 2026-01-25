@@ -1,0 +1,151 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Contact Form Configuration{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-4">Contact Form Configuration</h1>
+  
+  <div class="alert alert-info">
+    For each contact form on your site, include a hidden field in your HTML like:
+    <code>&lt;input type="hidden" name="form_id" value="[value]"&gt;</code>
+    where the value (e.g., <strong>contact_us</strong>) matches one of the configuration identifiers below.
+  </div>
+  
+  <!-- Existing Configurations Table with Inline Editing and Delete Option -->
+  <table class="table table-bordered" id="configTable">
+    <thead>
+      <tr>
+        <th>Form Identifier</th>
+        <th>Recipient Email</th>
+        <th>Email Subject</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="configTableBody">
+      {% for form_id, settings in contact_config.items() %}
+      <tr data-form-id="{{ form_id }}">
+        <td class="form-id">{{ form_id }}</td>
+        <td class="recipient">{{ settings.recipient }}</td>
+        <td class="subject">{{ settings.subject }}</td>
+        <td>
+          <button type="button" class="btn btn-sm btn-secondary editBtn">Edit</button>
+          <button type="button" class="btn btn-sm btn-success saveBtn" style="display:none;">Save</button>
+          <button type="button" class="btn btn-sm btn-danger cancelBtn" style="display:none;">Cancel</button>
+          <button type="button" class="btn btn-sm btn-outline-danger deleteBtn">Delete</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  
+  <!-- Add New Configuration Form -->
+  <h3 class="mt-4">Add New Configuration</h3>
+  <form method="post" action="{{ url_for('website_admin_routes.contact_config') }}">
+    <div class="mb-3">
+      <label for="new_form_id" class="form-label">Form Identifier</label>
+      <input type="text" class="form-control" id="new_form_id" name="form_id" placeholder="e.g., feedback" required>
+    </div>
+    <div class="mb-3">
+      <label for="new_recipient" class="form-label">Recipient Email</label>
+      <input type="email" class="form-control" id="new_recipient" name="recipient" placeholder="info@example.com" required>
+    </div>
+    <div class="mb-3">
+      <label for="new_subject" class="form-label">Email Subject</label>
+      <input type="text" class="form-control" id="new_subject" name="subject" placeholder="General Contact Form Submission" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Configuration</button>
+  </form>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  var tableBody = document.getElementById("configTableBody");
+  var rows = tableBody.getElementsByTagName("tr");
+  
+  Array.from(rows).forEach(function(row){
+    var editBtn = row.querySelector(".editBtn");
+    var saveBtn = row.querySelector(".saveBtn");
+    var cancelBtn = row.querySelector(".cancelBtn");
+    var deleteBtn = row.querySelector(".deleteBtn");
+    
+    var formIdCell = row.querySelector(".form-id");
+    var recipientCell = row.querySelector(".recipient");
+    var subjectCell = row.querySelector(".subject");
+    
+    var originalFormId = formIdCell.textContent.trim();
+    var originalRecipient = recipientCell.textContent.trim();
+    var originalSubject = subjectCell.textContent.trim();
+    
+    editBtn.addEventListener("click", function(){
+      formIdCell.innerHTML = '<input type="text" class="form-control" value="'+originalFormId+'" readonly>';
+      recipientCell.innerHTML = '<input type="email" class="form-control" value="'+originalRecipient+'">';
+      subjectCell.innerHTML = '<input type="text" class="form-control" value="'+originalSubject+'">';
+      editBtn.style.display = "none";
+      saveBtn.style.display = "inline-block";
+      cancelBtn.style.display = "inline-block";
+    });
+    
+    cancelBtn.addEventListener("click", function(){
+      formIdCell.textContent = originalFormId;
+      recipientCell.textContent = originalRecipient;
+      subjectCell.textContent = originalSubject;
+      editBtn.style.display = "inline-block";
+      saveBtn.style.display = "none";
+      cancelBtn.style.display = "none";
+    });
+    
+    saveBtn.addEventListener("click", function(){
+      var newRecipient = recipientCell.querySelector("input").value.trim();
+      var newSubject = subjectCell.querySelector("input").value.trim();
+      
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "{{ url_for('website_admin_routes.contact_config') }}", true);
+      xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+      xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4) {
+          if (xhr.status === 200) {
+            originalRecipient = newRecipient;
+            originalSubject = newSubject;
+            formIdCell.textContent = originalFormId;
+            recipientCell.textContent = newRecipient;
+            subjectCell.textContent = newSubject;
+            editBtn.style.display = "inline-block";
+            saveBtn.style.display = "none";
+            cancelBtn.style.display = "none";
+            location.reload();
+          } else {
+            alert("Failed to update configuration.");
+          }
+        }
+      };
+      var params = "form_id=" + encodeURIComponent(originalFormId) +
+                   "&recipient=" + encodeURIComponent(newRecipient) +
+                   "&subject=" + encodeURIComponent(newSubject);
+      xhr.send(params);
+    });
+    
+    deleteBtn.addEventListener("click", function(){
+      if (confirm("Are you sure you want to delete the configuration for '" + originalFormId + "'?")) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "{{ url_for('website_admin_routes.contact_config') }}", true);
+        xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+              location.reload();
+            } else {
+              alert("Failed to delete configuration.");
+            }
+          }
+        };
+        var params = "action=delete&delete_form_id=" + encodeURIComponent(originalFormId);
+        xhr.send(params);
+      }
+    });
+  });
+});
+</script>
+{% endblock %}

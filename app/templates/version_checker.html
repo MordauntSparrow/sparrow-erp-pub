@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="container mt-4">
+    <h1 class="mb-4">Version Manager</h1>
+
+    <!-- Schedule Update Button -->
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#scheduleUpdateModal">Schedule an Update</button>
+    <br/><br/>
+
+    <!-- Core Module Version Info -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <h2>Core Module</h2>
+      </div>
+      <div class="card-body">
+        <p><strong>Current Version:</strong> {{ current_version }}</p>
+        <p><strong>Latest Version:</strong> {{ latest_version }}</p>
+        {% if update_available %}
+          <p><strong class="text-success">Update Available!</strong></p>
+        {% else %}
+          <p>No updates available for the core module.</p>
+        {% endif %}
+
+        <!-- Core Changelog Button -->
+        <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#coreChangelogModal">View Core Changelog</button>
+
+        <!-- Core Update Now Button -->
+        <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModalCore">Update Core Now</button>
+      </div>
+    </div>
+
+    <!-- Core Changelog Modal -->
+    <div class="modal fade" id="coreChangelogModal" tabindex="-1" aria-labelledby="coreChangelogModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="coreChangelogModalLabel">Core Changelog</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <!-- Check if changelog exists and display accordingly -->
+            {% if core_changelog %}
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th scope="col">Version</th>
+                    <th scope="col">Release Date</th>
+                    <th scope="col">Changes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for entry in core_changelog %}
+                    <tr>
+                      <td><strong>{{ entry.version }}</strong></td>
+                      <td>{{ entry.date }}</td>
+                      <td>
+                        <ul>
+                          {% for change in entry.changes %}
+                            <li>{{ change }}</li>
+                          {% endfor %}
+                        </ul>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p>No changelog available for the core module.</p>
+            {% endif %}
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Core Update Now Modal -->
+    <div class="modal fade" id="updateNowModalCore" tabindex="-1" aria-labelledby="updateNowModalCoreLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="updateNowModalCoreLabel">Update Core Now</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p>Are you sure you want to update the Core Module to the latest version?</p>
+          </div>
+          <div class="modal-footer">
+            <form method="POST" action="{{ url_for('routes.version') }}">
+              <input type="hidden" name="update_type" value="core">
+              <button type="submit" class="btn btn-warning">Update Now</button>
+            </form>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+<!-- Installed Plugins and Changelog -->
+<div class="card mb-4">
+  <div class="card-header">
+    <h2>Installed Plugins</h2>
+  </div>
+  <div class="card-body">
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Plugin Name</th>
+          <th>Current Version</th>
+          <th>Latest Version</th>
+          <th>Update Available</th>
+          <th>Changelog</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for plugin in plugins %}
+          <tr>
+            <td>{{ plugin.plugin_name }}</td>
+            <td>{{ plugin.current_version }}</td>
+            <td>{{ plugin.latest_version }}</td>
+            <td>
+              {% if plugin.update_available %}
+                <span class="badge bg-success">Yes</span>
+              {% else %}
+                <span class="badge bg-danger">No</span>
+              {% endif %}
+            </td>
+            <td>
+              <!-- Open Modal for Plugin Changelog -->
+              <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#pluginChangelogModal{{ plugin.plugin_name }}">View Changelog</button>
+            </td>
+            <td>
+              <!-- Update Now Button for Plugin -->
+              <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModal{{ plugin.plugin_name }}">Update Now</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Plugin Changelog Modals (placed outside the table) -->
+{% for plugin in plugins %}
+  <div class="modal fade" id="pluginChangelogModal{{ plugin.plugin_name }}" tabindex="-1" aria-labelledby="pluginChangelogModalLabel{{ plugin.plugin_name }}" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pluginChangelogModalLabel{{ plugin.plugin_name }}">{{ plugin.plugin_name }} Changelog</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          {% if plugin_changelogs[plugin.plugin_name] %}
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th>Release Date</th>
+                  <th>Changes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in plugin_changelogs[plugin.plugin_name] %}
+                  <tr>
+                    <td><strong>{{ entry.version }}</strong></td>
+                    <td>{{ entry.date }}</td>
+                    <td>
+                      <ul>
+                        {% for change in entry.changes %}
+                          <li>{{ change }}</li>
+                        {% endfor %}
+                      </ul>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p>No changelog available for {{ plugin.plugin_name }}.</p>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Plugin Update Now -->
+  <div class="modal fade" id="updateNowModal{{ plugin.plugin_name }}" tabindex="-1" aria-labelledby="updateNowModalLabel{{ plugin.plugin_name }}" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="updateNowModalLabel{{ plugin.plugin_name }}">Update {{ plugin.plugin_name }} Now</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p>Are you sure you want to update <strong>{{ plugin.plugin_name }}</strong> to the latest version?</p>
+        </div>
+        <div class="modal-footer">
+          <form method="POST" action="{{ url_for('routes.version') }}">
+            <input type="hidden" name="update_type" value="plugin">
+            <input type="hidden" name="plugin_name" value="{{ plugin.plugin_name }}">
+            <button type="submit" class="btn btn-warning">Update Now</button>
+          </form>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endfor %}
+
+
+<!-- Modal to Schedule Update -->
+<div class="modal fade" id="scheduleUpdateModal" tabindex="-1" aria-labelledby="scheduleUpdateModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="scheduleUpdateModalLabel">Schedule Update</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="POST" action="{{ url_for('routes.version') }}">
+          <div class="mb-3">
+            <label for="update_type" class="form-label">Select Update Type</label>
+            <select name="update_type" id="update_type" class="form-select">
+              <option value="core">Core Module</option>
+              <option value="plugin">Plugin</option>
+            </select>
+          </div>
+
+          <div id="plugin_name_div" class="mb-3" style="display: none;">
+            <label for="plugin_name" class="form-label">Select Plugin</label>
+            <select name="plugin_name" id="plugin_name" class="form-select">
+              {% for plugin in plugins %}
+                <option value="{{ plugin.plugin_name }}">{{ plugin.plugin_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label for="scheduled_time" class="form-label">Scheduled Time (YYYY-MM-DD HH:MM:SS)</label>
+            <input type="datetime" id="scheduled_time" name="scheduled_time" class="form-control" required>
+          </div>
+
+          <button type="submit" class="btn btn-primary">Schedule Update</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Bootstrap and Popper.js -->
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.min.js"></script>
+<script>
+  // Adjust form fields visibility based on selected update type
+  document.getElementById("update_type").addEventListener("change", function() {
+    var selectedType = this.value;
+    if (selectedType === "plugin") {
+      document.getElementById("plugin_name_div").style.display = "block";
+    } else {
+      document.getElementById("plugin_name_div").style.display = "none";
+    }
+  });
+</script>
+
+{% endblock %}
+
+

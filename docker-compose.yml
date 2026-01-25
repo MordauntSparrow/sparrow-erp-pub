@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  sparrow-erp:
+    build: .
+    container_name: sparrow-erp
+    ports:
+      - "82:82" # Flask / ERP
+      - "80:80" # Website (can be enabled later in Admin UI)
+    environment:
+      - TZ=Europe/London
+      - APP_ROOT=/app/app
+    restart: unless-stopped

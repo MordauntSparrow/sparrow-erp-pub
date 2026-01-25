@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}{{ plugin_name }} Settings - Sparrow ERP{% endblock %}
+
+{% block content %}
+<h1 class="mb-3">{{ plugin_name }} Settings</h1>
+<a href="{{ url_for('routes.plugins') }}" class="btn btn-secondary btn-sm mb-3">Back to Plugins</a>
+
+<form method="POST">
+    <table class="table table-striped table-bordered table-hover mt-3">
+        <thead>
+            <tr>
+                <th>Setting</th>
+                <th>Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Name (always read-only) -->
+            <tr>
+                <td><strong>Name</strong></td>
+                <td><input type="text" class="form-control" name="name" value="{{ settings['name'] }}" disabled></td>
+            </tr>
+
+            <!-- System Name (always read-only) -->
+            <tr>
+                <td><strong>System Name</strong></td>
+                <td><input type="text" class="form-control" name="system_name" value="{{ settings['system_name'] }}" disabled></td>
+            </tr>
+
+            <!-- Description (always read-only) -->
+            <tr>
+                <td><strong>Description</strong></td>
+                <td><input type="text" class="form-control" name="description" value="{{ settings['description'] }}" disabled></td>
+            </tr>
+
+            <!-- Version (always read-only) -->
+            <tr>
+                <td><strong>Version</strong></td>
+                <td><input type="text" class="form-control" name="version" value="{{ settings['version'] }}" disabled></td>
+            </tr>
+
+            <!-- Dynamic settings (only show if present) -->
+            {% if settings['settings'] %}
+                {% for setting, data in settings['settings'].items() %}
+                <tr>
+                    <td>
+                        <strong>{{ setting }}</strong>
+                        {% if data.get('tooltip') %}
+                        <i class="fa fa-info-circle text-muted" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ data['tooltip'] }}"></i>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if data['editable'] %}
+                        <input 
+                            type="text" 
+                            class="form-control" 
+                            name="{{ setting }}" 
+                            value="{{ data['value'] }}" 
+                            placeholder="Enter value..."
+                        >
+                        {% else %}
+                        <input type="text" class="form-control" name="{{ setting }}" value="{{ data['value'] }}" disabled>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="2" class="text-center">No settings available for this plugin.</td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+</form>
+{% endblock %}

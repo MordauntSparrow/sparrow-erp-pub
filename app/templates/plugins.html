@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Plugins - Sparrow ERP{% endblock %}
+
+{% block content %}
+<h1>Plugins</h1>
+<a href="/" class="btn btn-secondary btn-sm mb-3">Back to Dashboard</a>
+
+<div class="row">
+    {% for plugin in plugins %}
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <!-- Display plugin image -->
+            <img src="/plugins/{{plugin.system_name}}/{{ plugin.icon }}" class="card-img-top" alt="{{ plugin.name }}" style="max-height: 150px; max-width: fit-content;">
+            <div class="card-body">
+                <!-- Display plugin name and description from factory manifest -->
+                <h5 class="card-title">{{ plugin.name }}</h5>
+                <p class="card-text">{{ plugin.description }}</p>
+
+                <!-- Check if the plugin is installed and enabled -->
+                {% if plugin.installed %}
+                    <!-- If installed, show settings button if enabled -->
+                    <a href="/plugin/{{ plugin.system_name }}/settings" class="btn btn-primary {% if not plugin.enabled %}disabled{% endif %}">
+                        Settings
+                    </a>
+                    
+                    <!-- Enable/Disable button based on current status -->
+                    {% if not plugin.enabled %}
+                    <form action="/plugin/{{ plugin.system_name }}/enable" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-success">Enable</button>
+                    </form>
+                    {% else %}
+                    <form action="/plugin/{{ plugin.system_name }}/disable" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-danger">Disable</button>
+                    </form>
+                    {% endif %}
+
+                    <!-- Uninstall button -->
+                    <form action="/plugin/{{ plugin.system_name }}/uninstall" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-danger">Uninstall</button>
+                    </form>
+
+                {% else %}
+                    <!-- If not installed, show Install button -->
+                    <form action="/plugin/{{ plugin.system_name }}/install" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-success">Install</button>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}
