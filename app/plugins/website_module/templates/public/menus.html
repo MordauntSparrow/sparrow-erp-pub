@@ -170,11 +170,11 @@
         <div class="card-content">
           <h3>Main Menu</h3>
           <p>Our principal menu featuring seasonal dishes and pub classics.</p>
-          <a href="https://imenupro.com/+1rrs-r" target="_blank" class="btn btn-reserve">View Main Menu</a>
+          <a href="{{ url_for('static', filename='menus/SpringMenu.pdf') }}" target="_blank" class="btn btn-reserve">View Main Menu</a>
         </div>
       </div>
 
-      <!-- Kids Menu -->
+      <!-- Kids Menu
       <div class="menu-card">
         <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='kids.png') }}" alt="Kids menu background">
         <div class="card-content">
@@ -182,7 +182,7 @@
           <p>Smaller portions and favourites for little appetites.</p>
           <a href="https://imenupro.com/+1rrs-4" target="_blank" class="btn btn-reserve">View Kids Menu</a>
         </div>
-      </div>
+      </div> -->
 
       <!-- Sunday Menu -->
       <div class="menu-card">
@@ -190,7 +190,7 @@
         <div class="card-content">
           <h3>Sunday Menu</h3>
           <p>Traditional roasts &amp; comfort food every Sunday.</p>
-          <a href="https://imenupro.com/+1rrs-u" target="_blank" class="btn btn-reserve">View Sunday Menu</a>
+          <a href="https://imenupro.com/+1rrs-u" target="_blank" disabled class="btn btn-reserve disabled">View Sunday Menu</a>
         </div>
       </div>
 
