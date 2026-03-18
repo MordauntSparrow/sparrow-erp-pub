@@ -190,7 +190,7 @@
         <div class="card-content">
           <h3>Sunday Menu</h3>
           <p>Traditional roasts &amp; comfort food every Sunday.</p>
-          <a href="https://imenupro.com/+1rrs-u" target="_blank" disabled class="btn btn-reserve disabled">View Sunday Menu</a>
+          <a href="https://imenupro.com/+1rrs-u" target="_blank" disabled class="btn btn-reserve disabled">Please Call for This Weeks Selection</a>
         </div>
       </div>
 
@@ -235,12 +235,12 @@
       </div>
 
       <!-- Wine List -->
-      <div class="menu-card">
+      <div class="menu-card disabled">
         <img class="card-bg-img" loading="lazy" decoding="async" src="{{ url_for('website_public.static', filename='wine.png') }}" alt="Wine list background">
         <div class="card-content">
           <h3>Wine List</h3>
           <p>Hand-picked wines to pair with your meal.</p>
-          <a class="btn btn-reserve" href="{{ url_for('static', filename='menus/wineMenu.pdf') }}">View Wine List</a>
+          <a class="btn btn-secondary disabled" aria-disabled="true">Coming Soon</a>
         </div>
       </div>
 
