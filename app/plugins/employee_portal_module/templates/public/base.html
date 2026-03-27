@@ -84,6 +84,7 @@
     .btn-outline-light { {% if _theme != 'dark' %}border-color: #ced4da !important; color: #495057 !important;{% endif %} }
     .btn-outline-warning, .btn-warning, .btn-info { color: #1f1f1f !important; }
   </style>
+  {% include 'partials/sparrow_csrf_head.html' %}
   {% block head %}{% endblock %}
 </head>
 <body>

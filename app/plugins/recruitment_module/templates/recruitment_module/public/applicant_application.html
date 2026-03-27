@@ -15,6 +15,46 @@
   {% endfor %}
 </div>
 
+{% if application.stage == 'interview' or application.stage == 'offer' %}
+<div class="card border-primary mb-4">
+  <div class="card-header fw-semibold">Interview</div>
+  <div class="card-body small">
+    {% if application.interview_format == 'online' and application.interview_meeting_url %}
+    <p class="mb-2">Your interview is <strong>online</strong>.</p>
+    <a href="{{ application.interview_meeting_url }}" class="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer">Join meeting</a>
+    <p class="text-muted mt-2 mb-0 small">Open the link at the time agreed with the recruiter. If the button doesn’t work, copy the link from your browser bar or ask HR.</p>
+    {% elif application.interview_format == 'onsite' and application.interview_location %}
+    <p class="mb-1">Your interview is <strong>on-site</strong> at:</p>
+    <div class="border rounded p-2 bg-light text-break" style="white-space:pre-wrap;">{{ application.interview_location }}</div>
+    {% elif application.stage == 'interview' %}
+    <p class="text-muted mb-0">Interview details (link or address) will appear here once your recruiter adds them.</p>
+    {% else %}
+    <p class="text-muted mb-0">No interview location was stored for this application.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if application.date_of_birth or application.address_line1 %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Your application profile</div>
+  <div class="card-body small">
+    <dl class="row mb-0">
+      <dt class="col-sm-4 text-muted">Date of birth</dt>
+      <dd class="col-sm-8">{{ application.date_of_birth }}</dd>
+      <dt class="col-sm-4 text-muted">Address</dt>
+      <dd class="col-sm-8">
+        {{ application.address_line1 or '—' }}{% if application.address_line2 %}<br>{{ application.address_line2 }}{% endif %}
+        {% if application.postcode %}<br>{{ application.postcode }}{% endif %}
+      </dd>
+      <dt class="col-sm-4 text-muted">Emergency contact</dt>
+      <dd class="col-sm-8">{{ application.emergency_contact_name or '—' }}{% if application.emergency_contact_phone %} · {{ application.emergency_contact_phone }}{% endif %}</dd>
+    </dl>
+    <p class="text-muted mb-0 mt-2">To change these details, contact HR — they are fixed after you submit the application.</p>
+  </div>
+</div>
+{% endif %}
+
 <div class="card mb-4">
   <div class="card-header fw-semibold">CV</div>
   <div class="card-body">

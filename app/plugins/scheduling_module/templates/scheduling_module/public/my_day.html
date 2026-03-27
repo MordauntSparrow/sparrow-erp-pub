@@ -1,6 +1,5 @@
 {% extends "scheduling_module/base_public.html" %}
 {% block extra_head %}
-<meta name="csrf-token" content="{{ csrf_token() }}">
 <meta name="scheduling-api-base" content="{{ request.script_root or '' }}/plugin/scheduling_module">
 {% endblock %}
 {% block content %}

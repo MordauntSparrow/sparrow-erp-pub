@@ -1,14 +1,14 @@
 {
-    "system_name": "training_module",
-    "version": "0.0.2",
-    "installed": true,
-    "enabled": false,
-    "name": "Training Module",
-    "description": "",
-    "dependencies": [
-        "website_module",
-        "employee_portal_module"
-    ],
-    "icon": "icon.png",
-    "dashboard_category": "Learning & compliance"
+  "system_name": "training_module",
+  "name": "Training",
+  "description": "View training and complete mandatory training.",
+  "version": "0.0.3",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["website_module", "employee_portal_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Courses, lessons, quizzes, certificates, sign-off, audit; trn_* schema + legacy migration. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "repository_token": ""
 }

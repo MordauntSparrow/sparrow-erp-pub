@@ -2,12 +2,13 @@
   "repository": "official",
   "system_name": "inventory_control",
   "name": "Inventory Control",
-  "current_version": "0.0.3",
+  "current_version": "0.0.4",
   "compatible_with": ">=1.1.0",
   "force_update": false,
+  "dashboard_category": "Stock & assets",
   "description": "Production-grade inventory, costing, and stock control: item master (SKU, categories, lead time), locations and batches, FIFO/LIFO/AVG costing, reorder points, equipment assets with serial numbers (make, model, warranty, condition), sign-out to users or contractors (loaned vs permanent), usage-by-person and monthly usage charts, idempotent install/upgrade scripts, and supplier/invoice integration.",
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/inventory_control/icon.png",
-  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Finventory_control%2Finventory_control_v0.0.3.zip/raw?ref=main",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Finventory_control%2Finventory_control_v0.0.4.zip/raw?ref=main",
   "dependencies": [],
   "settings": {
     "default_cost_method": {
@@ -20,6 +21,15 @@
     }
   },
   "changelog": [
+    {
+      "version": "0.0.4",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Finventory_control%2Finventory_control_v0.0.4.zip/raw?ref=main",
+      "changes": [
+        "Maintenance release — upload inventory_control_v0.0.4.zip before clients update."
+      ]
+    },
     {
       "version": "0.0.3",
       "date": "2026-03-20",

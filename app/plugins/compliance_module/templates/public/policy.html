@@ -26,6 +26,7 @@
       <p class="text-success small"><i class="bi bi-check-circle"></i> You have signed this policy.</p>
       {% else %}
       <form method="post" action="{{ url_for('public_compliance.acknowledge', slug=policy.slug) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-primary">I have read and accept this policy</button>
       </form>
       {% endif %}

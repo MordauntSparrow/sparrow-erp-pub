@@ -1,10 +1,28 @@
 {
     "system_name": "inventory_control",
-    "version": "0.0.3",
-    "installed": true,
-    "enabled": true,
     "name": "Inventory Control",
-    "description": "",
+    "description": "Advanced inventory, costing, and invoice control for Sparrow ERP.",
+    "version": "0.0.4",
     "icon": "icon.png",
-    "update_available": false
+    "settings": {
+        "default_cost_method": {
+            "value": "AVG",
+            "editable": true
+        },
+        "low_stock_threshold": {
+            "value": 5,
+            "editable": true
+        }
+    },
+    "enabled": true,
+    "dependencies": [
+        "website_module"
+    ],
+    "repository": "official",
+    "download_url": "",
+    "changelog": "Initial scaffold of Inventory Control plugin.",
+    "repository_token": "",
+    "update_available": false,
+    "permission_required": null,
+    "installed": true
 }

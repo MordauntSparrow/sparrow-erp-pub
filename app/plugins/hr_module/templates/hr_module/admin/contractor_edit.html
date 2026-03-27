@@ -32,6 +32,14 @@
     </div>
 
     <h2 class="h6 mt-2 mb-3">Role &amp; organisation</h2>
+    <div class="mb-4">
+      <label class="form-label" for="employment_type">Employment type (payroll)</label>
+      <select class="form-select" id="employment_type" name="employment_type">
+        <option value="paye" {% if (profile.employment_type or 'self_employed')|lower == 'paye' %}selected{% endif %}>PAYE (timesheet only — no contractor invoices)</option>
+        <option value="self_employed" {% if (profile.employment_type or 'self_employed')|lower != 'paye' %}selected{% endif %}>Self-employed (can submit invoices with timesheets)</option>
+      </select>
+      <div class="form-text">Stored on the Time Billing contractor record; controls whether invoicing appears in the contractor portal.</div>
+    </div>
     <div class="row">
       <div class="col-md-6 mb-3">
         <label class="form-label" for="job_title">Job title / role</label>

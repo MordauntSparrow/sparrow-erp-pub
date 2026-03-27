@@ -2,19 +2,22 @@
 {% block title %}Team{% endblock %}
 {% block content %}
 <h1 class="h5 mb-3 fw-semibold">Team</h1>
-<p class="text-secondary small mb-4">Your colleagues</p>
+<p class="text-secondary small mb-4">Tap a name to see their published schedule. Contact details are not shown here.</p>
 
 {% if colleagues %}
 <ul class="list-unstyled mb-0">
   {% for c in colleagues %}
   <li class="d-flex align-items-center py-3 border-bottom border-secondary">
-    <span class="rounded-circle bg-primary bg-opacity-25 d-flex align-items-center justify-content-center me-3 flex-shrink-0" style="width: 2.5rem; height: 2.5rem; font-weight: 600; font-size: 0.875rem;">
-      {{ (c.initials or (c.name or '?')[:2])|upper }}
-    </span>
-    <div class="min-width-0">
-      <span class="fw-medium">{{ c.name or 'Unnamed' }}</span>
-      {% if c.email %}<span class="d-block small text-secondary text-truncate">{{ c.email }}</span>{% endif %}
-    </div>
+    <a href="{{ url_for('public_scheduling.public_team_member_schedule', contractor_id=c.id) }}" class="d-flex align-items-center text-decoration-none flex-grow-1 min-width-0 text-body">
+      <span class="rounded-circle bg-primary bg-opacity-25 d-flex align-items-center justify-content-center me-3 flex-shrink-0" style="width: 2.5rem; height: 2.5rem; font-weight: 600; font-size: 0.875rem;">
+        {{ (c.initials or (c.name or '?')[:2])|upper }}
+      </span>
+      <div class="min-width-0">
+        <span class="fw-medium">{{ c.name or 'Unnamed' }}</span>
+        <span class="d-block small text-secondary">View schedule</span>
+      </div>
+      <i class="bi bi-chevron-right text-secondary ms-2 flex-shrink-0"></i>
+    </a>
   </li>
   {% endfor %}
 </ul>

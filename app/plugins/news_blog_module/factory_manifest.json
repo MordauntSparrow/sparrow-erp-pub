@@ -2,10 +2,11 @@
   "repository": "official",
   "system_name": "news_blog_module",
   "name": "News / Blog",
-  "current_version": "0.0.5",
+  "current_version": "0.0.6",
   "compatible_with": ">=1.1.0",
   "force_update": false,
   "description": "Production-grade news/blog module with article workflow (draft/published), SEO fields, taxonomy (categories/tags), cover images, public listing + detail pages, RSS, JSON-LD, and sitemap-ready routing for AI search discoverability.",
+  "dashboard_category": "Web & marketing",
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/news_blog_module/icon.png",
   "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.5.zip/raw?ref=main",
   "dependencies": [
@@ -28,6 +29,15 @@
     "/news/sitemap.xml"
   ],
   "changelog": [
+    {
+      "version": "0.0.6",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.6.zip/raw?ref=main",
+      "changes": [
+        "Maintenance release — upload news_blog_module_v0.0.6.zip before clients update."
+      ]
+    },
     {
       "version": "0.0.5",
       "date": "2026-03-20",

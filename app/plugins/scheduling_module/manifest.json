@@ -1,16 +1,14 @@
 {
-    "system_name": "scheduling_module",
-    "version": "0.0.2",
-    "installed": true,
-    "enabled": true,
-    "name": "Scheduling Module",
-    "description": "",
-    "dependencies": [
-        "website_module",
-        "employee_portal_module",
-        "time_billing_module"
-    ],
-    "icon": "icon.png",
-    "dashboard_category": "Roster & shifts",
-    "update_available": false
+  "system_name": "scheduling_module",
+  "name": "Scheduling & Shifts",
+  "description": "View your shifts and schedule.",
+  "version": "0.0.3",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["website_module", "employee_portal_module", "time_billing_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Sling-level scheduling: shifts, open shifts, templates, labour cost, audit, time clock & geofencing, timesheet export, announcements, shift tasks. See README and INTEGRATION.md. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "repository_token": ""
 }

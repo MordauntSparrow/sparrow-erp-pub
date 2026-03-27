@@ -2,7 +2,7 @@
 
 Base path: `/plugin/inventory_control`. Most JSON APIs require authentication (session).
 
-**Lovable / frontend:** See [LOVABLE_PRD_AND_PROMPT.md](./LOVABLE_PRD_AND_PROMPT.md) for a full PRD, endpoint list, settings page (API URL), auth flow, and component-level prompts. Access is controlled by **admin role** (same as the rest of the system; a future core update will refine the permissions system). **Supplier-facing** endpoints accept **Bearer token** (role `supplier`) for external supplier access. Customer-facing features (order tracking, invoices, etc.) are **not** in this module; they will be in a future Sales module.
+**External clients / SPA:** See [EXTERNAL_CLIENT_PRD_AND_PROMPT.md](./EXTERNAL_CLIENT_PRD_AND_PROMPT.md) for a PRD-style scope, endpoints, and auth notes. Browser admin UIs use **session cookies + CSRF** (`X-CSRFToken`). **Mobile and integrations** should use **`Authorization: Bearer`** (JWT from `POST /api/login`) on inventory API routes that support it. **Supplier-facing** endpoints accept **Bearer token** (role `supplier`). Customer-facing features (order tracking, invoices, etc.) are **not** in this module; they will be in a future Sales module.
 
 ## OpenAPI
 

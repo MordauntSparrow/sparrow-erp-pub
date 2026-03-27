@@ -405,6 +405,75 @@ def admin_search_contractors(q: str, limit: int = 50) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def get_contractor_employment_type_for_contractor(contractor_id: int) -> Optional[str]:
+    """Time Billing / HR: read employment_type from tb_contractors."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        try:
+            cur.execute(
+                "SELECT employment_type FROM tb_contractors WHERE id = %s LIMIT 1",
+                (int(contractor_id),),
+            )
+        except Exception:
+            return None
+        row = cur.fetchone()
+        if not row:
+            return None
+        v = (row.get("employment_type") or "").strip().lower()
+        return v if v in ("paye", "self_employed") else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_contractor_invoice_address_lines(contractor_id: int) -> List[str]:
+    """Fallback 'from' address for Time Billing invoice PDFs when portal billing fields are empty."""
+    p = admin_get_staff_profile(contractor_id)
+    if not p:
+        return []
+    lines: List[str] = []
+    name = (p.get("name") or "").strip()
+    if name:
+        lines.append(name)
+    a1 = (p.get("address_line1") or "").strip()
+    a2 = (p.get("address_line2") or "").strip()
+    pc = (p.get("postcode") or "").strip()
+    if a1:
+        lines.append(a1)
+    if a2:
+        lines.append(a2)
+    if pc:
+        lines.append(pc)
+    return lines
+
+
+def admin_update_contractor_employment_type(contractor_id: int, employment_type: str) -> bool:
+    """Set tb_contractors.employment_type (PAYE vs self-employed)."""
+    et = (employment_type or "").strip().lower()
+    if et not in ("paye", "self_employed"):
+        et = "self_employed"
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        try:
+            cur.execute(
+                "UPDATE tb_contractors SET employment_type = %s WHERE id = %s",
+                (et, int(contractor_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return False
+    finally:
+        cur.close()
+        conn.close()
+
+
 def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
     """Full HR profile for admin: core + all staff_details columns."""
     conn = get_db_connection()
@@ -412,14 +481,28 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
     try:
         try:
             cur.execute(
-                "SELECT id, name, email, initials, status, profile_picture_path FROM tb_contractors WHERE id = %s",
+                """
+                SELECT id, name, email, initials, status, profile_picture_path,
+                       COALESCE(employment_type, 'self_employed') AS employment_type
+                FROM tb_contractors WHERE id = %s
+                """,
                 (contractor_id,),
             )
         except Exception:
-            cur.execute(
-                "SELECT id, name, email, initials, status FROM tb_contractors WHERE id = %s",
-                (contractor_id,),
-            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    "SELECT id, name, email, initials, status, profile_picture_path FROM tb_contractors WHERE id = %s",
+                    (contractor_id,),
+                )
+            except Exception:
+                cur.execute(
+                    "SELECT id, name, email, initials, status FROM tb_contractors WHERE id = %s",
+                    (contractor_id,),
+                )
         row = cur.fetchone()
         if not row:
             return None

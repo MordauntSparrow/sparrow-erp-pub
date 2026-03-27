@@ -25,6 +25,7 @@
     <p class="small"><span class="badge bg-secondary">{{ req.status|hr_doc_request_status }}</span></p>
     <h2 class="h6 mt-3">Upload document</h2>
     <form method="post" action="{{ url_for('public_hr.request_upload', req_id=req.id) }}" enctype="multipart/form-data" class="mb-4">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <input type="file" name="document" class="form-control mb-2" accept=".pdf,.jpg,.jpeg,.png">
       <button type="submit" class="btn btn-primary btn-sm">Upload</button>
     </form>

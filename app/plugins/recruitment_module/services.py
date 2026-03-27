@@ -28,6 +28,10 @@ STAGE_LABELS = {
     "rejected": "Rejected",
 }
 
+# Interview arrangements (admin → applicant at interview stage)
+INTERVIEW_FORMAT_ONLINE = "online"
+INTERVIEW_FORMAT_ONSITE = "onsite"
+
 
 def recruitment_applicant_retention_days() -> int:
     """Days after hire/reject before recruitment-only PII may be purged (default 60)."""
@@ -719,10 +723,32 @@ def _copy_prehire_and_cv_to_hr(
                     logger.warning("HR employee document CV insert failed: %s", e)
 
         phone = (app_row.get("phone") or "").strip() or None
+        dob = _coerce_db_date(app_row.get("date_of_birth"))
+        a1 = (app_row.get("address_line1") or "").strip() or None
+        a2 = (app_row.get("address_line2") or "").strip() or None
+        pc = (app_row.get("postcode") or "").strip() or None
+        ecn = (app_row.get("emergency_contact_name") or "").strip() or None
+        ecp = (app_row.get("emergency_contact_phone") or "").strip() or None
         cur.execute(
-            "INSERT INTO hr_staff_details (contractor_id, phone) VALUES (%s, %s) "
-            "ON DUPLICATE KEY UPDATE phone = COALESCE(VALUES(phone), hr_staff_details.phone)",
-            (contractor_id, phone),
+            """
+            INSERT INTO hr_staff_details (
+              contractor_id, phone, address_line1, address_line2, postcode,
+              emergency_contact_name, emergency_contact_phone, date_of_birth
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+              phone = COALESCE(VALUES(phone), hr_staff_details.phone),
+              address_line1 = COALESCE(VALUES(address_line1), hr_staff_details.address_line1),
+              address_line2 = COALESCE(VALUES(address_line2), hr_staff_details.address_line2),
+              postcode = COALESCE(VALUES(postcode), hr_staff_details.postcode),
+              emergency_contact_name = COALESCE(
+                VALUES(emergency_contact_name), hr_staff_details.emergency_contact_name
+              ),
+              emergency_contact_phone = COALESCE(
+                VALUES(emergency_contact_phone), hr_staff_details.emergency_contact_phone
+              ),
+              date_of_birth = COALESCE(VALUES(date_of_birth), hr_staff_details.date_of_birth)
+            """,
+            (contractor_id, phone, a1, a2, pc, ecn, ecp, dob),
         )
         for col, path in staff_updates.items():
             cur.execute(
@@ -769,6 +795,88 @@ def parse_form_schema(schema_json: Any) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         return data
     return []
+
+
+def _format_task_response_value(value: Any, field_type: Optional[str] = None) -> str:
+    """Single value as readable text for admin review."""
+    if value is None or value == "":
+        return "—"
+    typ = (field_type or "").lower()
+    if typ == "checkbox":
+        s = str(value).lower()
+        if s in ("1", "true", "yes", "on"):
+            return "Yes"
+        if s in ("0", "false", "no", "off"):
+            return "No"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, list):
+        return ", ".join(_format_task_response_value(x, None) for x in value)
+    s = str(value).strip()
+    if typ == "file" and s:
+        return s
+    if s.lower() in ("yes", "no"):
+        return s.capitalize()
+    return s
+
+
+def humanize_task_response_rows(
+    response_json: Any, schema_fields: List[Dict[str, Any]]
+) -> List[Dict[str, str]]:
+    """
+    Turn stored response_json + form schema into ordered label/value rows for admin UI.
+    """
+    resp = _json_loads_maybe(response_json)
+    if not isinstance(resp, dict):
+        return []
+    fields = schema_fields or []
+    name_to_field = {str(f.get("name") or ""): f for f in fields if f.get("name")}
+    ordered_names = [str(f.get("name")) for f in fields if f.get("name")]
+    seen: Set[str] = set()
+    rows: List[Dict[str, str]] = []
+    for name in ordered_names:
+        if name in seen or name not in resp:
+            continue
+        seen.add(name)
+        f = name_to_field.get(name) or {}
+        label = (f.get("label") or name).strip() or name
+        rows.append(
+            {
+                "label": label,
+                "value": _format_task_response_value(resp.get(name), f.get("type")),
+            }
+        )
+    for k, v in resp.items():
+        k_str = str(k)
+        if k_str in seen:
+            continue
+        seen.add(k_str)
+        pretty = k_str.replace("-", " ").replace("_", " ").strip()
+        rows.append(
+            {
+                "label": pretty.title() if pretty else k_str,
+                "value": _format_task_response_value(v, None),
+            }
+        )
+    return rows
+
+
+def task_response_preview_summary(response_rows: List[Dict[str, str]], max_len: int = 90) -> str:
+    """One-line preview for the tasks table (not JSON)."""
+    if not response_rows:
+        return ""
+    parts = []
+    n = 0
+    for r in response_rows:
+        chunk = f"{r.get('label', '')}: {r.get('value', '')}"
+        if n + len(chunk) > max_len and parts:
+            break
+        parts.append(chunk)
+        n += len(chunk) + 2
+    s = " · ".join(parts)
+    if len(s) > max_len:
+        return s[: max_len - 1] + "…"
+    return s
 
 
 def schema_to_json_string(schema: Any) -> str:
@@ -1112,11 +1220,76 @@ def ensure_applicant_password(applicant_id: int, password: str) -> Tuple[bool, s
 # ---------------------------------------------------------------------------
 
 
+def _parse_iso_date_only(raw: Optional[str]) -> Optional[date]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _coerce_db_date(val: Any) -> Optional[date]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    return _parse_iso_date_only(str(val))
+
+
+def validate_application_hr_profile_from_request(form: Any) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    Required HR basics when submitting a vacancy application (public form).
+    Returns a dict safe to pass to create_application(hr_profile=...).
+    """
+    phone = (form.get("phone") or "").strip() or None
+    if not phone:
+        return False, "Please enter your phone number.", None
+    dob = _parse_iso_date_only(form.get("date_of_birth"))
+    if not dob:
+        return False, "Please enter your date of birth.", None
+    today = date.today()
+    if dob > today:
+        return False, "Date of birth cannot be in the future.", None
+    age = (today - dob).days // 365
+    if age < 16:
+        return False, "You must be at least 16 years old to apply.", None
+    if age > 100:
+        return False, "Please check your date of birth.", None
+    a1 = (form.get("address_line1") or "").strip()
+    if len(a1) < 3:
+        return False, "Please enter your address (line 1).", None
+    pc = (form.get("postcode") or "").strip()
+    if len(pc) < 2:
+        return False, "Please enter your postcode.", None
+    ecn = (form.get("emergency_contact_name") or "").strip()
+    if len(ecn) < 2:
+        return False, "Please enter your emergency contact’s name.", None
+    ecp = (form.get("emergency_contact_phone") or "").strip()
+    if len(ecp) < 6:
+        return False, "Please enter a valid emergency contact phone number.", None
+    a2 = (form.get("address_line2") or "").strip() or None
+    return True, "ok", {
+        "phone": phone[:64],
+        "date_of_birth": dob,
+        "address_line1": a1[:255],
+        "address_line2": (a2[:255] if a2 else None),
+        "postcode": pc[:32],
+        "emergency_contact_name": ecn[:255],
+        "emergency_contact_phone": ecp[:64],
+    }
+
+
 def create_application(
     opening_id: int,
     applicant_id: int,
     cover_note: Optional[str] = None,
     cv_path: Optional[str] = None,
+    *,
+    hr_profile: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, str, Optional[int]]:
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
@@ -1462,6 +1635,161 @@ def set_application_stage(application_id: int, new_stage: str) -> Tuple[bool, st
         schedule_recruitment_purge_eligible(application_id)
     apply_auto_tasks_for_stage(application_id)
     return True, "ok"
+
+
+def _looks_like_http_url(s: str) -> bool:
+    s = (s or "").strip().lower()
+    return s.startswith("http://") or s.startswith("https://")
+
+
+def list_interview_location_presets(active_only: bool = True) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        if active_only:
+            cur.execute(
+                """
+                SELECT id, label, location_text, sort_order, active
+                FROM rec_interview_location_presets
+                WHERE active = 1
+                ORDER BY sort_order ASC, label ASC, id ASC
+                """
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, label, location_text, sort_order, active
+                FROM rec_interview_location_presets
+                ORDER BY sort_order ASC, label ASC, id ASC
+                """
+            )
+        return cur.fetchall() or []
+    except Exception as e:
+        logger.warning("list_interview_location_presets: %s", e)
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_add_interview_location_preset(label: str, location_text: str) -> Tuple[bool, str]:
+    label = (label or "").strip()
+    loc = (location_text or "").strip()
+    if len(label) < 2:
+        return False, "Preset name is too short."
+    if len(loc) < 4:
+        return False, "Location text is too short."
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM rec_interview_location_presets")
+        row = cur.fetchone()
+        nxt = int(row[0]) if row and row[0] is not None else 1
+        cur.execute(
+            """
+            INSERT INTO rec_interview_location_presets (label, location_text, sort_order, active)
+            VALUES (%s, %s, %s, 1)
+            """,
+            (label[:128], loc, nxt),
+        )
+        conn.commit()
+        return True, "ok"
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_delete_interview_location_preset(preset_id: int) -> Tuple[bool, str]:
+    if preset_id <= 0:
+        return False, "Invalid preset."
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM rec_interview_location_presets WHERE id = %s", (preset_id,))
+        conn.commit()
+        return (True, "ok") if cur.rowcount else (False, "Preset not found.")
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_set_application_interview_details(
+    application_id: int,
+    interview_format: Optional[str],
+    meeting_url: Optional[str],
+    location_text: Optional[str],
+) -> Tuple[bool, str]:
+    """
+    interview_format: '', 'online', or 'onsite' (case-insensitive).
+    When online: stores URL, clears location. When onsite: stores location, clears URL.
+    Empty format clears all three fields.
+    """
+    fmt = (interview_format or "").strip().lower()
+    if fmt not in ("", INTERVIEW_FORMAT_ONLINE, INTERVIEW_FORMAT_ONSITE):
+        return False, "Invalid interview format."
+    url = (meeting_url or "").strip() or None
+    loc = (location_text or "").strip() or None
+    if fmt == INTERVIEW_FORMAT_ONLINE:
+        loc = None
+        if not url:
+            return False, "Enter a meeting link (https://…) for online interviews."
+        if not _looks_like_http_url(url):
+            return False, "Meeting link must start with http:// or https://."
+        if len(url) > 2000:
+            return False, "Meeting link is too long."
+    elif fmt == INTERVIEW_FORMAT_ONSITE:
+        url = None
+        if not loc:
+            return False, "Enter the on-site location (or pick a preset and edit if needed)."
+    else:
+        url = None
+        loc = None
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE rec_applications
+                SET interview_format = NULL, interview_meeting_url = NULL, interview_location = NULL
+                WHERE id = %s
+                """,
+                (application_id,),
+            )
+            conn.commit()
+            return (True, "ok") if cur.rowcount else (False, "Application not found.")
+        except Exception as e:
+            conn.rollback()
+            return False, str(e)
+        finally:
+            cur.close()
+            conn.close()
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE rec_applications
+            SET interview_format = %s, interview_meeting_url = %s, interview_location = %s
+            WHERE id = %s
+            """,
+            (fmt, url, loc, application_id),
+        )
+        conn.commit()
+        return (True, "ok") if cur.rowcount else (False, "Application not found.")
+    except Exception as e:
+        conn.rollback()
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
 
 # ---------------------------------------------------------------------------
 # Admin: roles
@@ -2285,7 +2613,7 @@ def admin_list_application_tasks(application_id: int) -> List[Dict[str, Any]]:
     try:
         cur.execute(
             """
-            SELECT t.*, ft.name AS template_name, ft.purpose
+            SELECT t.*, ft.name AS template_name, ft.purpose, ft.schema_json
             FROM rec_application_tasks t
             JOIN rec_form_templates ft ON ft.id = t.form_template_id
             WHERE t.application_id = %s
@@ -2293,7 +2621,13 @@ def admin_list_application_tasks(application_id: int) -> List[Dict[str, Any]]:
             """,
             (application_id,),
         )
-        return cur.fetchall() or []
+        rows = cur.fetchall() or []
+        for r in rows:
+            sf = parse_form_schema(r.get("schema_json"))
+            r["schema_fields"] = sf
+            r["response_rows"] = humanize_task_response_rows(r.get("response_json"), sf)
+            r["response_preview"] = task_response_preview_summary(r["response_rows"])
+        return rows
     finally:
         cur.close()
         conn.close()

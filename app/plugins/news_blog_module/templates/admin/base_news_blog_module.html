@@ -35,31 +35,7 @@
     {% endif %}
   }
 
-  /* ===== Navbar ===== */
-  .navbar {
-    {% if config.theme_settings.theme == 'dark' %}
-      background-color: #1f1f1f;
-    {% else %}
-      background-color: #ffffff;
-    {% endif %}
-  }
-  .navbar .nav-link, .navbar-brand {
-    {% if config.theme_settings.theme == 'dark' %}
-      color: #e6e6e6;
-    {% else %}
-      color: #212529;
-    {% endif %}
-  }
-  .navbar .nav-link:hover, .navbar .nav-link:focus {
-    {% if config.theme_settings.theme == 'dark' %}
-      color: #1e90ff;
-    {% else %}
-      color: #0d6efd;
-    {% endif %}
-    text-decoration: none;
-  }
-  .navbar .nav-link i { transition: transform 0.2s ease; }
-  .navbar .nav-link:hover i { transform: scale(1.2); }
+  {% include 'partials/sparrow_admin_nav_styles.html' %}
 
   /* ===== Links ===== */
   a {
@@ -166,75 +142,17 @@
   /* Footer separation */
   .footer { {% if config.theme_settings.theme != 'dark' %} border-top: 1px solid rgba(0,0,0,.06); {% endif %} }
   </style>
+{% include 'partials/sparrow_csrf_head.html' %}
 </head>
 <body>
 
-  <!-- Navbar -->
-  <nav class="navbar navbar-expand-lg navbar-light sticky-top shadow-sm">
+  {% include 'partials/sparrow_admin_top_nav.html' %}
+  <nav class="nav-module border-bottom py-2 px-3" style="{% if config.theme_settings.theme == 'dark' %}background:#1a1a1a;border-color:#333!important{% else %}background:#f8f9fa;border-color:#dee2e6!important{% endif %}">
     <div class="container-fluid px-3">
-
-      {% set site_settings = session.get('site_settings', {}) %}
-      {% set company_name = site_settings.get('company_name') or 'Sparrow ERP' %}
-      {% set branding = site_settings.get('branding') %}
-      {% set logo_path = site_settings.get('logo_path') %}
-
-      {% if branding == 'logo' and logo_path %}
-        <a class="navbar-brand" href="/">
-          <img src="{{ url_for('static', filename=logo_path) }}"
-               alt="{{ company_name }} Logo"
-               height="60"
-               style="max-height:60px">
+      <div class="d-flex flex-wrap align-items-center gap-1">
+        <a class="nav-link {% if request.endpoint == 'internal_news_blog.articles_list' %}active{% endif %}" href="{{ url_for('internal_news_blog.articles_list') }}">
+          <i class="bi bi-newspaper me-1"></i> Articles
         </a>
-      {% else %}
-        <a class="navbar-brand fw-semibold" href="/">{{ company_name }}</a>
-      {% endif %}
-
-      <button class="navbar-toggler" type="button" data-mdb-toggle="collapse" data-mdb-target="#navbarNav"
-              aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-        <i class="fas fa-bars"></i>
-      </button>
-
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto align-items-lg-center">
-          <li class="nav-item">
-            <a class="nav-link py-2 px-3" href="/" aria-current="{{ 'page' if request.path == '/' else 'false' }}">
-              <i class="bi bi-house me-1"></i> Home
-            </a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link py-2 px-3" href="/plugins" aria-current="{{ 'page' if request.path.startswith('/plugins') else 'false' }}">
-              <i class="bi bi-boxes me-1"></i> Plugins
-            </a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link py-2 px-3" href="/version" aria-current="{{ 'page' if request.path == '/version' else 'false' }}">
-              <i class="bi bi-cloud-download me-1"></i> Version Manager
-            </a>
-          </li>
-
-          <li class="w-100 d-lg-none my-2"><hr class="my-0"></li>
-
-          <li class="nav-item dropdown">
-            <a class="nav-link dropdown-toggle py-2 px-3 d-flex align-items-center" href="#"
-               id="userDropdown" role="button" data-mdb-toggle="dropdown" aria-expanded="false">
-              <i class="bi bi-person-circle me-1"></i>
-              <span class="text-truncate" style="max-width:160px">{{ site_settings.get('user_name', 'User') }}</span>
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-              <li>
-                <h6 class="dropdown-header d-flex align-items-center">
-                  <i class="bi bi-info-circle me-2"></i> Account
-                </h6>
-              </li>
-              <li>
-                <a class="dropdown-item" href="/logout">
-                  <i class="bi bi-box-arrow-right me-2"></i> Logout
-                </a>
-              </li>
-            </ul>
-          </li>
-
-        </ul>
       </div>
     </div>
   </nav>

@@ -400,6 +400,11 @@ def admin_contractor_edit_save(cid):
     else:
         flash("Failed to save profile.", "error")
 
+    et = (request.form.get("employment_type") or "").strip().lower()
+    if et in ("paye", "self_employed"):
+        if hr_services.admin_update_contractor_employment_type(cid, et):
+            flash("Employment type updated for Time Billing.", "success")
+
     pic = request.files.get("profile_picture")
     if pic and pic.filename and pic.filename.strip():
         ext = os.path.splitext(pic.filename)[1].lower() or ""

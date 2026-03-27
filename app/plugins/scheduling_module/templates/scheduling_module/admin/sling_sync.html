@@ -24,6 +24,7 @@
         {% endif %}
 
         <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_credentials') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <label class="form-label">Sling email</label>
           <input type="email" name="email" class="form-control form-control-sm mb-3" required value="{{ stored_email or '' }}" placeholder="you@example.com" />
 
@@ -48,6 +49,7 @@
         <h5 class="card-title mb-2">Sync defaults</h5>
 
         <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_settings') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <label class="form-label">Default job type</label>
           <select name="default_job_type_id" class="form-select form-select-sm mb-3" required>
             <option value="">Select…</option>
@@ -87,6 +89,7 @@
     </div>
 
     <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_run') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3">
         <div class="col-12 col-md-6">
           <label class="form-label">Date from</label>

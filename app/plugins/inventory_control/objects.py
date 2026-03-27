@@ -160,6 +160,8 @@ def _ensure_inventory_equipment_schema(conn) -> None:
     _alter_add_column(conn, "inventory_equipment_assets", "warranty_expiry DATE NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "service_interval_days INT NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "condition VARCHAR(64) NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
 
 
 class CostingStrategy:
@@ -860,7 +862,21 @@ class InventoryService:
                 ),
             )
             conn.commit()
-            return cur.lastrowid
+            new_id = cur.lastrowid
+            try:
+                code = f"AST-{int(new_id):06d}"
+                cur.execute(
+                    """
+                    UPDATE inventory_equipment_assets
+                    SET public_asset_code = %s
+                    WHERE id = %s AND (public_asset_code IS NULL OR public_asset_code = '')
+                    """,
+                    (code, int(new_id)),
+                )
+                conn.commit()
+            except Exception:
+                pass
+            return int(new_id)
         finally:
             cur.close()
 

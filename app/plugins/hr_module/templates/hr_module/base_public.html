@@ -8,8 +8,8 @@
     <div class="navbar-nav ms-auto align-items-center gap-2">
       <a class="nav-link" href="{{ url_for('public_hr.profile') }}">My details</a>
       <span class="navbar-text small me-1" aria-hidden="true">Theme</span>
-      <form method="post" action="{{ url_for('routes.contractor_set_theme') }}" class="d-inline"><input type="hidden" name="theme" value="light"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if (portal_theme|default('dark')) != 'light' else 'btn-secondary' }}" aria-label="Light theme">Light</button></form>
-      <form method="post" action="{{ url_for('routes.contractor_set_theme') }}" class="d-inline"><input type="hidden" name="theme" value="dark"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if (portal_theme|default('dark')) != 'dark' else 'btn-secondary' }}" aria-label="Dark theme">Dark</button></form>
+      <form method="post" action="{{ url_for('sparrow_shared_contractor_ui.set_contractor_theme') }}" class="d-inline"><input type="hidden" name="theme" value="light"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if (portal_theme|default('dark')) != 'light' else 'btn-secondary' }}" aria-label="Light theme">Light</button></form>
+      <form method="post" action="{{ url_for('sparrow_shared_contractor_ui.set_contractor_theme') }}" class="d-inline"><input type="hidden" name="theme" value="dark"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-sm {{ 'btn-outline-secondary' if (portal_theme|default('dark')) != 'dark' else 'btn-secondary' }}" aria-label="Dark theme">Dark</button></form>
     </div>
   </div>
 </nav>

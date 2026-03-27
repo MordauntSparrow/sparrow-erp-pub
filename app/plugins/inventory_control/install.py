@@ -82,6 +82,8 @@ def _upgrade_equipment_assets(conn) -> None:
     _alter_add_column(conn, "inventory_equipment_assets", "warranty_expiry DATE NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "service_interval_days INT NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "condition VARCHAR(64) NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
 
 
 def install():
@@ -459,6 +461,46 @@ def install():
                 cur.close()
             except Exception:
                 pass
+
+        _alter_add_column(
+            conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL"
+        )
+        _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
+        cur_idx = None
+        try:
+            cur_idx = conn.cursor()
+            cur_idx.execute(
+                "CREATE UNIQUE INDEX uniq_inventory_equipment_public_code ON inventory_equipment_assets (public_asset_code)"
+            )
+            conn.commit()
+            print("[inventory_control] Unique index on public_asset_code")
+        except Exception as e:
+            if "Duplicate" not in str(e):
+                print(f"[inventory_control] public_asset_code index: {e}")
+        finally:
+            if cur_idx:
+                try:
+                    cur_idx.close()
+                except Exception:
+                    pass
+
+        cur_idx2 = None
+        try:
+            cur_idx2 = conn.cursor()
+            cur_idx2.execute(
+                "CREATE INDEX idx_inv_tx_assignee ON inventory_transactions (assignee_type, assignee_id, performed_at)"
+            )
+            conn.commit()
+            print("[inventory_control] Index idx_inv_tx_assignee")
+        except Exception as e:
+            if "Duplicate" not in str(e):
+                print(f"[inventory_control] idx_inv_tx_assignee: {e}")
+        finally:
+            if cur_idx2:
+                try:
+                    cur_idx2.close()
+                except Exception:
+                    pass
 
         # Schema migrations: weight and repack support
         _alter_add_column(conn, "inventory_transactions", "weight DECIMAL(18, 6) NULL")

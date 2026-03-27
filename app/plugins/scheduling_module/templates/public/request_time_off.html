@@ -19,6 +19,7 @@
   <main class="container py-4">
     <h1 class="h5 mb-3">Request time off</h1>
     <form method="post" action="{{ url_for('public_scheduling.request_time_off_submit') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <div class="mb-2">
         <label class="form-label small">From date</label>
         <input type="date" name="start_date" class="form-control" required>

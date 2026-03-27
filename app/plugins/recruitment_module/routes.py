@@ -6,11 +6,13 @@ from urllib.parse import quote
 
 from flask import (
     Blueprint,
+    abort,
     current_app,
     flash,
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
@@ -37,6 +39,9 @@ public_site_bp = Blueprint(
 )
 
 SESSION_APPLICANT = "rec_applicant"
+# Public careers site only — keeps core/admin flashes off job & applicant pages
+REC_PUB_FLASH_SUCCESS = "recruitment_success"
+REC_PUB_FLASH_ERROR = "recruitment_error"
 ALLOWED_CV_EXT = {".pdf", ".doc", ".docx"}
 ALLOWED_TASK_FORM_FILE_EXT = {
     ".pdf",
@@ -104,6 +109,11 @@ def _applicant_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def _flash_public(message: str, *, error: bool = False) -> None:
+    """Queue a flash visible only on public recruitment templates (not mixed with ERP admin)."""
+    flash(message, REC_PUB_FLASH_ERROR if error else REC_PUB_FLASH_SUCCESS)
 
 
 def _form_optional_positive_int(field: str) -> Optional[int]:
@@ -189,15 +199,18 @@ def vacancies_list():
 def vacancy_detail(slug):
     opening = rec_svc.get_opening_public_by_slug(slug)
     if not opening:
-        flash("Vacancy not found or no longer open.", "error")
+        _flash_public("Vacancy not found or no longer open.", error=True)
         return redirect(url_for("public_recruitment_site.vacancies_list"))
+    u = _applicant_user()
+    applicant_profile = rec_svc.get_applicant_by_id(int(u["id"])) if u else None
     return render_template(
         "recruitment_module/public/vacancy_detail.html",
         opening=opening,
         title=opening.get("title") or "Vacancy",
         config=_core_manifest,
         website_settings=_get_website_settings(),
-        applicant=_applicant_user(),
+        applicant=u,
+        applicant_profile=applicant_profile,
     )
 
 
@@ -205,11 +218,11 @@ def vacancy_detail(slug):
 def vacancy_apply_post(slug):
     opening = rec_svc.get_opening_public_by_slug(slug)
     if not opening:
-        flash("Vacancy not found.", "error")
+        _flash_public("Vacancy not found.", error=True)
         return redirect(url_for("public_recruitment_site.vacancies_list"))
     u = _applicant_user()
     if not u:
-        flash("Please sign in or create an applicant account to apply.", "error")
+        _flash_public("Please sign in or create an applicant account to apply.", error=True)
         return redirect(
             url_for("public_recruitment_site.applicant_login")
             + "?next="
@@ -220,17 +233,27 @@ def vacancy_apply_post(slug):
     file = request.files.get("cv")
     up = _save_cv_upload(file)
     if file and file.filename and not up:
-        flash("CV must be PDF, DOC, or DOCX.", "error")
+        _flash_public("CV must be PDF, DOC, or DOCX.", error=True)
         return redirect(url_for("public_recruitment_site.vacancy_detail", slug=slug))
     if up:
         cv_path = up
+    ok_prof, msg_prof, hr_profile = rec_svc.validate_application_hr_profile_from_request(
+        request.form
+    )
+    if not ok_prof:
+        _flash_public(msg_prof, error=True)
+        return redirect(url_for("public_recruitment_site.vacancy_detail", slug=slug))
     ok, msg, app_id = rec_svc.create_application(
-        int(opening["id"]), int(u["id"]), cover_note=cover, cv_path=cv_path
+        int(opening["id"]),
+        int(u["id"]),
+        cover_note=cover,
+        cv_path=cv_path,
+        hr_profile=hr_profile,
     )
     if not ok:
-        flash(msg, "error")
+        _flash_public(msg, error=True)
         return redirect(url_for("public_recruitment_site.vacancy_detail", slug=slug))
-    flash("Application submitted. You can track progress in your applicant portal.", "success")
+    _flash_public("Application submitted. You can track progress in your applicant portal.")
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=app_id)
     )
@@ -256,7 +279,7 @@ def applicant_register_post():
     password = request.form.get("password") or ""
     ok, msg, aid = rec_svc.register_applicant(email, name, phone, password)
     if not ok:
-        flash(msg, "error")
+        _flash_public(msg, error=True)
         return redirect(url_for("public_recruitment_site.applicant_register"))
     session[SESSION_APPLICANT] = {
         "id": aid,
@@ -264,7 +287,7 @@ def applicant_register_post():
         "name": (name or "").strip(),
     }
     session.modified = True
-    flash("Account created. You can apply for open roles.", "success")
+    _flash_public("Account created. You can apply for open roles.")
     nxt = request.args.get("next") or url_for("public_recruitment_site.applicant_dashboard")
     return redirect(nxt)
 
@@ -289,7 +312,7 @@ def applicant_login_post():
     password = request.form.get("password") or ""
     row = rec_svc.verify_applicant_login(email, password)
     if not row:
-        flash("Invalid email or password.", "error")
+        _flash_public("Invalid email or password.", error=True)
         return redirect(url_for("public_recruitment_site.applicant_login"))
     session[SESSION_APPLICANT] = {
         "id": row["id"],
@@ -331,7 +354,7 @@ def applicant_application(application_id):
     uid = int(_applicant_user()["id"])
     app_row = rec_svc.get_application_for_applicant(application_id, uid)
     if not app_row:
-        flash("Application not found.", "error")
+        _flash_public("Application not found.", error=True)
         return redirect(url_for("public_recruitment_site.applicant_dashboard"))
     tasks = rec_svc.get_application_tasks_for_applicant(application_id, uid)
     progress = rec_svc.application_progress(app_row.get("stage") or "applied")
@@ -359,17 +382,17 @@ def applicant_upload_cv(application_id):
     uid = int(_applicant_user()["id"])
     app_row = rec_svc.get_application_for_applicant(application_id, uid)
     if not app_row:
-        flash("Application not found.", "error")
+        _flash_public("Application not found.", error=True)
         return redirect(url_for("public_recruitment_site.applicant_dashboard"))
     file = request.files.get("cv")
     up = _save_cv_upload(file)
     if not up:
-        flash("Upload a PDF, DOC, or DOCX file.", "error")
+        _flash_public("Upload a PDF, DOC, or DOCX file.", error=True)
         return redirect(
             url_for("public_recruitment_site.applicant_application", application_id=application_id)
         )
     rec_svc.update_application_cv(application_id, uid, up)
-    flash("CV updated.", "success")
+    _flash_public("CV updated.")
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=application_id)
     )
@@ -380,7 +403,7 @@ def applicant_upload_cv(application_id):
 def applicant_policies_ack(application_id):
     uid = int(_applicant_user()["id"])
     ok, msg = rec_svc.applicant_set_policies_acknowledged(application_id, uid)
-    flash("Policies acknowledged — thank you." if ok else msg, "success" if ok else "error")
+    _flash_public("Policies acknowledged — thank you." if ok else msg, error=not ok)
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=application_id)
     )
@@ -395,14 +418,14 @@ def applicant_prehire_upload(application_id, request_id):
     fs = request.files.get("file")
     rel = _save_prehire_file_upload(fs)
     if not rel:
-        flash("Upload a supported file (PDF, Word, or image).", "error")
+        _flash_public("Upload a supported file (PDF, Word, or image).", error=True)
         return redirect(
             url_for("public_recruitment_site.applicant_application", application_id=application_id)
         )
     ok, msg = rec_svc.applicant_save_prehire_upload(
         application_id, uid, request_id, rel, fs.filename if fs else None
     )
-    flash("Document uploaded." if ok else msg, "success" if ok else "error")
+    _flash_public("Document uploaded." if ok else msg, error=not ok)
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=application_id)
     )
@@ -415,7 +438,7 @@ def applicant_prehire_upload(application_id, request_id):
 def applicant_prehire_policy_ack(application_id, request_id):
     uid = int(_applicant_user()["id"])
     ok, msg = rec_svc.applicant_confirm_prehire_policy_ack(application_id, uid, request_id)
-    flash("Recorded — awaiting HR confirmation." if ok else msg, "success" if ok else "error")
+    _flash_public("Recorded — awaiting HR confirmation." if ok else msg, error=not ok)
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=application_id)
     )
@@ -427,7 +450,7 @@ def applicant_task(task_id):
     uid = int(_applicant_user()["id"])
     task = rec_svc.get_task_for_applicant(task_id, uid)
     if not task:
-        flash("Task not found.", "error")
+        _flash_public("Task not found.", error=True)
         return redirect(url_for("public_recruitment_site.applicant_dashboard"))
     schema_fields = task.get("schema_fields") or []
     has_file_field = any(
@@ -451,7 +474,7 @@ def applicant_task_post(task_id):
     uid = int(_applicant_user()["id"])
     task = rec_svc.get_task_for_applicant(task_id, uid)
     if not task:
-        flash("Task not found.", "error")
+        _flash_public("Task not found.", error=True)
         return redirect(url_for("public_recruitment_site.applicant_dashboard"))
     fields = task.get("schema_fields") or []
     response = rec_svc.collect_task_response_from_form(fields, request.form)
@@ -464,20 +487,20 @@ def applicant_task_post(task_id):
         fs = request.files.get(name)
         rel = _save_task_form_file_upload(fs) if fs and fs.filename else None
         if fs and fs.filename and not rel:
-            flash(
+            _flash_public(
                 "One or more files were not accepted. Use PDF, Word, or a common image type.",
-                "error",
+                error=True,
             )
             return redirect(url_for("public_recruitment_site.applicant_task", task_id=task_id))
         if f.get("required") and not rel:
-            flash(f"Please add the required file: {f.get('label') or name}.", "error")
+            _flash_public(f"Please add the required file: {f.get('label') or name}.", error=True)
             return redirect(url_for("public_recruitment_site.applicant_task", task_id=task_id))
         response[name] = rel or ""
     ok, msg = rec_svc.submit_task_response(task_id, uid, response)
     if not ok:
-        flash(msg, "error")
+        _flash_public(msg, error=True)
         return redirect(url_for("public_recruitment_site.applicant_task", task_id=task_id))
-    flash("Thank you — your response was saved.", "success")
+    _flash_public("Thank you — your response was saved.")
     return redirect(
         url_for(
             "public_recruitment_site.applicant_application",
@@ -880,6 +903,70 @@ def admin_applications():
     )
 
 
+@internal_bp.route("/settings/interview-locations", methods=["GET", "POST"])
+@login_required
+@_admin_required
+def admin_interview_presets():
+    """Saved office / meeting-place text for quick fill on application interview details."""
+    if request.method == "POST":
+        action = (request.form.get("action") or "add").strip().lower()
+        if action == "delete":
+            pid = int(request.form.get("preset_id") or 0)
+            ok, msg = rec_svc.admin_delete_interview_location_preset(pid)
+            flash("Preset removed." if ok else msg, "success" if ok else "error")
+        else:
+            ok, msg = rec_svc.admin_add_interview_location_preset(
+                request.form.get("label"),
+                request.form.get("location_text"),
+            )
+            flash("Preset added." if ok else msg, "success" if ok else "error")
+        return redirect(url_for("internal_recruitment.admin_interview_presets"))
+    presets = rec_svc.list_interview_location_presets(active_only=False)
+    return render_template(
+        "recruitment_module/admin/interview_presets.html",
+        presets=presets,
+        config=_core_manifest,
+    )
+
+
+@internal_bp.get("/applications/<int:application_id>/cv")
+@login_required
+@_admin_required
+def admin_application_cv_file(application_id):
+    """
+    Serve the applicant CV for an application (admin only).
+    Path must be under uploads/recruitment_cv/ — not a raw public static URL.
+    """
+    row = rec_svc.admin_get_application(application_id)
+    if not row or not row.get("cv_path"):
+        abort(404)
+    rel = str(row["cv_path"]).replace("\\", "/").strip().lstrip("/")
+    if not rel.startswith("uploads/recruitment_cv/"):
+        abort(404)
+    if ".." in rel:
+        abort(404)
+    static_root = os.path.normpath(_app_static_dir())
+    full = os.path.normpath(os.path.join(static_root, rel.replace("/", os.sep)))
+    if not full.startswith(static_root) or not os.path.isfile(full):
+        abort(404)
+    ext = os.path.splitext(full)[1].lower()
+    dl = f"application-{application_id}-cv{ext}"
+    inline = ext == ".pdf" and (request.args.get("download") or "").strip() != "1"
+    mimetype = None
+    if ext == ".pdf":
+        mimetype = "application/pdf"
+    elif ext == ".doc":
+        mimetype = "application/msword"
+    elif ext == ".docx":
+        mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return send_file(
+        full,
+        mimetype=mimetype,
+        as_attachment=not inline,
+        download_name=dl,
+    )
+
+
 @internal_bp.route("/applications/<int:application_id>", methods=["GET", "POST"])
 @login_required
 @_admin_required
@@ -915,6 +1002,17 @@ def admin_application_detail(application_id):
                 application_id, request.form.get("admin_notes")
             )
             flash("Notes saved.", "success")
+        elif action == "interview_details":
+            ok_iv, msg_iv = rec_svc.admin_set_application_interview_details(
+                application_id,
+                request.form.get("interview_format"),
+                request.form.get("interview_meeting_url"),
+                request.form.get("interview_location"),
+            )
+            flash(
+                "Interview details saved." if ok_iv else msg_iv,
+                "success" if ok_iv else "error",
+            )
         elif action == "prehire_add":
             ok, msg = rec_svc.admin_create_prehire_request(
                 application_id,
@@ -966,9 +1064,11 @@ def admin_application_detail(application_id):
         hire_preview = rec_svc.admin_preview_hire_billing(application_id)
         tb_roles_hire = rec_svc.time_billing_roles_for_select()
         wage_cards_hire = rec_svc.time_billing_wage_cards_for_select()
+    interview_presets = rec_svc.list_interview_location_presets(active_only=True)
     return render_template(
         "recruitment_module/admin/application_detail.html",
         application=row,
+        interview_presets=interview_presets,
         tasks=tasks,
         templates=templates,
         prehire_requests=prehire,

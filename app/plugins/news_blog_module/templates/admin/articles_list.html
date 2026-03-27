@@ -117,8 +117,17 @@
               data-status="{{ (article.status or 'draft')|lower|e }}">
             <td>
               {% if article.cover_image_path %}
-                {# NOTE: If this 404s, the backend is saving a path that isn't under Flask's /static root. #}
-                <img src="{{ url_for('static', filename=article.cover_image_path) }}"
+                {% set _cover_path = (article.cover_image_path or '')|trim %}
+                {% if _cover_path.startswith('http://') or _cover_path.startswith('https://') or _cover_path.startswith('//') %}
+                  {% set _cover_src = _cover_path %}
+                {% elif _cover_path.startswith('/static/') %}
+                  {% set _cover_src = _cover_path %}
+                {% elif _cover_path.startswith('static/') %}
+                  {% set _cover_src = '/' ~ _cover_path %}
+                {% else %}
+                  {% set _cover_src = url_for('static', filename=_cover_path.lstrip('/')) %}
+                {% endif %}
+                <img src="{{ _cover_src }}"
                      alt="{{ article.cover_image_alt or article.title }}"
                      style="width:52px;height:40px;object-fit:cover;border-radius:6px;border:1px solid rgba(0,0,0,0.08);">
               {% else %}
@@ -181,6 +190,7 @@
               <form method="post"
                     action="{{ url_for('internal_news_blog.articles_list') }}"
                     style="display:inline;">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="delete_article">
                 <input type="hidden" name="article_id" value="{{ article.id }}">
                 <button type="submit"
@@ -258,8 +268,18 @@
             <dt class="col-sm-4">Cover Image</dt>
             <dd class="col-sm-8">
               {% if article.cover_image_path %}
+                {% set _cover_path = (article.cover_image_path or '')|trim %}
+                {% if _cover_path.startswith('http://') or _cover_path.startswith('https://') or _cover_path.startswith('//') %}
+                  {% set _cover_src = _cover_path %}
+                {% elif _cover_path.startswith('/static/') %}
+                  {% set _cover_src = _cover_path %}
+                {% elif _cover_path.startswith('static/') %}
+                  {% set _cover_src = '/' ~ _cover_path %}
+                {% else %}
+                  {% set _cover_src = url_for('static', filename=_cover_path.lstrip('/')) %}
+                {% endif %}
                 <div class="mb-2">
-                  <img src="{{ url_for('static', filename=article.cover_image_path) }}"
+                  <img src="{{ _cover_src }}"
                        alt="{{ article.cover_image_alt or article.title }}"
                        style="max-width:100%;height:auto;border-radius:10px;border:1px solid rgba(0,0,0,0.08);">
                 </div>
@@ -299,6 +319,7 @@
         <form method="post"
               action="{{ url_for('internal_news_blog.articles_list') }}"
               enctype="multipart/form-data">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="action" value="update_article">
           <input type="hidden" name="article_id" value="{{ article.id }}">
 
@@ -422,6 +443,7 @@
         <form method="post"
               action="{{ url_for('internal_news_blog.articles_list') }}"
               enctype="multipart/form-data">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="action" value="create_article">
 
           <div class="modal-header">
@@ -529,6 +551,7 @@
     <div class="modal-dialog modal-lg modal-dialog-centered">
       <div class="modal-content">
         <form method="post" action="{{ url_for('internal_news_blog.articles_list') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <div class="modal-header">
             <h5 class="modal-title"><i class="bi bi-folder2-open me-2"></i>Manage Categories</h5>
             <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
@@ -571,6 +594,7 @@
                       <td><code>{{ c.slug }}</code></td>
                       <td>
                         <form method="post" action="{{ url_for('internal_news_blog.articles_list') }}" style="display:inline;">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                           <input type="hidden" name="action" value="delete_category">
                           <input type="hidden" name="category_id" value="{{ c.id }}">
                           <button class="btn btn-outline-danger btn-sm" type="submit"
@@ -601,6 +625,7 @@
     <div class="modal-dialog modal-lg modal-dialog-centered">
       <div class="modal-content">
         <form method="post" action="{{ url_for('internal_news_blog.articles_list') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <div class="modal-header">
             <h5 class="modal-title"><i class="bi bi-tags me-2"></i>Manage Tags</h5>
             <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
@@ -645,6 +670,7 @@
                       <td><code>{{ t.slug }}</code></td>
                       <td>
                         <form method="post" action="{{ url_for('internal_news_blog.articles_list') }}" style="display:inline;">
+                          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                           <input type="hidden" name="action" value="delete_tag">
                           <input type="hidden" name="tag_id" value="{{ t.id }}">
                           <button class="btn btn-outline-danger btn-sm" type="submit"

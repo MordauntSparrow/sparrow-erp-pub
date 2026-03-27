@@ -14,6 +14,7 @@ from app.objects import get_db_connection  # noqa: E402
 MIGRATIONS_TABLE = "rec_migrations"
 MODULE_TABLES = [
     MIGRATIONS_TABLE,
+    "rec_interview_location_presets",
     "rec_job_roles",
     "rec_openings",
     "rec_form_templates",
@@ -95,6 +96,19 @@ CREATE TABLE IF NOT EXISTS rec_opening_form_rules (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+SQL_CREATE_INTERVIEW_LOCATION_PRESETS = """
+CREATE TABLE IF NOT EXISTS rec_interview_location_presets (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  label VARCHAR(128) NOT NULL,
+  location_text TEXT NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_rec_iv_preset_sort (active, sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 SQL_CREATE_APPLICANTS = """
 CREATE TABLE IF NOT EXISTS rec_applicants (
   id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -117,6 +131,15 @@ CREATE TABLE IF NOT EXISTS rec_applications (
   status VARCHAR(32) NOT NULL DEFAULT 'active',
   cv_path VARCHAR(512) DEFAULT NULL,
   cover_note TEXT,
+  date_of_birth DATE DEFAULT NULL,
+  address_line1 VARCHAR(255) DEFAULT NULL,
+  address_line2 VARCHAR(255) DEFAULT NULL,
+  postcode VARCHAR(32) DEFAULT NULL,
+  emergency_contact_name VARCHAR(255) DEFAULT NULL,
+  emergency_contact_phone VARCHAR(64) DEFAULT NULL,
+  interview_format VARCHAR(16) DEFAULT NULL,
+  interview_meeting_url TEXT,
+  interview_location TEXT,
   admin_notes TEXT,
   contractor_id INT DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -250,6 +273,61 @@ def _ensure_recruitment_application_hr_columns(conn):
         cur.close()
 
 
+def _ensure_rec_application_profile_columns(conn):
+    """HR basics collected at apply time (mirrors hr_staff_details where possible)."""
+    cur = conn.cursor()
+    try:
+        for col, defn in [
+            ("date_of_birth", "DATE DEFAULT NULL AFTER cover_note"),
+            ("address_line1", "VARCHAR(255) DEFAULT NULL AFTER date_of_birth"),
+            ("address_line2", "VARCHAR(255) DEFAULT NULL AFTER address_line1"),
+            ("postcode", "VARCHAR(32) DEFAULT NULL AFTER address_line2"),
+            (
+                "emergency_contact_name",
+                "VARCHAR(255) DEFAULT NULL AFTER postcode",
+            ),
+            (
+                "emergency_contact_phone",
+                "VARCHAR(64) DEFAULT NULL AFTER emergency_contact_name",
+            ),
+        ]:
+            if not _column_exists(conn, "rec_applications", col):
+                cur.execute(
+                    "ALTER TABLE rec_applications ADD COLUMN {} {}".format(col, defn)
+                )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _ensure_rec_application_interview_columns(conn):
+    """Online meeting link and/or on-site location for the interview stage."""
+    cur = conn.cursor()
+    try:
+        if not _column_exists(conn, "rec_applications", "interview_format"):
+            after = (
+                "emergency_contact_phone"
+                if _column_exists(conn, "rec_applications", "emergency_contact_phone")
+                else "admin_notes"
+            )
+            cur.execute(
+                "ALTER TABLE rec_applications ADD COLUMN interview_format VARCHAR(16) DEFAULT NULL AFTER {}".format(
+                    after
+                )
+            )
+        if not _column_exists(conn, "rec_applications", "interview_meeting_url"):
+            cur.execute(
+                "ALTER TABLE rec_applications ADD COLUMN interview_meeting_url TEXT AFTER interview_format"
+            )
+        if not _column_exists(conn, "rec_applications", "interview_location"):
+            cur.execute(
+                "ALTER TABLE rec_applications ADD COLUMN interview_location TEXT AFTER interview_meeting_url"
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def _ensure_rec_job_roles_time_billing_columns(conn):
     """Link recruitment job roles to time billing roles + default wage card for hire."""
     cur = conn.cursor()
@@ -272,6 +350,8 @@ def install():
     try:
         ensure_tables(conn)
         _ensure_recruitment_application_hr_columns(conn)
+        _ensure_rec_application_profile_columns(conn)
+        _ensure_rec_application_interview_columns(conn)
         _ensure_rec_job_roles_time_billing_columns(conn)
     finally:
         conn.close()

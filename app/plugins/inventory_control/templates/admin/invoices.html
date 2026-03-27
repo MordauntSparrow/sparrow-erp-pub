@@ -2,7 +2,6 @@
 {% block page_title %}Invoices — Inventory Control{% endblock %}
 {% block content %}
 <div class="container-fluid py-4">
-  {% include "admin/_inventory_nav.html" %}
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
     <h1 class="h3 mb-0">Invoices</h1>
     <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -38,7 +37,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Review invoice — extracted data</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="reviewInvoiceId">
@@ -71,7 +70,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Close</button>
         <button type="button" class="btn btn-outline-primary" id="reviewSave">Save changes</button>
         <button type="button" class="btn btn-success" id="reviewApply">Apply to stock</button>
       </div>
@@ -83,14 +82,14 @@
 <div class="modal fade" id="applyModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
-      <div class="modal-header"><h5 class="modal-title">Apply invoice to stock</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-header"><h5 class="modal-title">Apply invoice to stock</h5><button type="button" class="btn-close" data-mdb-dismiss="modal"></button></div>
       <div class="modal-body">
         <input type="hidden" id="applyInvoiceId">
         <label class="form-label">Location *</label>
         <select class="form-select" id="applyLocationId"><option value="">— Select location —</option></select>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary" id="applyConfirm">Apply</button>
       </div>
     </div>
@@ -102,8 +101,8 @@
 <script>
 (function() {
   const base = '/plugin/inventory_control';
-  const reviewModal = new bootstrap.Modal(document.getElementById('reviewModal'));
-  const applyModal = new bootstrap.Modal(document.getElementById('applyModal'));
+  const reviewModal = mdb.Modal.getOrCreateInstance(document.getElementById('reviewModal'));
+  const applyModal = mdb.Modal.getOrCreateInstance(document.getElementById('applyModal'));
   let allSuppliers = [];
   let allItems = [];
 

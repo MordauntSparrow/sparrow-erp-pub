@@ -184,8 +184,21 @@
 
             <div class="card h-100 shadow-sm hover-shadow border-0 article-card" style="border-radius:.75rem;">
               {% if article.cover_image_path %}
+                {% set _cover_path_raw = (article.cover_image_path or '')|trim %}
+                {% set _cover_src = None %}
+                {% if _cover_path_raw %}
+                  {% if _cover_path_raw.startswith('http://') or _cover_path_raw.startswith('https://') or _cover_path_raw.startswith('//') %}
+                    {% set _cover_src = _cover_path_raw %}
+                  {% else %}
+                    {% set _cover_norm = _cover_path_raw.lstrip('/') %}
+                    {% if _cover_norm.startswith('static/') %}
+                      {% set _cover_norm = _cover_norm[7:] %}
+                    {% endif %}
+                    {% set _cover_src = url_for('static', filename=_cover_norm) %}
+                  {% endif %}
+                {% endif %}
                 <img class="article-cover"
-                     src="{{ url_for('static', filename=article.cover_image_path) }}"
+                     src="{{ _cover_src }}"
                      alt="{{ article.cover_image_alt or article.title }}">
               {% endif %}
 

@@ -2,19 +2,18 @@
 {% block page_title %}Analytics — Inventory Control{% endblock %}
 {% block content %}
 <div class="container-fluid py-4">
-  {% include "admin/_inventory_nav.html" %}
   <h1 class="h3 mb-4">Analytics &amp; Reports</h1>
   <p class="text-muted mb-4">View and download stock levels, activity, and movers reports.</p>
 
   <ul class="nav nav-tabs mb-3" id="analyticsTabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="stock-tab" data-bs-toggle="tab" data-bs-target="#stock-pane" type="button" role="tab">Stock levels</button>
+      <button class="nav-link active" id="stock-tab" data-mdb-toggle="tab" data-mdb-target="#stock-pane" type="button" role="tab">Stock levels</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="activity-tab" data-bs-toggle="tab" data-bs-target="#activity-pane" type="button" role="tab">Activity</button>
+      <button class="nav-link" id="activity-tab" data-mdb-toggle="tab" data-mdb-target="#activity-pane" type="button" role="tab">Activity</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="movers-tab" data-bs-toggle="tab" data-bs-target="#movers-pane" type="button" role="tab">Fast / slow movers</button>
+      <button class="nav-link" id="movers-tab" data-mdb-toggle="tab" data-mdb-target="#movers-pane" type="button" role="tab">Fast / slow movers</button>
     </li>
   </ul>
 

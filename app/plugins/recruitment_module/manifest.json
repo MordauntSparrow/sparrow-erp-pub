@@ -1,16 +1,14 @@
 {
-    "system_name": "recruitment_module",
-    "version": "0.0.2",
-    "installed": true,
-    "enabled": true,
-    "name": "Recruitment Module",
-    "description": "",
-    "dependencies": [
-        "website_module",
-        "time_billing_module",
-        "hr_module"
-    ],
-    "icon": "icon.png",
-    "dashboard_category": "People & HR",
-    "update_available": false
+  "system_name": "recruitment_module",
+  "name": "Recruitment",
+  "description": "Job openings on the website, applicant portal, CV upload, and form-based assessments tied to hiring stages.",
+  "version": "0.0.2",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["website_module", "time_billing_module", "hr_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Job roles link to time billing roles + default wage cards; hire sets contractor role_id and wage_rate_card_id; roles list shows live openings and pipeline counts.",
+  "repository_token": ""
 }

@@ -20,8 +20,6 @@ from .services import (
     safe_profile_picture_path,
     get_ep_setting,
     set_ep_setting,
-    get_contractor_theme,
-    set_contractor_theme,
     admin_search_contractors,
     admin_list_contractors_for_select,
     admin_list_messages,
@@ -136,7 +134,7 @@ def login_page():
 
 @public_bp.post("/set-theme")
 def set_theme():
-    """Backward-compatible alias; core handler persists tb_contractors.ui_theme + cookie."""
+    """Legacy URL /employee-portal/set-theme; prefer sparrow_shared_contractor_ui.set_contractor_theme."""
     from app.contractor_ui_theme import contractor_set_theme_response
 
     return contractor_set_theme_response()
@@ -197,12 +195,11 @@ def login_submit():
             "profile_picture_path": safe_avatar,
             "role": role,
         }
-        saved_theme = get_contractor_theme(int(u["id"]))
-        if saved_theme in ("light", "dark", "auto"):
-            session["portal_theme"] = saved_theme
-        elif saved_theme == "system":
-            session["portal_theme"] = "auto"
-        session.modified = True  # Ensure session is persisted so time_billing and other modules see tb_user
+        from app.contractor_ui_theme import sync_contractor_theme_to_session
+
+        sync_contractor_theme_to_session(session, int(u["id"]))
+        # Ensure session is persisted so time_billing and other modules see tb_user
+        session.modified = True
 
         default_next = url_for("public_employee_portal.dashboard")
         next_param = request.form.get("next") or request.args.get("next")

@@ -202,11 +202,91 @@ def public_schedule_week():
 @public_bp.get("/team")
 @_staff_required
 def public_team():
-    """List colleagues (other contractors) for visibility and contact."""
-    contractors = ScheduleService.list_contractors()
+    """List colleagues (no email — privacy). Names link to published-shift week view."""
+    contractors = ScheduleService.list_contractors_for_team_directory()
     return render_template(
         "scheduling_module/public/team.html",
         colleagues=contractors or [],
+        website_settings=_get_website_settings(),
+        config=_core_manifest,
+    )
+
+
+@public_bp.get("/team/<int:contractor_id>/schedule")
+@_staff_required
+def public_team_member_schedule(contractor_id: int):
+    """Read-only week of a colleague's published shifts. Time off / unavailability show as OFF only."""
+    cid = _current_contractor_id()
+    if not cid:
+        return redirect("/employee-portal/login?next=" + request.path)
+    allowed = set(ScheduleService.get_active_contractor_team_ids())
+    if contractor_id not in allowed:
+        return (
+            render_template(
+                "scheduling_module/public/shift_not_found.html",
+                config=_core_manifest,
+            ),
+            404,
+        )
+    if contractor_id == cid:
+        wk = (request.args.get("week") or "").strip()
+        return redirect(
+            url_for("public_scheduling.public_schedule_week", week=wk or None)
+        )
+
+    week_s = (request.args.get("week") or "").strip()
+    if week_s:
+        try:
+            week_start = date.fromisoformat(week_s[:10])
+            if week_start.weekday() != 0:
+                week_start -= timedelta(days=week_start.weekday())
+        except ValueError:
+            week_start = date.today()
+            while week_start.weekday() != 0:
+                week_start -= timedelta(days=1)
+    else:
+        week_start = date.today()
+        while week_start.weekday() != 0:
+            week_start -= timedelta(days=1)
+    week_end = week_start + timedelta(days=6)
+
+    shifts = ScheduleService.list_shifts(
+        contractor_id=contractor_id,
+        date_from=week_start,
+        date_to=week_end,
+        status="published",
+    )
+    shifts = [s for s in shifts if (s.get("status") or "").lower() != "cancelled"]
+    week_days = [week_start + timedelta(days=i) for i in range(7)]
+    shifts_by_day = {}
+    for s in shifts:
+        wd = s.get("work_date")
+        if wd:
+            iso = wd.isoformat() if hasattr(wd, "isoformat") else str(wd)
+            shifts_by_day.setdefault(iso, []).append(s)
+
+    privacy_off_days = ScheduleService.contractor_privacy_absence_dates(
+        contractor_id, week_start
+    )
+    member_name = "Team member"
+    for c in ScheduleService.list_contractors_for_team_directory():
+        if int(c["id"]) == contractor_id:
+            member_name = (c.get("name") or c.get("initials") or "Team member").strip() or "Team member"
+            break
+
+    today = date.today()
+    return render_template(
+        "scheduling_module/public/team_member_schedule_week.html",
+        member_name=member_name,
+        member_id=contractor_id,
+        week_start=week_start,
+        week_end=week_end,
+        week_days=week_days,
+        shifts_by_day=shifts_by_day,
+        privacy_off_days=privacy_off_days,
+        today=today,
+        timedelta=timedelta,
+        time_display=_time_display,
         website_settings=_get_website_settings(),
         config=_core_manifest,
     )

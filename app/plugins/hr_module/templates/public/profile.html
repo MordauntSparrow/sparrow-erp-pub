@@ -21,6 +21,7 @@
     <h1 class="h5 mb-3">My details</h1>
     <p class="text-secondary small">Keep your contact and emergency details up to date.</p>
     <form method="post" action="{{ url_for('public_hr.profile_save') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <div class="mb-2">
         <label class="form-label small">Name</label>
         <input type="text" class="form-control" value="{{ profile.name or '' }}" disabled>

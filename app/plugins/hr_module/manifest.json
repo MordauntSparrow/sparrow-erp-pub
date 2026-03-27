@@ -1,16 +1,14 @@
 {
-    "system_name": "hr_module",
-    "version": "0.0.2",
-    "installed": true,
-    "enabled": true,
-    "name": "Hr Module",
-    "description": "",
-    "dependencies": [
-        "website_module",
-        "employee_portal_module",
-        "time_billing_module"
-    ],
-    "icon": "icon.png",
-    "dashboard_category": "People & HR",
-    "update_available": false
+  "system_name": "hr_module",
+  "name": "HR",
+  "description": "Employee store: profiles, DBS, driving licence, right to work, contract metadata, document library, and portal requests.",
+  "version": "0.0.2",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["website_module", "employee_portal_module", "time_billing_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Employee directory, document library, date of birth, richer admin dashboard. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "repository_token": ""
 }

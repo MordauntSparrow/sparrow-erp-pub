@@ -10,8 +10,45 @@
 <div class="card border-primary">
   <div class="card-header fw-semibold">Apply</div>
   <div class="card-body">
+    <p class="small text-muted mb-3">We need a few details for HR and emergency contact. These are stored with this application and copied to your staff record if you are hired.</p>
     <form method="post" action="{{ url_for('public_recruitment_site.vacancy_apply_post', slug=opening.slug) }}" enctype="multipart/form-data">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <h3 class="h6 text-uppercase text-muted mb-3">Your details</h3>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="phone">Phone <span class="text-danger">*</span></label>
+          <input class="form-control" type="tel" id="phone" name="phone" required autocomplete="tel"
+            value="{{ applicant_profile.phone or '' }}" placeholder="Mobile or best contact">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="date_of_birth">Date of birth <span class="text-danger">*</span></label>
+          <input class="form-control" type="date" id="date_of_birth" name="date_of_birth" required>
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="address_line1">Address line 1 <span class="text-danger">*</span></label>
+          <input class="form-control" id="address_line1" name="address_line1" required autocomplete="address-line1" maxlength="255">
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="address_line2">Address line 2 <span class="text-muted">(optional)</span></label>
+          <input class="form-control" id="address_line2" name="address_line2" autocomplete="address-line2" maxlength="255">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="postcode">Postcode <span class="text-danger">*</span></label>
+          <input class="form-control" id="postcode" name="postcode" required autocomplete="postal-code" maxlength="32">
+        </div>
+      </div>
+      <h3 class="h6 text-uppercase text-muted mb-3">Emergency contact</h3>
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="emergency_contact_name">Name <span class="text-danger">*</span></label>
+          <input class="form-control" id="emergency_contact_name" name="emergency_contact_name" required maxlength="255">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="emergency_contact_phone">Phone <span class="text-danger">*</span></label>
+          <input class="form-control" type="tel" id="emergency_contact_phone" name="emergency_contact_phone" required autocomplete="tel">
+        </div>
+      </div>
+      <h3 class="h6 text-uppercase text-muted mb-3">Application</h3>
       <div class="mb-3">
         <label class="form-label" for="cover_note">Cover note (optional)</label>
         <textarea class="form-control" id="cover_note" name="cover_note" rows="4" placeholder="Brief introduction"></textarea>

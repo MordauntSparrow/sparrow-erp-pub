@@ -1,15 +1,14 @@
 {
-    "system_name": "compliance_module",
-    "version": "0.0.2",
-    "installed": true,
-    "enabled": true,
-    "name": "Compliance Module",
-    "description": "",
-    "dependencies": [
-        "employee_portal_module",
-        "website_module"
-    ],
-    "icon": "icon.png",
-    "dashboard_category": "Compliance & risk",
-    "update_available": false
+  "system_name": "compliance_module",
+  "name": "Compliance & Policies",
+  "description": "Organisational policies (H&S, safeguarding, etc.), staff acknowledgement, and employee portal todos.",
+  "version": "0.1.1",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["employee_portal_module", "website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Initial: policy library, issue to staff, legal acknowledgement, ep_todos integration. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "repository_token": ""
 }

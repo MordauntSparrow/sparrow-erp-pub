@@ -21,6 +21,7 @@
     <h1 class="h5 mb-3">Report sickness</h1>
     <p class="text-secondary small">Submit the dates you are unable to work. Your manager will be notified.</p>
     <form method="post" action="{{ url_for('public_scheduling.report_sickness_submit') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <div class="mb-2">
         <label class="form-label small">First day off</label>
         <input type="date" name="start_date" class="form-control" value="{{ today }}">

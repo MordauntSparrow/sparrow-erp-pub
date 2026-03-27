@@ -5,7 +5,7 @@ Uses tb_contractors, clients, sites, job_types from time_billing_module.
 import logging
 import json
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from app.objects import get_db_connection
 import base64
 import hashlib
@@ -1962,6 +1962,72 @@ class ScheduleService:
         finally:
             cur.close()
             conn.close()
+
+    @staticmethod
+    def list_contractors_for_team_directory() -> List[Dict[str, Any]]:
+        """Active contractors for peer team list — no email (privacy)."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT id, name, initials FROM tb_contractors WHERE status = 'active' ORDER BY name"
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def get_active_contractor_team_ids() -> List[int]:
+        """IDs of active contractors allowed in team directory / peer schedule views."""
+        return [int(c["id"]) for c in ScheduleService.list_contractors_for_team_directory() if c.get("id") is not None]
+
+    @staticmethod
+    def contractor_privacy_absence_dates(contractor_id: int, week_start: date) -> Set[str]:
+        """
+        Dates (ISO strings) in Mon–Sun week where the contractor has approved time off
+        or recurring unavailability. Used on peer schedule views: show OFF only (no type/reason/times).
+        """
+        week_end = week_start + timedelta(days=6)
+        off: Set[str] = set()
+
+        def _as_date(v):
+            if v is None:
+                return None
+            if isinstance(v, datetime):
+                return v.date()
+            if isinstance(v, date):
+                return v
+            s = str(v)[:10]
+            try:
+                return date.fromisoformat(s)
+            except ValueError:
+                return None
+
+        rows = ScheduleService.list_time_off(
+            contractor_id=contractor_id,
+            date_from=week_start,
+            date_to=week_end,
+            status="approved",
+        )
+        for row in rows:
+            sd = _as_date(row.get("start_date"))
+            ed = _as_date(row.get("end_date"))
+            if not sd or not ed:
+                continue
+            d = sd
+            while d <= ed:
+                if week_start <= d <= week_end:
+                    off.add(d.isoformat())
+                d += timedelta(days=1)
+
+        umap = ScheduleService.get_unavailability_for_week([contractor_id], week_start)
+        for u in umap.get(contractor_id) or []:
+            iso = u.get("date")
+            if iso:
+                off.add(str(iso)[:10])
+
+        return off
 
     @staticmethod
     def get_contractor_portal_summary(contractor_id: int) -> Dict[str, Any]:

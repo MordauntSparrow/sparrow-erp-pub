@@ -68,7 +68,7 @@ flowchart LR
 
 Export: CSV download via `/api/export/items`, `/api/export/transactions`, `/api/export/stock_levels`, `/api/export/batches` with `?format=csv`.
 
-All pages use the shared nav (`_inventory_nav.html`) and extend the module’s own **`admin/inventory_admin_base.html`** (no dependency on Ventus or other modules). The base provides Inventory Control branding, topbar with Home/Theme/Logout, and a consistent layout and theme for a seamless in-module experience.
+All pages extend **`admin/inventory_admin_base.html`**, which uses **MDB UI Kit** (`mdb.min.css` / `mdb.min.js`), the Sparrow ERP shared admin top nav, and a second-row Inventory subnav (same pattern as other plugins). Modals and tabs use **`data-mdb-*`** and **`mdb.Modal.getOrCreateInstance(...)`**, not raw Bootstrap `data-bs-*` / `bootstrap.Modal`. Per-page `_inventory_nav.html` is deprecated; links live in the base template.
 
 ## Modular integration
 

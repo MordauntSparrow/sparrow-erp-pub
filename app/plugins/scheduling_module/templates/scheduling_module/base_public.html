@@ -11,7 +11,7 @@
     <span class="navbar-text fw-semibold">{{ module_name or 'Scheduling & Shifts' }}</span>
     <div class="navbar-nav ms-auto align-items-center gap-2">
       <span class="navbar-text small me-1" aria-hidden="true">Theme</span>
-      <form method="post" action="{{ url_for('routes.contractor_set_theme') }}" class="d-inline">
+      <form method="post" action="{{ url_for('sparrow_shared_contractor_ui.set_contractor_theme') }}" class="d-inline">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         {% set _pref = portal_theme_preference|default('light') %}
         <button type="submit" name="theme" value="light" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'light' else 'btn-secondary' }}" title="Light mode" aria-label="Light theme">Light</button>
