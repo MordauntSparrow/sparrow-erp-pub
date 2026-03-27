@@ -1,14 +1,99 @@
 {
-    "system_name": "website_module",
-    "name": "Website Module",
-    "description": "Manages the website's content and display",
-    "version": "1.1.5",
-    "icon": "icon.png",
-    "control_mode": "erp",
-    "repository": "official",
-    "dependencies": [],
-    "changelog": "Initial release of Official Plugin.",
-    "repository_token": "",
-    "enabled": false,
-    "settings": {}
+  "repository": "official",
+  "system_name": "website_module",
+  "name": "Website",
+  "current_version": "1.1.7",
+  "compatible_with": ">=1.0.0",
+  "force_update": false,
+  "description": "Website module.",
+  "dashboard_category": "Web & marketing",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/website_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.7.zip/raw?ref=main",
+  "dependencies": [],
+  "changelog": [
+    {
+      "version": "1.1.7",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.7.zip/raw?ref=main",
+      "changes": [
+        "E-commerce and website builder: storefront, checkout, and related public/admin improvements.",
+        "Complete release — upload full website_module_v1.1.7.zip to the repository before clients update."
+      ]
+    },
+    {
+      "version": "1.1.6",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.6.zip/raw?ref=main",
+      "changes": [
+        "Complete release package — upload full website_module_v1.1.6.zip to the repository before clients update."
+      ]
+    },
+    {
+      "version": "1.1.5",
+      "date": "2026-01-13",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.5.zip/raw?ref=main",
+      "changes": [
+        "Analytics Bug fixes"
+      ]
+    },
+    {
+      "version": "1.1.4",
+      "date": "2026-01-12",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.4.zip/raw?ref=main",
+      "changes": [
+        "Analytics migrated from JSON file storage to database-backed aggregate tables for scalability and performance.",
+        "AnalyticsManager rewritten to use DB aggregates (daily page views, hourly totals, daily country totals) while preserving geo lookup caching.",
+        "Sitemap smartening: dynamic sitemap index aggregates enabled plugins' sitemap endpoints for better crawl coverage.",
+        "Robots/sitemap alignment improvements to ensure public sections are indexable and sitemap references remain accurate.",
+        "Added/expanded LLM discovery support via /llms.txt generated from enabled plugins' declared public sections."
+      ]
+    },
+    {
+      "version": "1.1.3",
+      "date": "2025-11-05",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.3.zip/raw?ref=main",
+      "changes": [
+        "Bug fixes"
+      ]
+    },
+    {
+      "version": "1.1.2",
+      "date": "2025-10-28",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v1.1.2.zip/raw?ref=main",
+      "changes": [
+        "Major SEO overhaul: robust meta/OG/social tags, canonical, JSON-LD, favicon/OG image logic.",
+        "Modern always-on cookie bar with customizable color, Accept/Decline, and consent enforcement.",
+        "No analytics/tracking scripts load before consent.",
+        "Admin UI: all cookie bar/policy/SEO/social settings editable.",
+        "Cookie bar live preview in admin settings.",
+        "Policy generator and markdown-to-HTML display improvements.",
+        "All template logic robust to missing meta/OG/page data.",
+        "Accessibility and responsive layout improvements."
+      ]
+    },
+    {
+      "version": "0.1.1",
+      "date": "2025-09-21",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v0.1.1.zip/raw?ref=main",
+      "changes": [
+        "Added website builder demonstrator."
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "date": "2025-01-10",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fwebsite_module%2Fwebsite_module_v0.1.0.zip/raw?ref=main",
+      "changes": [
+        "Initial release."
+      ]
+    }
+  ]
 }

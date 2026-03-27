@@ -1,0 +1,19 @@
+{% set raw = (items|replace('</p>', '\n')|replace('<br>', '\n')|replace('<br/>', '\n')|replace('<br />', '\n')|striptags) %}
+<div class="container py-4 py-md-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <h2 class="h4 fw-bold mb-4{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="title" data-wb-plain="1"{% endif %}>{{ title }}</h2>
+      <ul class="list-unstyled mb-0">
+        {% for line in raw.splitlines() %}
+          {% set t = line|trim %}
+          {% if t %}
+        <li class="d-flex gap-3 mb-3">
+          <span class="text-primary flex-shrink-0"><i class="bi bi-check-circle-fill fs-5" aria-hidden="true"></i></span>
+          <span>{{ t }}</span>
+        </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>

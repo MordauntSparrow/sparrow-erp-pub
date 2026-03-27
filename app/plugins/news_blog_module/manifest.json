@@ -1,0 +1,13 @@
+{
+    "system_name": "news_blog_module",
+    "version": "0.0.5",
+    "installed": true,
+    "enabled": true,
+    "name": "News Blog Module",
+    "description": "",
+    "dependencies": [
+        "website_module"
+    ],
+    "icon": "icon.png",
+    "update_available": false
+}

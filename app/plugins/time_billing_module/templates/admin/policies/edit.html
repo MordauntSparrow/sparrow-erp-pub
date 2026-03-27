@@ -165,7 +165,7 @@
 
             const r = await fetch('{{ url_for("internal_time_billing.create_policy") }}', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
                 body: JSON.stringify(Object.assign({ id: polId }, payload))
             });
 

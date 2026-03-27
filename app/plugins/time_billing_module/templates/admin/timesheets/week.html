@@ -54,7 +54,7 @@
     </div>
 
     <div class="col-6 col-md-3">
-      <div class="card">
+        <div class="card">
         <div class="card-body py-2">
           <div class="text-muted small">Status</div>
           <div>
@@ -72,6 +72,41 @@
       </div>
     </div>
   </div>
+
+  <!-- Summaries by job type (for invoicing) -->
+  {% if data.summaries_by_job_type is defined and data.summaries_by_job_type %}
+  <div class="card mb-3">
+    <div class="card-header py-2">
+      <strong>Summaries by job type</strong> <span class="text-muted small">(wage × hours per type for invoicing)</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>Job type</th>
+              <th class="text-end">Hours</th>
+              <th class="text-end">Pay</th>
+              <th class="text-end">Entries</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in data.summaries_by_job_type %}
+            <tr>
+              <td>
+                <span class="badge me-1" style="background-color: {{ s.job_type_colour_hex or '#6c757d' }}; color: #fff;">{{ s.job_type_name or 'Job type ' ~ s.job_type_id }}</span>
+              </td>
+              <td class="text-end">{{ '%.2f'|format(s.total_hours) }}</td>
+              <td class="text-end">£{{ '%.2f'|format(s.total_pay) }}</td>
+              <td class="text-end">{{ s.entry_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Grid -->
   <div class="card">
@@ -115,7 +150,8 @@
 
                 <!-- Job type -->
                 <td>
-                  <input class="form-control form-control-sm js-edit"
+                  <span class="badge me-1" style="background-color: {{ e.job_type_colour_hex or '#6c757d' }}; color: #fff;">{{ e.job_type_name or e.job_type_id or '' }}</span>
+                  <input class="form-control form-control-sm js-edit d-inline-block" style="max-width:80px"
                          data-field="job_type_id" type="number"
                          value="{{ e.job_type_id or '' }}">
                 </td>
@@ -169,15 +205,36 @@
 
                 <!-- Notes -->
                 <td>
-                  <input class="form-control form-control-sm js-edit"
-                         data-field="notes"
-                         value="{{ e.notes or '' }}">
+                  <div class="d-flex flex-column">
+                    <input class="form-control form-control-sm js-edit"
+                           data-field="notes"
+                           value="{{ e.notes or '' }}">
+                    {% if e.edited_by %}
+                      <small class="text-warning mt-1" title="{{ (e.edit_reason or '')|e }}">
+                        Adjusted
+                      </small>
+                      {% if e.actual_start and e.scheduled_start %}
+                        <small class="text-warning mt-0" title="Start vs scheduled">
+                          Start: {% if e.actual_start < e.scheduled_start %}early{% elif e.actual_start > e.scheduled_start %}late{% else %}on time{% endif %}
+                        </small>
+                      {% endif %}
+                      {% if e.actual_end and e.scheduled_end %}
+                        <small class="text-warning mt-0" title="End vs scheduled">
+                          End: {% if e.actual_end < e.scheduled_end %}early{% elif e.actual_end > e.scheduled_end %}late{% else %}on time{% endif %}
+                        </small>
+                      {% endif %}
+                    {% elif e.edit_reason %}
+                      <small class="text-muted mt-1" title="{{ (e.edit_reason or '')|e }}">
+                        Auto-prefilled
+                      </small>
+                    {% endif %}
+                  </div>
                 </td>
 
                 <!-- Policy
                 <td class="text-end">
                   <button class="btn btn-outline-secondary btn-sm js-policy" type="button"
-                          data-bs-toggle="modal" data-bs-target="#policyModal"
+                          data-mdb-toggle="modal" data-mdb-target="#policyModal"
                           data-policy='{{ e.policy_applied or ""|safe }}'
                           title="Policy applied">
                     <i class="bi bi-info-circle"></i>
@@ -218,14 +275,14 @@
         <h6 class="modal-title">
           <i class="bi bi-info-circle me-2"></i> Policy Details
         </h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"
                 aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <pre class="mb-0 small" id="policyJson">{}</pre>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-secondary btn-sm" data-mdb-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
@@ -239,7 +296,7 @@
         <h6 class="modal-title text-danger">
           <i class="bi bi-x-circle me-2"></i> Reject Timesheet
         </h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <label class="form-label">Reason (required)</label>
@@ -247,15 +304,17 @@
                   placeholder="Explain what needs changing or clarifications for staff"></textarea>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" type="button" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-secondary" type="button" data-mdb-dismiss="modal">Cancel</button>
         <button class="btn btn-danger" type="submit">Reject</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- Script -->
-<script>
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
 (function () {
   "use strict";
 
@@ -270,20 +329,15 @@
   const rejectModalEl = document.getElementById("rejectModal");
   const policyModalEl = document.getElementById("policyModal");
 
-  // Modal helpers that always work (MDB, Bootstrap, or fallback)
+  // MDB modals (admin base loads mdb.min.js)
   function showModal(el) {
     if (!el) return;
     try {
       if (window.mdb && mdb.Modal) {
-        (mdb.Modal.getInstance(el) || new mdb.Modal(el)).show();
-        return;
-      }
-      if (window.bootstrap && bootstrap.Modal) {
-        (bootstrap.Modal.getInstance(el) || new bootstrap.Modal(el)).show();
+        (mdb.Modal.getInstance(el) || mdb.Modal.getOrCreateInstance(el)).show();
         return;
       }
     } catch (e) {}
-    // Fallback
     el.classList.add("show");
     el.style.display = "block";
     el.removeAttribute("aria-hidden");
@@ -293,15 +347,11 @@
     if (!el) return;
     try {
       if (window.mdb && mdb.Modal) {
-        (mdb.Modal.getInstance(el) || new mdb.Modal(el)).hide();
-        return;
-      }
-      if (window.bootstrap && bootstrap.Modal) {
-        (bootstrap.Modal.getInstance(el) || new bootstrap.Modal(el)).hide();
+        const inst = mdb.Modal.getInstance(el);
+        if (inst) inst.hide();
         return;
       }
     } catch (e) {}
-    // Fallback
     el.classList.remove("show");
     el.style.display = "none";
     el.setAttribute("aria-hidden", "true");
@@ -317,7 +367,7 @@
   async function patchEntry(id, payload) {
     const resp = await fetch(`${PATCH_BASE}/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "PATCH"),
       body: JSON.stringify(payload),
     });
     const data = await resp.json().catch(() => ({}));
@@ -400,7 +450,7 @@
       }
       const resp = await fetch(REJECT_URL(userId, weekId), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "POST"),
         body: JSON.stringify({ reason }),
       });
       if (resp.ok) {

@@ -1,0 +1,304 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}{{ 'Edit shift' if shift else 'New shift' }} – Scheduling{% endblock %}
+{% block content %}
+<nav class="mb-2 small">
+  <a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a>
+  <span class="text-muted">/</span>
+  <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}">Week view</a>
+  <span class="text-muted">/</span>
+  <span>{{ 'Edit shift' if shift else 'New shift' }}</span>
+</nav>
+<h1 class="h4 mb-3">{{ 'Edit shift' if shift else 'New shift' }}</h1>
+
+<form method="post" action="{{ url_for('internal_scheduling.admin_shift_update', shift_id=shift.id) if shift else url_for('internal_scheduling.admin_shift_create') }}" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="row g-3">
+    <div class="col-md-3">
+      <label class="form-label">Staff needed</label>
+      <input type="number" name="required_count" class="form-control" min="1" value="{{ shift.required_count if (shift and shift.required_count is not none) else 1 }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Assigned staff</label>
+      <div class="d-flex gap-1 align-items-start">
+        <select name="contractor_ids" id="contractor_ids" class="form-select" multiple size="5">
+          {% for c in contractors %}
+          <option value="{{ c.id }}" {{ 'selected' if c.id in assigned_contractor_ids else '' }}>{{ c.name or c.email }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-suggest-staff" title="Suggest available staff for this date/time">Suggest</button>
+      </div>
+      <div id="suggest-list" class="small text-muted mt-1 d-none"></div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">{{ assignment_label|default('Client') }} <span class="text-danger">*</span>
+        <a href="{{ url_for('internal_scheduling.admin_add_client_form') }}{% if default_date %}?date={{ default_date }}{% endif %}" class="small fw-normal ms-1">Add {{ assignment_label|default('client')|lower }}</a>
+      </label>
+      {% if not clients %}
+      <div class="alert alert-info py-2 small mb-2">No {{ assignment_label|default('clients')|lower }} yet. <a href="{{ url_for('internal_scheduling.admin_add_client_form') }}{% if default_date %}?date={{ default_date }}{% endif %}">Add one</a> first, then choose here.</div>
+      {% endif %}
+      <select name="client_id" id="client_id" class="form-select" required>
+        <option value="">Select…</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if (shift and shift.client_id == c.id) or (not shift and default_client_id is defined and default_client_id == c.id) else '' }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Site</label>
+      <select name="site_id" id="site_id" class="form-select">
+        <option value="">Any</option>
+        {% for st in sites %}
+        <option value="{{ st.id }}" data-client-id="{{ st.client_id }}" {{ 'selected' if shift and shift.site_id == st.id else '' }}>{{ st.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Job type <span class="text-danger">*</span></label>
+      <select name="job_type_id" class="form-select" required>
+        <option value="">Select…</option>
+        {% for j in job_types %}
+        <option value="{{ j.id }}" {{ 'selected' if shift and shift.job_type_id == j.id else '' }}>{{ j.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Date <span class="text-danger">*</span></label>
+      <input type="date" name="work_date" class="form-control" value="{{ (shift.work_date|string)[:10] if shift and shift.work_date else default_date }}" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Start <span class="text-danger">*</span></label>
+      <input type="time" name="scheduled_start" class="form-control" value="{{ shift_start_time|default('09:00') }}" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">End <span class="text-danger">*</span></label>
+      <input type="time" name="scheduled_end" class="form-control" value="{{ shift_end_time|default('17:00') }}" required>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Break (min)</label>
+      <input type="number" name="break_mins" class="form-control" value="{{ shift.break_mins if shift and shift.break_mins is not none else 0 }}" min="0">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Status</label>
+      <select name="status" class="form-select">
+        <option value="draft" {{ 'selected' if shift and shift.status == 'draft' else '' }}>Draft</option>
+        <option value="published" {{ 'selected' if shift and shift.status == 'published' else '' }}>Published</option>
+        <option value="cancelled" {{ 'selected' if shift and shift.status == 'cancelled' else '' }}>Cancelled</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Labour cost (£)</label>
+      <input type="number" name="labour_cost" class="form-control" value="{{ shift.labour_cost if (shift and shift.labour_cost is not none) else '' }}" min="0" step="0.01" placeholder="Optional">
+    </div>
+    <div class="col-12" id="assignment-instructions-wrap">
+      <label class="form-label small text-muted">Location / {{ assignment_label|default('assignment') }} notes</label>
+      <div id="assignment-instructions" class="form-control bg-light small" style="min-height: 3rem; white-space: pre-wrap;">{% if assignment_instructions %}{{ assignment_instructions }}{% else %}<span class="text-muted">Select a {{ assignment_label|default('client')|lower }} to see instructions, or edit in More → Location & shift notes.</span>{% endif %}</div>
+      <div class="mt-1 small"><a href="{{ url_for('internal_scheduling.admin_assignment_instructions') }}" id="edit-instructions-link" class="d-none">Edit in Location & shift notes</a></div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Shift notes</label>
+      <textarea name="notes" class="form-control" rows="2" placeholder="Per-shift notes (e.g. specific instructions for this shift)">{{ shift.notes if shift and shift.notes else '' }}</textarea>
+    </div>
+    <div class="col-12">
+      <div id="conflict-warnings" class="alert alert-warning py-2 small d-none" role="alert"></div>
+    </div>
+  </div>
+  <div class="mt-3 d-flex gap-2 flex-wrap">
+    <button type="submit" class="btn btn-primary">{{ 'Save' if shift else 'Create shift' }}</button>
+    <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+{% if shift %}
+<div class="mt-2 d-flex gap-2 flex-wrap align-items-center">
+  <form method="post" action="{{ url_for('internal_scheduling.admin_shift_repeat', shift_id=shift.id) }}" class="d-inline-flex gap-1 align-items-center">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label class="form-label small mb-0">Repeat this shift for</label>
+    <input type="number" name="num_weeks" value="4" min="1" max="52" class="form-control form-control-sm" style="width:4rem">
+    <span class="small">weeks</span>
+    <button type="submit" class="btn btn-outline-info btn-sm">Repeat</button>
+  </form>
+  <a href="{{ url_for('internal_scheduling.admin_shift_delete', shift_id=shift.id) }}" class="btn btn-outline-danger btn-sm">Delete shift</a>
+</div>
+{% endif %}
+{% if shift and shift_tasks is defined %}
+<div class="card card-body mt-3">
+  <h2 class="h6 mb-2">Tasks for this shift</h2>
+  <p class="text-muted small mb-2">Staff can see and mark these complete in the portal / app.</p>
+  <form method="post" action="{{ url_for('internal_scheduling.admin_shift_task_add', shift_id=shift.id) }}" class="d-flex gap-2 mb-2">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="text" name="task_title" class="form-control form-control-sm" placeholder="New task" required>
+    <button type="submit" class="btn btn-outline-primary btn-sm">Add task</button>
+  </form>
+  <ul class="list-group list-group-flush">
+    {% for t in shift_tasks %}
+    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+      <span>{{ t.title }}{% if t.completed_at %} <span class="badge bg-success">Done</span>{% endif %}</span>
+      <form method="post" action="{{ url_for('internal_scheduling.admin_shift_task_delete', shift_id=shift.id, task_id=t.id) }}" class="d-inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger btn-sm">Remove</button>
+      </form>
+    </li>
+    {% else %}
+    <li class="list-group-item text-muted px-0">No tasks yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% if shift and shift_audit %}
+<div class="card card-body mt-3">
+  <h2 class="h6 mb-2">History</h2>
+  <ul class="list-group list-group-flush small">
+    {% for e in shift_audit %}
+    <li class="list-group-item d-flex justify-content-between align-items-start px-0">
+      <span><span class="badge bg-secondary">{{ e.action }}</span> {{ (e.created_at|string)[:19] if e.created_at else '' }}</span>
+      <span class="text-muted">{{ e.actor_username or e.actor_user_id or '—' }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <a href="{{ url_for('internal_scheduling.admin_audit_log', shift_id=shift.id) }}" class="small mt-2">View full audit log for this shift</a>
+</div>
+{% endif %}
+<script>
+(function() {
+  var client = document.getElementById('client_id');
+  var site = document.getElementById('site_id');
+  if (!client || !site) return;
+  function filterSites() {
+    var cid = client.value;
+    for (var i = 0; i < site.options.length; i++) {
+      var opt = site.options[i];
+      if (opt.value === '') { opt.style.display = 'block'; continue; }
+      opt.style.display = (opt.getAttribute('data-client-id') === cid || !cid) ? 'block' : 'none';
+      if (opt.style.display === 'none' && opt.selected) opt.selected = false;
+    }
+  }
+  client.addEventListener('change', filterSites);
+  filterSites();
+
+  var instructionsEl = document.getElementById('assignment-instructions');
+  var editLink = document.getElementById('edit-instructions-link');
+  var instructionsPlaceholder = instructionsEl ? instructionsEl.querySelector('span.text-muted') : null;
+  function loadAssignmentInstructions() {
+    var cid = client.value;
+    if (!cid || !instructionsEl) return;
+    if (editLink) {
+      editLink.href = '/plugin/scheduling_module/schedule/assignment-instructions/' + cid + '/edit';
+      editLink.classList.remove('d-none');
+    }
+    fetch('/plugin/scheduling_module/api/assignment-instructions/' + cid, { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (instructionsPlaceholder) instructionsPlaceholder.remove();
+        instructionsEl.textContent = (data.instructions || '').trim() || 'No instructions set. Edit in More → Location & shift notes.';
+      })
+      .catch(function() {
+        if (instructionsPlaceholder) instructionsPlaceholder.remove();
+        instructionsEl.textContent = 'Could not load. Edit in More → Location & shift notes.';
+      });
+  }
+  if (client && instructionsEl) {
+    client.addEventListener('change', loadAssignmentInstructions);
+    if (client.value) loadAssignmentInstructions();
+  }
+})();
+</script>
+<script>
+(function() {
+  var api = '/plugin/scheduling_module/api';
+  var client = document.getElementById('client_id');
+  var contractorEl = document.getElementById('contractor_ids');
+  var workDateEl = document.querySelector('input[name="work_date"]');
+  var startEl = document.querySelector('input[name="scheduled_start"]');
+  var endEl = document.querySelector('input[name="scheduled_end"]');
+  var conflictEl = document.getElementById('conflict-warnings');
+  var suggestListEl = document.getElementById('suggest-list');
+  var suggestBtn = document.getElementById('btn-suggest-staff');
+  var excludeShiftId = {{ shift.id if shift else 'null' }};
+
+  function getFirstSelectedContractorId() {
+    if (!contractorEl || !contractorEl.options) return null;
+    for (var i = 0; i < contractorEl.options.length; i++) {
+      if (contractorEl.options[i].selected) return contractorEl.options[i].value;
+    }
+    return null;
+  }
+
+  function checkConflicts() {
+    if (!contractorEl || !workDateEl || !startEl || !endEl || !conflictEl) return;
+    var cid = getFirstSelectedContractorId();
+    var date = workDateEl.value;
+    var start = startEl.value;
+    var end = endEl.value;
+    if (!cid || !date || !start || !end) {
+      conflictEl.classList.add('d-none');
+      return;
+    }
+    var q = 'contractor_id=' + encodeURIComponent(cid) + '&date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
+    if (excludeShiftId) q += '&exclude_shift_id=' + excludeShiftId;
+    fetch(api + '/check-conflicts?' + q, { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.conflicts && data.conflicts.length) {
+          conflictEl.innerHTML = '<strong>Warnings:</strong> ' + data.conflicts.join(' ');
+          conflictEl.classList.remove('d-none');
+        } else {
+          conflictEl.classList.add('d-none');
+        }
+      })
+      .catch(function() { conflictEl.classList.add('d-none'); });
+  }
+
+  if (contractorEl) contractorEl.addEventListener('change', checkConflicts);
+  if (workDateEl) workDateEl.addEventListener('change', checkConflicts);
+  if (startEl) startEl.addEventListener('change', checkConflicts);
+  if (endEl) endEl.addEventListener('change', checkConflicts);
+
+  if (suggestBtn && suggestListEl && contractorEl) {
+    suggestBtn.addEventListener('click', function() {
+      var date = workDateEl && workDateEl.value;
+      var start = startEl && startEl.value;
+      var end = endEl && endEl.value;
+      if (!date || !start || !end) {
+        suggestListEl.textContent = 'Set date and start/end time first.';
+        suggestListEl.classList.remove('d-none');
+        return;
+      }
+      var q = 'date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
+      if (client && client.value) q += '&client_id=' + client.value;
+      var jt = document.querySelector('select[name="job_type_id"]');
+      if (jt && jt.value) q += '&job_type_id=' + jt.value;
+      suggestListEl.textContent = 'Loading…';
+      suggestListEl.classList.remove('d-none');
+      fetch(api + '/suggest-contractors?' + q, { headers: { 'Accept': 'application/json' } })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.contractors && data.contractors.length) {
+            suggestListEl.innerHTML = 'Available: ' + data.contractors.map(function(c) {
+              return '<a href="#" class="suggest-pick me-1" data-id="' + c.id + '">' + (c.name || c.email) + '</a>';
+            }).join(', ');
+            suggestListEl.querySelectorAll('.suggest-pick').forEach(function(a) {
+              a.addEventListener('click', function(e) {
+                e.preventDefault();
+                var id = this.getAttribute('data-id');
+                for (var i = 0; i < contractorEl.options.length; i++) {
+                  if (contractorEl.options[i].value === id) {
+                    contractorEl.options[i].selected = true;
+                    break;
+                  }
+                }
+                checkConflicts();
+              });
+            });
+          } else {
+            suggestListEl.textContent = 'No available staff for this slot.';
+          }
+        })
+        .catch(function() { suggestListEl.textContent = 'Could not load suggestions.'; });
+    });
+  }
+
+  if (contractorEl && workDateEl && startEl && endEl && conflictEl) {
+    if (getFirstSelectedContractorId() && workDateEl.value && startEl.value && endEl.value) checkConflicts();
+  }
+})();
+</script>
+{% endblock %}

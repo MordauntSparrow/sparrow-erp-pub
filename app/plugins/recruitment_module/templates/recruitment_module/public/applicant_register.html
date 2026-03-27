@@ -1,0 +1,25 @@
+{% extends "recruitment_module/public/base_public.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Applicant registration</h1>
+<form method="post" action="{{ url_for('public_recruitment_site.applicant_register_post') }}{% if request.args.get('next') %}?next={{ request.args.get('next')|urlencode }}{% endif %}" class="col-md-6">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label" for="name">Full name</label>
+    <input type="text" class="form-control" id="name" name="name" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="email">Email</label>
+    <input type="email" class="form-control" id="email" name="email" required autocomplete="username">
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="phone">Phone (optional)</label>
+    <input type="text" class="form-control" id="phone" name="phone">
+  </div>
+  <div class="mb-3">
+    <label class="form-label" for="password">Password (min 8 characters)</label>
+    <input type="password" class="form-control" id="password" name="password" required minlength="8" autocomplete="new-password">
+  </div>
+  <button type="submit" class="btn btn-primary">Register</button>
+</form>
+{% endblock %}

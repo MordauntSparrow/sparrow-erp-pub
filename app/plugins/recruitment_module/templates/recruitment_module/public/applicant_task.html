@@ -1,0 +1,134 @@
+{% extends "recruitment_module/public/base_public.html" %}
+{% block title %}{{ task.template_name }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('public_recruitment_site.applicant_application', application_id=application_id) }}">Application</a></li><li class="breadcrumb-item active" aria-current="page">{{ task.template_name }}</li></ol></nav>
+<h1 class="h4 mb-3">{{ task.template_name }}</h1>
+<p class="text-muted small mb-4">{{ task.template_purpose }}</p>
+{% if task.status == 'completed' %}
+<div class="alert alert-success">This form was already submitted.</div>
+{% elif not task.schema_fields %}
+<div class="alert alert-warning">This form has no fields configured. Please contact the employer.</div>
+{% else %}
+<form method="post" action="{{ url_for('public_recruitment_site.applicant_task_post', task_id=task.id) }}"{% if has_file_field %} enctype="multipart/form-data"{% endif %}>
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  {% for f in task.schema_fields %}
+  {% set fid = 'f_' ~ f.name %}
+  {% set typ = (f.type or 'text')|lower %}
+  {% set req = f.required %}
+  {% if f.options is string %}
+    {% set opts = [f.options] %}
+  {% elif f.options is mapping %}
+    {% set opts = [] %}
+  {% elif f.options %}
+    {% set opts = f.options %}
+  {% else %}
+    {% set opts = [] %}
+  {% endif %}
+  {% set msize = 8 if opts|length > 8 else (2 if opts|length < 2 else opts|length) %}
+
+  <div class="mb-3">
+    {% if typ == 'checkbox' %}
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="{{ f.name }}" id="{{ fid }}" value="yes" {% if req %}required{% endif %}>
+      <label class="form-check-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    </div>
+
+    {% elif typ == 'radio' and opts %}
+    <div class="rec-field-group">
+      <span class="form-label d-block">{{ f.label or f.name }}{% if req %} *{% endif %}</span>
+      {% for opt in opts %}
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="{{ f.name }}" id="{{ fid }}_{{ loop.index }}" value="{{ opt }}" {% if loop.first and req %}required{% endif %}>
+        <label class="form-check-label" for="{{ fid }}_{{ loop.index }}">{{ opt }}</label>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% elif typ == 'select' and opts %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <select class="form-select" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+      <option value="">— Choose —</option>
+      {% for opt in opts %}
+      <option value="{{ opt }}">{{ opt }}</option>
+      {% endfor %}
+    </select>
+
+    {% elif typ == 'multiselect' and opts %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <select class="form-select" id="{{ fid }}" name="{{ f.name }}" multiple size="{{ msize }}" {% if req %}required{% endif %}>
+      {% for opt in opts %}
+      <option value="{{ opt }}">{{ opt }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">Hold Ctrl (Windows) or ⌘ (Mac) to select more than one.</div>
+
+    {% elif typ == 'textarea' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <textarea class="form-control" id="{{ fid }}" name="{{ f.name }}" rows="{{ f.rows|default(4) }}" {% if req %}required{% endif %}></textarea>
+
+    {% elif typ == 'number' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="number" id="{{ fid }}" name="{{ f.name }}" step="any"
+           {% if f.min is defined and f.min != '' %}min="{{ f.min }}"{% endif %}
+           {% if f.max is defined and f.max != '' %}max="{{ f.max }}"{% endif %}
+           {% if f.step is defined and f.step != '' %}step="{{ f.step }}"{% endif %}
+           {% if req %}required{% endif %}>
+
+    {% elif typ == 'range' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-range" type="range" id="{{ fid }}" name="{{ f.name }}"
+           min="{{ f.min if f.min is defined and f.min != '' else 0 }}"
+           max="{{ f.max if f.max is defined and f.max != '' else 100 }}"
+           step="{{ f.step if f.step is defined and f.step != '' else 1 }}"
+           value="{{ f.value if f.value is defined and f.value != '' else 50 }}"
+           {% if req %}required{% endif %}
+           oninput="document.getElementById('{{ fid }}_out').textContent = this.value">
+    <div class="small text-muted"><span id="{{ fid }}_out">{{ f.value if f.value is defined and f.value != '' else 50 }}</span></div>
+
+    {% elif typ == 'datetime' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="datetime-local" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+
+    {% elif typ == 'date' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="date" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+
+    {% elif typ == 'time' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="time" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+
+    {% elif typ == 'month' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="month" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+
+    {% elif typ == 'week' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="week" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+
+    {% elif typ == 'color' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control form-control-color" type="color" id="{{ fid }}" name="{{ f.name }}" value="{{ f.value if f.value is defined and f.value else '#563d7c' }}" title="Choose colour" {% if req %}required{% endif %}>
+
+    {% elif typ == 'file' %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="file" id="{{ fid }}" name="{{ f.name }}" {% if req %}required{% endif %}>
+    <div class="form-text">PDF, Word, or common images (JPG, PNG, WebP, GIF).</div>
+
+    {% elif typ in ('radio', 'select', 'multiselect') %}
+    <div class="alert alert-warning small py-2 mb-0">This question needs choices — please contact the employer.</div>
+
+    {% elif typ in ('email', 'tel', 'url', 'search') %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="{{ typ }}" id="{{ fid }}" name="{{ f.name }}" {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% endif %} {% if req %}required{% endif %} {% if typ == 'url' %}inputmode="url"{% endif %}>
+
+    {% else %}
+    <label class="form-label" for="{{ fid }}">{{ f.label or f.name }}{% if req %} *{% endif %}</label>
+    <input class="form-control" type="text" id="{{ fid }}" name="{{ f.name }}" {% if f.placeholder %}placeholder="{{ f.placeholder }}"{% endif %} {% if req %}required{% endif %}>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <button type="submit" class="btn btn-primary">Submit</button>
+  <a class="btn btn-link" href="{{ url_for('public_recruitment_site.applicant_application', application_id=application_id) }}">Cancel</a>
+</form>
+{% endif %}
+{% endblock %}

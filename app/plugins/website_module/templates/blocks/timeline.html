@@ -1,0 +1,35 @@
+{% macro event(date_lbl, title, body, prefix='', cm=false) %}
+  {% set tt = (title or '')|trim %}
+  {% if tt or cm %}
+  <div class="position-relative ps-4 pb-4 border-start border-primary border-2 ms-2">
+    <span class="position-absolute top-0 start-0 translate-middle-x rounded-circle bg-primary" style="width: 0.75rem; height: 0.75rem; margin-left: -1px;" aria-hidden="true"></span>
+    {% if cm %}
+      {% if date_lbl and date_lbl|trim %}<div class="small text-primary fw-semibold mb-1 wb-inline-target" data-wb-field="{{ prefix }}_date" data-wb-plain="1">{{ date_lbl }}</div>{% endif %}
+      <h3 class="h6 fw-bold mb-2 wb-inline-target" data-wb-field="{{ prefix }}_title" data-wb-plain="1">{{ title }}</h3>
+      {% if body and body|trim %}<div class="text-muted small wb-inline-target" data-wb-field="{{ prefix }}_body" data-wb-rich="1">{{ body|safe }}</div>{% endif %}
+    {% else %}
+      {% if date_lbl and date_lbl|trim %}<div class="small text-primary fw-semibold mb-1">{{ date_lbl }}</div>{% endif %}
+      <h3 class="h6 fw-bold mb-2">{{ title }}</h3>
+      {% if body and body|trim %}<div class="text-muted small">{{ body|safe }}</div>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+{% endmacro %}
+<section class="py-5">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <div class="text-center mb-4 mb-md-5">
+          <h2 class="h3 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="heading" data-wb-plain="1"{% endif %}>{{ heading }}</h2>
+          {% if sub %}<p class="text-muted mb-0{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+        </div>
+        <div class="pt-2">
+          {{ event(e1_date, e1_title, e1_body, 'e1', canvas_mode) }}
+          {{ event(e2_date, e2_title, e2_body, 'e2', canvas_mode) }}
+          {{ event(e3_date, e3_title, e3_body, 'e3', canvas_mode) }}
+          {{ event(e4_date, e4_title, e4_body, 'e4', canvas_mode) }}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

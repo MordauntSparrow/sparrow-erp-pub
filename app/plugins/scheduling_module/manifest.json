@@ -1,0 +1,16 @@
+{
+    "system_name": "scheduling_module",
+    "version": "0.0.2",
+    "installed": true,
+    "enabled": true,
+    "name": "Scheduling Module",
+    "description": "",
+    "dependencies": [
+        "website_module",
+        "employee_portal_module",
+        "time_billing_module"
+    ],
+    "icon": "icon.png",
+    "dashboard_category": "Roster & shifts",
+    "update_available": false
+}

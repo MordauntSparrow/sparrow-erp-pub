@@ -6,6 +6,10 @@
 
     <!-- Schedule Update Button -->
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#scheduleUpdateModal">Schedule an Update</button>
+    <form method="POST" action="{{ url_for('routes.run_version_upgrades') }}" class="d-inline ms-2">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-warning">Run DB Upgrades</button>
+    </form>
     <br/><br/>
 
     <!-- Core Module Version Info -->
@@ -15,9 +19,18 @@
       </div>
       <div class="card-body">
         <p><strong>Current Version:</strong> {{ current_version }}</p>
-        <p><strong>Latest Version:</strong> {{ latest_version }}</p>
+        <p><strong>Latest Version:</strong>
+          {% if latest_version %}
+            {{ latest_version }}
+          {% else %}
+            <span class="text-muted">Unable to check</span>
+            <span class="d-block small text-secondary mt-1">The update server did not return a version (often 401 without credentials). Set <code>GITLAB_TOKEN</code> or <code>GITLAB_USERNAME</code> / <code>GITLAB_PASSWORD</code> in your environment, or <code>CORE_MANIFEST_REMOTE_URL</code> to an accessible manifest URL.</span>
+          {% endif %}
+        </p>
         {% if update_available %}
           <p><strong class="text-success">Update Available!</strong></p>
+        {% elif not latest_version %}
+          <p class="text-secondary small">Configure GitLab access above to see whether a newer core release is published.</p>
         {% else %}
           <p>No updates available for the core module.</p>
         {% endif %}
@@ -89,6 +102,7 @@
           </div>
           <div class="modal-footer">
             <form method="POST" action="{{ url_for('routes.version') }}">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="update_type" value="core">
               <button type="submit" class="btn btn-warning">Update Now</button>
             </form>
@@ -107,7 +121,7 @@
     <table class="table table-striped">
       <thead>
         <tr>
-          <th>Plugin Name</th>
+          <th>Plugin</th>
           <th>Current Version</th>
           <th>Latest Version</th>
           <th>Update Available</th>
@@ -118,7 +132,7 @@
       <tbody>
         {% for plugin in plugins %}
           <tr>
-            <td>{{ plugin.plugin_name }}</td>
+            <td class="fw-medium">{{ plugin.display_name|default(plugin.plugin_name, true) }}</td>
             <td>{{ plugin.current_version }}</td>
             <td>{{ plugin.latest_version }}</td>
             <td>
@@ -149,7 +163,7 @@
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="pluginChangelogModalLabel{{ plugin.plugin_name }}">{{ plugin.plugin_name }} Changelog</h5>
+          <h5 class="modal-title" id="pluginChangelogModalLabel{{ plugin.plugin_name }}">{{ plugin.display_name|default(plugin.plugin_name, true) }} — changelog</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
@@ -179,7 +193,7 @@
               </tbody>
             </table>
           {% else %}
-            <p>No changelog available for {{ plugin.plugin_name }}.</p>
+            <p>No changelog available for {{ plugin.display_name|default(plugin.plugin_name, true) }}.</p>
           {% endif %}
         </div>
         <div class="modal-footer">
@@ -194,14 +208,15 @@
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title" id="updateNowModalLabel{{ plugin.plugin_name }}">Update {{ plugin.plugin_name }} Now</h5>
+          <h5 class="modal-title" id="updateNowModalLabel{{ plugin.plugin_name }}">Update {{ plugin.display_name|default(plugin.plugin_name, true) }}</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p>Are you sure you want to update <strong>{{ plugin.plugin_name }}</strong> to the latest version?</p>
+          <p>Are you sure you want to update <strong>{{ plugin.display_name|default(plugin.plugin_name, true) }}</strong> to the latest version?</p>
         </div>
         <div class="modal-footer">
           <form method="POST" action="{{ url_for('routes.version') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="update_type" value="plugin">
             <input type="hidden" name="plugin_name" value="{{ plugin.plugin_name }}">
             <button type="submit" class="btn btn-warning">Update Now</button>
@@ -224,6 +239,7 @@
       </div>
       <div class="modal-body">
         <form method="POST" action="{{ url_for('routes.version') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <div class="mb-3">
             <label for="update_type" class="form-label">Select Update Type</label>
             <select name="update_type" id="update_type" class="form-select">
@@ -236,7 +252,7 @@
             <label for="plugin_name" class="form-label">Select Plugin</label>
             <select name="plugin_name" id="plugin_name" class="form-select">
               {% for plugin in plugins %}
-                <option value="{{ plugin.plugin_name }}">{{ plugin.plugin_name }}</option>
+                <option value="{{ plugin.plugin_name }}">{{ plugin.display_name|default(plugin.plugin_name, true) }}</option>
               {% endfor %}
             </select>
           </div>

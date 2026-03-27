@@ -1,0 +1,17 @@
+{% set ratio_class = 'ratio-16x9' if ratio == '16x9' else ('ratio-4x3' if ratio == '4x3' else 'ratio-1x1') %}
+<div class="container py-3">
+  <div class="ratio {{ ratio_class }} {{ 'rounded-4 overflow-hidden shadow-3' if rounded else '' }} bg-dark">
+    {% if url and 'vimeo.com' in url %}
+      {% set vm = (url.split('vimeo.com/')[-1]).split('/')[0].split('?')[0] %}
+      <iframe src="https://player.vimeo.com/video/{{ vm }}" title="Vimeo video" loading="lazy" allowfullscreen allow="autoplay; fullscreen; picture-in-picture"></iframe>
+    {% elif url and 'youtu.be/' in url %}
+      {% set y = (url.split('youtu.be/')[-1]).split('?')[0] %}
+      <iframe src="https://www.youtube-nocookie.com/embed/{{ y }}" title="YouTube video" loading="lazy" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+    {% elif url and 'youtube.com' in url and 'v=' in url %}
+      {% set y = (url.split('v=')[-1]).split('&')[0] %}
+      <iframe src="https://www.youtube-nocookie.com/embed/{{ y }}" title="YouTube video" loading="lazy" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"></iframe>
+    {% else %}
+      <div class="d-flex align-items-center justify-content-center text-white-50 small p-3 text-center">Add a valid YouTube or Vimeo URL in block settings</div>
+    {% endif %}
+  </div>
+</div>

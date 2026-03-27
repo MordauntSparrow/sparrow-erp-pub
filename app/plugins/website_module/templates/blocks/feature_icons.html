@@ -1,0 +1,41 @@
+{# Icon class: allow "bi-foo" or "bi bi-foo" #}
+{% macro icon_class(ic) -%}
+{%- if ic and (ic.startswith('bi ') or ic.startswith('bi-')) -%}{{ ic }}{%- elif ic -%}bi {{ ic }}{%- else -%}bi bi-circle{%- endif -%}
+{%- endmacro %}
+<section class="py-5 bg-light">
+  <div class="container">
+    <div class="text-center mb-4 mb-md-5">
+      <h2 class="h3 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="title" data-wb-plain="1"{% endif %}>{{ title }}</h2>
+      {% if subtitle %}<p class="text-muted mb-0 mx-auto{% if canvas_mode %} wb-inline-target{% endif %}" style="max-width: 36rem;"{% if canvas_mode %} data-wb-field="subtitle" data-wb-plain="1"{% endif %}>{{ subtitle }}</p>{% endif %}
+    </div>
+    <div class="row g-4">
+      <div class="col-md-4">
+        <div class="text-center p-4 h-100 rounded-4 bg-white shadow-1-strong">
+          <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary bg-opacity-10 text-primary mb-3" style="width: 3.5rem; height: 3.5rem;">
+            <i class="{{ icon_class(i1) }} fs-4" aria-hidden="true"></i>
+          </div>
+          <h3 class="h6 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="t1" data-wb-plain="1"{% endif %}>{{ t1 }}</h3>
+          <p class="text-muted small mb-0{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="d1" data-wb-plain="1"{% endif %}>{{ d1 }}</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="text-center p-4 h-100 rounded-4 bg-white shadow-1-strong">
+          <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary bg-opacity-10 text-primary mb-3" style="width: 3.5rem; height: 3.5rem;">
+            <i class="{{ icon_class(i2) }} fs-4" aria-hidden="true"></i>
+          </div>
+          <h3 class="h6 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="t2" data-wb-plain="1"{% endif %}>{{ t2 }}</h3>
+          <p class="text-muted small mb-0{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="d2" data-wb-plain="1"{% endif %}>{{ d2 }}</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="text-center p-4 h-100 rounded-4 bg-white shadow-1-strong">
+          <div class="d-inline-flex align-items-center justify-content-center rounded-circle bg-primary bg-opacity-10 text-primary mb-3" style="width: 3.5rem; height: 3.5rem;">
+            <i class="{{ icon_class(i3) }} fs-4" aria-hidden="true"></i>
+          </div>
+          <h3 class="h6 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="t3" data-wb-plain="1"{% endif %}>{{ t3 }}</h3>
+          <p class="text-muted small mb-0{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="d3" data-wb-plain="1"{% endif %}>{{ d3 }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

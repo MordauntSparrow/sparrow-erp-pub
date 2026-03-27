@@ -1,0 +1,426 @@
+{# Builder preview iframe: select, reorder (Sortable), inline edit, postMessage #}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<style id="wb-canvas-bridge-css">
+  .wb-canvas-root { min-height: 40px; }
+  .wb-canvas-nested-root { min-height: 36px; position: relative; padding-left: 2px; }
+  .wb-canvas-block { position: relative; transition: box-shadow 0.15s ease, outline 0.15s ease; }
+  .wb-canvas-drag-handle {
+    position: absolute;
+    left: 4px;
+    top: 4px;
+    z-index: 5;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    border-radius: 6px;
+    background: rgba(14, 124, 134, 0.92);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    user-select: none;
+  }
+  .wb-canvas-drag-handle:active { cursor: grabbing; }
+  .wb-canvas-block:hover { box-shadow: inset 0 0 0 2px rgba(14, 124, 134, 0.35); }
+  .wb-canvas-block.wb-canvas-selected {
+    box-shadow: inset 0 0 0 3px #0E7C86, 0 0 0 2px rgba(14, 124, 134, 0.2);
+    outline: 2px solid #0E7C86;
+    outline-offset: 2px;
+    z-index: 1;
+  }
+  .wb-sortable-ghost { opacity: 0.45; outline: 2px dashed #0E7C86; }
+  .wb-inline-target.wb-inline-editing {
+    outline: 2px dashed #1565c0;
+    outline-offset: 2px;
+    min-height: 1.5em;
+    cursor: text;
+  }
+  #wb-canvas-toolbar {
+    position: fixed;
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #1a1a1a;
+    color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.35);
+    font-size: 12px;
+    font-weight: 600;
+    max-width: calc(100vw - 16px);
+  }
+  #wb-canvas-toolbar button {
+    border: 0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    background: #37474f;
+    color: #fff;
+  }
+  #wb-canvas-toolbar button:hover { filter: brightness(1.12); }
+  #wb-canvas-toolbar button.wb-tb-del { background: #c62828; }
+  #wb-canvas-toolbar button.wb-tb-dup { background: #1565c0; }
+  #wb-canvas-toolbar .wb-tb-label { opacity: 0.85; margin-right: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+  #wb-inline-rte {
+    position: fixed;
+    z-index: 100002;
+    display: none;
+    flex-direction: row;
+    gap: 4px;
+    padding: 6px 8px;
+    background: #263238;
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0,0,0,.3);
+  }
+  #wb-inline-rte button {
+    border: 0;
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    font-weight: 800;
+    cursor: pointer;
+    background: #455a64;
+    color: #fff;
+  }
+  #wb-inline-rte button:hover { background: #546e7a; }
+</style>
+<script>
+(function () {
+  var TB = null;
+  var RTE = null;
+  var editingEl = null;
+  var INLINE_ORIG = new WeakMap();
+  var ORIGIN = window.location.origin;
+
+  function pathFromEl(el) {
+    if (!el) return null;
+    var raw = el.getAttribute('data-wb-path');
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function post(msg) {
+    msg = msg || {};
+    msg.wb = 'sparrow-builder';
+    try {
+      window.parent.postMessage(msg, ORIGIN);
+    } catch (e) {}
+  }
+
+  function clearRte() {
+    if (RTE) {
+      RTE.style.display = 'none';
+      RTE._target = null;
+    }
+    if (editingEl) {
+      editingEl.removeAttribute('contenteditable');
+      editingEl.removeAttribute('data-wb-editing');
+      INLINE_ORIG.delete(editingEl);
+      editingEl.classList.remove('wb-inline-editing');
+      editingEl = null;
+    }
+  }
+
+  function placeRteBar(el) {
+    if (!RTE) return;
+    var rect = el.getBoundingClientRect();
+    RTE.style.display = 'flex';
+    RTE.style.left = Math.max(8, rect.left) + 'px';
+    RTE.style.top = Math.max(8, rect.top - 44) + 'px';
+    RTE._target = el;
+  }
+
+  function finishInlineEdit(block, path, field, rich) {
+    if (!editingEl) return;
+    var val = rich ? editingEl.innerHTML : editingEl.innerText;
+    post({ type: 'patch', path: path, field: field, value: val, rich: !!rich });
+    INLINE_ORIG.delete(editingEl);
+    clearRte();
+  }
+
+  function startInlineEdit(target, block) {
+    if (target.getAttribute('data-wb-editing') === '1') return;
+    var path = pathFromEl(block);
+    var field = target.getAttribute('data-wb-field');
+    if (!path || !field) return;
+    var rich = target.getAttribute('data-wb-rich') === '1';
+    clearRte();
+    editingEl = target;
+    INLINE_ORIG.set(target, rich ? target.innerHTML : target.innerText);
+    target.setAttribute('data-wb-editing', '1');
+    target.setAttribute('contenteditable', 'true');
+    target.classList.add('wb-inline-editing');
+    if (rich) {
+      if (!RTE) {
+        RTE = document.createElement('div');
+        RTE.id = 'wb-inline-rte';
+        RTE.innerHTML = '<button type="button" title="Bold" data-cmd="bold"><b>B</b></button>' +
+          '<button type="button" title="Italic" data-cmd="italic"><i>I</i></button>' +
+          '<button type="button" title="Underline" data-cmd="underline"><u>U</u></button>';
+        RTE.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        RTE.addEventListener('click', function (e) {
+          var b = e.target.closest('button[data-cmd]');
+          if (!b || !editingEl) return;
+          e.preventDefault();
+          editingEl.focus();
+          document.execCommand(b.getAttribute('data-cmd'), false, null);
+        });
+        document.body.appendChild(RTE);
+      }
+      placeRteBar(target);
+    }
+    target.focus();
+    var onBlur = function (ev) {
+      var rel = ev.relatedTarget;
+      if (rel && rel.closest && rel.closest('#wb-inline-rte')) return;
+      finishInlineEdit(block, path, field, rich);
+      target.removeEventListener('blur', onBlur);
+    };
+    target.addEventListener('blur', onBlur);
+  }
+
+  function clearVisual() {
+    clearRte();
+    document.querySelectorAll('.wb-canvas-block.wb-canvas-selected').forEach(function (n) {
+      n.classList.remove('wb-canvas-selected');
+    });
+    if (TB) {
+      TB.remove();
+      TB = null;
+    }
+  }
+
+  function placeToolbar(el) {
+    if (!el) return;
+    if (!TB) {
+      TB = document.createElement('div');
+      TB.id = 'wb-canvas-toolbar';
+      TB.innerHTML =
+        '<span class="wb-tb-label" id="wb-tb-label">Block</span>' +
+        '<button type="button" class="wb-tb-dup" data-act="dup">Duplicate</button>' +
+        '<button type="button" class="wb-tb-del" data-act="del">Delete</button>';
+      TB.addEventListener('click', function (e) {
+        var btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var sel = document.querySelector('.wb-canvas-block.wb-canvas-selected');
+        var path = sel ? pathFromEl(sel) : null;
+        if (!path) return;
+        if (btn.getAttribute('data-act') === 'del') post({ type: 'delete', path: path });
+        if (btn.getAttribute('data-act') === 'dup') post({ type: 'duplicate', path: path });
+      });
+      document.body.appendChild(TB);
+    }
+    var rect = el.getBoundingClientRect();
+    var tw = TB.offsetWidth || 200;
+    var left = Math.max(8, Math.min(rect.left + rect.width / 2 - tw / 2, window.innerWidth - tw - 8));
+    var top = Math.min(rect.bottom + 8, window.innerHeight - 48);
+    TB.style.left = left + 'px';
+    TB.style.top = top + 'px';
+  }
+
+  function selectEl(el, path) {
+    clearVisual();
+    if (!el || !path) return;
+    el.classList.add('wb-canvas-selected');
+    var label = el.querySelector('.fw-semibold, h1, h2, h3, .display-4, .card-title');
+    var lb = document.getElementById('wb-tb-label');
+    if (lb) lb.textContent = (label && label.textContent.trim()) ? label.textContent.trim().slice(0, 40) : 'Block';
+    placeToolbar(el);
+    post({ type: 'select', path: path });
+  }
+
+  function destroyNestedSortables() {
+    document.querySelectorAll('.wb-canvas-nested-root').forEach(function (nr) {
+      if (nr._wbSortable) {
+        try { nr._wbSortable.destroy(); } catch (x) {}
+        nr._wbSortable = null;
+      }
+    });
+  }
+
+  function destroyRootSortable() {
+    var root = document.getElementById('wb-canvas-sort-root');
+    if (root && root._wbSortable) {
+      try { root._wbSortable.destroy(); } catch (x) {}
+      root._wbSortable = null;
+    }
+  }
+
+  function initBuilderSortable() {
+    var root = document.getElementById('wb-canvas-sort-root');
+    if (typeof Sortable === 'undefined') return;
+    destroyNestedSortables();
+    destroyRootSortable();
+    if (!root) return;
+    root._wbSortable = Sortable.create(root, {
+      animation: 180,
+      handle: '.wb-canvas-drag-handle',
+      draggable: '.wb-canvas-block',
+      ghostClass: 'wb-sortable-ghost',
+      onEnd: function () {
+        var ch = root.children;
+        var order = [];
+        for (var i = 0; i < ch.length; i++) {
+          if (!ch[i].classList || !ch[i].classList.contains('wb-canvas-block')) continue;
+          var p = pathFromEl(ch[i]);
+          if (p && p.length === 1) order.push(p[0]);
+        }
+        var blocks = root.querySelectorAll(':scope > .wb-canvas-block');
+        if (order.length !== blocks.length) return;
+        post({ type: 'reorder', order: order });
+      }
+    });
+
+    document.querySelectorAll('.wb-canvas-nested-root').forEach(function (nr) {
+      var pjson = nr.getAttribute('data-wb-parent-path');
+      if (!pjson) return;
+      var parentPath;
+      try { parentPath = JSON.parse(pjson); } catch (e) { return; }
+      if (nr._wbSortable) {
+        try { nr._wbSortable.destroy(); } catch (x) {}
+        nr._wbSortable = null;
+      }
+      nr._wbSortable = Sortable.create(nr, {
+        animation: 180,
+        handle: '.wb-canvas-drag-handle',
+        draggable: '.wb-canvas-block',
+        ghostClass: 'wb-sortable-ghost',
+        onEnd: function () {
+          var blocks = nr.querySelectorAll(':scope > .wb-canvas-block');
+          var order = [];
+          for (var i = 0; i < blocks.length; i++) {
+            var p = pathFromEl(blocks[i]);
+            if (!p || !p.length) return;
+            order.push(p[p.length - 1]);
+          }
+          if (order.length !== blocks.length) return;
+          var n = order.length;
+          var seen = {};
+          for (var j = 0; j < n; j++) {
+            if (order[j] < 0 || order[j] >= n) return;
+            if (seen[order[j]]) return;
+            seen[order[j]] = true;
+          }
+          post({ type: 'reorderNested', parentPath: parentPath, order: order });
+        }
+      });
+    });
+  }
+
+  document.addEventListener('dblclick', function (e) {
+    var t = e.target.closest('.wb-inline-target');
+    if (!t) return;
+    var block = t.closest('.wb-canvas-block');
+    if (!block) return;
+    e.preventDefault();
+    e.stopPropagation();
+    startInlineEdit(t, block);
+  }, true);
+
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('.wb-canvas-drag-handle')) return;
+    if (e.target.closest('#wb-canvas-toolbar')) return;
+    if (e.target.closest('#wb-inline-rte')) return;
+    if (e.target.closest('a, button, input, textarea, select, label, [data-wb-no-select]')) return;
+    var block = e.target.closest('.wb-canvas-block');
+    if (!block) {
+      clearVisual();
+      post({ type: 'clear' });
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    var path = pathFromEl(block);
+    selectEl(block, path);
+  }, true);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      if (editingEl) {
+        if (INLINE_ORIG.has(editingEl)) {
+          var o = INLINE_ORIG.get(editingEl);
+          var isRich = editingEl.getAttribute('data-wb-rich') === '1';
+          if (isRich) editingEl.innerHTML = o;
+          else editingEl.innerText = o;
+          INLINE_ORIG.delete(editingEl);
+        }
+        clearRte();
+      }
+      clearVisual();
+      post({ type: 'clear' });
+      return;
+    }
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    var t = e.target;
+    if (t.matches('input, textarea, select, [contenteditable="true"]')) return;
+    var sel = document.querySelector('.wb-canvas-block.wb-canvas-selected');
+    if (!sel) return;
+    e.preventDefault();
+    post({ type: 'delete', path: pathFromEl(sel) });
+  });
+
+  window.addEventListener('scroll', function () {
+    var sel = document.querySelector('.wb-canvas-block.wb-canvas-selected');
+    if (sel) placeToolbar(sel);
+    if (editingEl && RTE) placeRteBar(editingEl);
+  }, true);
+
+  window.addEventListener('message', function (e) {
+    if (e.origin !== ORIGIN) return;
+    var d = e.data;
+    if (!d || d.wb !== 'sparrow-builder') return;
+    if (d.type !== 'highlight') return;
+    clearVisual();
+    if (!d.path || !d.path.length) return;
+    var want = JSON.stringify(d.path);
+    var nodes = document.querySelectorAll('.wb-canvas-block');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].getAttribute('data-wb-path') === want) {
+        nodes[i].classList.add('wb-canvas-selected');
+        var label = nodes[i].querySelector('.fw-semibold, h1, h2, h3, .display-4, .card-title');
+        if (TB) TB.remove();
+        TB = null;
+        TB = document.createElement('div');
+        TB.id = 'wb-canvas-toolbar';
+        TB.innerHTML =
+          '<span class="wb-tb-label" id="wb-tb-label">Block</span>' +
+          '<button type="button" class="wb-tb-dup" data-act="dup">Duplicate</button>' +
+          '<button type="button" class="wb-tb-del" data-act="del">Delete</button>';
+        TB.addEventListener('click', function (ev) {
+          var btn = ev.target.closest('button[data-act]');
+          if (!btn) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          var sel = document.querySelector('.wb-canvas-block.wb-canvas-selected');
+          var pth = sel ? pathFromEl(sel) : null;
+          if (!pth) return;
+          if (btn.getAttribute('data-act') === 'del') post({ type: 'delete', path: pth });
+          if (btn.getAttribute('data-act') === 'dup') post({ type: 'duplicate', path: pth });
+        });
+        document.body.appendChild(TB);
+        var lb = document.getElementById('wb-tb-label');
+        if (lb) lb.textContent = (label && label.textContent.trim()) ? label.textContent.trim().slice(0, 40) : 'Block';
+        placeToolbar(nodes[i]);
+        break;
+      }
+    }
+  });
+
+  function boot() {
+    initBuilderSortable();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>

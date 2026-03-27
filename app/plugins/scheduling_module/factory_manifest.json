@@ -1,0 +1,42 @@
+{
+  "repository": "official",
+  "system_name": "scheduling_module",
+  "name": "Scheduling & Shifts",
+  "current_version": "0.0.2",
+  "compatible_with": ">=1.1.0",
+  "force_update": false,
+  "description": "View your shifts and schedule. Sling-level scheduling: shifts, open shifts, templates, labour cost, audit, time clock & geofencing, timesheet export, announcements, shift tasks.",
+  "dashboard_category": "Roster & shifts",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/scheduling_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fscheduling_module%2Fscheduling_module_v0.0.1.zip/raw?ref=main",
+  "dependencies": [
+    "website_module",
+    "employee_portal_module",
+    "time_billing_module"
+  ],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "0.0.2",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fscheduling_module%2Fscheduling_module_v0.0.2.zip/raw?ref=main",
+      "changes": [
+        "Public schedule: AI assistant button respects LLM configuration; central AI config alignment.",
+        "Maintenance release — upload scheduling_module_v0.0.2.zip before clients update."
+      ]
+    },
+    {
+      "version": "0.0.1",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fscheduling_module%2Fscheduling_module_v0.0.1.zip/raw?ref=main",
+      "changes": [
+        "Initial release of Scheduling & Shifts (official repository).",
+        "Shifts, open shifts, templates, labour cost, audit, time clock & geofencing, timesheet export, announcements, shift tasks.",
+        "See module README and INTEGRATION.md for integration notes.",
+        "Upload scheduling_module_v0.0.1.zip to plugins/scheduling_module/ before enabling remote installs."
+      ]
+    }
+  ]
+}

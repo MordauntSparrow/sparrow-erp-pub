@@ -1,0 +1,178 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Transactions — Inventory Control{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  {% include "admin/_inventory_nav.html" %}
+  <h1 class="h3 mb-4">Transactions</h1>
+
+  <div class="card mb-4">
+    <div class="card-header"><strong>Record transaction</strong></div>
+    <div class="card-body">
+      <form id="txForm" class="row g-2 align-items-end">
+        <div class="col-md-3"><label class="form-label">Item *</label><select class="form-select" id="txItemId" required></select></div>
+        <div class="col-md-3"><label class="form-label">Location *</label><select class="form-select" id="txLocationId" required></select></div>
+        <div class="col-md-2"><label class="form-label">Quantity *</label><input type="number" class="form-control" id="txQty" step="any" value="1" required></div>
+        <div class="col-md-2"><label class="form-label">Type</label><select class="form-select" id="txType"><option value="in">In</option><option value="out">Out</option><option value="return">Return</option><option value="adjustment">Adjustment</option></select></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Record</button></div>
+
+        <div class="col-12"><hr class="my-2"></div>
+
+        <div class="col-md-4">
+          <label class="form-label">Signed out to (optional)</label>
+          <input type="text" class="form-control" id="txAssigneeSearch" placeholder="Search users or contractors...">
+          <input type="hidden" id="txAssigneeType">
+          <input type="hidden" id="txAssigneeId">
+          <input type="hidden" id="txAssigneeLabel">
+          <div class="list-group position-absolute shadow-sm d-none" id="assigneeResults" style="z-index: 2000; max-height: 240px; overflow:auto; width: min(520px, 90vw);"></div>
+          <div class="form-text">Used for consumables usage trends and equipment assignment.</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Loaned?</label>
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="txIsLoan">
+            <label class="form-check-label" for="txIsLoan">LOAN</label>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Due back</label>
+          <input type="date" class="form-control" id="txDueBack">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Equipment serial (optional)</label>
+          <input type="text" class="form-control" id="txSerial" placeholder="Scan or type serial number">
+          <div class="form-text">For serialised equipment; leave blank for bulk consumables.</div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0" id="transactions-table">
+          <thead class="table-light"><tr><th>ID</th><th>Type</th><th>Item</th><th>Location</th><th>Qty</th><th>Date</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <p class="text-muted small mt-2" id="transactions-status">Loading…</p>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  const base = '/plugin/inventory_control';
+  let allItems = [], allLocations = [];
+
+  function loadRefs() {
+    return Promise.all([
+      fetch(base + '/api/items?limit=500', { credentials: 'same-origin' }).then(r => r.json()).then(d => { allItems = d.items || []; }),
+      fetch(base + '/api/locations', { credentials: 'same-origin' }).then(r => r.json()).then(d => { allLocations = d.locations || []; })
+    ]).then(() => {
+      const itemSel = document.getElementById('txItemId');
+      itemSel.innerHTML = '<option value="">— Select item —</option>';
+      allItems.forEach(it => { const o = document.createElement('option'); o.value = it.id; o.textContent = (it.sku || '') + ' — ' + (it.name || ''); itemSel.appendChild(o); });
+      const locSel = document.getElementById('txLocationId');
+      locSel.innerHTML = '<option value="">— Select location —</option>';
+      allLocations.forEach(l => { const o = document.createElement('option'); o.value = l.id; o.textContent = (l.code || '') + ' — ' + (l.name || ''); locSel.appendChild(o); });
+    });
+  }
+
+  const itemMap = () => { const m = {}; allItems.forEach(it => { m[it.id] = it.sku || it.name; }); return m; };
+  const locMap = () => { const m = {}; allLocations.forEach(l => { m[l.id] = l.code || l.name; }); return m; };
+
+  function loadTransactions() {
+    fetch(base + '/api/transactions?limit=100', { credentials: 'same-origin' }).then(r => r.json()).then(data => {
+      const tx = data.transactions || [];
+      const im = itemMap(), lm = locMap();
+      const tbody = document.querySelector('#transactions-table tbody');
+      tbody.innerHTML = '';
+      tx.forEach(t => {
+        const tr = document.createElement('tr');
+        const rollbackBtn = t.reversed_transaction_id ? '' : '<button type="button" class="btn btn-sm btn-outline-warning rollback-tx" data-id="' + t.id + '" title="Rollback">Rollback</button>';
+        tr.innerHTML = '<td>' + t.id + '</td><td>' + (t.transaction_type || '') + '</td><td>' + (im[t.item_id] || '#' + t.item_id) + '</td><td>' + (lm[t.location_id] || '#' + t.location_id) + '</td><td>' + (t.quantity ?? '') + '</td><td>' + (t.performed_at || '') + '</td><td>' + rollbackBtn + '</td>';
+        tbody.appendChild(tr);
+      });
+      document.getElementById('transactions-status').textContent = tx.length + ' transaction(s)';
+      tbody.querySelectorAll('.rollback-tx').forEach(btn => btn.addEventListener('click', function() {
+        const id = parseInt(this.dataset.id, 10);
+        if (!confirm('Rollback this transaction? A reversing transaction will be created.')) return;
+        fetch(base + '/api/transactions/' + id + '/rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' })
+          .then(r => r.json()).then(d => { if (d.error) alert(d.error); else loadTransactions(); }).catch(() => alert('Request failed'));
+      }));
+    }).catch(() => { document.getElementById('transactions-status').textContent = 'Error loading transactions'; });
+  }
+
+  document.getElementById('txForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const payload = {
+      item_id: parseInt(document.getElementById('txItemId').value, 10),
+      location_id: parseInt(document.getElementById('txLocationId').value, 10),
+      quantity: parseFloat(document.getElementById('txQty').value),
+      transaction_type: document.getElementById('txType').value,
+      assignee_type: document.getElementById('txAssigneeType').value || null,
+      assignee_id: document.getElementById('txAssigneeId').value || null,
+      assignee_label: document.getElementById('txAssigneeLabel').value || null,
+      is_loan: document.getElementById('txIsLoan').checked,
+      due_back_date: document.getElementById('txDueBack').value || null,
+      equipment_serial: document.getElementById('txSerial').value.trim() || null
+    };
+    if (!payload.item_id || !payload.location_id || isNaN(payload.quantity)) { alert('Select item, location and enter quantity'); return; }
+    fetch(base + '/api/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), credentials: 'same-origin' })
+      .then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); return; }
+        document.getElementById('txQty').value = '1';
+        document.getElementById('txSerial').value = '';
+        loadTransactions();
+      }).catch(() => alert('Request failed'));
+  });
+
+  // Assignee search
+  const searchEl = document.getElementById('txAssigneeSearch');
+  const resEl = document.getElementById('assigneeResults');
+  function clearAssignee() {
+    document.getElementById('txAssigneeType').value = '';
+    document.getElementById('txAssigneeId').value = '';
+    document.getElementById('txAssigneeLabel').value = '';
+  }
+  function hideResults() { resEl.classList.add('d-none'); resEl.innerHTML = ''; }
+  function showResults(items) {
+    resEl.innerHTML = '';
+    items.forEach(p => {
+      const a = document.createElement('button');
+      a.type = 'button';
+      a.className = 'list-group-item list-group-item-action';
+      a.textContent = (p.label || '') + ' (' + p.type + ')';
+      a.addEventListener('click', function() {
+        document.getElementById('txAssigneeType').value = p.type;
+        document.getElementById('txAssigneeId').value = p.id;
+        document.getElementById('txAssigneeLabel').value = p.label || '';
+        searchEl.value = (p.label || '') + ' (' + p.type + ')';
+        hideResults();
+      });
+      resEl.appendChild(a);
+    });
+    resEl.classList.toggle('d-none', items.length === 0);
+  }
+  searchEl.addEventListener('input', function() {
+    clearTimeout(this._t);
+    const q = this.value.trim();
+    clearAssignee();
+    if (q.length < 2) { hideResults(); return; }
+    this._t = setTimeout(function() {
+      fetch(base + '/api/people/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(d => showResults(d.people || []))
+        .catch(() => hideResults());
+    }, 250);
+  });
+  document.addEventListener('click', function(e) {
+    if (!resEl.contains(e.target) && e.target !== searchEl) hideResults();
+  });
+
+  loadRefs().then(loadTransactions);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}New template – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">New template</h1>
+<form method="post" action="{{ url_for('internal_scheduling.admin_template_create') }}" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label">Name <span class="text-danger">*</span></label>
+    <input type="text" name="name" class="form-control" required placeholder="e.g. Week A">
+  </div>
+  <div class="row g-2">
+    <div class="col-md-4">
+      <label class="form-label">{{ assignment_label|default('Client') }}</label>
+      <select name="client_id" class="form-select">
+        <option value="">—</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Site</label>
+      <select name="site_id" class="form-select">
+        <option value="">—</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}">{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Job type</label>
+      <select name="job_type_id" class="form-select">
+        <option value="">—</option>
+        {% for j in job_types %}
+        <option value="{{ j.id }}">{{ j.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="mt-3">
+    <button type="submit" class="btn btn-primary">Create & add slots</button>
+    <a href="{{ url_for('internal_scheduling.admin_templates') }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

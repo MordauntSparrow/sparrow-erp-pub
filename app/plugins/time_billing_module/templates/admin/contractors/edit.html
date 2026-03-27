@@ -40,6 +40,15 @@
           </select>
         </div>
 
+        <div class="col-12 col-md-4">
+          <label class="form-label">Employment type</label>
+          <select id="employment_type" class="form-select form-select-sm">
+            <option value="self_employed">Self-employed</option>
+            <option value="paye">PAYE</option>
+          </select>
+          <div class="form-text">Self-employed can create invoices after approval. Stored here so HR is not required; if HR module exposes this field, it can override.</div>
+        </div>
+
         <div class="col-12 col-md-6">
           <label class="form-label">Role (single)</label>
           <select id="role_id" class="form-select form-select-sm" required>
@@ -80,17 +89,20 @@
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="msgTitle"></h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
       </div>
       <div class="modal-body" id="msgBody"></div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
 </div>
 
-<script>
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
 (function () {
   "use strict";
 
@@ -98,16 +110,17 @@
   const idMatch = location.hash.match(/edit-(\d+)/);
   const userId = idMatch ? idMatch[1] : null;
 
-  // Modal guard: support bootstrap or MDB
-  const ModalClass = (window.bootstrap && bootstrap.Modal)
-    ? bootstrap.Modal
-    : (window.mdb && mdb.Modal);
-  const msgModalInst = ModalClass ? new ModalClass(document.getElementById('msgModal')) : null;
+  const msgModalEl = document.getElementById('msgModal');
+  function getMsgModal() {
+    if (!window.mdb || !mdb.Modal) return null;
+    return mdb.Modal.getOrCreateInstance(msgModalEl);
+  }
 
   function showMsg(title, body) {
     document.getElementById('msgTitle').textContent = title;
     document.getElementById('msgBody').textContent = body;
-    if (msgModalInst) msgModalInst.show();
+    const m = getMsgModal();
+    if (m) m.show();
     else alert(`${title}: ${body}`);
   }
 
@@ -115,6 +128,7 @@
   const emailEl = $('#email');
   const nameEl = $('#name');
   const statusEl = $('#status');
+  const employmentTypeEl = $('#employment_type');
   const roleIdEl = $('#role_id');
   const wageCardEl = $('#wage_rate_card_id');
   const newPwEl = $('#new_pw');
@@ -174,6 +188,7 @@
     emailEl.value = c.email || '';
     nameEl.value = c.name || '';
     statusEl.value = (c.status || 'active').toLowerCase();
+    employmentTypeEl.value = (c.employment_type || 'self_employed').toLowerCase();
 
     // Preselect role_id and wage card if present
     if (c.role_id != null) roleIdEl.value = String(c.role_id);
@@ -183,17 +198,18 @@
   async function save() {
     const name = (nameEl.value || '').trim();
     const status = (statusEl.value || 'active').toLowerCase();
+    const employment_type = (employmentTypeEl.value || 'paye').toLowerCase();
     const role_id = roleIdEl.value ? parseInt(roleIdEl.value, 10) : null;
     const wage_rate_card_id = wageCardEl.value ? parseInt(wageCardEl.value, 10) : null;
 
     if (!name) return showMsg('Validation Error', 'Name cannot be empty');
     if (!role_id) return showMsg('Validation Error', 'Please select a primary role');
 
-    const payload = { name, status, role_id, wage_rate_card_id };
+    const payload = { name, status, employment_type, role_id, wage_rate_card_id };
 
     const r = await fetch(UPDATE_URL(userId), {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
       body: JSON.stringify(payload),
     });
 
@@ -212,7 +228,7 @@
 
     const r = await fetch(SETPW_URL(userId), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
       body: JSON.stringify({ password: pw }),
     });
 

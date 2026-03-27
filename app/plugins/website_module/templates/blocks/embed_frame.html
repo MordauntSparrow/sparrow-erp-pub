@@ -1,0 +1,10 @@
+{% set u = (src or '')|trim %}
+{% set h = (height|default(480))|int %}
+{% set frame_title = (title or 'Embedded content')|e %}
+{% if u and (u|lower)[:8] == 'https://' %}
+<div class="container py-4 py-md-5">
+  <div class="w-100 {% if rounded|default(true) %}rounded-4 overflow-hidden shadow-2{% endif %}" style="height: {{ h }}px;">
+    <iframe src="{{ u|e }}" title="{{ frame_title }}" class="border-0 w-100 h-100" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allow="fullscreen"></iframe>
+  </div>
+</div>
+{% endif %}

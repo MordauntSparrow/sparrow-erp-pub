@@ -1,0 +1,164 @@
+{% extends "public/base.html" %}
+{% block title %}Dashboard – {{ (config.site_settings or {}).company_name or 'Employee Portal' }}{% endblock %}
+{% block content %}
+{# Profile: avatar + name (mobile-first, top of page) #}
+<div class="text-center py-4" role="region" aria-label="Profile">
+  {% if user and user.get('profile_picture_path') %}
+    <img src="{{ url_for('static', filename=user.profile_picture_path) }}" alt="" class="ep-avatar" width="96" height="96">
+  {% else %}
+    <div class="ep-avatar-initials mx-auto" aria-hidden="true">
+      {{ ((user.get('initials') or user.get('name') or user.get('email') or '?')|string)[:2]|upper }}
+    </div>
+  {% endif %}
+  <h2 class="h5 mt-3 mb-0">{{ user.get('name') or user.get('email') }}</h2>
+  <p class="text-secondary small mb-0">Employee Portal</p>
+</div>
+
+{# Quick actions: time off, sickness (only when scheduling enabled), and pending items #}
+<section class="mb-4" aria-labelledby="quick-actions-heading">
+  <h3 id="quick-actions-heading" class="h6 text-secondary text-uppercase mb-3">Quick actions</h3>
+  <div class="d-flex flex-wrap gap-2">
+    {% if scheduling_enabled|default(False) %}
+    <a href="/scheduling/request-time-off" class="btn btn-outline-light btn-sm">Request time off</a>
+    <a href="/scheduling/report-sickness" class="btn btn-outline-warning btn-sm">Report sickness</a>
+    {% endif %}
+  </div>
+  {% if pending_policies|default(0) > 0 or pending_hr_requests|default(0) > 0 %}
+  <div class="mt-2 d-flex flex-wrap gap-2">
+    {% if pending_policies|default(0) > 0 %}
+    <a href="/compliance/" class="btn btn-warning btn-sm">{{ pending_policies }} policy/policies to sign</a>
+    {% endif %}
+    {% if pending_hr_requests|default(0) > 0 %}
+    <a href="/hr/" class="btn btn-info btn-sm">{{ pending_hr_requests }} document request(s)</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+{# Module links: vertical list (works on phone and desktop); disabled modules greyed out #}
+<section class="mb-4" aria-labelledby="modules-heading">
+  <h3 id="modules-heading" class="h6 text-secondary text-uppercase mb-3">Modules</h3>
+  <div class="d-flex flex-column gap-2">
+    {% for mod in module_links %}
+    {% if mod.enabled|default(True) %}
+    <a href="{{ mod.url }}" class="module-tile">
+      <i class="bi {{ mod.icon }}"></i>
+      <span class="fw-medium">{{ mod.name }}</span>
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    {% else %}
+    <span class="module-tile module-tile--disabled" title="This module is not enabled.">
+      <i class="bi {{ mod.icon }}"></i>
+      <span class="fw-medium">{{ mod.name }}</span>
+      <span class="ms-auto small text-secondary">Not available</span>
+    </span>
+    {% endif %}
+    {% endfor %}
+  </div>
+</section>
+
+{# Messages from any module #}
+<section class="mb-4" aria-labelledby="messages-heading">
+  <h3 id="messages-heading" class="h6 text-secondary text-uppercase mb-3">
+    <i class="bi bi-envelope me-1" aria-hidden="true"></i> Messages
+  </h3>
+  {% if messages %}
+  <div class="d-flex flex-column gap-2">
+    {% for m in messages %}
+    <div class="ep-card p-3 {% if not m.read_at %}border-start border-primary border-3{% endif %}">
+      <div class="d-flex justify-content-between align-items-start">
+        <strong class="small text-secondary">{{ m.source_module|replace('_module','') }}</strong>
+        <span class="small text-secondary">{{ m.created_at.strftime('%d %b') if m.created_at else '' }}</span>
+      </div>
+      <div class="fw-medium mt-1">{{ m.subject }}</div>
+      {% if m.body %}
+      <p class="small text-secondary mb-0 mt-1">{{ m.body[:120] }}{% if m.body|length > 120 %}…{% endif %}</p>
+      {% endif %}
+      <button type="button" class="btn btn-link btn-sm p-0 mt-1 ep-link js-mark-read" data-id="{{ m.id }}" {% if m.read_at %}disabled{% endif %} aria-label="Mark as read">
+        {% if m.read_at %}Read{% else %}Mark as read{% endif %}
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-secondary small mb-0">No messages.</p>
+  {% endif %}
+</section>
+
+{# Todos from HR, Compliance, Training, etc. #}
+<section class="mb-4" aria-labelledby="todos-heading">
+  <h3 id="todos-heading" class="h6 text-secondary text-uppercase mb-3">
+    <i class="bi bi-list-check me-1" aria-hidden="true"></i> To-do
+  </h3>
+  {% if todos %}
+  <div class="d-flex flex-column gap-2">
+    {% for t in todos %}
+    <div class="ep-card p-3 {% if t.completed_at %}opacity-75{% endif %}">
+      <div class="d-flex align-items-start gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary p-1 js-todo-complete" data-id="{{ t.id }}" title="Mark done" aria-label="Mark todo as done" {% if t.completed_at %}disabled{% endif %}>
+          {% if t.completed_at %}<i class="bi bi-check-lg text-success"></i>{% else %}<i class="bi bi-circle"></i>{% endif %}
+        </button>
+        <div class="flex-grow-1 min-w-0">
+          <span class="small text-secondary">{{ t.source_module|replace('_module','') }}</span>
+          <div class="fw-medium">
+            {% if t.link_url %}
+            <a href="{{ t.link_url }}" class="ep-link">{{ t.title }}</a>
+            {% else %}
+            {{ t.title }}
+            {% endif %}
+          </div>
+          {% if t.due_date and not t.completed_at %}
+          <span class="small text-warning">Due {{ t.due_date.strftime('%d %b %Y') }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-secondary small mb-0">Nothing to do right now.</p>
+  {% endif %}
+</section>
+
+<script>
+(function() {
+  function handleApiError(res, fallbackMsg) {
+    if (!res.ok) {
+      try { return res.json().then(function(d) { alert(d.error || fallbackMsg); }); }
+      catch (e) { alert(fallbackMsg); }
+    }
+    return Promise.resolve();
+  }
+  document.querySelectorAll('.js-mark-read').forEach(function(btn) {
+    if (btn.disabled) return;
+    btn.addEventListener('click', function() {
+      var id = btn.getAttribute('data-id');
+      var url = '{{ url_for("public_employee_portal.api_mark_message_read", msg_id=0) }}'.replace('0', id);
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+      }).then(function(res) {
+        return handleApiError(res, 'Could not mark as read.').then(function() {
+          if (res.ok) { btn.textContent = 'Read'; btn.disabled = true; }
+        });
+      }).catch(function() { alert('Something went wrong. Please try again.'); });
+    });
+  });
+  document.querySelectorAll('.js-todo-complete').forEach(function(btn) {
+    if (btn.disabled) return;
+    btn.addEventListener('click', function() {
+      var id = btn.getAttribute('data-id');
+      var url = '{{ url_for("public_employee_portal.api_todo_complete", todo_id=0) }}'.replace('0', id);
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+      }).then(function(res) {
+        return handleApiError(res, 'Could not complete todo.').then(function() {
+          if (res.ok) window.location.reload();
+        });
+      }).catch(function() { alert('Something went wrong. Please try again.'); });
+    });
+  });
+})();
+</script>
+{% endblock %}

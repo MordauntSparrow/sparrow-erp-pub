@@ -6,7 +6,21 @@
 <h1 class="mb-3">{{ plugin_name }} Settings</h1>
 <a href="{{ url_for('routes.plugins') }}" class="btn btn-secondary btn-sm mb-3">Back to Plugins</a>
 
+<div aria-live="polite" aria-atomic="true" class="mb-3">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            {% if category in ('plugins_page_success', 'plugins_page_danger', 'plugins_page_error') %}
+            <div class="alert alert-{% if category == 'plugins_page_success' %}success{% else %}danger{% endif %} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endif %}
+        {% endfor %}
+    {% endwith %}
+</div>
+
 <form method="POST">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <table class="table table-striped table-bordered table-hover mt-3">
         <thead>
             <tr>

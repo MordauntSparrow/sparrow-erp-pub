@@ -1,0 +1,33 @@
+{% extends "recruitment_module/public/base_public.html" %}
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('public_recruitment_site.vacancies_list') }}">Vacancies</a></li><li class="breadcrumb-item active" aria-current="page">{{ opening.title }}</li></ol></nav>
+<h1 class="h3 mb-2">{{ opening.title }}</h1>
+<p class="text-muted mb-3"><span class="badge bg-primary-subtle text-primary border">{{ opening.role_title }}</span></p>
+{% if opening.summary %}<p class="lead">{{ opening.summary }}</p>{% endif %}
+{% if opening.description %}<div class="mb-4 text-break" style="white-space:pre-wrap;">{{ opening.description }}</div>{% endif %}
+
+{% if applicant %}
+<div class="card border-primary">
+  <div class="card-header fw-semibold">Apply</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('public_recruitment_site.vacancy_apply_post', slug=opening.slug) }}" enctype="multipart/form-data">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label" for="cover_note">Cover note (optional)</label>
+        <textarea class="form-control" id="cover_note" name="cover_note" rows="4" placeholder="Brief introduction"></textarea>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="cv">CV (PDF, DOC, DOCX)</label>
+        <input class="form-control" type="file" id="cv" name="cv" accept=".pdf,.doc,.docx,application/pdf">
+      </div>
+      <button type="submit" class="btn btn-primary">Submit application</button>
+    </form>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-info">
+  <a href="{{ url_for('public_recruitment_site.applicant_login', next=request.path) }}">Sign in</a> or
+  <a href="{{ url_for('public_recruitment_site.applicant_register', next=request.path) }}">create an applicant account</a> to apply.
+</div>
+{% endif %}
+{% endblock %}

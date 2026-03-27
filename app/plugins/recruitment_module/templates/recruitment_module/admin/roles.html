@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Job roles — Recruitment{% endblock %}
+{% block content %}
+<div class="container-fluid mt-3 mt-md-4 px-3 px-lg-4 rec-admin">
+  {% include 'recruitment_module/admin/_recruitment_ui.html' %}
+  {% include 'recruitment_module/admin/_recruitment_nav.html' %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">Job roles</h1>
+      <p class="small text-muted mb-0">Recruitment-facing titles, linked to time billing for wages when people are hired.</p>
+    </div>
+    <a class="btn btn-primary btn-sm rounded-3" href="{{ url_for('internal_recruitment.admin_role_new') }}">New role</a>
+  </div>
+  <div class="table-responsive border rounded bg-white">
+    <table class="table table-hover mb-0 small">
+      <thead class="table-light"><tr><th>Title</th><th>Time billing role</th><th>Live openings</th><th>Pipeline apps</th><th>Department</th><th>Active</th></tr></thead>
+      <tbody>
+        {% for r in roles %}
+        <tr>
+          <td><a href="{{ url_for('internal_recruitment.admin_role_edit', role_id=r.id) }}">{{ r.title }}</a><br><code class="text-muted">{{ r.slug }}</code></td>
+          <td>{% if r.tb_role_name %}{{ r.tb_role_name }}{% if r.default_wage_card_name %}<br><span class="text-muted">Card: {{ r.default_wage_card_name }}</span>{% endif %}{% else %}<span class="text-warning">Not linked</span>{% endif %}</td>
+          <td><span class="badge bg-success">{{ r.openings_live or 0 }}</span> <span class="text-muted">/ {{ r.openings_total or 0 }} total</span></td>
+          <td>{{ r.applications_pipeline or 0 }}</td>
+          <td>{{ r.department or '—' }}</td>
+          <td>{% if r.active %}Yes{% else %}No{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-muted">No roles yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

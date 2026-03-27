@@ -3,27 +3,34 @@
 <div class="container py-3">
 
     <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-clipboard2-check me-2"></i> Runsheets
-        </h4>
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+        <div>
+            <h4 class="mb-0 d-flex align-items-center">
+                <i class="bi bi-clipboard2-check me-2"></i> Runsheets
+            </h4>
+            <p class="text-muted small mb-0 mt-1">Plan and publish shifts; filter by client, job type, or week.
+                <strong>Publish</strong> on a row pushes crew lines to timesheets — use again after edits or Ventus sign-off to <strong>resync</strong>.</p>
+        </div>
         <a class="btn btn-primary btn-sm" href="#" id="btnNew">
-            <i class="bi bi-plus-lg me-1"></i> New
+            <i class="bi bi-plus-lg me-1"></i> New runsheet
         </a>
     </div>
 
     <!-- Filters -->
     <form class="row g-2 mb-3" id="filterForm">
         <div class="col-12 col-md-3">
-            <input class="form-control form-control-sm" type="text" name="client_name" placeholder="Client ID">
+            <label class="form-label small text-muted mb-0">Client</label>
+            <input class="form-control form-control-sm" type="text" name="client_name" placeholder="ID or name">
         </div>
         <div class="col-12 col-md-3">
-            <input class="form-control form-control-sm" type="text" name="job_type_id" placeholder="Job Type ID">
+            <label class="form-label small text-muted mb-0">Job type</label>
+            <input class="form-control form-control-sm" type="text" name="job_type_id" placeholder="ID">
         </div>
         <div class="col-12 col-md-3">
-            <input class="form-control form-control-sm" type="text" name="week_id" placeholder="Week ID (YYYYWW)">
+            <label class="form-label small text-muted mb-0">Week</label>
+            <input class="form-control form-control-sm" type="text" name="week_id" placeholder="YYYYWW">
         </div>
-        <div class="col-12 col-md-3 d-flex gap-2">
+        <div class="col-12 col-md-3 d-flex gap-2 align-items-end">
             <button class="btn btn-secondary btn-sm" type="submit">
                 <i class="bi bi-search me-1"></i> Apply
             </button>
@@ -33,6 +40,9 @@
 
     <!-- Runsheets Table -->
     <div class="card">
+        <div class="card-header py-2 d-flex align-items-center">
+            <i class="bi bi-list-ul me-2"></i> List
+        </div>
         <div class="card-body">
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
@@ -99,11 +109,13 @@
                     ? 'bg-success'
                     : (status === 'draft' ? 'bg-secondary' : 'bg-dark');
 
+                const jobTypeColour = r.job_type_colour_hex || '#6c757d';
+                const jobTypeBadge = `<span class="badge" style="background-color:${jobTypeColour};color:#fff">${r.job_type_name || r.job_type_id || ''}</span>`;
                 tr.innerHTML = `
                     <td>${r.id}</td>
                     <td>${r.work_date || ''}</td>
                     <td>${r.client_name || r.client_id || ''}</td>
-                    <td>${r.job_type_name || r.job_type_id || ''}</td>
+                    <td>${jobTypeBadge}</td>
                     <td><span class="badge ${badge}">${status}</span></td>
                     <td class="text-end">
                         <div class="btn-group btn-group-sm">
@@ -124,9 +136,10 @@
             // Bind publish buttons safely
             body.querySelectorAll('.js-publish').forEach(btn => {
                 btn.addEventListener('click', async () => {
-                    if (!confirm('Publish this runsheet?')) return;
+                    if (!confirm('Publish / resync this runsheet to contractor timesheets? (Same as Edit Runsheet → Publish / resync.)')) return;
                     const resp = await fetch(`${PUBLISH_BASE}/${btn.dataset.id}/publish`, {
-                        method: 'POST'
+                        method: 'POST',
+                        headers: window.tbMergeCsrfHeaders({}, 'POST')
                     });
                     if (resp.ok) {
                         load();
@@ -151,22 +164,9 @@
         load();
     });
 
-    btnNew.addEventListener('click', async (e) => {
+    btnNew.addEventListener('click', (e) => {
         e.preventDefault();
-        try {
-            const resp = await fetch(CREATE_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-            if (resp.ok) {
-                load();
-            } else {
-                alert('Create failed');
-            }
-        } catch (e) {
-            alert('Create failed');
-        }
+        window.location.href = "{{ url_for('internal_time_billing.runsheets_edit_page') }}#edit-new";
     });
 
     load();

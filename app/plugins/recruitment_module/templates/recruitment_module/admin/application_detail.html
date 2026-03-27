@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Application #{{ application.id }}{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-10">
+  <h1 class="h4 mb-2">{{ application.name }} — {{ application.opening_title }}</h1>
+  <p class="small mb-4"><a href="{{ url_for('internal_recruitment.admin_applications') }}">← Applications</a></p>
+
+  <div class="d-flex flex-wrap gap-2 mb-4">
+    {% for step in progress %}
+    <span class="badge rounded-pill {% if step.current %}bg-primary{% elif step.done %}bg-success{% else %}bg-light text-muted border{% endif %}">{{ step.label }}</span>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Pipeline</div>
+        <div class="card-body">
+          <form method="post" class="mb-0">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="stage">
+            <label class="form-label small" for="stage">Stage</label>
+            <div class="input-group">
+              <select class="form-select" id="stage" name="stage">
+                {% for s in stages %}
+                <option value="{{ s }}" {% if application.stage == s %}selected{% endif %}>{{ stage_labels.get(s, s) }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-primary">Update</button>
+            </div>
+            <div class="form-text">Updating stage runs auto-assign rules for that stage.</div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Hire → employee (contractor)</div>
+        <div class="card-body small">
+          {% if application.contractor_id %}
+          <p class="text-success mb-0">Linked contractor ID: <strong>{{ application.contractor_id }}</strong></p>
+          {% else %}
+          <p class="text-muted mb-2">Applicants stay <strong>out of the contractor table</strong> until pre-hire documents are HR-approved, HR authorises hire, and the applicant has confirmed policies on the portal. Then create the contractor — approved files and CV are copied into HR.</p>
+          {% if hire_precheck_ok %}
+          <div class="alert alert-success py-2 mb-2">Ready to create contractor.</div>
+          {% else %}
+          <div class="alert alert-warning py-2 mb-2">{{ hire_precheck_message }}</div>
+          {% endif %}
+          <ul class="mb-2 ps-3">
+            <li>HR authorisation: {% if application.hr_conversion_authorized %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
+            <li>Policies acknowledged (applicant): {% if application.policies_acknowledged_at %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
+          </ul>
+          <form method="post" class="mb-3 pb-3 border-bottom">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="authorize_hire">
+            <button type="submit" class="btn btn-sm btn-outline-primary" {% if not prehire_requests %}title="No pre-hire rows — authorisation still allowed"{% endif %}>Authorise contractor creation (HR)</button>
+            <div class="form-text">Only after every pre-hire item below is <strong>approved</strong>.</div>
+          </form>
+          {% if hire_preview and hire_preview.ok %}
+          <div class="alert alert-light border py-2 mb-2 small">
+            <strong>Time billing (default from job role):</strong>
+            role <code>{{ hire_preview.role_name }}</code>
+            {% if hire_preview.wage_card_id %}· wage card #{{ hire_preview.wage_card_id }}{% else %}· wage card: first active for role (or none){% endif %}
+            <br><span class="text-muted">Recruitment role: {{ hire_preview.rec_job_role_title or '—' }}{% if hire_preview.linked_tb_role_name %} · linked TB role: {{ hire_preview.linked_tb_role_name }}{% endif %}</span>
+          </div>
+          {% elif hire_preview and not hire_preview.ok %}
+          <div class="alert alert-secondary py-2 mb-2 small">{{ hire_preview.message }}</div>
+          {% endif %}
+          <form method="post" id="hire-contractor-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="hire">
+            <div class="mb-2">
+              <label class="form-label small" for="tb_role_id">Override time billing role</label>
+              <select class="form-select form-select-sm" id="tb_role_id" name="tb_role_id">
+                <option value="">— Use job role link (or legacy name below) —</option>
+                {% for tr in tb_roles_hire %}
+                <option value="{{ tr.id }}">{{ tr.name }}{% if tr.code %} ({{ tr.code }}){% endif %}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Leave default to use the job role’s linked time billing role. Pick another role here to override for this hire only.</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="wage_card_id">Override wage rate card</label>
+              <select class="form-select form-select-sm" id="wage_card_id" name="wage_card_id">
+                <option value="">— Default from job role / first card for role —</option>
+                {% for wc in wage_cards_hire %}
+                <option value="{{ wc.id }}" data-role-id="{{ wc.role_id or '' }}">{% if wc.role_name %}{{ wc.role_name }} — {% endif %}{{ wc.name }} (#{{ wc.id }})</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="contractor_role">Legacy role name (fallback)</label>
+              <input class="form-control form-control-sm" id="contractor_role" name="contractor_role" value="staff" placeholder="Only if no TB role above">
+              <div class="form-text">Used only when no time billing role is linked and no override is selected (creates/finds a <code>roles</code> row by name).</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="password">Portal password (optional)</label>
+              <input class="form-control form-control-sm" type="password" id="password" name="password" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-sm btn-success" {% if not hire_precheck_ok %}disabled{% endif %} onclick="return confirm('Create contractor, copy documents to HR, and mark hired?');">Create contractor &amp; mark hired</button>
+          </form>
+          <script>
+          (function(){
+            var tb = document.getElementById('tb_role_id');
+            var wc = document.getElementById('wage_card_id');
+            if (!tb || !wc) return;
+            function filterWageCards(){
+              var rid = tb.value || '';
+              var opts = wc.querySelectorAll('option[data-role-id]');
+              var firstVisible = null;
+              opts.forEach(function(o){
+                var orid = o.getAttribute('data-role-id') || '';
+                var show = !rid || !orid || orid === rid;
+                o.hidden = !show;
+                o.disabled = !show;
+                if (show && !firstVisible && o.value) firstVisible = o;
+              });
+              if (wc.value && wc.selectedOptions[0] && wc.selectedOptions[0].hidden) {
+                wc.value = '';
+              }
+            }
+            tb.addEventListener('change', filterWageCards);
+            filterWageCards();
+          })();
+          </script>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Pre-hire compliance (applicant portal)</div>
+    <div class="card-body small">
+      <p class="text-muted">Request right-to-work, DBS, contract, policy confirmation, etc. The applicant uploads on <strong>their</strong> login — not the employee portal. After you <strong>approve</strong> each row, use <em>Authorise contractor creation</em> above.</p>
+      <form method="post" class="row g-2 align-items-end border-bottom pb-3 mb-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="prehire_add">
+        <div class="col-md-4">
+          <label class="form-label small">Title</label>
+          <input class="form-control form-control-sm" name="prehire_title" placeholder="e.g. Right to work evidence" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Type</label>
+          <select class="form-select form-select-sm" name="prehire_type">
+            {% for k, lab in prehire_type_labels.items() %}
+            <option value="{{ k }}">{{ lab }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Description (optional)</label>
+          <input class="form-control form-control-sm" name="prehire_description" placeholder="Instructions">
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-sm btn-primary w-100">Add request</button>
+        </div>
+      </form>
+      {% if prehire_requests %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light"><tr><th>Title</th><th>Type</th><th>Status</th><th>File</th><th class="text-end">HR</th></tr></thead>
+          <tbody>
+            {% for r in prehire_requests %}
+            <tr>
+              <td>{{ r.title }}</td>
+              <td>{{ prehire_type_labels.get(r.request_type, r.request_type) }}</td>
+              <td><span class="badge bg-secondary">{{ r.status }}</span></td>
+              <td><code class="small">{% if r.latest_file_path %}{{ r.latest_file_path }}{% else %}—{% endif %}</code></td>
+              <td class="text-end text-nowrap">
+                <form method="post" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="prehire_approve">
+                  <input type="hidden" name="request_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-success" {% if r.status != 'uploaded' %}disabled{% endif %}>Approve</button>
+                </form>
+                <form method="post" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="prehire_reject">
+                  <input type="hidden" name="request_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" {% if r.status == 'approved' %}disabled{% endif %}>Reject</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No pre-hire requests yet. Add types such as right to work, DBS, or contract.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Assign form</div>
+    <div class="card-body">
+      <form method="post" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="assign">
+        <div class="col-md-6">
+          <select class="form-select form-select-sm" name="form_template_id" required>
+            {% for t in templates %}
+            <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 form-check">
+          <input class="form-check-input" type="checkbox" name="force" value="1" id="force">
+          <label class="form-check-label small" for="force">Force new (even if exists)</label>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-sm btn-outline-primary">Send form</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Applicant &amp; CV</div>
+    <div class="card-body small">
+      <p class="mb-1"><strong>Email:</strong> {{ application.email }} · <strong>Phone:</strong> {{ application.phone or '—' }}</p>
+      <p class="mb-0"><strong>CV:</strong> {% if application.cv_path %}<code>{{ application.cv_path }}</code>{% else %}—{% endif %}</p>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Admin notes</div>
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="notes">
+        <textarea class="form-control mb-2" name="admin_notes" rows="3">{{ application.admin_notes or '' }}</textarea>
+        <button type="submit" class="btn btn-sm btn-secondary">Save notes</button>
+      </form>
+    </div>
+  </div>
+
+  <h2 class="h6 mt-4">Tasks / responses</h2>
+  <div class="table-responsive border rounded bg-white">
+    <table class="table table-sm mb-0 small">
+      <thead class="table-light"><tr><th>Template</th><th>Status</th><th>Response preview</th></tr></thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr>
+          <td>{{ t.template_name }} <span class="text-muted">({{ t.purpose }})</span></td>
+          <td><span class="badge {% if t.status == 'completed' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ t.status }}</span></td>
+          <td><code class="small">{{ t.response_json|tojson|truncate(220) if t.response_json else '—' }}</code></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-muted">No tasks.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ profile.name or profile.email }} – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_contractors') }}">Contractors</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id) }}">{{ profile.name or profile.email }}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Edit</li>
+    </ol>
+  </nav>
+  <h1 class="mb-3">Edit profile</h1>
+  <p class="text-muted">{{ profile.name or profile.email }}</p>
+
+  <form method="post" action="{{ url_for('internal_hr.admin_contractor_edit_save', cid=profile.id) }}" enctype="multipart/form-data" class="card card-body mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <h2 class="h6 mb-3">Profile photo</h2>
+    <div class="mb-4 d-flex align-items-start gap-3 flex-wrap">
+      {% set pv = profile.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+      {% if pv %}
+      <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='profile_picture') }}" alt="" width="88" height="88" class="rounded-circle border flex-shrink-0" style="object-fit:cover;">
+      {% else %}
+      <div class="rounded-circle bg-secondary bg-opacity-25 text-secondary d-flex align-items-center justify-content-center flex-shrink-0 fw-semibold" style="width:88px;height:88px;font-size:1.25rem;">{{ (profile.initials or (profile.name or profile.email or '?')[:2])|upper }}</div>
+      {% endif %}
+      <div class="flex-grow-1" style="min-width:220px;">
+        <label class="form-label" for="profile_picture">Upload new photo</label>
+        <input type="file" class="form-control form-control-sm" id="profile_picture" name="profile_picture" accept="image/jpeg,image/png,image/webp,image/gif">
+        <div class="form-text">Optional. Replaces the current photo on the HR profile and employee directory when you save.</div>
+      </div>
+    </div>
+
+    <h2 class="h6 mt-2 mb-3">Role &amp; organisation</h2>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="job_title">Job title / role</label>
+        <input type="text" class="form-control" id="job_title" name="job_title" value="{{ profile.job_title or '' }}" placeholder="e.g. Senior engineer" maxlength="128">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="department">Department</label>
+        <input type="text" class="form-control" id="department" name="department" value="{{ profile.department or '' }}" placeholder="e.g. Operations" maxlength="128">
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="manager_contractor_id">Manager</label>
+      <select class="form-select" id="manager_contractor_id" name="manager_contractor_id">
+        <option value="">— None —</option>
+        {% for m in manager_choices %}
+        <option value="{{ m.id }}" {% if profile.manager_contractor_id is not none and profile.manager_contractor_id == m.id %}selected{% endif %}>{{ m.name or m.email }}{% if m.name and m.email %} · {{ m.email }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Line manager (another person in your contractor list). Leave blank if not set.</div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Phone</label>
+        <input type="text" class="form-control" name="phone" value="{{ profile.phone or '' }}">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Emergency contact name</label>
+        <input type="text" class="form-control" name="emergency_contact_name" value="{{ profile.emergency_contact_name or '' }}">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Address line 1</label>
+      <input type="text" class="form-control" name="address_line1" value="{{ profile.address_line1 or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Address line 2</label>
+      <input type="text" class="form-control" name="address_line2" value="{{ profile.address_line2 or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Postcode</label>
+      <input type="text" class="form-control" name="postcode" value="{{ profile.postcode or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Emergency contact phone</label>
+      <input type="text" class="form-control" name="emergency_contact_phone" value="{{ profile.emergency_contact_phone or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Date of birth</label>
+      <input type="date" class="form-control" name="date_of_birth" value="{{ profile.date_of_birth|string if profile.date_of_birth else '' }}">
+    </div>
+
+    <h3 class="h6 mt-4">Driving licence</h3>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Number</label>
+        <input type="text" class="form-control" name="driving_licence_number" value="{{ profile.driving_licence_number or '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="driving_licence_expiry" value="{{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="driving_licence_document_path" value="{{ profile.driving_licence_document_path or '' }}" placeholder="e.g. uploads/hr/...">
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">Right to work</h3>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Type</label>
+        <input type="text" class="form-control" name="right_to_work_type" value="{{ profile.right_to_work_type or '' }}" placeholder="e.g. passport, visa">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="right_to_work_expiry" value="{{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="right_to_work_document_path" value="{{ profile.right_to_work_document_path or '' }}">
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">DBS</h3>
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Level</label>
+        <input type="text" class="form-control" name="dbs_level" value="{{ profile.dbs_level or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Number</label>
+        <input type="text" class="form-control" name="dbs_number" value="{{ profile.dbs_number or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="dbs_expiry" value="{{ profile.dbs_expiry|string if profile.dbs_expiry else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="dbs_document_path" value="{{ profile.dbs_document_path or '' }}">
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">Contract</h3>
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Type</label>
+        <input type="text" class="form-control" name="contract_type" value="{{ profile.contract_type or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Start</label>
+        <input type="date" class="form-control" name="contract_start" value="{{ profile.contract_start|string if profile.contract_start else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">End</label>
+        <input type="date" class="form-control" name="contract_end" value="{{ profile.contract_end|string if profile.contract_end else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="contract_document_path" value="{{ profile.contract_document_path or '' }}">
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id) }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,8 +1,9 @@
-{% extends "admin/base.html" %}
+{% extends "admin/website_admin_base.html" %}
 {% block content %}
 <div class="container py-4">
   <h2 class="mb-4"><i class="bi bi-gear"></i> Website Global Settings</h2>
   <form method="POST" enctype="multipart/form-data" class="needs-validation" novalidate>
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
 
     <!-- Branding Images -->
     <div class="card mb-4">

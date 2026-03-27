@@ -1,3 +1,3 @@
-<section class="py-4">
-  <div class="container">{{ html|safe }}</div>
-</section>
+<div class="clearfix my-3 website-block-text">
+  <div class="prose text-body{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="html" data-wb-rich="1"{% endif %}>{{ html|safe }}</div>
+</div>

@@ -1,5 +1,4 @@
-<section class="py-4">
-  <div class="container text-center">
-    <img src="{{ src }}" alt="{{ alt }}" class="img-fluid {% if rounded %}rounded-4{% endif %}">
-  </div>
-</section>
+<figure class="figure my-4 w-100">
+  <img src="{{ src }}" alt="{% set _al = (alt or '')|trim %}{% if _al %}{{ _al }}{% else %}Image{% endif %}" class="figure-img img-fluid {{ 'rounded-4' if rounded else '' }} {{ 'shadow-3' if shadow else '' }} w-100" {% if priority_lcp %}loading="eager" fetchpriority="high" decoding="async" data-wb-skip-lazy="1"{% else %}loading="lazy" decoding="async"{% endif %} style="object-fit: cover; max-height: 560px;">
+  {% if caption %}<figcaption class="figure-caption text-center mt-2">{{ caption }}</figcaption>{% endif %}
+</figure>

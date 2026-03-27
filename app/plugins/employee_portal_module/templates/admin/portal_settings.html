@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Portal settings – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_index') }}">Employee Portal</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Portal settings</li>
+    </ol>
+  </nav>
+  <h1 class="mb-3">Portal settings</h1>
+  <p class="text-muted">Default dashboard copy shown to all staff.</p>
+
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_portal_settings_save') }}" class="card card-body" style="max-width: 640px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label for="welcome_message" class="form-label">Welcome message (optional)</label>
+      <textarea class="form-control" id="welcome_message" name="welcome_message" rows="4" placeholder="e.g. Welcome to the staff portal. Check your messages and tasks below.">{{ welcome_message }}</textarea>
+      <p class="small text-muted mt-1">Shown at the top of the contractor dashboard. Leave blank to hide.</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{{ url_for('internal_employee_portal.admin_index') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+  <a href="{{ url_for('internal_employee_portal.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Employee Portal admin</a>
+</div>
+{% endblock %}

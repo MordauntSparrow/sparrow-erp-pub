@@ -2,30 +2,33 @@
 {% block content %}
 <div class="container py-3">
 
-    <!-- Header -->
     <div class="d-flex align-items-center justify-content-between mb-3">
         <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-clipboard2-plus me-2"></i> Edit Runsheet
+            <i class="bi bi-clipboard2-plus me-2"></i> Edit Runsheet (admin)
         </h4>
         <div class="d-flex gap-2">
             <button id="btnSave" class="btn btn-primary btn-sm">
                 <i class="bi bi-save me-1"></i> Save
             </button>
             <button id="btnPublish" class="btn btn-success btn-sm">
-                <i class="bi bi-upload me-1"></i> Publish
+                <i class="bi bi-upload me-1"></i> Publish / resync
             </button>
         </div>
     </div>
 
-    <!-- Runsheet Form -->
+    <p class="text-muted small mb-3">
+        Use this screen to fix data or create a runsheet <strong>on behalf of</strong> crew (enter numeric <strong>Contractor ID</strong> per row).
+        Day-to-day crew selection and template forms belong on the <strong>contractor</strong> time-billing UI (crew search API: <code>/time-billing/api/refs/contractors?q=</code>).
+        <strong>Publish / resync</strong> runs the same server step every time: upserts each contractor’s timesheet row from this runsheet (assignments with <code>payroll_included = 1</code> only). Use after fixing times, after crew reactivate, or after <strong>Ventus sign-off</strong> updated <code>actual_end</code> but timesheets still show old data.
+    </p>
+
     <div id="rsForm" class="card">
         <div class="card-body">
 
-            <!-- Header Fields -->
             <div class="row g-2">
                 <div class="col-12 col-md-3">
                     <label class="form-label">Client ID</label>
-                    <input class="form-control form-control-sm" id="client_name">
+                    <input class="form-control form-control-sm" id="client_id" placeholder="e.g. 12">
                 </div>
                 <div class="col-12 col-md-3">
                     <label class="form-label">Job Type ID</label>
@@ -45,11 +48,10 @@
             </div>
             <hr>
 
-            <!-- Assignments Section -->
             <div class="d-flex align-items-center justify-content-between mb-2">
-                <h6 class="mb-0">Assignments</h6>
+                <h6 class="mb-0">Assignments (contractor IDs)</h6>
                 <button class="btn btn-outline-secondary btn-sm" id="btnAddAssign">
-                    <i class="bi bi-plus-lg"></i> Add assignment
+                    <i class="bi bi-plus-lg"></i> Add row
                 </button>
             </div>
 
@@ -72,32 +74,40 @@
     </div>
 </div>
 
-<script>
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
     (function () {
-        // Get runsheet ID from hash: #edit-<id>
-        const rsId = (location.hash.match(/edit-(\d+)/) || [])[1];
+        const hashMatch = location.hash.match(/edit-(new|\d+)/);
+        const rsId = hashMatch ? (hashMatch[1] === 'new' ? null : hashMatch[1]) : null;
+        const isNew = !rsId;
         const q = (sel) => document.querySelector(sel);
 
-        // Add assignment row
         function addAssignmentRow(a = {}) {
             const tbody = q('#assignTbl tbody');
             const tr = document.createElement('tr');
+            const cid = a.contractor_id || a.user_id || '';
             tr.innerHTML = `
       <td>
-        <input class="form-control form-control-sm js" data-field="contractor_id" value="${a.contractor_id || ''}">
-      </td>
-      <td class="d-flex gap-1">
-        <input class="form-control form-control-sm js" data-field="scheduled_start" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_start || ''}">
-        <span>–</span>
-        <input class="form-control form-control-sm js" data-field="scheduled_end" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_end || ''}">
-      </td>
-      <td class="d-flex gap-1">
-        <input class="form-control form-control-sm js" data-field="actual_start" style="max-width:90px" placeholder="HH:MM" value="${a.actual_start || ''}">
-        <span>–</span>
-        <input class="form-control form-control-sm js" data-field="actual_end" style="max-width:90px" placeholder="HH:MM" value="${a.actual_end || ''}">
+        <input class="form-control form-control-sm js" data-field="contractor_id" value="${cid}">
       </td>
       <td>
-        <input class="form-control form-control-sm js" data-field="notes" value="${a.notes || ''}">
+        <div class="d-flex gap-1 align-items-center flex-wrap">
+          <input class="form-control form-control-sm js" data-field="scheduled_start" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_start || ''}">
+          <span>–</span>
+          <input class="form-control form-control-sm js" data-field="scheduled_end" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_end || ''}">
+        </div>
+      </td>
+      <td>
+        <div class="d-flex gap-1 align-items-center flex-wrap">
+          <input class="form-control form-control-sm js" data-field="actual_start" style="max-width:90px" placeholder="HH:MM" value="${a.actual_start || ''}">
+          <span>–</span>
+          <input class="form-control form-control-sm js" data-field="actual_end" style="max-width:90px" placeholder="HH:MM" value="${a.actual_end || ''}">
+        </div>
+      </td>
+      <td>
+        <input class="form-control form-control-sm js" data-field="notes" value="">
       </td>
       <td class="text-end">
         <button class="btn btn-outline-danger btn-sm js-del" type="button">
@@ -106,17 +116,18 @@
       </td>
     `;
             tbody.appendChild(tr);
+            const notesEl = tr.querySelector('[data-field="notes"]');
+            if (notesEl && a.notes) notesEl.value = a.notes;
             tr.querySelector('.js-del').addEventListener('click', () => tr.remove());
             return tr;
         }
 
-        // Load runsheet data
         async function load() {
             if (!rsId) return;
-            const resp = await fetch(`{{ url_for('internal_time_billing.api_get_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId));
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_get_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId));
             if (!resp.ok) { alert('Failed to load runsheet'); return; }
             const d = await resp.json();
-            q('#client_name').value = d.client_name || '';
+            q('#client_id').value = (d.client_id != null ? d.client_id : d.client_name) || '';
             q('#job_type_id').value = d.job_type_id || '';
             q('#work_date').value = d.work_date || '';
             q('#status').value = d.status || 'draft';
@@ -126,10 +137,10 @@
             (d.assignments || []).forEach(addAssignmentRow);
         }
 
-        // Collect form data
         function collect() {
+            const cRaw = (q('#client_id').value || '').trim();
             const payload = {
-                client_name: q('#client_name').value ? parseInt(q('#client_name').value, 10) : null,
+                client_id: cRaw ? parseInt(cRaw, 10) : null,
                 job_type_id: q('#job_type_id').value ? parseInt(q('#job_type_id').value, 10) : null,
                 work_date: q('#work_date').value || null,
                 status: q('#status').value || 'draft',
@@ -152,33 +163,56 @@
             return payload;
         }
 
-        // Save runsheet
         async function save() {
-            if (!rsId) { alert('Open from list to get an ID'); return; }
-            const resp = await fetch(`{{ url_for('internal_time_billing.api_update_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId), {
+            const payload = collect();
+            if (isNew) {
+                if (!payload.client_id) { alert('Client ID is required'); return; }
+                if (!payload.job_type_id) { alert('Job Type ID is required'); return; }
+                if (!payload.work_date) { alert('Work Date is required'); return; }
+                const resp = await fetch("{{ url_for('internal_time_billing.api_create_runsheet') }}", {
+                    method: 'POST',
+                    headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) { alert('Create failed'); return; }
+                const data = await resp.json();
+                const newId = data.id;
+                if (newId) {
+                    location.hash = 'edit-' + newId;
+                    location.reload();
+                } else {
+                    alert('Create succeeded but no ID returned');
+                }
+                return;
+            }
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_update_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(collect())
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
+                body: JSON.stringify(payload)
             });
             alert(resp.ok ? 'Saved' : 'Save failed');
         }
 
-        // Publish runsheet
         async function publish() {
-            if (!rsId) { alert('Open from list to get an ID'); return; }
-            if (!confirm('Publish this runsheet?')) return;
-            const resp = await fetch(`{{ url_for('internal_time_billing.api_publish_runsheet', rs_id='__ID__') }}`.replace('__ID__', rsId), { method: 'POST' });
-            alert(resp.ok ? 'Published' : 'Publish failed');
+            if (!rsId) { alert('Save the runsheet first to get an ID'); return; }
+            if (!confirm('Publish / resync this runsheet to contractor timesheets? (Upserts rows for payroll_included assignments.)')) return;
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_publish_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId), {
+                method: 'POST',
+                headers: window.tbMergeCsrfHeaders({}, 'POST')
+            });
+            let msg = resp.ok ? 'Published' : 'Publish failed';
+            try {
+                const j = await resp.json();
+                if (j && j.message) msg += ': ' + j.message;
+            } catch (e) { /* ignore */ }
+            alert(msg);
         }
 
-        // Event bindings
         document.getElementById('btnAddAssign').addEventListener('click', () => addAssignmentRow());
         document.getElementById('btnSave').addEventListener('click', save);
         document.getElementById('btnPublish').addEventListener('click', publish);
 
-        // Initialize
-        load();
-
+        if (rsId) load();
     })();
 </script>
 {% endblock %}

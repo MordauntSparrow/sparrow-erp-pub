@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block title %}{{ profile.name or profile.email }} – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">People</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_employees') }}">Employees</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{{ profile.name or profile.email }}</li>
+    </ol>
+  </nav>
+  <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3 min-w-0">
+      {% set pv = profile.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+      {% if pv %}
+      <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='profile_picture') }}" alt="" class="rounded-circle border flex-shrink-0" width="80" height="80" style="object-fit:cover;">
+      {% else %}
+      <div class="rounded-circle bg-primary bg-opacity-25 text-primary d-flex align-items-center justify-content-center flex-shrink-0 fw-bold" style="width:80px;height:80px;font-size:1.35rem;">{{ (profile.initials or (profile.name or profile.email or '?')[:2])|upper }}</div>
+      {% endif %}
+      <div class="min-w-0">
+        <h1 class="mb-1 text-truncate">{{ profile.name or profile.email }}</h1>
+        <p class="text-muted small mb-0">{{ profile.email }} · {{ profile.status|hr_contractor_status }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}{% if profile.department %} · {{ profile.department }}{% endif %} · Ref. {{ profile.id }}</p>
+      </div>
+    </div>
+    <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}" class="btn btn-primary btn-sm flex-shrink-0">Edit profile</a>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header"><strong>Role &amp; organisation</strong></div>
+    <div class="card-body">
+      <p class="mb-1"><strong>Job title / role</strong> {{ profile.job_title or '—' }}</p>
+      <p class="mb-1"><strong>Department</strong> {{ profile.department or '—' }}</p>
+      <p class="mb-0"><strong>Manager</strong>
+        {% if profile.manager_contractor_id %}
+        <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.manager_contractor_id) }}">{{ profile.manager_name or profile.manager_email or ('Ref. ' ~ profile.manager_contractor_id) }}</a>
+        {% if profile.manager_email and profile.manager_name %}<span class="text-muted small"> · {{ profile.manager_email }}</span>{% endif %}
+        {% else %}—{% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if compliance_gaps %}
+  <div class="card border-warning mb-4" id="compliance-gaps">
+    <div class="card-header bg-warning bg-opacity-10"><strong>Missing or incomplete on file</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Use <strong>Upload to library</strong> below (pick the matching category) or ask the employee to upload via a document request.</p>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Item</th><th></th></tr></thead>
+          <tbody>
+            {% for gap in compliance_gaps %}
+            <tr>
+              <td>
+                <div class="fw-medium">{{ gap.title }}</div>
+                <div class="small text-muted">{{ gap.hint }}</div>
+              </td>
+              <td class="text-nowrap text-end">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id, focus_cat=gap.upload_category) }}#documents">Upload</a>
+                {% set req_state = (open_doc_request_button_state|default({})).get(gap.request_type) %}
+                {% if req_state == 'awaiting_review' %}
+                <button type="button" class="btn btn-sm btn-secondary" disabled title="Open Document requests below to approve or reject.">File uploaded — review below</button>
+                {% elif req_state == 'awaiting_upload' %}
+                <button type="button" class="btn btn-sm btn-secondary" disabled title="A request is already open for this item.">Awaiting upload from request</button>
+                {% else %}
+                <form method="post" action="{{ url_for('internal_hr.admin_contractor_quick_request', cid=profile.id) }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="request_type" value="{{ gap.request_type }}">
+                  <input type="hidden" name="title" value="Please upload: {{ gap.title }}">
+                  <button type="submit" class="btn btn-sm btn-primary">Request from staff</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="alert alert-success py-2 small mb-4">Core compliance items look complete (expiries, linked files, or document library). Review sections below for detail.</div>
+  {% endif %}
+
+  {% if ventus_plugin_available %}
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <strong>Ventus CAD — roles &amp; skills</strong>
+      <a href="{{ url_for('medical_response_internal.landing') }}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener">Open Ventus</a>
+    </div>
+    <div class="card-body">
+      {% if ventus_crew_profiles %}
+        {% for vp in ventus_crew_profiles %}
+        <div class="{% if not loop.first %}border-top pt-3 mt-3{% endif %}">
+          <div class="fw-semibold">{{ vp.username }}</div>
+          <p class="small text-muted mb-1">Linked for CAD and dispatch.</p>
+          {% if vp.skills %}
+          <div class="small mb-1"><span class="text-muted">Skills:</span>
+            {% for s in vp.skills %}
+              {% if s is mapping %}{{ s.label or s.name or s.grade or s }}{% else %}{{ s }}{% endif %}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if vp.qualifications %}
+          <div class="small mb-0"><span class="text-muted">Qualifications:</span>
+            {% for q in vp.qualifications %}
+              {% if q is mapping %}{{ q.label or q.name or q }}{% else %}{{ q }}{% endif %}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if not vp.skills and not vp.qualifications %}
+          <p class="small text-muted mb-0">Add skills and qualifications in Ventus (crew profile).</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="small text-muted mb-2">No Ventus crew profile is linked to this person yet. Link them in Ventus to show skills and qualifications here.</p>
+        <p class="small text-muted mb-0">Manage crew profiles in Ventus (CAD administration).</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card mb-4">
+        <div class="card-header"><strong>Contact & address</strong></div>
+        <div class="card-body">
+          <p class="mb-1"><strong>Date of birth</strong> {{ profile.date_of_birth|string if profile.date_of_birth else '—' }}</p>
+          <p class="mb-1"><strong>Phone</strong> {{ profile.phone or '—' }}</p>
+          <p class="mb-1"><strong>Address</strong> {{ profile.address_line1 or '—' }}{% if profile.address_line2 %}, {{ profile.address_line2 }}{% endif %}</p>
+          <p class="mb-1"><strong>Postcode</strong> {{ profile.postcode or '—' }}</p>
+          <p class="mb-0"><strong>Emergency contact</strong> {{ profile.emergency_contact_name or '—' }} {{ profile.emergency_contact_phone or '' }}</p>
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>Driving licence</strong></div>
+        <div class="card-body">
+          <p class="mb-1">{{ profile.driving_licence_number or '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}</p>
+          {% if profile.driving_licence_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='driving_licence', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>Right to work</strong></div>
+        <div class="card-body">
+          <p class="mb-1">Type: {{ profile.right_to_work_type|hr_profile_field }}</p>
+          <p class="mb-1">Expiry: {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}</p>
+          {% if profile.right_to_work_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='right_to_work', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card mb-4">
+        <div class="card-header"><strong>DBS</strong></div>
+        <div class="card-body">
+          <p class="mb-1">Level: {{ profile.dbs_level|hr_profile_field }} · Number: {{ profile.dbs_number or '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}</p>
+          {% if profile.dbs_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='dbs', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>Contract</strong></div>
+        <div class="card-body">
+          <p class="mb-1">Type: {{ profile.contract_type|hr_profile_field }}</p>
+          <p class="mb-1">Start: {{ profile.contract_start|string if profile.contract_start else '—' }} · End: {{ profile.contract_end|string if profile.contract_end else '—' }}</p>
+          {% if profile.contract_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='contract', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h5 mt-4" id="documents">Document library</h2>
+  <p class="text-muted small">Scanned or uploaded files stored against this employee.</p>
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('internal_hr.admin_employee_document_upload', cid=profile.id) }}" enctype="multipart/form-data" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">File</label>
+          <input type="file" name="file" class="form-control form-control-sm" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Category</label>
+          <select name="category" id="doc_category_select" class="form-select form-select-sm">
+            {% for cat in doc_categories %}
+            <option value="{{ cat }}" {% if focus_cat and cat == focus_cat %}selected{% endif %}>{{ cat|hr_employee_doc_category }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Title</label>
+          <input type="text" name="title" class="form-control form-control-sm" placeholder="e.g. Passport scan">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Notes</label>
+          <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional">
+        </div>
+        <div class="col-md-1">
+          <button type="submit" class="btn btn-primary btn-sm w-100">Upload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% if employee_documents %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Category</th>
+          <th>Uploaded</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in employee_documents %}
+        <tr>
+          <td>{{ d.title }}</td>
+          <td><span class="badge bg-secondary">{{ d.category|hr_employee_doc_category }}</span></td>
+          <td class="small text-muted">{{ d.created_at|string if d.created_at else '—' }}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('internal_hr.admin_employee_document_file', doc_id=d.id) }}" class="btn btn-sm btn-outline-primary">Download</a>
+            <form method="post" action="{{ url_for('internal_hr.admin_employee_document_delete', cid=profile.id, doc_id=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this document?');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted small mb-4">No documents in the library yet.</p>
+  {% endif %}
+
+  <h2 class="h5 mt-4">Document requests</h2>
+  {% if requests_list %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Required by</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in requests_list %}
+        <tr>
+          <td>{{ r.title }}</td>
+          <td><span class="badge bg-secondary">{{ (r.request_type or 'other')|hr_request_type }}</span></td>
+          <td>{{ r.required_by_date|string if r.required_by_date else '—' }}</td>
+          <td><span class="badge {% if r.status == 'approved' %}bg-success{% elif r.status == 'rejected' %}bg-danger{% elif r.status == 'overdue' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ r.status|hr_doc_request_status }}</span></td>
+          <td><a href="{{ url_for('internal_hr.admin_request_detail', rid=r.id) }}" class="btn btn-sm btn-outline-secondary">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No document requests.</p>
+  {% endif %}
+
+  <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to employees</a>
+  <a href="{{ url_for('internal_hr.admin_contractors') }}" class="btn btn-outline-secondary btn-sm mt-3">Search</a>
+
+  {% if focus_cat %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var el = document.getElementById('documents');
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

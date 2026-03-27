@@ -1,0 +1,36 @@
+{% if style == 'minimal' %}
+<figure class="border-start border-primary border-4 ps-4 py-2 my-4">
+  <blockquote class="blockquote mb-2 fs-5{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="quote" data-wb-rich="1"{% endif %}>{{ quote|safe }}</blockquote>
+  <figcaption class="blockquote-footer mb-0 mt-2">
+    {% if avatar %}<img src="{{ avatar }}" alt="{{ (author or 'Author')|striptags|trim|truncate(80) }}" class="rounded-circle me-2" width="40" height="40" loading="lazy" decoding="async">{% endif %}
+    <span class="fw-semibold text-dark{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="author" data-wb-plain="1"{% endif %}>{{ author }}</span>{% if role %}, <cite title="Source" class="{% if canvas_mode %}wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="role" data-wb-plain="1"{% endif %}>{{ role }}</cite>{% endif %}
+  </figcaption>
+</figure>
+{% elif style == 'highlight' %}
+<div class="p-4 p-md-5 rounded-4 my-4" style="background: linear-gradient(145deg, #f8f9fa 0%, #e9ecef 100%);">
+  <div class="d-flex flex-column flex-md-row gap-3 align-items-start">
+    {% if avatar %}<img src="{{ avatar }}" class="rounded-circle shadow-1-strong" width="72" height="72" alt="{{ (author or 'Author')|striptags|trim|truncate(80) }}" loading="lazy" decoding="async">{% endif %}
+    <div>
+      <div class="fs-5 mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="quote" data-wb-rich="1"{% endif %}>{{ quote|safe }}</div>
+      <div class="fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="author" data-wb-plain="1"{% endif %}>{{ author }}</div>
+      {% if role %}<div class="text-muted small{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="role" data-wb-plain="1"{% endif %}>{{ role }}</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="card border-0 shadow-2 rounded-4 my-4">
+  <div class="card-body p-4 p-md-5">
+    <div class="d-flex gap-1 text-warning mb-3" aria-hidden="true">
+      <i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i><i class="bi bi-star-fill"></i>
+    </div>
+    <blockquote class="blockquote fs-6 mb-4{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="quote" data-wb-rich="1"{% endif %}>{{ quote|safe }}</blockquote>
+    <div class="d-flex align-items-center gap-3">
+      {% if avatar %}<img src="{{ avatar }}" class="rounded-circle" width="56" height="56" alt="{{ (author or 'Author')|striptags|trim|truncate(80) }}" loading="lazy" decoding="async">{% endif %}
+      <div>
+        <div class="fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="author" data-wb-plain="1"{% endif %}>{{ author }}</div>
+        {% if role %}<div class="text-muted small{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="role" data-wb-plain="1"{% endif %}>{{ role }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

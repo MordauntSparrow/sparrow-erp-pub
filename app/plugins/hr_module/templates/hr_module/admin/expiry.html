@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Expiry dashboard – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Expiry dashboard</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Expiry dashboard</h1>
+  <p class="text-muted mb-3">Documents and contract end dates expiring in the next {{ days }} days.</p>
+
+  <div class="mb-3">
+    <a href="{{ url_for('internal_hr.admin_expiry', days=30) }}" class="btn btn-sm {{ 'btn-primary' if days == 30 else 'btn-outline-secondary' }}">30 days</a>
+    <a href="{{ url_for('internal_hr.admin_expiry', days=60) }}" class="btn btn-sm {{ 'btn-primary' if days == 60 else 'btn-outline-secondary' }}">60 days</a>
+    <a href="{{ url_for('internal_hr.admin_expiry', days=90) }}" class="btn btn-sm {{ 'btn-primary' if days == 90 else 'btn-outline-secondary' }}">90 days</a>
+  </div>
+
+  {% if expiring %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead>
+        <tr>
+          <th>Contractor</th>
+          <th>Document type</th>
+          <th>Expiry date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in expiring %}
+        <tr>
+          <td>{{ r.contractor_name or r.contractor_email or '#' ~ r.id }} <span class="small text-muted">#{{ r.id }}</span></td>
+          <td><span class="badge bg-secondary">{{ r.doc_type|hr_expiry_doc_type }}</span></td>
+          <td>{{ r.expiry_date|string if r.expiry_date else '—' }}</td>
+          <td><a href="{{ url_for('internal_hr.admin_contractor_profile', cid=r.id) }}" class="btn btn-sm btn-outline-primary">Profile</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small text-muted">{{ expiring|length }} item(s) expiring.</p>
+  {% else %}
+  <p class="text-muted">Nothing expiring in the next {{ days }} days.</p>
+  {% endif %}
+
+  <a href="{{ url_for('internal_hr.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to HR admin</a>
+</div>
+{% endblock %}

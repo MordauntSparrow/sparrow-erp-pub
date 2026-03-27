@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Applications — Recruitment{% endblock %}
+{% block content %}
+<div class="container-fluid mt-3 mt-md-4 px-3 px-lg-4 rec-admin">
+  {% include 'recruitment_module/admin/_recruitment_ui.html' %}
+  {% include 'recruitment_module/admin/_recruitment_nav.html' %}
+
+  <h1 class="h4 mb-3 fw-semibold">Applications</h1>
+  <form class="row g-2 mb-4 align-items-end" method="get">
+    <div class="col-auto">
+      <select class="form-select form-select-sm" name="opening_id" onchange="this.form.submit()">
+        <option value="">All openings</option>
+        {% for o in openings %}
+        <option value="{{ o.id }}" {% if filter_opening_id == o.id %}selected{% endif %}>{{ o.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <input class="form-control form-control-sm" type="search" name="q" placeholder="Search name/email" value="{{ q }}">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
+    </div>
+  </form>
+  <div class="table-responsive border rounded-3 bg-white shadow-sm">
+    <table class="table table-hover mb-0 small">
+      <thead class="table-light"><tr><th>Applicant</th><th>Opening</th><th>Stage</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for a in applications %}
+        <tr>
+          <td><a href="{{ url_for('internal_recruitment.admin_application_detail', application_id=a.id) }}">{{ a.name }}</a><br><span class="text-muted">{{ a.email }}</span></td>
+          <td>{{ a.opening_title }}</td>
+          <td><span class="badge bg-secondary">{{ a.stage }}</span></td>
+          <td>{{ a.updated_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted">No applications.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

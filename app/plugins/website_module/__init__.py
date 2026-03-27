@@ -8,6 +8,67 @@ from ...objects import PluginManager
 from flask_login import LoginManager
 import logging
 
+try:
+    from flask_seasurf import SeaSurf
+except Exception:
+    SeaSurf = None
+
+
+def _discover_core_templates_dir(app):
+    """
+    Directory containing shared Jinja partials (e.g. partials/sparrow_csrf_head.html).
+    The website Flask app only loads website_module/templates by default; the ERP core
+    lives under app/templates/. Resolves paths for local dev and Docker (e.g. /app/app/...).
+
+    Override with env SPARROW_CORE_TEMPLATES=/absolute/path/to/app/templates
+    """
+    candidates = []
+    env_dir = (os.environ.get("SPARROW_CORE_TEMPLATES") or "").strip()
+    if env_dir:
+        candidates.append(os.path.abspath(env_dir))
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    # .../app/plugins/website_module -> .../app/templates
+    candidates.append(os.path.abspath(os.path.join(here, "..", "..", "templates")))
+
+    rp = getattr(app, "root_path", None) or ""
+    if rp:
+        candidates.append(os.path.abspath(os.path.join(rp, "..", "..", "templates")))
+
+    seen = set()
+    for c in candidates:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        partial = os.path.join(c, "partials", "sparrow_csrf_head.html")
+        if os.path.isfile(partial):
+            return c
+    return None
+
+
+def _append_core_templates_loader(app):
+    """
+    After all blueprints are registered, wrap the Jinja loader so includes like
+    {% include 'partials/sparrow_csrf_head.html' %} resolve to app/templates/.
+    (Patching app.jinja_loader alone is fragile because jinja_loader is a cached_property
+    and the Environment uses DispatchingJinjaLoader over app + blueprints.)
+    """
+    core = _discover_core_templates_dir(app)
+    if not core:
+        logging.warning(
+            "Website app: could not find core templates (partials/sparrow_csrf_head.html). "
+            "Set SPARROW_CORE_TEMPLATES to the absolute path of the folder that contains "
+            "partials/ (normally app/templates). Tried SPARROW_CORE_TEMPLATES and paths "
+            "relative to website_module."
+        )
+        return
+    from jinja2 import ChoiceLoader, FileSystemLoader
+
+    app.jinja_env.loader = ChoiceLoader(
+        [app.jinja_env.loader, FileSystemLoader(core)]
+    )
+
+
 def create_website_app(plugins_dir=None):
     """
     Creates and configures the Flask app for the website module.
@@ -16,10 +77,19 @@ def create_website_app(plugins_dir=None):
     if plugins_dir is None:
         plugins_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
+    # Same volume bind as admin app (run_website.py also calls this early).
+    try:
+        from app.storage_paths import bind_persistent_directories
+
+        _app_pkg = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        bind_persistent_directories(_app_pkg)
+    except Exception as e:
+        logging.warning("Persistent storage bind failed on website app: %s", e)
+
     app = Flask(__name__,
                 static_url_path='/static',
                 static_folder=os.path.join(os.path.dirname(__file__), '../../static'))
-    
+
     import re
 
     def sort_keys(d):
@@ -44,7 +114,21 @@ def create_website_app(plugins_dir=None):
     app.jinja_env.filters['regex_replace'] = regex_replace
 
     # Set your secret key for sessions and token generation
-    app.secret_key = 'your_secret_key_here'
+    app.secret_key = os.environ.get('WEB_SECRET_KEY') or 'your_secret_key_here'
+    # Ensure session cookie is sent for all paths (e.g. /employee-portal and /time-billing share auth)
+    app.config.setdefault('SESSION_COOKIE_PATH', '/')
+    app.config.setdefault('SESSION_COOKIE_SAMESITE', 'Lax')
+
+    # CSRF: provide csrf_token() in templates so shared templates (e.g. forms) don't raise UndefinedError
+    if SeaSurf:
+        try:
+            SeaSurf(app)
+        except Exception as e:
+            logging.warning("SeaSurf init failed on website app: %s", e)
+    if 'csrf_token' not in app.jinja_env.globals:
+        def _csrf_token():
+            return ''
+        app.jinja_env.globals['csrf_token'] = _csrf_token
 
     # Initialize Flask-Login and configure the user loader.
     login_manager = LoginManager()
@@ -105,6 +189,15 @@ def create_website_app(plugins_dir=None):
         print("Independent mode: Website module provides no predefined routes.")
         app.register_blueprint(website_public_added_routes, url_prefix="/")
         print("Moderate Mode Loaded Successfully")
+
+    # Must run after blueprints exist: add app/templates for shared {% include %} partials.
+    _append_core_templates_loader(app)
+
+    # Public base template uses this instead of url_for('website_public.static') for portability.
+    app.jinja_env.globals["website_static_url"] = website_static_url
+    app.jinja_env.globals["website_public_page_url"] = website_public_page_url
+    app.jinja_env.globals["website_public_asset_url"] = website_public_asset_url
+
     return app
 
 
@@ -112,7 +205,7 @@ class WebsiteServer:
     """
     Manages the website Flask application lifecycle.
     """
-    def __init__(self, port=72, plugins_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))):
+    def __init__(self, port=8080, plugins_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))):
         self.port = port
         self.plugins_dir = plugins_dir
         self.app = create_website_app(plugins_dir)

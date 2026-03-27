@@ -1,0 +1,10 @@
+{
+    "system_name": "inventory_control",
+    "version": "0.0.3",
+    "installed": true,
+    "enabled": true,
+    "name": "Inventory Control",
+    "description": "",
+    "icon": "icon.png",
+    "update_available": false
+}

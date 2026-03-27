@@ -1,0 +1,39 @@
+{% extends "training_module/base_public.html" %}
+{% block title %}My training{% endblock %}
+{% block content %}
+<h1 class="h5 mb-2">{{ module_name }}</h1>
+<p class="text-muted small mb-4">{{ module_description }}</p>
+{% if assignments %}
+  <div class="d-flex flex-column gap-3">
+    {% for a in assignments %}
+    <div class="card card-module p-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <a href="{{ url_for('public_training.view_item', assignment_id=a.id) }}" class="text-decoration-none fw-medium">{{ a.title }}</a>
+          {% if a.summary %}<p class="small text-muted mb-0 mt-1">{{ a.summary[:120] }}{% if a.summary|length > 120 %}…{% endif %}</p>{% endif %}
+          {% if a.delivery_type %}<p class="small text-secondary mb-0 mt-1">Type: {{ a.delivery_type }}</p>{% endif %}
+          {% if a.due_date %}<p class="small text-warning mb-0 mt-1">Due: {{ a.due_date.isoformat() if a.due_date else '' }}</p>{% endif %}
+        </div>
+        <div class="text-end">
+          {% if a.completed %}
+          <span class="badge bg-success">Complete</span>
+          {% else %}
+          <span class="badge bg-secondary">{{ a.status|replace('_',' ')|title if a.status else 'To do' }}</span>
+          {% if a.mandatory %}<span class="badge bg-danger ms-1">Mandatory</span>{% endif %}
+          {% endif %}
+        </div>
+      </div>
+      <a href="{{ url_for('public_training.view_item', assignment_id=a.id) }}" class="btn btn-primary btn-sm mt-2">
+        {% if a.completed %}View{% else %}Continue{% endif %} <i class="bi bi-chevron-right"></i>
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card card-module p-4 text-center">
+    <i class="bi bi-mortarboard display-6 text-muted"></i>
+    <p class="text-muted mb-0 mt-2">No training assigned to you right now.</p>
+  </div>
+{% endif %}
+<a href="{{ url_for('public_employee_portal.dashboard') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Portal</a>
+{% endblock %}

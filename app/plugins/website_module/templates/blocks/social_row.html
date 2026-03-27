@@ -1,0 +1,20 @@
+{% set links = [
+  (facebook, 'bi-facebook', 'Facebook'),
+  (instagram, 'bi-instagram', 'Instagram'),
+  (linkedin, 'bi-linkedin', 'LinkedIn'),
+  (x, 'bi-twitter', 'X / Twitter'),
+  (youtube, 'bi-youtube', 'YouTube'),
+  (github, 'bi-github', 'GitHub'),
+] %}
+<div class="py-3">
+  <div class="d-flex flex-wrap justify-content-center align-items-center gap-3">
+    {% for url, icon, label in links %}
+      {% set u = (url or '')|trim %}
+      {% if u %}
+    <a href="{{ u|e }}" class="btn btn-outline-secondary btn-floating rounded-circle" style="width: 2.75rem; height: 2.75rem;" target="_blank" rel="noopener noreferrer" aria-label="{{ label }}" data-wb-cta="social" data-wb-network="{{ label|e }}">
+      <i class="bi {{ icon }}" aria-hidden="true"></i>
+    </a>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>

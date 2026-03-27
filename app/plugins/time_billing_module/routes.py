@@ -6,10 +6,28 @@ import os
 import json
 from flask import (
     Blueprint, request, jsonify, send_file,
-    render_template, redirect, url_for, flash, session
+    render_template, redirect, url_for, flash, session, abort,
+    current_app, has_request_context,
 )
+from flask_login import current_user, login_required
 from app.objects import get_db_connection, AuthManager, PluginManager
-from .services import TimesheetService, RunsheetService, TemplateService, ExportService, _dec
+from .services import (
+    TimesheetService,
+    RunsheetService,
+    TemplateService,
+    ExportService,
+    InvoiceService,
+    MinimalRateResolver,
+    _dec,
+)
+
+
+def _tb_safe_api_error(exc: Exception, *, status: int = 400, log_message: str = "time_billing API"):
+    """Log full exception; return generic error body when not in debug (production-safe)."""
+    current_app.logger.exception("%s: %s", log_message, exc)
+    detail = str(exc) if current_app.debug else "Something went wrong. Please try again or contact support."
+    return jsonify({"ok": False, "error": detail}), status
+
 
 # =============================================================================
 # Blueprints
@@ -33,6 +51,33 @@ plugin_manager = PluginManager(os.path.abspath('app/plugins'))
 core_manifest = plugin_manager.get_core_manifest()
 
 
+def _employee_portal_enabled():
+    """
+    True if employee_portal_module is installed, enabled in the plugin manifest,
+    and its public blueprint is registered (avoids broken nav links).
+    """
+    try:
+        plugs = plugin_manager.load_plugins() or {}
+        info = plugs.get("employee_portal_module")
+        if not info or not bool(info.get("enabled", False)):
+            return False
+        try:
+            if has_request_context() and getattr(current_app, "blueprints", None):
+                if "public_employee_portal" not in current_app.blueprints:
+                    return False
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+@public_bp.context_processor
+def _inject_tb_public_nav():
+    """Contractor UI: show 'Back to portal' only when employee portal is on."""
+    return {"tb_employee_portal_available": _employee_portal_enabled()}
+
+
 # =============================================================================
 # Auth (tb_contractors)
 # =============================================================================
@@ -47,92 +92,207 @@ def current_tb_user_id():
     return int(u['id']) if u and u.get('id') is not None else None
 
 
+def _set_tb_session_from_contractor_id(contractor_id: int) -> bool:
+    """Load contractor by id, set session['tb_user'] if active. Returns True if session was set."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT id, email, name, initials, status, profile_picture_path
+            FROM tb_contractors WHERE id = %s LIMIT 1
+        """, (int(contractor_id),))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row or str(row.get("status") or "").lower() not in ("active", "1", "true", "yes"):
+        return False
+    role = _contractor_effective_role(int(row["id"]))
+    try:
+        from app.plugins.employee_portal_module.services import safe_profile_picture_path
+        safe_avatar = safe_profile_picture_path(row.get("profile_picture_path"))
+    except Exception:
+        safe_avatar = None
+    display = (row.get("name") or "").strip() or row.get("email") or ""
+    session["tb_user"] = {
+        "id": int(row["id"]),
+        "email": row["email"],
+        "name": display,
+        "initials": (row.get("initials") or "").strip(),
+        "profile_picture_path": safe_avatar,
+        "role": role,
+    }
+    session.modified = True
+    from app.contractor_ui_theme import sync_contractor_theme_to_session
+
+    sync_contractor_theme_to_session(session, int(row["id"]))
+    return True
+
+
 def staff_required_tb(view):
+    """Require tb_user (contractor). No roles—contractors have one view; staff/admin/superuser are admin app (port 82) only."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         u = current_tb_user()
-        if not u:
-            return redirect('/time-billing/login')
-        role = (u.get('role') or '').lower()
-        if role not in ('staff', 'admin', 'superuser'):
-            flash('Not authorized for staff portal.', 'error')
-            return redirect(url_for('public_time_billing.login_page'))
-        return view(*args, **kwargs)
+        portal = _employee_portal_enabled()
+
+        if u:
+            return view(*args, **kwargs)
+
+        if portal:
+            # No session, portal on: try launch token or tb_cid cookie, else send to portal login
+            launch = request.args.get("launch") if request else None
+            if launch:
+                try:
+                    from flask import current_app
+                    from itsdangerous import URLSafeTimedSerializer
+                    uid = URLSafeTimedSerializer(current_app.secret_key).loads(launch, salt="tb_launch", max_age=60)
+                    if _set_tb_session_from_contractor_id(uid):
+                        return redirect("/time-billing/")
+                except Exception:
+                    pass
+            token = request.cookies.get("tb_cid") if request else None
+            if token:
+                try:
+                    from flask import current_app
+                    from itsdangerous import URLSafeTimedSerializer
+                    cid = URLSafeTimedSerializer(current_app.secret_key).loads(token, salt="tb_cid", max_age=60 * 60 * 24 * 7)
+                    if _set_tb_session_from_contractor_id(cid):
+                        return view(*args, **kwargs)
+                except Exception:
+                    pass
+            return redirect(url_for("public_employee_portal.login_page"))
+
+        # No session, portal off: use time-billing login
+        return redirect("/time-billing/login")
     return wrapped
 
 
+def _contractor_effective_role(contractor_id: int) -> str:
+    """Resolve contractor's role from tb_contractor_roles (many-to-many) and role_id (single)."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT LOWER(TRIM(r.name)) AS name FROM tb_contractor_roles cr
+            JOIN roles r ON r.id = cr.role_id WHERE cr.contractor_id = %s
+        """, (contractor_id,))
+        names = [row[0] for row in (cur.fetchall() or []) if row and row[0]]
+        if 'superuser' in names:
+            return 'superuser'
+        if 'admin' in names:
+            return 'admin'
+        if names:
+            return names[0] or 'staff'
+        cur.execute("""
+            SELECT LOWER(TRIM(r.name)) FROM tb_contractors c
+            LEFT JOIN roles r ON r.id = c.role_id WHERE c.id = %s
+        """, (contractor_id,))
+        row = cur.fetchone()
+        return (row[0] or 'staff') if row else 'staff'
+    finally:
+        cur.close()
+        conn.close()
+
+
 def admin_required_tb(view):
+    """For internal (admin app, port 82): require core user with role admin/superuser (Flask-Login)."""
     @wraps(view)
+    @login_required
     def wrapped(*args, **kwargs):
-        role = session.get('role')
-        # if role != 'admin' and role != 'superuser':
-        #     flash('Admin access required.', 'error')
-        #     return redirect('/')
+        role = (getattr(current_user, 'role', None) or '').lower()
+        if role not in ('admin', 'superuser'):
+            flash('Admin access required.', 'error')
+            return redirect(url_for('routes.dashboard'))
         return view(*args, **kwargs)
     return wrapped
 
 # =============================================================================
 # Public authentication routes (tb_contractors)
+# Portal off: /time-billing/login exists, normal form login + role check.
+# Portal on: GET/POST /login redirect to portal; no form here.
 # =============================================================================
 
 
 @public_bp.get("/login")
 def login_page():
+    if _employee_portal_enabled():
+        return redirect(url_for('public_employee_portal.login_page'))
+    if current_tb_user():
+        return redirect(url_for('public_time_billing.public_dashboard_page'))
     return render_template("public/auth/login.html", config=core_manifest)
 
 
 @public_bp.post("/login")
 def login_submit():
+    if _employee_portal_enabled():
+        return redirect(url_for('public_employee_portal.login_page'))
     email = (request.form.get('email') or '').strip().lower()
     password = request.form.get('password') or ''
 
     if not email or not password:
-        flash('Email and password are required.', 'error')
+        flash('Please enter your email and password.', 'error')
         return redirect(url_for('public_time_billing.login_page'))
 
-    conn = get_db_connection()
-    cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("""
-            SELECT id, email, name, status, password_hash
-            FROM tb_contractors
-            WHERE email=%s
-            LIMIT 1
-        """, (email,))
-        u = cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("""
+                SELECT id, email, name, status, password_hash
+                FROM tb_contractors
+                WHERE email=%s
+                LIMIT 1
+            """, (email,))
+            u = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
 
-    if not u or not u.get('password_hash') or not AuthManager.verify_password(u['password_hash'], password):
-        flash('Invalid credentials.', 'error')
+        if not u or not u.get('password_hash') or not AuthManager.verify_password(u['password_hash'], password):
+            flash('Invalid email or password. Please check your credentials and try again.', 'error')
+            return redirect(url_for('public_time_billing.login_page'))
+
+        if str(u.get('status')).lower() not in ('active', '1', 'true', 'yes'):
+            flash('Your account is inactive. Please contact an administrator.', 'error')
+            return redirect(url_for('public_time_billing.login_page'))
+
+        if request.form.get('remember') == 'on':
+            session.permanent = True
+
+        display = (u.get('name') or '').strip() or u['email']
+        role = _contractor_effective_role(int(u['id']))
+        session['tb_user'] = {
+            "id": int(u['id']),
+            "email": u['email'],
+            "name": display,
+            "role": role
+        }
+        from app.contractor_ui_theme import sync_contractor_theme_to_session
+
+        sync_contractor_theme_to_session(session, int(u["id"]))
+
+        ss = session.get('site_settings', {})
+        ss['user_name'] = display
+        session['site_settings'] = ss
+
+        next_url = request.args.get('next') or url_for(
+            'public_time_billing.public_dashboard_page')
+        return redirect(next_url)
+    except Exception:
+        flash('An unexpected error occurred. Please try again later.', 'error')
         return redirect(url_for('public_time_billing.login_page'))
-
-    if str(u.get('status')).lower() not in ('active', '1', 'true', 'yes'):
-        flash('Account inactive. Contact admin.', 'error')
-        return redirect(url_for('public_time_billing.login_page'))
-
-    display = (u.get('name') or '').strip() or u['email']
-    session['tb_user'] = {
-        "id": int(u['id']),
-        "email": u['email'],
-        "name": display,
-        "role": "staff"  # harmless default so staff_required_tb passes
-    }
-
-    ss = session.get('site_settings', {})
-    ss['user_name'] = display
-    session['site_settings'] = ss
-
-    next_url = request.args.get('next') or url_for(
-        'public_time_billing.public_dashboard_page')
-    return redirect(next_url)
 
 
 @public_bp.get("/logout")
 def logout():
     session.pop('tb_user', None)
     flash('You have been logged out.', 'success')
+    if _employee_portal_enabled():
+        resp = redirect(url_for('public_employee_portal.login_page'))
+        resp.delete_cookie('tb_cid', path='/')
+        return resp
+    # Portal off: back to time-billing login
     return redirect(url_for('public_time_billing.login_page'))
 
 # Optional: password set/reset endpoints
@@ -390,6 +550,19 @@ def api_issue_timesheet():
             VALUES (%s, %s, 'draft', 0, 0)
         """, (user_id, week_id))
         conn.commit()
+
+        # Training: auto-assign by role change (v1).
+        try:
+            if role_id is not None:
+                from app.plugins.training_module.services import TrainingService
+
+                TrainingService.apply_role_assignment_rules(
+                    contractor_id=int(user_id),
+                    role_id=int(role_id),
+                    assigned_by_user_id=getattr(current_user, "id", None),
+                )
+        except Exception:
+            pass
         return jsonify({"ok": True})
     finally:
         cur.close()
@@ -558,7 +731,10 @@ def api_list_runsheets():
 @internal_bp.get("/api/runsheets/<int:rs_id>")
 @admin_required_tb
 def api_get_runsheet(rs_id):
-    return jsonify(RunsheetService.get_runsheet(rs_id))
+    rs = RunsheetService.get_runsheet(rs_id)
+    if not rs or not rs.get("id"):
+        return jsonify({"error": "Runsheet not found"}), 404
+    return jsonify(rs)
 
 
 @internal_bp.post("/api/runsheets")
@@ -583,6 +759,63 @@ def api_publish_runsheet(rs_id):
     published_by = current_tb_user_id()
     res = RunsheetService.publish_runsheet(rs_id, published_by=published_by)
     return jsonify(res), (200 if res.get("ok") else 400)
+
+# =============================================================================
+# Configuration hub (job types, rates, policies, templates)
+# =============================================================================
+
+
+@internal_bp.get("/config/page")
+@admin_required_tb
+def config_page():
+    """Single hub for all Time Billing configuration."""
+    return render_template("admin/config/index.html", config=core_manifest)
+
+
+@internal_bp.get("/job-types/page")
+@admin_required_tb
+def job_types_page():
+    return render_template("admin/job_types/list.html", config=core_manifest)
+
+
+@internal_bp.get("/api/job-types")
+@admin_required_tb
+def api_list_job_types():
+    return jsonify(TemplateService.list_job_types())
+
+
+@internal_bp.post("/api/job-types")
+@admin_required_tb
+def api_create_job_type():
+    data = request.get_json(force=True) or {}
+    try:
+        jid = TemplateService.create_job_type(data)
+        return jsonify({"id": jid}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.put("/api/job-types/<int:jid>")
+@admin_required_tb
+def api_update_job_type(jid):
+    data = request.get_json(force=True) or {}
+    data["id"] = jid
+    try:
+        TemplateService.update_job_type(data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/job-types/<int:jid>")
+@admin_required_tb
+def api_delete_job_type(jid):
+    try:
+        TemplateService.delete_job_type(jid)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 
 # =============================================================================
 # Rate cards / policies (admin)
@@ -627,6 +860,48 @@ def add_wage_card_row(card_id):
     return jsonify({"id": TemplateService.add_wage_row(card_id, data)})
 
 
+@internal_bp.put("/api/wage-cards/<int:card_id>")
+@admin_required_tb
+def update_wage_card_api(card_id):
+    data = request.get_json(force=True) or {}
+    try:
+        TemplateService.update_wage_card(card_id, data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/wage-cards/<int:card_id>")
+@admin_required_tb
+def delete_wage_card_api(card_id):
+    try:
+        TemplateService.delete_wage_card(card_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.put("/api/wage-cards/<int:card_id>/rows/<int:row_id>")
+@admin_required_tb
+def update_wage_card_row_api(card_id, row_id):
+    data = request.get_json(force=True) or {}
+    try:
+        TemplateService.update_wage_row(card_id, row_id, data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/wage-cards/<int:card_id>/rows/<int:row_id>")
+@admin_required_tb
+def delete_wage_card_row_api(card_id, row_id):
+    try:
+        TemplateService.delete_wage_row(card_id, row_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @internal_bp.get("/api/bill-cards")
 @admin_required_tb
 def get_bill_cards():
@@ -651,6 +926,48 @@ def get_bill_card_rows(card_id):
 def add_bill_card_row(card_id):
     data = request.get_json(force=True) or {}
     return jsonify({"id": TemplateService.add_bill_row(card_id, data)})
+
+
+@internal_bp.put("/api/bill-cards/<int:card_id>")
+@admin_required_tb
+def update_bill_card_api(card_id):
+    data = request.get_json(force=True) or {}
+    try:
+        TemplateService.update_bill_card(card_id, data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/bill-cards/<int:card_id>")
+@admin_required_tb
+def delete_bill_card_api(card_id):
+    try:
+        TemplateService.delete_bill_card(card_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.put("/api/bill-cards/<int:card_id>/rows/<int:row_id>")
+@admin_required_tb
+def update_bill_card_row_api(card_id, row_id):
+    data = request.get_json(force=True) or {}
+    try:
+        TemplateService.update_bill_row(card_id, row_id, data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/bill-cards/<int:card_id>/rows/<int:row_id>")
+@admin_required_tb
+def delete_bill_card_row_api(card_id, row_id):
+    try:
+        TemplateService.delete_bill_row(card_id, row_id)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @internal_bp.get("/api/policies")
@@ -710,7 +1027,10 @@ def list_templates():
 @admin_required_tb
 def create_template():
     data = request.get_json(force=True) or {}
-    return jsonify({"id": TemplateService.create_runsheet_template(data)})
+    try:
+        return jsonify({"id": TemplateService.create_runsheet_template(data)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @internal_bp.get("/api/templates/<int:tpl_id>")
@@ -774,6 +1094,95 @@ def contractors_edit_page():
 
 
 # =============================================================================
+# Contractor invoices (admin)
+# =============================================================================
+
+
+@internal_bp.get("/invoices")
+@admin_required_tb
+def admin_invoices_list_page():
+    cid = request.args.get("contractor_id", type=int)
+    st = (request.args.get("status") or "").strip().lower() or None
+    rows = InvoiceService.list_invoices_admin(contractor_id=cid, status=st, limit=400)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, name, email FROM tb_contractors
+            ORDER BY name ASC, email ASC
+            LIMIT 500
+            """
+        )
+        contractors = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    return render_template(
+        "admin/invoices/list.html",
+        invoices=rows,
+        contractors=contractors,
+        filter_contractor_id=cid,
+        filter_status=st,
+        config=core_manifest,
+    )
+
+
+@internal_bp.get("/invoices/analytics")
+@admin_required_tb
+def admin_invoices_analytics_page():
+    y = request.args.get("year", type=int)
+    if not y:
+        y = datetime.utcnow().year
+    data = InvoiceService.admin_invoice_analytics(year=y)
+    return render_template(
+        "admin/invoices/analytics.html",
+        analytics=data,
+        selected_year=y,
+        config=core_manifest,
+    )
+
+
+@internal_bp.get("/invoices/<int:invoice_id>")
+@admin_required_tb
+def admin_invoice_detail_page(invoice_id):
+    inv = InvoiceService.get_invoice_detail_admin(invoice_id)
+    if not inv:
+        flash("Invoice not found.", "error")
+        return redirect(url_for("internal_time_billing.admin_invoices_list_page"))
+    return render_template(
+        "admin/invoices/detail.html",
+        invoice=inv,
+        config=core_manifest,
+    )
+
+
+@internal_bp.get("/invoices/<int:invoice_id>.pdf")
+@admin_required_tb
+def admin_invoice_pdf(invoice_id):
+    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(invoice_id, contractor_id=None)
+    if not pdf_bytes:
+        abort(404)
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=fname,
+    )
+
+
+@internal_bp.post("/invoices/<int:invoice_id>/void")
+@admin_required_tb
+def admin_invoice_void(invoice_id):
+    reason = (request.form.get("reason") or "").strip() or "Voided by administrator."
+    if InvoiceService.admin_void_invoice(invoice_id, reason):
+        flash("Invoice voided. Contractor can create a new invoice after the week is approved again.", "success")
+    else:
+        flash("Could not void invoice (already void or missing).", "error")
+    return redirect(url_for("internal_time_billing.admin_invoices_list_page"))
+
+
+# =============================================================================
 # API Endpoints (roles are many-to-many via roles + tb_contractor_roles)
 # =============================================================================
 
@@ -781,26 +1190,45 @@ def contractors_edit_page():
 @internal_bp.get("/api/contractors/<int:user_id>")
 @admin_required_tb
 def api_get_contractor(user_id):
+    import mysql.connector
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("""
-            SELECT
-                c.id,
-                c.email,
-                c.name,
-                c.status,
-                c.role_id,
-                c.wage_rate_card_id,
-                CASE WHEN c.status = 'active' THEN 1 ELSE 0 END AS is_active,
-                DATE_FORMAT(c.created_at, '%%Y-%%m-%%d %%H:%%i') AS created_at
-            FROM tb_contractors c
-            WHERE c.id = %s
-        """, (user_id,))
+        try:
+            cur.execute("""
+                SELECT
+                    c.id,
+                    c.email,
+                    c.name,
+                    c.status,
+                    c.role_id,
+                    c.wage_rate_card_id,
+                    COALESCE(c.employment_type, 'paye') AS employment_type,
+                    CASE WHEN c.status = 'active' THEN 1 ELSE 0 END AS is_active,
+                    DATE_FORMAT(c.created_at, '%%Y-%%m-%%d %%H:%%i') AS created_at
+                FROM tb_contractors c
+                WHERE c.id = %s
+            """, (user_id,))
+        except (mysql.connector.Error, Exception):
+            cur.execute("""
+                SELECT
+                    c.id,
+                    c.email,
+                    c.name,
+                    c.status,
+                    c.role_id,
+                    c.wage_rate_card_id,
+                    CASE WHEN c.status = 'active' THEN 1 ELSE 0 END AS is_active,
+                    DATE_FORMAT(c.created_at, '%%Y-%%m-%%d %%H:%%i') AS created_at
+                FROM tb_contractors c
+                WHERE c.id = %s
+            """, (user_id,))
         row = cur.fetchone()
 
         if not row:
             return jsonify({"error": "not found"}), 404
+        if "employment_type" not in row:
+            row["employment_type"] = "self_employed"
 
         # Optionally keep roles array (for display/back-compat)
         cur.execute("""
@@ -1034,22 +1462,33 @@ def api_update_contractor(user_id):
 
     role_id = data.get("role_id")
     wage_rate_card_id = data.get("wage_rate_card_id")
+    employment_type = (data.get("employment_type") or "self_employed").strip().lower()
+    if employment_type not in ("paye", "self_employed"):
+        employment_type = "self_employed"
     # legacy roles support (optional)
     roles = data.get("roles") or []
 
     if not name:
         return jsonify({"ok": False, "error": "Name required"}), 400
 
+    import mysql.connector
     conn = get_db_connection()
     try:
         cur = conn.cursor()
 
-        # update base fields
-        cur.execute("""
-            UPDATE tb_contractors
-            SET name = %s, status = %s
-            WHERE id = %s
-        """, (name, status, user_id))
+        # update base fields (employment_type if column exists)
+        try:
+            cur.execute("""
+                UPDATE tb_contractors
+                SET name = %s, status = %s, employment_type = %s
+                WHERE id = %s
+            """, (name, status, employment_type, user_id))
+        except (mysql.connector.Error, Exception):
+            cur.execute("""
+                UPDATE tb_contractors
+                SET name = %s, status = %s
+                WHERE id = %s
+            """, (name, status, user_id))
 
         # update primary role_id if provided
         if role_id is not None:
@@ -1273,6 +1712,44 @@ def public_dashboard_page():
         config=core_manifest,
     )
 
+
+@public_bp.get("/runsheets")
+@staff_required_tb
+def public_runsheets_list_page():
+    uid = current_tb_user_id()
+    return render_template(
+        "public/runsheets/list.html",
+        config=core_manifest,
+        current_contractor_id=int(uid),
+    )
+
+
+@public_bp.get("/runsheets/new")
+@staff_required_tb
+def public_runsheets_new_page():
+    uid = current_tb_user_id()
+    return render_template(
+        "public/runsheets/edit.html",
+        config=core_manifest,
+        rs_id=None,
+        current_contractor_id=int(uid),
+    )
+
+
+@public_bp.get("/runsheets/<int:rs_id>")
+@staff_required_tb
+def public_runsheets_edit_page(rs_id):
+    uid = current_tb_user_id()
+    if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
+        abort(403)
+    return render_template(
+        "public/runsheets/edit.html",
+        config=core_manifest,
+        rs_id=rs_id,
+        current_contractor_id=int(uid),
+    )
+
+
 # -------------------------
 # Public Timesheet Pages
 # -------------------------
@@ -1320,7 +1797,7 @@ def api_public_delete_entry(week_id, entry_id):
 
         # Check ownership and week match
         cur.execute(
-            "SELECT id, user_id, week_id FROM tb_timesheet_entries WHERE id=%s",
+            "SELECT id, user_id, week_id, source, runsheet_id FROM tb_timesheet_entries WHERE id=%s",
             (entry_id,),
         )
         row = cur.fetchone()
@@ -1328,6 +1805,20 @@ def api_public_delete_entry(week_id, entry_id):
             return jsonify({"ok": False, "message": "not_found"}), 404
         if row["user_id"] != uid or row["week_id"] != wk["id"]:
             return jsonify({"ok": False, "message": "not_owner"}), 403
+
+        # If this was a scheduler-prefilled entry, record the removal so
+        # auto-prefill won't re-create it the next time the week is opened.
+        if (row.get("source") or "").lower() == "scheduler" and row.get("runsheet_id"):
+            cur.execute("SHOW TABLES LIKE 'tb_scheduler_shift_removals'")
+            if cur.fetchone():
+                cur.execute(
+                    """
+                    INSERT INTO tb_scheduler_shift_removals (user_id, schedule_shift_id)
+                    VALUES (%s, %s)
+                    ON DUPLICATE KEY UPDATE created_at=CURRENT_TIMESTAMP
+                    """,
+                    (uid, int(row["runsheet_id"])),
+                )
 
         # Delete the entry
         cur.execute("DELETE FROM tb_timesheet_entries WHERE id=%s", (entry_id,))
@@ -1387,6 +1878,166 @@ def api_public_submit(week_id):
     return jsonify({"ok": True})
 
 
+# -------------------------
+# Self-employed invoice (mobile-first)
+# -------------------------
+
+
+@public_bp.get("/weeks/<week_id>/invoice")
+@staff_required_tb
+def public_week_invoice_page(week_id):
+    """Mobile-first page to create an invoice with the timesheet (submitted or approved). Self-employed only."""
+    uid = current_tb_user_id()
+    wk = TimesheetService._ensure_week(uid, week_id)
+    status = (wk.get("status") or "").lower()
+    if status not in ("submitted", "approved"):
+        flash("Submit your timesheet first, then create an invoice to send for approval with it.", "warning")
+        return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
+    if InvoiceService.get_contractor_employment_type(uid) != "self_employed":
+        flash("Invoicing is for self-employed contractors only.", "info")
+        return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
+    entries = InvoiceService.get_uninvoiced_entries(wk["id"], uid)
+    if not entries:
+        flash("No uninvoiced entries for this week.", "info")
+        return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
+    total = sum((e.get("pay") or 0) + (e.get("travel_parking") or 0) for e in entries)
+    suggested = InvoiceService.get_next_invoice_number(uid)
+    invoice_info = InvoiceService.get_week_invoice_info(wk["id"])
+    we = wk.get("week_ending")
+    if hasattr(we, "strftime"):
+        we = we.strftime("%Y-%m-%d")
+    return render_template(
+        "public/invoice/create.html",
+        week_id=week_id,
+        week_ending=we,
+        entries=entries,
+        total=total,
+        suggested_invoice_number=suggested,
+        has_voided_invoice=invoice_info.get("has_voided_invoice"),
+        week_status=status,
+        config=core_manifest,
+    )
+
+
+@public_bp.post("/api/weeks/<week_id>/invoice")
+@staff_required_tb
+def api_public_create_invoice(week_id):
+    """Create invoice with timesheet: draft when week submitted, sent when week already approved."""
+    uid = current_tb_user_id()
+    wk = TimesheetService._ensure_week(uid, week_id)
+    status = (wk.get("status") or "").lower()
+    if status not in ("submitted", "approved"):
+        return jsonify({"ok": False, "message": "Submit your timesheet first"}), 400
+    if InvoiceService.get_contractor_employment_type(uid) != "self_employed":
+        return jsonify({"ok": False, "message": "Self-employed only"}), 403
+    data = request.get_json() or {}
+    invoice_number = (data.get("invoice_number") or "").strip() or InvoiceService.get_next_invoice_number(uid)
+    mark_sent = status == "approved"
+    try:
+        inv = InvoiceService.create_invoice(uid, wk["id"], invoice_number, mark_sent=mark_sent)
+        return jsonify({"ok": True, "invoice": inv})
+    except ValueError as e:
+        return jsonify({"ok": False, "message": str(e)}), 400
+
+
+@public_bp.post("/weeks/<week_id>/invoice/finalize")
+@staff_required_tb
+def public_week_invoice_finalize(week_id):
+    """
+    Promote draft → sent when the week is already approved (submitted-then-approved invoice flow).
+    """
+    uid = current_tb_user_id()
+    wk = TimesheetService._ensure_week(uid, week_id)
+    try:
+        out = InvoiceService.finalize_draft_invoice_for_week(uid, int(wk["id"]))
+        if out:
+            flash(
+                "Invoice #%s finalized and marked sent. This week is now marked invoiced."
+                % (out.get("invoice_number") or out.get("id")),
+                "success",
+            )
+        else:
+            flash("No draft invoice was found for this week to finalize.", "warning")
+    except ValueError as e:
+        flash(str(e), "error")
+    return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
+
+
+@public_bp.get("/invoices")
+@staff_required_tb
+def public_invoices_list_page():
+    uid = current_tb_user_id()
+    rows = InvoiceService.list_invoices_for_contractor(uid)
+    return render_template(
+        "public/invoice/list.html",
+        invoices=rows,
+        config=core_manifest,
+    )
+
+
+@public_bp.get("/invoices/<int:invoice_id>")
+@staff_required_tb
+def public_invoice_detail_page(invoice_id):
+    uid = current_tb_user_id()
+    inv = InvoiceService.get_invoice_detail_for_contractor(invoice_id, uid)
+    if not inv:
+        flash("Invoice not found.", "error")
+        return redirect(url_for("public_time_billing.public_invoices_list_page"))
+    return render_template(
+        "public/invoice/detail.html",
+        invoice=inv,
+        config=core_manifest,
+    )
+
+
+@public_bp.get("/invoices/<int:invoice_id>/download")
+@staff_required_tb
+def public_invoice_pdf_download(invoice_id):
+    uid = current_tb_user_id()
+    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(invoice_id, contractor_id=uid)
+    if not pdf_bytes:
+        abort(404)
+    return send_file(
+        BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=fname,
+    )
+
+
+@public_bp.get("/settings/billing")
+@staff_required_tb
+def public_billing_settings_page():
+    uid = current_tb_user_id()
+    profile = InvoiceService.get_contractor_billing_profile(uid)
+    suggested = InvoiceService.get_next_invoice_number(uid)
+    return render_template(
+        "public/settings/billing.html",
+        profile=profile,
+        suggested_next_invoice_number=suggested,
+        config=core_manifest,
+    )
+
+
+@public_bp.post("/settings/billing")
+@staff_required_tb
+def public_billing_settings_save():
+    uid = current_tb_user_id()
+    InvoiceService.save_contractor_billing_profile(
+        uid,
+        {
+            "invoice_business_name": request.form.get("invoice_business_name"),
+            "invoice_address_line1": request.form.get("invoice_address_line1"),
+            "invoice_address_line2": request.form.get("invoice_address_line2"),
+            "invoice_city": request.form.get("invoice_city"),
+            "invoice_postcode": request.form.get("invoice_postcode"),
+            "invoice_country": request.form.get("invoice_country"),
+        },
+    )
+    flash("Billing details saved. These appear on invoice PDFs.", "success")
+    return redirect(url_for("public_time_billing.public_billing_settings_page"))
+
+
 @public_bp.get("/api/refs/clients")
 @staff_required_tb
 def api_refs_clients():
@@ -1410,10 +2061,19 @@ def api_refs_clients():
 @staff_required_tb
 def api_refs_sites():
     client_name = request.args.get("client_name")
+    client_id = request.args.get("client_id", type=int)
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        if client_name:
+        if client_id:
+            cur.execute("""
+                SELECT id, name
+                FROM sites
+                WHERE active IN (1, '1', 'active', TRUE)
+                  AND client_id = %s
+                ORDER BY name ASC
+            """, (client_id,))
+        elif client_name:
             cur.execute("""
                 SELECT id, name
                 FROM sites
@@ -1442,7 +2102,7 @@ def api_refs_job_types():
     cur = conn.cursor(dictionary=True)
     try:
         cur.execute("""
-            SELECT id, name
+            SELECT id, name, colour_hex
             FROM job_types
             WHERE active IN (1, '1', 'active', TRUE)
             ORDER BY name ASC
@@ -1452,6 +2112,287 @@ def api_refs_job_types():
         cur.close()
         conn.close()
     return jsonify({"items": items})
+
+
+@internal_bp.get("/api/refs/clients")
+@admin_required_tb
+def api_admin_refs_clients():
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT id, name
+            FROM clients
+            WHERE active IN (1, '1', 'active', TRUE)
+            ORDER BY name ASC
+        """)
+        items = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"items": items})
+
+
+@internal_bp.get("/api/refs/sites")
+@admin_required_tb
+def api_admin_refs_sites():
+    client_id = request.args.get("client_id", type=int)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        if client_id:
+            cur.execute("""
+                SELECT id, name, client_id
+                FROM sites
+                WHERE active IN (1, '1', 'active', TRUE)
+                  AND client_id = %s
+                ORDER BY name ASC
+            """, (client_id,))
+        else:
+            cur.execute("""
+                SELECT id, name, client_id
+                FROM sites
+                WHERE active IN (1, '1', 'active', TRUE)
+                ORDER BY name ASC
+            """)
+        items = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"items": items})
+
+
+@internal_bp.get("/api/refs/contractors")
+@admin_required_tb
+def api_admin_refs_contractors():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"items": []})
+    like = f"%{q}%"
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT id, name, email, initials
+            FROM tb_contractors
+            WHERE status = 'active'
+              AND (
+                name LIKE %s OR email LIKE %s OR initials LIKE %s OR CAST(id AS CHAR) LIKE %s
+              )
+            ORDER BY name ASC
+            LIMIT 30
+        """, (like, like, like, like))
+        items = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"items": items})
+
+
+@public_bp.get("/api/my/runsheet-templates")
+@staff_required_tb
+def api_my_runsheet_templates_list():
+    try:
+        return jsonify({"items": TemplateService.list_active_runsheet_templates()})
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="list_active_runsheet_templates")
+
+
+@public_bp.get("/api/my/runsheet-templates/<int:tpl_id>/schema")
+@staff_required_tb
+def api_my_runsheet_template_schema(tpl_id):
+    try:
+        return jsonify(TemplateService.render_form_schema(tpl_id))
+    except Exception as e:
+        current_app.logger.warning(
+            "runsheets template schema failed tpl_id=%s: %s", tpl_id, e, exc_info=True
+        )
+        return jsonify({"error": "Template not found or unavailable."}), 404
+
+
+@public_bp.get("/api/refs/contractors")
+@staff_required_tb
+def api_public_refs_contractors():
+    """Contractor search for runsheet crew (field UI). Same rules as admin ref."""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"items": []})
+    like = f"%{q}%"
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, name, email, initials
+            FROM tb_contractors
+            WHERE status = 'active'
+              AND (
+                name LIKE %s OR email LIKE %s OR initials LIKE %s OR CAST(id AS CHAR) LIKE %s
+              )
+            ORDER BY name ASC
+            LIMIT 30
+            """,
+            (like, like, like, like),
+        )
+        items = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"items": items})
+
+
+@public_bp.get("/api/my/runsheets")
+@staff_required_tb
+def api_my_runsheets_list():
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"items": []}), 401
+    try:
+        rows = RunsheetService.list_runsheets_for_contractor(int(uid))
+        return jsonify({"items": rows})
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="api_my_runsheets_list")
+
+
+@public_bp.get("/api/my/runsheets/<int:rs_id>")
+@staff_required_tb
+def api_my_runsheets_get(rs_id):
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        rs = RunsheetService.get_runsheet(rs_id)
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="api_my_runsheets_get")
+    if not rs:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(rs)
+
+
+@public_bp.post("/api/my/runsheets")
+@staff_required_tb
+def api_my_runsheets_create():
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(force=True) or {}
+    data = dict(data)
+    data["lead_user_id"] = int(uid)
+    try:
+        rs_id = RunsheetService.create_runsheet(data)
+        RunsheetService.ensure_lead_assignment(rs_id, int(uid))
+        return jsonify({"ok": True, "id": rs_id}), 201
+    except Exception as e:
+        current_app.logger.warning("api_my_runsheets_create: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@public_bp.patch("/api/my/runsheets/<int:rs_id>/my-assignment")
+@staff_required_tb
+def api_my_runsheets_patch_my_assignment(rs_id):
+    """Non-lead crew: save own actual times and notes only."""
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json(force=True) or {}
+    try:
+        RunsheetService.update_own_assignment_times(rs_id, int(uid), data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        current_app.logger.warning(
+            "api_my_runsheets_patch_my_assignment rs_id=%s: %s", rs_id, e, exc_info=True
+        )
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@public_bp.put("/api/my/runsheets/<int:rs_id>")
+@staff_required_tb
+def api_my_runsheets_update(rs_id):
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_may_edit_runsheet_header(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    data = request.get_json(force=True) or {}
+    try:
+        RunsheetService.update_runsheet(rs_id, data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        current_app.logger.warning(
+            "api_my_runsheets_update rs_id=%s: %s", rs_id, e, exc_info=True
+        )
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@public_bp.post("/api/my/runsheets/<int:rs_id>/publish")
+@staff_required_tb
+def api_my_runsheets_publish(rs_id):
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_may_edit_runsheet_header(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        res = RunsheetService.publish_runsheet(rs_id, published_by=int(uid))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="api_my_runsheets_publish")
+
+
+@public_bp.post("/api/my/runsheets/<int:rs_id>/assignments/<int:ra_id>/withdraw")
+@staff_required_tb
+def api_my_runsheets_assignment_withdraw(rs_id, ra_id):
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        res = RunsheetService.withdraw_runsheet_assignment(rs_id, ra_id, int(uid))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="assignment_withdraw")
+
+
+@public_bp.post("/api/my/runsheets/<int:rs_id>/assignments/<int:ra_id>/reactivate")
+@staff_required_tb
+def api_my_runsheets_assignment_reactivate(rs_id, ra_id):
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        res = RunsheetService.reactivate_runsheet_assignment(rs_id, ra_id, int(uid))
+        return jsonify(res), (200 if res.get("ok") else 400)
+    except Exception as e:
+        return _tb_safe_api_error(e, status=500, log_message="assignment_reactivate")
+
+
+@public_bp.get("/api/rates")
+@staff_required_tb
+def api_public_contractor_rate():
+    """
+    Effective £/h wage rate for the logged-in contractor, job type, and work date.
+    Uses the same card lookup as saving a timesheet row (MinimalRateResolver).
+    Query: job_type_id (int), on=YYYY-MM-DD
+    """
+    uid = current_tb_user_id()
+    job_type_id = request.args.get("job_type_id", type=int)
+    on_raw = (request.args.get("on") or "").strip()
+    if not uid or not job_type_id or not on_raw:
+        return jsonify({"ok": False, "rate": 0.0, "message": "job_type_id and on (YYYY-MM-DD) required"}), 400
+    try:
+        work_date = datetime.strptime(on_raw, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"ok": False, "rate": 0.0, "message": "invalid on date"}), 400
+    rate = MinimalRateResolver.resolve_rate(uid, job_type_id, work_date)
+    return jsonify({"ok": True, "rate": float(rate)})
+
 
 # -------------------------
 # Public Exports

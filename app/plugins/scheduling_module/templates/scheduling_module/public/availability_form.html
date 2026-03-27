@@ -1,0 +1,131 @@
+{% extends "scheduling_module/base_public.html" %}
+{% block content %}
+{% set is_unavailability = (mode|default('availability')) == 'unavailability' %}
+{% set title_edit = 'Edit unavailability' if is_unavailability else 'Edit availability' %}
+{% set title_add = 'Add unavailability window' if is_unavailability else 'Add availability window' %}
+{% set is_edit = avail is defined and avail %}
+<h1 class="h5 mb-3">{{ title_edit if is_edit else title_add }}</h1>
+<form method="post" action="{{ url_for('public_scheduling.unavailability_edit', una_id=avail.id) if (avail and is_unavailability) else url_for('public_scheduling.availability_edit', avail_id=avail.id) if avail else (url_for('public_scheduling.unavailability_add') if is_unavailability else url_for('public_scheduling.availability_add')) }}" class="card card-module p-3" id="availability-form">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <div class="mb-3">
+    <label class="form-label">Day(s)</label>
+    {% if is_edit %}
+    <select name="day_of_week" class="form-select form-control-dark bg-dark text-light" required>
+      <option value="0" {{ 'selected' if avail.day_of_week == 0 else '' }}>Monday</option>
+      <option value="1" {{ 'selected' if avail.day_of_week == 1 else '' }}>Tuesday</option>
+      <option value="2" {{ 'selected' if avail.day_of_week == 2 else '' }}>Wednesday</option>
+      <option value="3" {{ 'selected' if avail.day_of_week == 3 else '' }}>Thursday</option>
+      <option value="4" {{ 'selected' if avail.day_of_week == 4 else '' }}>Friday</option>
+      <option value="5" {{ 'selected' if avail.day_of_week == 5 else '' }}>Saturday</option>
+      <option value="6" {{ 'selected' if avail.day_of_week == 6 else '' }}>Sunday</option>
+    </select>
+    {% else %}
+    <div class="d-flex flex-wrap gap-2 mb-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-days-preset="0,1,2,3,4">Weekdays (Mon–Fri)</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-days-preset="5,6">Weekend (Sat–Sun)</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-days-preset="0,1,2,3,4,5,6">All days</button>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="0" class="form-check-input days-cb"> Mon</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="1" class="form-check-input days-cb"> Tue</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="2" class="form-check-input days-cb"> Wed</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="3" class="form-check-input days-cb"> Thu</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="4" class="form-check-input days-cb"> Fri</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="5" class="form-check-input days-cb"> Sat</label>
+      <label class="form-check form-check-inline"><input type="checkbox" name="days" value="6" class="form-check-input days-cb"> Sun</label>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Time</label>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <button type="button" class="btn btn-outline-primary btn-sm" id="btn-all-day">All day</button>
+      <span class="small text-muted">or quick:</span>
+      <label class="d-inline-flex align-items-center gap-1 small">
+        <span>After</span>
+        <input type="time" id="after-time" class="form-control form-control-sm form-control-dark bg-dark text-light" style="width:auto">
+      </label>
+      <label class="d-inline-flex align-items-center gap-1 small">
+        <span>Before</span>
+        <input type="time" id="before-time" class="form-control form-control-sm form-control-dark bg-dark text-light" style="width:auto">
+      </label>
+    </div>
+    <div class="row g-2">
+      <div class="col">
+        <label class="form-label small mb-0">Start time</label>
+        <input type="time" name="start_time" id="start_time" class="form-control form-control-dark bg-dark text-light" value="{{ avail.start_time_str if avail else '' }}" required>
+      </div>
+      <div class="col">
+        <label class="form-label small mb-0">End time</label>
+        <input type="time" name="end_time" id="end_time" class="form-control form-control-dark bg-dark text-light" value="{{ avail.end_time_str if avail else '' }}" required>
+      </div>
+    </div>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Effective from</label>
+    <input type="date" name="effective_from" class="form-control form-control-dark bg-dark text-light" value="{{ avail.effective_from_iso if avail else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Effective to (optional)</label>
+    <input type="date" name="effective_to" class="form-control form-control-dark bg-dark text-light" value="{{ avail.effective_to_iso if avail else '' }}">
+  </div>
+  <button type="submit" class="btn btn-primary">Save</button>
+  <a href="{{ url_for('public_scheduling.my_availability') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+</form>
+<p class="text-muted small mt-2">{{ 'This is when you cannot work (e.g. other commitments). Schedulers will see this on your name in the week view.' if is_unavailability else 'This is when you are generally available to be scheduled.' }}</p>
+
+<script>
+(function() {
+  var form = document.getElementById('availability-form');
+  if (!form) return;
+  var startTime = document.getElementById('start_time');
+  var endTime = document.getElementById('end_time');
+  var afterTime = document.getElementById('after-time');
+  var beforeTime = document.getElementById('before-time');
+  var btnAllDay = document.getElementById('btn-all-day');
+  function setTimes(start, end) {
+    if (startTime) startTime.value = start;
+    if (endTime) endTime.value = end;
+  }
+
+  if (btnAllDay) {
+    btnAllDay.addEventListener('click', function() {
+      setTimes('00:00', '23:59');
+    });
+  }
+  if (afterTime) {
+    afterTime.addEventListener('change', function() {
+      if (afterTime.value) setTimes(afterTime.value, '23:59');
+    });
+  }
+  if (beforeTime) {
+    beforeTime.addEventListener('change', function() {
+      if (beforeTime.value) setTimes('00:00', beforeTime.value);
+    });
+  }
+
+  var presetBtns = form.querySelectorAll('[data-days-preset]');
+  presetBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var days = (btn.getAttribute('data-days-preset') || '').split(',').filter(Boolean);
+      form.querySelectorAll('.days-cb').forEach(function(cb) {
+        cb.checked = days.indexOf(cb.value) !== -1;
+      });
+    });
+  });
+
+  if (form && form.querySelector('input[name="days"]')) {
+    form.addEventListener('submit', function(e) {
+      var checked = form.querySelectorAll('input[name="days"]:checked');
+      if (checked.length === 0) {
+        e.preventDefault();
+        alert('Please select at least one day.');
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

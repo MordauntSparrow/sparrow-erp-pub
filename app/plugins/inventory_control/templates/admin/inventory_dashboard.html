@@ -1,0 +1,183 @@
+{% extends "admin/inventory_admin_base.html" %}
+
+{% block page_title %}Inventory Control{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+  {% include "admin/_inventory_nav.html" %}
+  <div class="row mb-4">
+    <div class="col">
+      <h1 class="h3 mb-0">Inventory Dashboard</h1>
+      <p class="text-muted mb-0">
+        Overview, trends, and AI summary of inventory movements.
+      </p>
+    </div>
+  </div>
+
+  <!-- Health + KPIs (server-rendered fallback, then JS can refresh) -->
+  <div class="row mb-4" id="kpi-row">
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Health</h6>
+          {% if health and health.status == "ok" %}
+            <span class="badge bg-success">OK</span>
+          {% else %}
+            <span class="badge bg-danger">Degraded</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Total value</h6>
+          <p class="mb-0 fw-bold" id="metric-total-value">{{ metrics.total_value | default(0) }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Active items</h6>
+          <p class="mb-0 fw-bold" id="metric-total-items">{{ metrics.total_items | default(0) }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Low stock</h6>
+          <p class="mb-0 fw-bold" id="metric-low-stock">{{ metrics.low_stock_count | default(0) }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Expiring (30d)</h6>
+          <p class="mb-0 fw-bold" id="metric-expiring">{{ metrics.expiring_batches_count | default(0) }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4 col-lg-2 mb-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body py-3">
+          <h6 class="card-title text-muted mb-1 small">Tx (7d)</h6>
+          <p class="mb-0 fw-bold" id="metric-recent-tx">{{ metrics.recent_transactions_count | default(0) }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI summary -->
+  <div class="row mb-4">
+    <div class="col-12">
+      <div class="card shadow-sm border-primary">
+        <div class="card-header bg-primary text-white d-flex align-items-center">
+          <span class="me-2">📊</span>
+          <strong>Inventory summary</strong>
+        </div>
+        <div class="card-body">
+          <p class="mb-0" id="movement-summary">Loading…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="row">
+    <div class="col-lg-4 mb-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header">Stock value by category</div>
+        <div class="card-body position-relative" style="height: 260px;">
+          <canvas id="chart-value-by-category"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 mb-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header">Movements by type (7 days)</div>
+        <div class="card-body position-relative" style="height: 260px;">
+          <canvas id="chart-movements-by-type"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 mb-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-header">Activity (last 7 days)</div>
+        <div class="card-body position-relative" style="height: 260px;">
+          <canvas id="chart-activity-days"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  const base = '/plugin/inventory_control';
+  let chartValueByCategory = null;
+  let chartMovementsByType = null;
+  let chartActivityDays = null;
+
+  function updateDashboard(data) {
+    if (!data) return;
+    document.getElementById('metric-total-value').textContent = data.total_value != null ? data.total_value : '—';
+    document.getElementById('metric-total-items').textContent = data.total_items != null ? data.total_items : '—';
+    document.getElementById('metric-low-stock').textContent = data.low_stock_count != null ? data.low_stock_count : '—';
+    document.getElementById('metric-expiring').textContent = data.expiring_batches_count != null ? data.expiring_batches_count : '—';
+    document.getElementById('metric-recent-tx').textContent = data.recent_transactions_count != null ? data.recent_transactions_count : '—';
+    document.getElementById('movement-summary').textContent = data.movement_summary || 'No summary available.';
+
+    var vbc = data.value_by_category || [];
+    var labels = vbc.map(function(x) { return x.category_name || 'Uncategorised'; });
+    var values = vbc.map(function(x) { return x.value || 0; });
+    var colors = ['#0d6efd','#198754','#ffc107','#dc3545','#0dcaf0','#6f42c1','#fd7e14','#20c997'];
+    if (chartValueByCategory) chartValueByCategory.destroy();
+    chartValueByCategory = new Chart(document.getElementById('chart-value-by-category'), {
+      type: 'doughnut',
+      data: { labels: labels, datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length) }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    var mbt = data.movements_by_type || [];
+    var typeLabels = mbt.map(function(x) { return x.type || ''; });
+    var typeCounts = mbt.map(function(x) { return x.count || 0; });
+    if (chartMovementsByType) chartMovementsByType.destroy();
+    chartMovementsByType = new Chart(document.getElementById('chart-movements-by-type'), {
+      type: 'bar',
+      data: { labels: typeLabels, datasets: [{ label: 'Count', data: typeCounts, backgroundColor: '#0d6efd' }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+    });
+
+    var mbd = data.movements_by_day || [];
+    var dayLabels = mbd.map(function(x) { return x.day ? x.day.slice(0, 10) : ''; });
+    var dayCounts = mbd.map(function(x) { return x.count || 0; });
+    if (chartActivityDays) chartActivityDays.destroy();
+    chartActivityDays = new Chart(document.getElementById('chart-activity-days'), {
+      type: 'line',
+      data: { labels: dayLabels, datasets: [{ label: 'Transactions', data: dayCounts, borderColor: '#198754', fill: true, tension: 0.3 }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  fetch(base + '/api/dashboard', { credentials: 'same-origin' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        document.getElementById('movement-summary').textContent = 'Could not load dashboard: ' + (data.error || 'Unknown error');
+        return;
+      }
+      updateDashboard(data);
+    })
+    .catch(function() {
+      document.getElementById('movement-summary').textContent = 'Failed to load dashboard.';
+    });
+})();
+</script>
+{% endblock %}

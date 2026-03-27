@@ -1,0 +1,110 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Time off – Scheduling{% endblock %}
+{% block content %}
+<nav class="mb-2 small">
+  <a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a>
+  <span class="text-muted">/</span>
+  <span>Time off</span>
+</nav>
+<h1 class="h4 mb-2">Time off</h1>
+<p class="text-muted small mb-3">Approve or reject requests. Add time off or sickness on behalf of staff.</p>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <a href="{{ url_for('internal_scheduling.admin_time_off_new') }}" class="btn btn-success btn-sm"><i class="bi bi-plus-lg me-1"></i> Add time off</a>
+</div>
+
+<form method="get" action="{{ url_for('internal_scheduling.admin_time_off') }}" class="card card-body mb-4">
+  <div class="row g-2">
+    <div class="col-md-2">
+      <label class="form-label small">Staff</label>
+      <select name="contractor_id" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {{ 'selected' if contractor_id == c.id else '' }}>{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">Type</label>
+      <select name="type" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="annual" {{ 'selected' if type_filter == 'annual' else '' }}>Annual</option>
+        <option value="sickness" {{ 'selected' if type_filter == 'sickness' else '' }}>Sickness</option>
+        <option value="other" {{ 'selected' if type_filter == 'other' else '' }}>Other</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">Status</label>
+      <select name="status" class="form-select form-select-sm">
+        <option value="">All</option>
+        <option value="requested" {{ 'selected' if status == 'requested' else '' }}>Requested</option>
+        <option value="approved" {{ 'selected' if status == 'approved' else '' }}>Approved</option>
+        <option value="rejected" {{ 'selected' if status == 'rejected' else '' }}>Rejected</option>
+        <option value="cancelled" {{ 'selected' if status == 'cancelled' else '' }}>Cancelled</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">From</label>
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from or '' }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">To</label>
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to or '' }}">
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button type="submit" class="btn btn-secondary btn-sm">Filter</button>
+    </div>
+  </div>
+</form>
+
+{% if time_off_list %}
+<div class="table-responsive">
+  <table class="table table-bordered table-hover">
+    <thead class="table-light">
+      <tr>
+        <th>Staff</th>
+        <th>Type</th>
+        <th>Start</th>
+        <th>End</th>
+        <th>Time</th>
+        <th>Reason</th>
+        <th>Status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in time_off_list %}
+      <tr>
+        <td>{{ r.contractor_name or r.contractor_email }}</td>
+        <td><span class="badge {% if r.type == 'sickness' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ r.type }}</span></td>
+        <td>{{ r.start_date|string if r.start_date else '—' }}</td>
+        <td>{{ r.end_date|string if r.end_date else '—' }}</td>
+        <td>{% if r.start_time_display and r.end_time_display %}{{ r.start_time_display }}–{{ r.end_time_display }}{% else %}<span class="text-muted">All day</span>{% endif %}</td>
+        <td>{{ r.reason or '—' }}</td>
+        <td>
+          <span class="badge {% if r.status == 'approved' %}bg-success{% elif r.status == 'rejected' %}bg-danger{% elif r.status == 'requested' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ r.status }}</span>
+        </td>
+        <td>
+          {% if r.status == 'requested' %}
+          <form method="post" action="{{ url_for('internal_scheduling.admin_time_off_approve', tid=r.id) }}" class="d-inline" id="time-off-form-{{ r.id }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="admin_notes" class="form-control form-control-sm d-inline-block me-1" style="width: 110px;" placeholder="Note (optional)" aria-label="Admin note (optional)">
+            <button type="submit" class="btn btn-success btn-sm" formaction="{{ url_for('internal_scheduling.admin_time_off_approve', tid=r.id) }}">Approve</button>
+            <button type="submit" class="btn btn-danger btn-sm" formaction="{{ url_for('internal_scheduling.admin_time_off_reject', tid=r.id) }}">Reject</button>
+          </form>
+          {% else %}
+          {% if r.admin_notes %}<span class="small text-muted" title="{{ r.admin_notes }}">Note</span>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small text-muted">{{ time_off_list|length }} request(s).</p>
+{% else %}
+<p class="text-muted">No time off matches the filters. <a href="{{ url_for('internal_scheduling.admin_time_off_new') }}">Add time off</a> on behalf of a staff member.</p>
+{% endif %}
+
+<a href="{{ url_for('internal_scheduling.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Scheduling</a>
+{% endblock %}

@@ -1,0 +1,15 @@
+{
+    "system_name": "employee_portal_module",
+    "version": "0.0.2",
+    "installed": true,
+    "enabled": true,
+    "name": "Employee Portal Module",
+    "description": "",
+    "dependencies": [
+        "website_module",
+        "time_billing_module"
+    ],
+    "icon": "icon.png",
+    "dashboard_category": "Self-service portal",
+    "update_available": false
+}

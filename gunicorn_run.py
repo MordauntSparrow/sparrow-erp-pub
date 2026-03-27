@@ -36,18 +36,20 @@ def _start_website():
                 f"[WARN] Website module import failed: {ie}. Skipping WebsiteServer startup.")
             return
 
+        web_port = int(os.environ.get("WEB_PORT", "8080"))
+        ws = WebsiteServer(port=web_port)
+
         def _run_website():
             try:
-                ws = WebsiteServer()
                 ws.start()
-                print("[INFO] WebsiteServer started.")
+                print(f"[INFO] Website server started on port {web_port}. Demo site and employee login: http://<host>:{web_port}/")
             except Exception:
                 print("[ERROR] WebsiteServer failed to start:")
                 traceback.print_exc()
 
-        t = threading.Thread(target=_run_website,
-                             name="WebsiteServerThread", daemon=True)
+        t = threading.Thread(target=_run_website, name="WebsiteServerThread", daemon=True)
         t.start()
+        print(f"[INFO] Website server thread started (listening on port {web_port}).")
 
     except Exception:
         print("[ERROR] Failed to start WebsiteServer:")

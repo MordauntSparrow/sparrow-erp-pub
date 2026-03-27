@@ -1,3 +1,9 @@
-<div class="py-2 text-center">
-  <a href="{{ href }}" class="btn btn-{{ style|default('primary') }}">{{ text }}</a>
+{% set sz = 'btn-sm' if size == 'sm' else ('btn-lg' if size == 'lg' else '') %}
+<div class="d-inline-block my-1">
+  {% if style == 'link' %}
+  <a href="{{ href }}" class="btn btn-link {{ sz }} px-2" data-wb-no-select="1" data-wb-cta="button">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="text" data-wb-plain="1">{{ text }}</span>{% else %}{{ text }}{% endif %}</a>
+  {% else %}
+  {% set outline = 'btn-outline-' ~ style if outline else 'btn-' ~ style %}
+  <a href="{{ href }}" class="btn {{ outline }} {{ sz }} px-4 ripple-surface" data-wb-no-select="1" data-wb-cta="button">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="text" data-wb-plain="1">{{ text }}</span>{% else %}{{ text }}{% endif %}</a>
+  {% endif %}
 </div>

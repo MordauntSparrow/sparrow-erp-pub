@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Employees · HR{% endblock %}
+{% block content %}
+<div class="hr-admin-surface">
+  {% include 'hr_module/admin/_hr_ui_styles.html' %}
+
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}" class="text-decoration-none">People</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Employees</li>
+    </ol>
+  </nav>
+
+  <div class="hr-kanban-toolbar mb-4">
+    <div class="row align-items-center g-3">
+      <div class="col-lg-4">
+        <p class="text-muted hr-upper-tight fw-semibold mb-1">Directory</p>
+        <h1 class="h3 fw-semibold text-dark mb-0">Employees</h1>
+      </div>
+      <div class="col-lg-5">
+        <form method="get" class="d-flex gap-2 flex-wrap align-items-center">
+          <input type="hidden" name="view" value="{{ view_mode }}">
+          <div class="flex-grow-1" style="min-width: 200px;">
+            <div class="input-group input-group-lg shadow-sm rounded-pill overflow-hidden bg-white" style="border-radius: 999px !important;">
+              <span class="input-group-text border-0 bg-white ps-3"><i class="bi bi-search text-muted"></i></span>
+              <input type="search" class="form-control border-0" name="q" value="{{ q }}" placeholder="Search by name or email">
+            </div>
+          </div>
+          <select name="status" class="form-select form-select-lg border-0 shadow-sm" style="max-width: 160px; border-radius: 12px;">
+            <option value="active" {{ 'selected' if status_filter == 'active' else '' }}>Active</option>
+            <option value="all" {{ 'selected' if status_filter == 'all' else '' }}>Everyone</option>
+            <option value="inactive" {{ 'selected' if status_filter == 'inactive' else '' }}>Inactive</option>
+          </select>
+          <button type="submit" class="btn btn-primary btn-lg px-4 rounded-3">Apply</button>
+        </form>
+      </div>
+      <div class="col-lg-3 text-lg-end">
+        <div class="btn-group hr-view-pill shadow-sm" role="group" aria-label="View mode">
+          <a href="{{ url_for('internal_hr.admin_employees', view='kanban', q=q, status=status_filter) }}"
+             class="btn btn-sm {{ 'btn-primary' if view_mode == 'kanban' else 'btn-white bg-white text-secondary' }}">Cards</a>
+          <a href="{{ url_for('internal_hr.admin_employees', view='list', q=q, status=status_filter) }}"
+             class="btn btn-sm {{ 'btn-primary' if view_mode == 'list' else 'btn-white bg-white text-secondary' }}">List</a>
+        </div>
+        <div class="small text-muted mt-2">
+          {% if employees %}{{ employees|length }} shown{% else %}0 results{% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('internal_hr.admin_index') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i> Dashboard</a>
+      <a href="{{ url_for('internal_hr.admin_contractors') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-search me-1"></i> Search</a>
+      <a href="{{ url_for('internal_hr.admin_requests') }}" class="btn btn-sm btn-outline-primary rounded-pill"><i class="bi bi-inbox me-1"></i> Requests</a>
+      <a href="{{ url_for('internal_hr.admin_request_new_form') }}" class="btn btn-sm btn-primary rounded-pill"><i class="bi bi-plus-lg me-1"></i> Request document</a>
+    </div>
+  </div>
+
+  {% if employees %}
+    {% if view_mode == 'list' %}
+    <div class="hr-table-wrap">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-4">Name</th>
+            <th>Role / dept</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th class="text-end pe-4">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in employees %}
+          <tr>
+            <td class="ps-4">
+              <div class="d-flex align-items-center gap-2">
+                {% set ep = e.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+                {% if ep %}
+                <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=e.id, field='profile_picture') }}" alt="" class="flex-shrink-0 rounded-2 border" width="40" height="40" style="object-fit:cover;">
+                {% else %}
+                <div class="hr-kanban-avatar flex-shrink-0" style="width:40px;height:40px;font-size:0.75rem;border-radius:10px;">{{ (e.initials or (e.name or e.email or '?')[:2])|upper }}</div>
+                {% endif %}
+                <span class="fw-semibold text-dark">{{ e.name or e.email or '—' }}</span>
+              </div>
+            </td>
+            <td class="small text-muted">
+              {% if e.job_title %}{{ e.job_title }}{% endif %}
+              {% if e.job_title and e.department %}<span class="text-secondary"> · </span>{% endif %}
+              {% if e.department %}{{ e.department }}{% endif %}
+              {% if not e.job_title and not e.department %}—{% endif %}
+            </td>
+            <td class="hr-kanban-meta"><i class="bi bi-envelope me-1"></i>{{ e.email or '—' }}</td>
+            <td class="hr-kanban-meta">{% if e.phone %}<i class="bi bi-telephone me-1"></i>{{ e.phone }}{% else %}—{% endif %}</td>
+            <td><span class="badge rounded-pill bg-light text-dark border">{{ e.status|hr_contractor_status }}</span></td>
+            <td class="text-end pe-4 text-nowrap">
+              <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=e.id) }}" class="btn btn-sm btn-primary rounded-pill">Open</a>
+              <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=e.id) }}" class="btn btn-sm btn-outline-secondary rounded-pill">Edit</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-4 g-4">
+      {% for e in employees %}
+      <div class="col">
+        <div class="card hr-kanban-card h-100">
+          <div class="card-body p-4">
+            <div class="d-flex gap-3 mb-3">
+              {% set ep = e.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+              {% if ep %}
+              <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=e.id, field='profile_picture') }}" alt="" class="rounded-3 flex-shrink-0 border" width="56" height="56" style="object-fit:cover;">
+              {% else %}
+              <div class="hr-kanban-avatar flex-shrink-0">{{ (e.initials or (e.name or e.email or '?')[:2])|upper }}</div>
+              {% endif %}
+              <div class="min-w-0 flex-grow-1">
+                <div class="fw-semibold text-dark text-truncate" title="{{ e.name or e.email }}">{{ e.name or e.email or '—' }}</div>
+                <div class="small text-muted text-truncate" title="{{ (e.job_title or '') ~ ' ' ~ (e.department or '') }}">
+                  {% if e.job_title %}{{ e.job_title }}{% elif e.department %}{{ e.department }}{% else %}Employee{% endif %}
+                  {% if e.job_title and e.department %} · {{ e.department }}{% endif %}
+                </div>
+              </div>
+              <span class="badge rounded-pill align-self-start {{ 'bg-success bg-opacity-10 text-success' if (e.status or '')|lower in ('active','1') else 'bg-secondary bg-opacity-10 text-secondary' }}">{{ e.status|hr_contractor_status }}</span>
+            </div>
+            <div class="hr-kanban-meta mb-1 text-truncate" title="{{ e.email or '' }}"><i class="bi bi-envelope"></i> {{ e.email or '—' }}</div>
+            <div class="hr-kanban-meta mb-3 text-truncate" title="{{ e.phone or '' }}"><i class="bi bi-telephone"></i> {% if e.phone %}{{ e.phone }}{% else %}—{% endif %}</div>
+            {% if e.date_of_birth %}
+            <div class="small text-muted mb-3"><i class="bi bi-gift me-1"></i> {{ e.date_of_birth|string }}</div>
+            {% endif %}
+            <div class="d-flex gap-2 pt-2 border-top border-light mt-auto">
+              <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=e.id) }}" class="btn btn-primary btn-sm flex-grow-1 rounded-3 fw-semibold">Profile</a>
+              <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=e.id) }}" class="btn btn-outline-secondary btn-sm rounded-3">Edit</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% else %}
+  <div class="card hr-panel">
+    <div class="card-body text-center py-5">
+      <i class="bi bi-people text-muted display-4 d-block mb-3"></i>
+      <p class="text-muted mb-2">No one matches these filters.</p>
+      <a href="{{ url_for('internal_hr.admin_employees', status='all', view=view_mode) }}" class="btn btn-outline-primary rounded-pill">Show everyone</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

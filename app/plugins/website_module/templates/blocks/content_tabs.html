@@ -1,0 +1,29 @@
+{% set tid = 'wb-tabs-' ~ _block_uid %}
+{% set has2 = t2_label and t2_label|trim %}
+{% set has3 = t3_label and t3_label|trim %}
+<div class="container py-4 py-md-5">
+  <ul class="nav nav-tabs nav-fill mb-3 border-0 gap-1" id="{{ tid }}-nav" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active rounded-3 fw-semibold" id="{{ tid }}-t1" data-mdb-toggle="tab" data-mdb-target="#{{ tid }}-p1" type="button" role="tab" aria-controls="{{ tid }}-p1" aria-selected="true">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="t1_label" data-wb-plain="1">{{ t1_label }}</span>{% else %}{{ t1_label }}{% endif %}</button>
+    </li>
+    {% if has2 %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link rounded-3 fw-semibold" id="{{ tid }}-t2" data-mdb-toggle="tab" data-mdb-target="#{{ tid }}-p2" type="button" role="tab" aria-controls="{{ tid }}-p2" aria-selected="false">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="t2_label" data-wb-plain="1">{{ t2_label }}</span>{% else %}{{ t2_label }}{% endif %}</button>
+    </li>
+    {% endif %}
+    {% if has3 %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link rounded-3 fw-semibold" id="{{ tid }}-t3" data-mdb-toggle="tab" data-mdb-target="#{{ tid }}-p3" type="button" role="tab" aria-controls="{{ tid }}-p3" aria-selected="false">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="t3_label" data-wb-plain="1">{{ t3_label }}</span>{% else %}{{ t3_label }}{% endif %}</button>
+    </li>
+    {% endif %}
+  </ul>
+  <div class="tab-content p-4 p-md-5 rounded-4 bg-light border border-light" id="{{ tid }}-content">
+    <div class="tab-pane fade show active{% if canvas_mode %} wb-inline-target{% endif %}" id="{{ tid }}-p1" role="tabpanel" aria-labelledby="{{ tid }}-t1" tabindex="0"{% if canvas_mode %} data-wb-field="t1_body" data-wb-rich="1"{% endif %}>{{ t1_body|safe }}</div>
+    {% if has2 %}
+    <div class="tab-pane fade{% if canvas_mode %} wb-inline-target{% endif %}" id="{{ tid }}-p2" role="tabpanel" aria-labelledby="{{ tid }}-t2" tabindex="0"{% if canvas_mode %} data-wb-field="t2_body" data-wb-rich="1"{% endif %}>{{ (t2_body or '')|safe }}</div>
+    {% endif %}
+    {% if has3 %}
+    <div class="tab-pane fade{% if canvas_mode %} wb-inline-target{% endif %}" id="{{ tid }}-p3" role="tabpanel" aria-labelledby="{{ tid }}-t3" tabindex="0"{% if canvas_mode %} data-wb-field="t3_body" data-wb-rich="1"{% endif %}>{{ (t3_body or '')|safe }}</div>
+    {% endif %}
+  </div>
+</div>

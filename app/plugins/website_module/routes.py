@@ -1,9 +1,15 @@
+import copy
 import mimetypes
 import os
 import json
+import uuid
 import datetime
 from datetime import date
 from pathlib import Path
+from typing import Any, Dict, Optional
+
+from werkzeug.utils import secure_filename
+from werkzeug.routing import BuildError
 
 import markdown
 from jinja2 import TemplateNotFound
@@ -21,7 +27,10 @@ from flask import (
     flash,
     current_app,
     Response,
+    has_request_context,
 )
+
+from markupsafe import Markup
 
 from app.objects import PluginManager, EmailManager
 from .objects import *  # noqa: F403
@@ -53,6 +62,58 @@ website_public_added_routes = Blueprint(
 )
 
 templates_dir = os.path.join(os.path.dirname(__file__), 'templates/public')
+
+
+def website_static_url(filename: Optional[str]) -> str:
+    """
+    URL for files under website_module/static (OG images, uploads, etc.).
+
+    On the main ERP app the public marketing blueprint is often not registered, so
+    ``url_for('website_public.static', ...)`` raises BuildError. The admin blueprint
+    exposes the same files at /plugin/website_module/website_module_static/...
+    Standalone website apps register website_public and use blueprint static.
+    """
+    if filename is None:
+        return ""
+    fn = str(filename).replace("\\", "/").strip().lstrip("/")
+    if not fn:
+        return ""
+    try:
+        return url_for("website_public.static", filename=fn)
+    except BuildError:
+        pass
+    try:
+        return url_for("website_admin_routes.website_module_static", filename=fn)
+    except BuildError:
+        pass
+    except RuntimeError:
+        # outside request context
+        pass
+    return "/website_module_static/" + fn
+
+
+def website_public_page_url(route: Any) -> str:
+    """
+    Link to a pages.json route (nav/footer). Uses website_public endpoints when registered
+    (standalone site); otherwise root-relative paths so ERP builder preview does not BuildError.
+    """
+    r = route if route is not None else ""
+    r = str(r).strip()
+    if not r or r == "/":
+        try:
+            return url_for("website_public.root_page")
+        except BuildError:
+            return "/"
+    path = r.strip("/")
+    if not path:
+        try:
+            return url_for("website_public.root_page")
+        except BuildError:
+            return "/"
+    try:
+        return url_for("website_public.custom_page", page_route=path)
+    except BuildError:
+        return "/" + path
 
 
 # ----------------------------
@@ -99,6 +160,57 @@ def get_core_manifest():
     except Exception as e:
         print(f"[Website] get_core_manifest failed: {e}")
         return {}
+
+
+def build_website_public_config() -> Dict[str, Any]:
+    """
+    Flatten core manifest for public/website_public_base.html (site_settings + top-level).
+    Ensures company_name, branding, and logo_path match what the live marketing shell expects.
+    """
+    m = dict(get_core_manifest() or {})
+    ss = m.get("site_settings") if isinstance(m.get("site_settings"), dict) else {}
+    m["company_name"] = (m.get("company_name") or ss.get("company_name") or "").strip() or None
+    m["branding"] = ss.get("branding", m.get("branding"))
+    m["logo_path"] = ss.get("logo_path", m.get("logo_path"))
+    ts = m.get("theme_settings")
+    if not isinstance(ts, dict):
+        m["theme_settings"] = {}
+    return m
+
+
+_MODULE_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def website_public_asset_url(filename: Optional[str]) -> str:
+    """
+    Logo, theme CSS, and custom CSS paths from manifest: resolve to the correct URL on ERP
+    (builder preview) vs standalone site. Prefers a file under website_module/static
+    (e.g. uploads/builder/…); otherwise uses Flask app static (core uploads/logo).
+    """
+    if filename is None:
+        return ""
+    fn = str(filename).replace("\\", "/").strip().lstrip("/")
+    if not fn:
+        return ""
+    ms_root = os.path.normpath(_MODULE_STATIC_DIR)
+    wm_path = os.path.normpath(os.path.join(ms_root, fn))
+    if wm_path.startswith(ms_root) and os.path.isfile(wm_path):
+        return website_static_url(fn)
+    try:
+        sf = current_app.static_folder
+        if sf:
+            ar = os.path.normpath(sf)
+            app_path = os.path.normpath(os.path.join(sf, fn))
+            if app_path.startswith(ar) and os.path.isfile(app_path):
+                return url_for("static", filename=fn)
+    except RuntimeError:
+        pass
+    if fn.startswith("uploads/builder/"):
+        return website_static_url(fn)
+    try:
+        return url_for("static", filename=fn)
+    except BuildError:
+        return website_static_url(fn)
 
 
 def load_website_manifest():
@@ -167,6 +279,173 @@ def _load_pages_json():
     except Exception as e:
         print(f"[Website] Failed to load pages.json: {e}")
     return []
+
+
+def _normalize_route(route_str: str) -> str:
+    route_str = (route_str or "").strip()
+    return "/" + route_str.lstrip("/")
+
+
+def _load_published_builder_record(store, route_str: str):
+    """
+    Latest published (non-draft) builder JSON for this route, if any.
+    Used for SEO overlay even when the page has no blocks yet.
+    """
+    norm = _normalize_route(route_str)
+    pages_dir = getattr(store, "pages_dir", None)
+    if not pages_dir or not os.path.isdir(pages_dir):
+        return None
+    for fname in sorted(os.listdir(pages_dir)):
+        if not fname.endswith(".json"):
+            continue
+        path = os.path.join(pages_dir, fname)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                pj = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(pj, dict):
+            continue
+        if pj.get("draft", True):
+            continue
+        if _normalize_route(pj.get("route") or "") != norm:
+            continue
+        return pj
+    return None
+
+
+def _load_published_builder_page(store, route_str: str):
+    """
+    Published (non-draft) builder page for this route with at least one block.
+    Scans data/pages/*.json — acceptable for typical site sizes.
+    """
+    rec = _load_published_builder_record(store, route_str)
+    if not rec:
+        return None
+    blocks = rec.get("blocks") or []
+    if not isinstance(blocks, list) or len(blocks) == 0:
+        return None
+    return rec
+
+
+def _merge_seo_dict_into_page_data(page_data: dict, seo: Any) -> dict:
+    """
+    Overlay builder ``seo`` onto a copy of ``page_data['meta']`` for live/preview head tags.
+    Non-empty title/description override; booleans and keywords/image follow explicit keys.
+    """
+    if not page_data or not isinstance(page_data, dict):
+        return page_data
+    out = copy.deepcopy(page_data)
+    if not isinstance(seo, dict) or not seo:
+        return out
+    meta = dict(out.get("meta") or {})
+
+    t = str(seo.get("title", "") or "").strip()
+    if t:
+        meta["title"] = t
+    d = str(seo.get("description", "") or "").strip()
+    if d:
+        meta["description"] = d
+
+    if "keywords" in seo:
+        kw = seo.get("keywords")
+        if isinstance(kw, str):
+            meta["keywords"] = [x.strip() for x in kw.split(",") if x.strip()]
+        elif isinstance(kw, list):
+            meta["keywords"] = [str(x).strip() for x in kw if str(x).strip()]
+        else:
+            meta["keywords"] = []
+
+    if "image" in seo:
+        im = str(seo.get("image", "") or "").strip()
+        if im:
+            meta["image"] = im
+        else:
+            meta.pop("image", None)
+
+    for key in ("noindex", "nofollow", "omit_from_sitemap"):
+        if key in seo:
+            meta[key] = bool(seo[key])
+
+    out["meta"] = meta
+    return out
+
+
+def _builder_page_with_pages_json_seo_defaults(page: dict, public_route: str) -> dict:
+    """
+    Deep-copy builder page and pre-fill empty SEO fields from pages.json for the same route.
+    Does not write to disk; first Save persists. Reduces duplicate entry between Page Manager and Builder.
+    """
+    out = copy.deepcopy(page)
+    route = (public_route or "/").strip()
+    if not route.startswith("/"):
+        route = "/" + route
+    pages = _load_pages_json()
+    pd = next((p for p in pages if (p.get("route") or "") == route), None)
+    if not pd:
+        return out
+    seo = dict(out.get("seo") or {})
+    meta = pd.get("meta") or {}
+    if not str(seo.get("title", "") or "").strip() and meta.get("title"):
+        seo["title"] = str(meta["title"]).strip()
+    if not str(seo.get("description", "") or "").strip() and meta.get("description"):
+        seo["description"] = str(meta["description"]).strip()
+    if not str(seo.get("keywords", "") or "").strip():
+        kw = meta.get("keywords")
+        if isinstance(kw, list) and kw:
+            seo["keywords"] = ", ".join(
+                str(x).strip() for x in kw if str(x).strip())
+        elif isinstance(kw, str) and kw.strip():
+            seo["keywords"] = kw.strip()
+    if not str(seo.get("image", "") or "").strip() and meta.get("image"):
+        seo["image"] = str(meta["image"]).strip()
+    for key in ("noindex", "nofollow", "omit_from_sitemap"):
+        if key not in seo and meta.get(key):
+            seo[key] = bool(meta[key])
+    out["seo"] = seo
+    return out
+
+
+def _render_public_page_with_builder(
+    template_file: str,
+    route_norm: str,
+    page_data: dict,
+    pages: list,
+):
+    """
+    Live site: merge published builder output with the static Jinja page (same rules as preview).
+    Custom HTML-only sites are unchanged when no published builder exists.
+    """
+    store = BuilderPageStore(ensure_data_folder(_module_dir()))  # noqa: F405
+    published_record = _load_published_builder_record(store, route_norm)
+    page_data_effective = _merge_seo_dict_into_page_data(
+        page_data, (published_record or {}).get("seo")
+    )
+    pub = _load_published_builder_page(store, route_norm)
+    ctx = {
+        "page_data": page_data_effective,
+        "pages": pages,
+        "config": build_website_public_config(),
+        "website_settings": get_website_settings(),
+        "website_static_url": website_static_url,
+        "website_public_page_url": website_public_page_url,
+        "website_public_asset_url": website_public_asset_url,
+    }
+    if pub and pub.get("blocks"):
+        renderer = BuilderRenderer()  # noqa: F405
+        builder_html = (renderer.render_page(pub) or "").strip()
+        if builder_html:
+            merge_mode = (pub.get("settings") or {}).get("merge_mode", "augment")
+            if merge_mode not in ("augment", "prepend", "replace"):
+                merge_mode = "augment"
+            if merge_mode == "replace":
+                ctx["builder_merged_html"] = builder_html
+                ctx["builder_merge_mode"] = merge_mode
+                return render_template("builder_replace_page.html", **ctx)
+            ctx["builder_merged_html"] = builder_html
+            ctx["builder_merge_mode"] = merge_mode
+            return render_template(template_file, **ctx)
+    return render_template(template_file, **ctx)
 
 
 def _record_page_view_safe():
@@ -277,12 +556,11 @@ def root_page():
     if not os.path.exists(template_path):
         return "Home page file is missing.", 404
 
-    return render_template(
+    return _render_public_page_with_builder(
         template_file,
-        page_data=page_data,
-        config=get_core_manifest(),
-        website_settings=get_website_settings(),
-        pages=pages
+        "/",
+        page_data,
+        pages,
     )
 
 
@@ -329,11 +607,21 @@ def sitemap_pages():
     base_url = request.url_root.rstrip('/').replace('http://', 'https://', 1)
     public_templates_dir = os.path.join(
         os.path.dirname(__file__), 'templates', 'public')
+    store = BuilderPageStore(ensure_data_folder(_module_dir()))  # noqa: F405
 
     xml = ['<?xml version="1.0" encoding="UTF-8"?>']
     xml.append('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
 
     for p in pages:
+        route_norm = _normalize_route(p.get('route') or '/')
+        pub = _load_published_builder_record(store, route_norm)
+        merged_stub = _merge_seo_dict_into_page_data(
+            {'meta': dict(p.get('meta') or {})},
+            (pub or {}).get('seo'),
+        )
+        meta = merged_stub.get('meta') or {}
+        if meta.get('omit_from_sitemap') or meta.get('noindex'):
+            continue
         route = (p.get('route') or '').strip() or '/'
         if not route.startswith('/'):
             route = '/' + route.lstrip('/')
@@ -421,12 +709,12 @@ def custom_page(page_route):
         return "Page Not Found", 404
 
     template_file = f"{page_route.strip('/')}.html"
-    return render_template(
+    route_norm = _normalize_route("/" + page_route.strip("/"))
+    return _render_public_page_with_builder(
         template_file,
-        pages=pages,
-        page_data=page_data,
-        config=get_core_manifest(),
-        website_settings=get_website_settings()
+        route_norm,
+        page_data,
+        pages,
     )
 
 
@@ -470,7 +758,7 @@ def form_submit():
 @website_public_routes.route('/privacy-policy')
 def privacy_policy():
     website_settings = get_website_settings()
-    config = get_core_manifest()
+    config = build_website_public_config()
     policy_md = website_settings.get(
         'privacy_policy', 'No privacy policy set.')
     policy_html = markdown.markdown(policy_md)
@@ -488,7 +776,7 @@ def privacy_policy():
 @website_public_routes.route('/cookie-policy')
 def cookie_policy():
     website_settings = get_website_settings()
-    config = get_core_manifest()
+    config = build_website_public_config()
     policy_md = website_settings.get('cookie_policy', 'No cookie policy set.')
     policy_html = markdown.markdown(policy_md)
     return render_template(
@@ -509,6 +797,38 @@ def website_static(filename):
 
 
 # ----------------------------
+# PWA (Employee Portal cluster: installable app)
+# ----------------------------
+
+@website_public_routes.route('/manifest.webmanifest')
+def pwa_manifest():
+    """Web app manifest for Add to home screen (employee portal, time-billing, work)."""
+    static_folder = current_app.static_folder
+    pwa_path = os.path.join(static_folder, 'pwa', 'manifest.webmanifest')
+    if not os.path.isfile(pwa_path):
+        return Response('{}', status=404, mimetype='application/json')
+    return send_from_directory(
+        os.path.join(static_folder, 'pwa'),
+        'manifest.webmanifest',
+        mimetype='application/manifest+json'
+    )
+
+
+@website_public_routes.route('/sw.js')
+def pwa_sw():
+    """Service worker at root so scope is / (covers portal, time-billing, work)."""
+    static_folder = current_app.static_folder
+    pwa_path = os.path.join(static_folder, 'pwa', 'sw.js')
+    if not os.path.isfile(pwa_path):
+        return Response('// no-op', status=404, mimetype='application/javascript')
+    return send_from_directory(
+        os.path.join(static_folder, 'pwa'),
+        'sw.js',
+        mimetype='application/javascript'
+    )
+
+
+# ----------------------------
 # Admin blueprint + builder (unchanged except minor hygiene)
 # ----------------------------
 
@@ -525,6 +845,15 @@ website_admin_routes = Blueprint(
     url_prefix='/plugin/website_module',
     template_folder=admin_template_folder
 )
+
+
+@website_admin_routes.record
+def _register_website_public_jinja_helpers(state):
+    """Jinja helpers for templates shared between ERP (no public blueprint) and standalone site."""
+    g = state.app.jinja_env.globals
+    g["website_static_url"] = website_static_url
+    g["website_public_page_url"] = website_public_page_url
+    g["website_public_asset_url"] = website_public_asset_url
 
 
 def get_blueprint():
@@ -554,11 +883,6 @@ def _module_dir():
 
 def _data_dir():
     return ensure_data_folder(_module_dir())  # noqa: F405
-
-
-def _normalize_route(route_str: str) -> str:
-    route_str = (route_str or '').strip()
-    return '/' + route_str.lstrip('/')
 
 
 def _load_page_by_route(store, route_str: str):
@@ -601,11 +925,13 @@ def builder_ui_root():
     store = BuilderPageStore(_data_dir())  # noqa: F405
     registry = BlocksRegistry()  # noqa: F405
     page = _get_or_create_page(store, '/')
+    page = _builder_page_with_pages_json_seo_defaults(page, '/')
     return render_template(
-        'builder/builder.html',
+        'builder/website_builder.html',
         title=f"Website Builder — {page.get('title', '/')}",
         page=page,
         blocks_registry=registry.safe_registry(),
+        grouped_palette=registry.grouped_palette(),
         config=core_manifest
     )
 
@@ -621,13 +947,58 @@ def builder_ui(page_route):
     store = BuilderPageStore(_data_dir())  # noqa: F405
     registry = BlocksRegistry()  # noqa: F405
     page = _get_or_create_page(store, page_route)
+    eff_route = '/' if not page_route else '/' + str(page_route).lstrip('/')
+    page = _builder_page_with_pages_json_seo_defaults(page, eff_route)
     return render_template(
-        'builder/builder.html',
+        'builder/website_builder.html',
         title=f"Website Builder — {page.get('title', page_route)}",
         page=page,
         blocks_registry=registry.safe_registry(),
+        grouped_palette=registry.grouped_palette(),
         config=core_manifest
     )
+
+
+def _render_jinja_template_content_block(
+    tpl_file: str,
+    candidate_path: str,
+    block_name: str = "content",
+    **context: Any,
+) -> str:
+    """
+    Render only ``block_name`` from a page template (e.g. public/index.html).
+
+    Builder preview wraps output in ``website_preview_base.html``, which already
+    extends ``website_public_base.html``. Rendering the full child template would
+    embed a second complete layout (double header/footer, duplicate navbar IDs,
+    broken toggler).
+    """
+    env = current_app.jinja_env
+    tpl = None
+    try:
+        tpl = env.get_template(tpl_file)
+    except TemplateNotFound:
+        if candidate_path and os.path.isfile(candidate_path):
+            with open(candidate_path, encoding="utf-8") as f:
+                tpl = env.from_string(f.read())
+        else:
+            return ""
+    block_fn = tpl.blocks.get(block_name) if getattr(tpl, "blocks", None) else None
+    if not block_fn:
+        print(
+            f"[Preview] Template {tpl_file!r} has no {block_name!r} block; "
+            "manual HTML omitted to avoid double layout."
+        )
+        return ""
+    ctx_dict = dict(context)
+    if has_request_context():
+        current_app.update_template_context(ctx_dict)
+    try:
+        tctx = tpl.new_context(ctx_dict)
+        return Markup("".join(block_fn(tctx)))
+    except Exception as e:
+        print(f"[Preview] content-block render failed for {tpl_file}: {e}")
+        return ""
 
 
 # Live preview (iframe)
@@ -643,26 +1014,38 @@ def builder_preview(page_route: str = ''):
     )
     plugins_dir = os.path.abspath(os.path.join(app_root, 'plugins'))
     plugin_manager = PluginManager(plugins_dir)
-    core_manifest = plugin_manager.get_core_manifest()
+    public_config = build_website_public_config()
 
     store = BuilderPageStore(_data_dir())  # noqa: F405
     renderer = BuilderRenderer()  # noqa: F405
 
     # Builder page/state
     page = _get_or_create_page(store, effective_route)
-    builder_html = renderer.render_page(page) or ''
+    builder_html = renderer.render_page(page, canvas_mode=True) or ''
 
     # Manual HTML render for public template
     pages = _load_pages_json()
     page_data = next((p for p in pages if (
         p.get('route') or '') == effective_route), None)
 
+    base_page_data = page_data or {
+        'title': page.get('title') or effective_route.strip('/') or 'Page',
+        'route': effective_route,
+        'meta': {},
+    }
+    page_data_for_head = _merge_seo_dict_into_page_data(
+        base_page_data, page.get('seo'))
+
     manual_html = ''
     if page_data:
         public_dir = os.path.join(os.path.dirname(
             __file__), 'templates', 'public')
-        tpl_file = 'index.html' if effective_route == '/' else f"{effective_route.strip('/')}.html"
-        candidate = os.path.join(public_dir, tpl_file)
+        # Admin blueprint searches all template subfolders — pin to public/ to avoid wrong index.html.
+        tpl_file = (
+            'public/index.html' if effective_route == '/'
+            else f"public/{effective_route.strip('/')}.html"
+        )
+        candidate = os.path.join(public_dir, tpl_file.replace('public/', '', 1))
 
         # Debug diagnostics
         print(f"[Preview] effective_route={effective_route}")
@@ -677,55 +1060,55 @@ def builder_preview(page_route: str = ''):
         except Exception as e:
             print(f"[Preview] listdir error for {public_dir}: {e}")
 
-        try:
-            manual_html = render_template(
-                tpl_file,
-                page_data=page_data,
-                pages=pages,
-                config=core_manifest,
-                website_settings=get_website_settings()
-            )
-            print(f"[Preview] render_template OK for {tpl_file}")
-        except Exception as e:
-            print(
-                f"[Preview] Manual template render failed for {tpl_file}: {e}")
-            # Fallback: read file and render with Flask's environment so url_for works
-            try:
-                with open(candidate, 'r', encoding='utf-8') as f:
-                    tpl_source = f.read()
-                manual_html = render_template_string(
-                    tpl_source,
-                    page_data=page_data,
-                    pages=pages,
-                    config=core_manifest,
-                    website_settings=get_website_settings()
-                )
-                print(
-                    f"[Preview] Fallback render_template_string OK for {candidate}")
-            except Exception as ee:
-                print(
-                    f"[Preview] Fallback render_template_string error for {candidate}: {ee}")
+        ctx_kwargs = dict(
+            page_data=page_data_for_head,
+            pages=pages,
+            config=public_config,
+            website_settings=get_website_settings(),
+            website_static_url=website_static_url,
+            website_public_page_url=website_public_page_url,
+            website_public_asset_url=website_public_asset_url,
+        )
+        # Only the inner `{% block content %}` — full render would nest a second
+        # website_public_base inside preview (double header/footer / broken navbar).
+        manual_html = _render_jinja_template_content_block(
+            tpl_file, candidate, "content", **ctx_kwargs
+        )
+        if manual_html:
+            print(f"[Preview] content-block render OK for {tpl_file}")
 
     # Merge policy
     merge_mode = (page.get('settings') or {}).get('merge_mode', 'augment')
     if not builder_html:
         final_render = manual_html
     else:
+        # Root wrapper so preview iframe can Sortable root-level blocks (canvas bridge).
+        wrapped_builder = (
+            '<div id="wb-canvas-sort-root" class="wb-canvas-root">'
+            + (builder_html or '').strip()
+            + '</div>'
+        )
         if merge_mode == 'replace':
-            final_render = builder_html
+            final_render = wrapped_builder
         elif merge_mode == 'prepend':
-            final_render = (builder_html or '') + (manual_html or '')
+            final_render = wrapped_builder + (manual_html or '')
         else:
-            final_render = (manual_html or '') + (builder_html or '')
+            final_render = (manual_html or '') + wrapped_builder
 
     html = render_template(
-        'builder/preview_base.html',
+        'builder/website_preview_base.html',
         title=page.get('seo', {}).get('title') or page.get(
             'title') or effective_route,
         page=page,
         rendered=final_render,
-        config=core_manifest,
-        pages=pages
+        config=public_config,
+        pages=pages,
+        page_data=page_data_for_head,
+        website_settings=get_website_settings(),
+        website_static_url=website_static_url,
+        website_public_page_url=website_public_page_url,
+        website_public_asset_url=website_public_asset_url,
+        builder_canvas_bridge=True,
     )
     resp = make_response(html)
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -737,7 +1120,8 @@ def builder_preview(page_route: str = ''):
 # Save draft (by route)
 # ------------------------
 
-@website_admin_routes.route('/builder/<path:page_route>/save', methods=['POST'], endpoint='builder_save')
+@website_admin_routes.route('/builder/save', methods=['POST'], defaults={'page_route': ''})
+@website_admin_routes.route('/builder/<path:page_route>/save', methods=['POST'])
 def builder_save(page_route):
     """Saves a builder page draft including nested blocks and validates them."""
     payload = request.get_json(silent=True)
@@ -791,6 +1175,8 @@ def builder_save(page_route):
     page['blocks'] = cleaned_blocks
     page['vars'] = payload.get('vars', page.get('vars', {}))
     page['seo'] = payload.get('seo', page.get('seo', {}))
+    if isinstance(payload.get('settings'), dict):
+        page['settings'] = {**(page.get('settings') or {}), **payload['settings']}
     page['draft'] = True
     page['version'] = int(page.get('version', 0)) + 1
     page['updated_at'] = datetime.datetime.utcnow().isoformat()
@@ -802,7 +1188,8 @@ def builder_save(page_route):
 # Publish (by route)
 # ------------------------
 
-@website_admin_routes.route('/builder/<path:page_route>/publish', methods=['POST'], endpoint='builder_publish')
+@website_admin_routes.route('/builder/publish', methods=['POST'], defaults={'page_route': ''})
+@website_admin_routes.route('/builder/<path:page_route>/publish', methods=['POST'])
 def builder_publish(page_route):
     """Publishes the current draft. Auto-creates page if needed."""
     store = BuilderPageStore(_data_dir())  # noqa: F405
@@ -851,6 +1238,54 @@ def builder_create_page():
 def builder_blocks_registry():
     """Returns safe block metadata (label, icon, defaults, schema)."""
     return jsonify(BlocksRegistry().safe_registry())  # noqa: F405
+
+
+BUILDER_UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "static", "uploads", "builder"
+)
+BUILDER_UPLOAD_MAX_BYTES = 8 * 1024 * 1024
+BUILDER_UPLOAD_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+
+@website_admin_routes.route("/builder/upload", methods=["POST"], endpoint="builder_media_upload")
+def builder_media_upload():
+    """
+    Accept image upload for the visual builder (cards, heroes, etc.).
+    Files are served via /plugin/website_module/website_module_static/uploads/builder/...
+    Public site uses /website_module_static/... for the same files when the website blueprint is mounted.
+    """
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file"}), 400
+    f = request.files["file"]
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "Empty filename"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in BUILDER_UPLOAD_EXTS:
+        return jsonify({"ok": False, "error": "Use JPG, PNG, GIF or WebP"}), 400
+    try:
+        pos = f.tell()
+    except Exception:
+        pos = 0
+    try:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(pos)
+    except Exception:
+        size = request.content_length or 0
+    if size and size > BUILDER_UPLOAD_MAX_BYTES:
+        return jsonify({"ok": False, "error": "File too large (max 8MB)"}), 400
+    os.makedirs(BUILDER_UPLOAD_DIR, exist_ok=True)
+    base = secure_filename(f.filename) or "image"
+    root, ext2 = os.path.splitext(base)
+    unique = f"{root}_{uuid.uuid4().hex[:10]}{ext2 or ext}"
+    dest = os.path.join(BUILDER_UPLOAD_DIR, unique)
+    f.save(dest)
+    rel = f"uploads/builder/{unique}"
+    return jsonify({
+        "ok": True,
+        "url": f"/website_module_static/{rel}",
+        "path": rel,
+    })
 
 
 # ------------------------
@@ -940,7 +1375,7 @@ def admin_index():
     }
 
     return render_template(
-        "admin/index.html",
+        "admin/website_admin_dashboard.html",
         config=core_manifest,
         title="Website Admin Dashboard",
         analytics=analytics_data,
@@ -996,7 +1431,7 @@ def contact_config():
 
     core_manifest = get_core_manifest()
     current_config = config_manager.get_configuration()
-    return render_template("admin/contact_config.html", config=core_manifest, contact_config=current_config)
+    return render_template("admin/website_contact_config.html", config=core_manifest, contact_config=current_config)
 
 # ----------------------------
 # Static helpers (admin)
@@ -1017,7 +1452,7 @@ def write_html_file(file_path, page_data):
     path_obj.parent.mkdir(parents=True, exist_ok=True)
 
     if path_obj.name == "index.html":
-        content = f"""{{% extends "base.html" %}}
+        content = f"""{{% extends "public/website_public_base.html" %}}
 
 {{% block title %}}{page_data['meta']['title']}{{% endblock %}}
 
@@ -1082,7 +1517,7 @@ def write_html_file(file_path, page_data):
 """
     else:
         content = """
-{% extends "base.html" %}
+{% extends "public/website_public_base.html" %}
 
 {% block title %}Home - Sparrow ERP{% endblock %}
 
@@ -1148,7 +1583,7 @@ def edit_base_html():
         return redirect(url_for('website_admin_routes.page_manager'))
 
     pages = load_pages()
-    return render_template('admin/page_manager.html', base_content=base_content, pages=pages)
+    return render_template('admin/website_page_manager.html', base_content=base_content, pages=pages)
 
 
 @website_admin_routes.route('/pages', methods=['GET', 'POST'])
@@ -1176,9 +1611,9 @@ def page_manager():
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
 
     {% if theme_settings.custom_css_path %}
-        <link rel="stylesheet" href="{{ url_for('static', filename=theme_settings.custom_css_path) }}">
+        <link rel="stylesheet" href="{{ website_public_asset_url(theme_settings.custom_css_path) }}">
     {% else %}
-        <link rel="stylesheet" href="{{ url_for('static', filename='css/' + theme_settings.theme + '.css') }}">
+        <link rel="stylesheet" href="{{ website_public_asset_url('css/' + theme_settings.theme + '.css') }}">
     {% endif %}
 </head>
 <body>
@@ -1186,7 +1621,7 @@ def page_manager():
       <div class="container">
         {% if site_settings.branding == 'logo' and site_settings.logo_path %}
             <a class="navbar-brand" href="/">
-                <img src="{{ url_for('static', filename=site_settings.logo_path) }}" alt="Logo" height="40">
+                <img src="{{ website_public_asset_url(site_settings.logo_path) }}" alt="Logo" height="40">
             </a>
         {% else %}
             <a class="navbar-brand" href="/">{{ site_settings.company_name or 'Sparrow ERP' }}</a>
@@ -1200,7 +1635,7 @@ def page_manager():
             {% for page in pages %}
                 {% if page.header %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('website_public.custom_page', page_route=page.route.strip('/')) }}">
+                        <a class="nav-link" href="{{ website_public_page_url(page.route) }}">
                             {{ page.title }}
                         </a>
                     </li>
@@ -1231,7 +1666,7 @@ def page_manager():
                 {% for page in pages %}
                     {% if page.footer %}
                         <li>
-                            <a href="{{ url_for('website_public.custom_page', page_route=page.route.strip('/')) }}" class="text-dark">
+                            <a href="{{ website_public_page_url(page.route) }}" class="text-dark">
                                 {{ page.title }}
                             </a>
                         </li>
@@ -1292,7 +1727,14 @@ def page_manager():
                 "route": f"/{route}" if route else "/",
                 "header": 'header' in request.form,
                 "footer": 'footer' in request.form,
-                "meta": {"title": title, "description": "", "keywords": []}
+                "meta": {
+                    "title": title,
+                    "description": "",
+                    "keywords": [],
+                    "noindex": False,
+                    "nofollow": False,
+                    "omit_from_sitemap": False,
+                }
             }
 
             with open(pages_path, 'r+', encoding='utf-8') as f:
@@ -1319,11 +1761,17 @@ def page_manager():
                 pages[index]['route'] = f"/{route}" if route else "/"
                 pages[index]['header'] = 'header' in request.form
                 pages[index]['footer'] = 'footer' in request.form
+                old_meta = pages[index].get('meta') or {}
                 pages[index]['meta'] = {
                     'title': request.form['meta_title'],
                     'description': request.form['meta_description'],
-                    'keywords': [k.strip() for k in request.form['meta_keywords'].split(',') if k.strip()]
+                    'keywords': [k.strip() for k in request.form['meta_keywords'].split(',') if k.strip()],
+                    'noindex': 'meta_noindex' in request.form,
+                    'nofollow': 'meta_nofollow' in request.form,
+                    'omit_from_sitemap': 'meta_omit_from_sitemap' in request.form,
                 }
+                if old_meta.get('image'):
+                    pages[index]['meta']['image'] = old_meta['image']
 
                 if old_html_path != new_html_path:
                     if os.path.exists(old_html_path):
@@ -1388,7 +1836,7 @@ def page_manager():
         pages = []
 
     return render_template(
-        'admin/page_manager.html',
+        'admin/website_page_manager.html',
         pages=pages,
         config=core_manifest,
         base_content=base_content,
@@ -1409,11 +1857,18 @@ def edit_meta(page_index):
     meta_description = request.form.get('meta_description', '').strip()
     meta_keywords = request.form.get('meta_keywords', '').split(',')
 
-    pages[page_index]['meta'] = {
+    prev_meta = pages[page_index].get('meta') or {}
+    new_meta = {
         'title': meta_title,
         'description': meta_description,
-        'keywords': [k.strip() for k in meta_keywords if k.strip()]
+        'keywords': [k.strip() for k in meta_keywords if k.strip()],
+        'noindex': prev_meta.get('noindex', False),
+        'nofollow': prev_meta.get('nofollow', False),
+        'omit_from_sitemap': prev_meta.get('omit_from_sitemap', False),
     }
+    if prev_meta.get('image'):
+        new_meta['image'] = prev_meta['image']
+    pages[page_index]['meta'] = new_meta
 
     page = pages[page_index]
     html_path = os.path.join(templates_dir, f"{page['route'].strip('/')}.html")
@@ -1697,3 +2152,6 @@ def register_admin_routes(app):
     This will be called dynamically by the Core Module.
     """
     app.register_blueprint(website_admin_routes)
+    app.jinja_env.globals["website_static_url"] = website_static_url
+    app.jinja_env.globals["website_public_page_url"] = website_public_page_url
+    app.jinja_env.globals["website_public_asset_url"] = website_public_asset_url

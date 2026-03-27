@@ -23,9 +23,15 @@
     (async function () {
         const tplId = (location.hash.match(/preview-(\d+)/) || [])[1];
         const body = document.getElementById('previewBody');
+        const TEMPLATE_API_BASE = `{{ url_for('internal_time_billing.get_template', tpl_id=0) }}`.replace(/\/0$/, '');
+        const templateFieldsUrl = () => TEMPLATE_API_BASE + '/' + tplId + '/fields';
 
         async function load() {
-            const r = await fetch(`{{ url_for('internal_time_billing.get_template_fields', tpl_id='__ID__') }}`.replace('__ID__', tplId));
+            if (!tplId) {
+                body.innerHTML = '<div class="text-danger">Open from Templates with #preview-&lt;id&gt; in the URL.</div>';
+                return;
+            }
+            const r = await fetch(templateFieldsUrl());
             const fields = await r.json();
 
             if (!fields.length) {

@@ -1,0 +1,20 @@
+{% extends "compliance_module/base_public.html" %}
+{% block title %}{{ policy.title }}{% endblock %}
+{% block content %}
+<h1 class="h5 mb-1">{{ policy.title }}</h1>
+<p class="text-secondary small">Version {{ policy.version }} · Effective {{ policy.effective_from }}{% if policy.effective_to %} – {{ policy.effective_to }}{% endif %}</p>
+<div class="policy-body mb-3" style="background:#1e293b;border-radius:1rem;padding:1.5rem;max-height:60vh;overflow-y:auto;">{{ (policy.body or policy.summary or 'No content.')|safe }}</div>
+{% if policy.file_path and policy.file_name %}
+<p class="mb-3"><a href="{{ url_for('public_compliance.public_policy_file', policy_id=policy.id) }}" class="btn btn-outline-light btn-sm"><i class="bi bi-download me-1"></i>Download {{ policy.file_name }}</a></p>
+{% endif %}
+{% if policy.required_acknowledgement %}
+  {% if acknowledged %}
+  <p class="text-success small"><i class="bi bi-check-circle"></i> You have signed this policy.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('public_compliance.acknowledge', slug=policy.slug) }}">
+    <button type="submit" class="btn btn-primary">I have read and accept this policy</button>
+  </form>
+  {% endif %}
+{% endif %}
+<a href="/compliance/" class="btn btn-outline-light btn-sm mt-3">Back to list</a>
+{% endblock %}

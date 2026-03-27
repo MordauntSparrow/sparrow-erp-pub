@@ -127,7 +127,82 @@
   </div>
 </div>
 
-<script>
+<!-- Edit wage rate card (name / role / active) -->
+<div class="modal fade" id="editCardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="editCardForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit wage rate card</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ecCardId" value="">
+        <div class="mb-2">
+          <label class="form-label">Card name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" id="ecName" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Role ID (optional)</label>
+          <input type="number" class="form-control form-control-sm" id="ecRoleId" min="1" placeholder="Leave blank for none">
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="ecActive" checked>
+          <label class="form-check-label" for="ecActive">Active</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit wage rate row -->
+<div class="modal fade" id="editRowModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form class="modal-content" id="editRowForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit wage rate</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="erCardId" value="">
+        <input type="hidden" id="erRowId" value="">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Job type</label>
+            <select class="form-select form-select-sm" id="erJobTypeId" required></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Rate (hourly)</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">£</span>
+              <input class="form-control" id="erRate" type="number" step="0.01" min="0" required>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective from</label>
+            <input class="form-control form-control-sm" id="erFrom" type="date" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective to (optional)</label>
+            <input class="form-control form-control-sm" id="erTo" type="date">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
 (function () {
   const cardsBody        = document.getElementById('cardsBody');
   const refreshBtn       = document.getElementById('refreshBtn');
@@ -137,6 +212,11 @@
   const newCardFields    = document.getElementById('newCardFields');
   const jobTypeSelect    = document.getElementById('jobTypeSelect');
   const form             = document.getElementById('createRowForm');
+  const editCardModalEl  = document.getElementById('editCardModal');
+  const editRowModalEl   = document.getElementById('editRowModal');
+  const editCardForm     = document.getElementById('editCardForm');
+  const editRowForm      = document.getElementById('editRowForm');
+  const erJobTypeId      = document.getElementById('erJobTypeId');
 
   // Toggle new card fields
   createNewCardChk.addEventListener('change', () => {
@@ -149,6 +229,32 @@
   createModalEl.addEventListener('show.mdb.modal', async () => {
     await Promise.all([loadJobTypes(), loadCardsForSelect()]);
   });
+
+  editRowModalEl.addEventListener('show.mdb.modal', async () => {
+    await loadJobTypesForEdit();
+  });
+
+  async function loadJobTypesForEdit() {
+    try {
+      erJobTypeId.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch("/plugin/time_billing_module/api/refs/job-types", { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Job types failed');
+      const data  = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      const hid = document.getElementById('erRowId');
+      const current = (hid && hid.dataset.pendingJobType) ? hid.dataset.pendingJobType : '';
+      if (!items.length) {
+        erJobTypeId.innerHTML = '<option value="">No job types</option>';
+        return;
+      }
+      erJobTypeId.innerHTML = items.map(j => `<option value="${j.id}">${j.name}</option>`).join('');
+      if (current) erJobTypeId.value = String(current);
+      if (hid) delete hid.dataset.pendingJobType;
+    } catch (e) {
+      console.error(e);
+      erJobTypeId.innerHTML = '<option value="">Failed to load</option>';
+    }
+  }
 
   async function loadJobTypes() {
     try {
@@ -218,30 +324,55 @@
           console.warn(e);
         }
 
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
         const rowsHtml = Array.isArray(rows) && rows.length
-          ? rows.map(w => `
+          ? rows.map(w => {
+              const jt = w.job_type_id != null ? String(w.job_type_id) : '';
+              const from = w.effective_from ? String(w.effective_from).slice(0, 10) : '';
+              const to = w.effective_to ? String(w.effective_to).slice(0, 10) : '';
+              return `
               <tr>
-                <td>${w.job_type_name || w.job_type_id}</td>
+                <td>${esc(w.job_type_name || w.job_type_id)}</td>
                 <td>£${Number(w.rate || 0).toFixed(2)}</td>
-                <td>${w.effective_from || ''}</td>
-                <td>${w.effective_to || ''}</td>
-              </tr>`).join('')
-          : `<tr><td colspan="4" class="text-muted text-center">No rows yet.</td></tr>`;
+                <td>${esc(from)}</td>
+                <td>${esc(to)}</td>
+                <td class="text-end text-nowrap">
+                  <button type="button" class="btn btn-sm btn-outline-primary js-edit-row"
+                    data-card-id="${c.id}" data-row-id="${w.id}"
+                    data-job-type-id="${jt}"
+                    data-rate="${Number(w.rate || 0)}"
+                    data-from="${esc(from)}" data-to="${esc(to)}">Edit</button>
+                  <button type="button" class="btn btn-sm btn-outline-danger js-del-row"
+                    data-card-id="${c.id}" data-row-id="${w.id}"
+                    data-label="${esc(w.job_type_name || 'row')}">Delete</button>
+                </td>
+              </tr>`;
+            }).join('')
+          : `<tr><td colspan="5" class="text-muted text-center">No rows yet.</td></tr>`;
 
+        const cname = esc(c.name || '');
+        const rid = c.role_id != null ? String(c.role_id) : '';
         return `
           <div class="mb-3 border rounded">
-            <div class="p-2 bg-light d-flex align-items-center justify-content-between">
+            <div class="p-2 bg-light d-flex flex-wrap align-items-center justify-content-between gap-2">
               <div>
-                <strong>${c.name}</strong>
-                ${c.role_name ? `<span class="text-muted ms-2">(${c.role_name})</span>` : ''}
+                <strong>${cname}</strong>
+                ${c.role_name ? `<span class="text-muted ms-2">(${esc(c.role_name)})</span>` : ''}
                 ${String(c.active) === '0' ? '<span class="badge bg-secondary ms-2">inactive</span>' : ''}
               </div>
-              <button class="btn btn-outline-primary btn-sm"
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary js-edit-card"
+                  data-id="${c.id}" data-name="${cname}" data-role-id="${rid}"
+                  data-active="${String(c.active) === '0' ? '0' : '1'}">Edit card</button>
+                <button type="button" class="btn btn-outline-danger js-del-card"
+                  data-id="${c.id}" data-name="${cname}">Delete card</button>
+                <button type="button" class="btn btn-outline-primary"
                       data-mdb-toggle="modal"
                       data-mdb-target="#createRowModal"
                       data-card-id="${c.id}">
-                Add rate
-              </button>
+                  Add rate
+                </button>
+              </div>
             </div>
             <div class="p-2">
               <div class="table-responsive">
@@ -252,6 +383,7 @@
                       <th>Rate</th>
                       <th>Effective from</th>
                       <th>Effective to</th>
+                      <th class="text-end">Actions</th>
                     </tr>
                   </thead>
                   <tbody>${rowsHtml}</tbody>
@@ -264,12 +396,80 @@
       cardsBody.innerHTML = blocks.join('');
 
       // Preselect card when clicking "Add rate" on a card block
-      cardsBody.querySelectorAll('[data-card-id]').forEach(btn => {
+      cardsBody.querySelectorAll('[data-mdb-target="#createRowModal"][data-card-id]').forEach(btn => {
         btn.addEventListener('click', () => {
           createNewCardChk.checked = false;
           newCardFields.classList.add('d-none');
           cardSelect.disabled = false;
           cardSelect.value = btn.getAttribute('data-card-id') || '';
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-edit-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('ecCardId').value = btn.getAttribute('data-id') || '';
+          document.getElementById('ecName').value = btn.getAttribute('data-name') || '';
+          const rid = btn.getAttribute('data-role-id');
+          document.getElementById('ecRoleId').value = rid && rid !== 'null' ? rid : '';
+          document.getElementById('ecActive').checked = (btn.getAttribute('data-active') || '1') !== '0';
+          const m = mdb.Modal.getOrCreateInstance(editCardModalEl);
+          m.show();
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-del-card').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = parseInt(btn.getAttribute('data-id') || '0', 10);
+          const nm = btn.getAttribute('data-name') || 'this card';
+          if (!id || !confirm(`Delete wage rate card "${nm}"?\n\nAll rate rows on this card will be removed. Contractors using this card will have their wage card cleared.`)) return;
+          try {
+            const r = await fetch(`/plugin/time_billing_module/api/wage-cards/${id}`, {
+              method: 'DELETE',
+              headers: window.tbMergeCsrfHeaders({ 'Accept': 'application/json' }, 'DELETE')
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(j.error || 'Delete failed'); return; }
+            await refreshCards();
+          } catch (e) {
+            console.error(e);
+            alert('Delete failed');
+          }
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-edit-row').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cardId = btn.getAttribute('data-card-id') || '';
+          const rowId = btn.getAttribute('data-row-id') || '';
+          document.getElementById('erCardId').value = cardId;
+          document.getElementById('erRowId').value = rowId;
+          document.getElementById('erRowId').dataset.pendingJobType = btn.getAttribute('data-job-type-id') || '';
+          document.getElementById('erRate').value = btn.getAttribute('data-rate') || '0';
+          document.getElementById('erFrom').value = btn.getAttribute('data-from') || '';
+          document.getElementById('erTo').value = btn.getAttribute('data-to') || '';
+          const m = mdb.Modal.getOrCreateInstance(editRowModalEl);
+          m.show();
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-del-row').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const cardId = parseInt(btn.getAttribute('data-card-id') || '0', 10);
+          const rowId = parseInt(btn.getAttribute('data-row-id') || '0', 10);
+          const lab = btn.getAttribute('data-label') || 'row';
+          if (!cardId || !rowId || !confirm(`Delete wage rate row for "${lab}"?`)) return;
+          try {
+            const r = await fetch(`/plugin/time_billing_module/api/wage-cards/${cardId}/rows/${rowId}`, {
+              method: 'DELETE',
+              headers: window.tbMergeCsrfHeaders({ 'Accept': 'application/json' }, 'DELETE')
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(j.error || 'Delete failed'); return; }
+            await refreshCards();
+          } catch (e) {
+            console.error(e);
+            alert('Delete failed');
+          }
         });
       });
     } catch (e) {
@@ -344,7 +544,7 @@
         };
         const r1 = await fetch('/plugin/time_billing_module/api/wage-cards', {
           method : 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
           body   : JSON.stringify(newCard)
         });
         if (!r1.ok) {
@@ -362,7 +562,7 @@
       // 2) Add row to the chosen/new card
       const r2 = await fetch(`/plugin/time_billing_module/api/wage-cards/${cardId}/rows`, {
         method : 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
         body   : JSON.stringify(payloadRow)
       });
       if (!r2.ok) {
@@ -389,6 +589,69 @@
       btn.disabled = false;
       spinner.classList.add('d-none');
       label.textContent = 'Save';
+    }
+  });
+
+  editCardForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = parseInt(document.getElementById('ecCardId').value, 10);
+    const name = document.getElementById('ecName').value.trim();
+    if (!id || !name) { alert('Name required'); return; }
+    const ridRaw = document.getElementById('ecRoleId').value.trim();
+    const payload = {
+      name,
+      role_id: ridRaw ? parseInt(ridRaw, 10) : null,
+      active: document.getElementById('ecActive').checked ? 1 : 0
+    };
+    try {
+      const r = await fetch(`/plugin/time_billing_module/api/wage-cards/${id}`, {
+        method: 'PUT',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'PUT'),
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'Update failed'); return; }
+      const m = mdb.Modal.getInstance(editCardModalEl);
+      if (m) m.hide();
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Update failed');
+    }
+  });
+
+  editRowForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const cardId = parseInt(document.getElementById('erCardId').value, 10);
+    const rowId = parseInt(document.getElementById('erRowId').value, 10);
+    const payload = {
+      job_type_id: parseInt(erJobTypeId.value, 10),
+      rate: parseFloat(document.getElementById('erRate').value),
+      effective_from: document.getElementById('erFrom').value,
+      effective_to: document.getElementById('erTo').value.trim() || null
+    };
+    if (!cardId || !rowId) { alert('Invalid row'); return; }
+    if (!Number.isInteger(payload.job_type_id)) { alert('Choose job type'); return; }
+    if (Number.isNaN(payload.rate)) { alert('Invalid rate'); return; }
+    if (!payload.effective_from) { alert('Effective from required'); return; }
+    if (payload.effective_to && payload.effective_to < payload.effective_from) {
+      alert('Effective to must be on or after effective from');
+      return;
+    }
+    try {
+      const r = await fetch(`/plugin/time_billing_module/api/wage-cards/${cardId}/rows/${rowId}`, {
+        method: 'PUT',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'PUT'),
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'Update failed'); return; }
+      const m = mdb.Modal.getInstance(editRowModalEl);
+      if (m) m.hide();
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Update failed');
     }
   });
 

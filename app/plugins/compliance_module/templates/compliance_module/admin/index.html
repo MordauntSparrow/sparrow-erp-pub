@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Compliance &amp; Policies{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="h4 mb-2">Compliance &amp; policies</h1>
+  <p class="text-muted small mb-4">Upload Health &amp; Safety, safeguarding, privacy, and other organisational policies. When you <strong>issue to all staff</strong>, each active contractor gets a portal to-do and must acknowledge the current version.</p>
+  <p><a href="{{ url_for('internal_compliance.admin_policy_new') }}" class="btn btn-primary btn-sm">New policy</a></p>
+  <div class="table-responsive border rounded bg-white mt-3">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light"><tr><th>Title</th><th>Category</th><th>Version</th><th>Next review</th><th>Last reviewed</th><th>Status</th><th>Acks (current)</th></tr></thead>
+      <tbody>
+        {% for p in policies %}
+        <tr>
+          <td><a href="{{ url_for('internal_compliance.admin_policy_edit', policy_id=p.id) }}">{{ p.title }}</a></td>
+          <td>{{ category_labels.get(p.category, p.category) }}</td>
+          <td>{{ p.version }}</td>
+          <td class="small">{% if p.next_review_date %}{{ p.next_review_date }}{% else %}—{% endif %}</td>
+          <td class="small">{% if p.last_reviewed_date %}{{ p.last_reviewed_date }}{% else %}—{% endif %}</td>
+          <td>{% if p.published %}<span class="badge bg-success">Published</span>{% else %}<span class="badge bg-secondary">Draft</span>{% endif %}
+            {% if p.mandatory %}<span class="badge bg-warning text-dark">Mandatory</span>{% else %}<span class="badge bg-light text-dark border">Info</span>{% endif %}
+          </td>
+          <td>{{ p.ack_count or 0 }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted">No policies yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

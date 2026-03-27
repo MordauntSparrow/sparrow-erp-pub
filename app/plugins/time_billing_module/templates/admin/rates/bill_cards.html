@@ -1,99 +1,680 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
+
 {% block content %}
 <div class="container py-3">
 
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-eye me-2"></i> Template Preview
-        </h4>
-        <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.runsheets_page') }}">
-            <i class="bi bi-arrow-left me-1"></i> Back
-        </a>
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-receipt me-2"></i> Bill Rate Cards
+    </h4>
+    <div class="d-flex gap-2">
+      <a class="btn btn-secondary btn-sm"
+         href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">
+        <i class="bi bi-arrow-left me-1"></i> Back
+      </a>
+      <button class="btn btn-primary btn-sm"
+              data-mdb-toggle="modal"
+              data-mdb-target="#createRowModal">
+        <i class="bi bi-plus-lg me-1"></i> Add rate
+      </button>
     </div>
+  </div>
 
-    <!-- Preview Body -->
-    <div class="card">
-        <div class="card-body" id="previewBody">Loading…</div>
+  <!-- Cards and rows -->
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-semibold">Bill rate cards</span>
+      <button class="btn btn-outline-secondary btn-sm" id="refreshBtn">
+        <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+      </button>
     </div>
-
+    <div class="card-body" id="cardsBody">
+      <div class="text-muted">Loading…</div>
+    </div>
+  </div>
 </div>
 
-<script>
-    (async function () {
-        const tplId = (location.hash.match(/preview-(\d+)/) || [])[1];
-        const body = document.getElementById('previewBody');
+<!-- Create/Add Row Modal -->
+<div class="modal fade" id="createRowModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form class="modal-content" id="createRowForm">
 
-        async function load() {
-            const r = await fetch(`{{ url_for('internal_time_billing.get_template_fields', tpl_id='__ID__') }}`.replace('__ID__', tplId));
-            const fields = await r.json();
+      <div class="modal-header">
+        <h5 class="modal-title">Add bill rate</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
 
-            if (!fields.length) {
-                body.innerHTML = '<div class="text-muted">No fields.</div>';
-                return;
-            }
+      <div class="modal-body">
 
-            const frag = document.createDocumentFragment();
+        <!-- Choose existing card OR create a new card -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Use existing card</label>
+            <select class="form-select" name="card_id" id="cardSelect"></select>
+            <div class="form-text">Pick a card to add a rate row to.</div>
+          </div>
+          <div class="col-md-6">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="createNewCardChk">
+              <label class="form-check-label" for="createNewCardChk">
+                Or create new card
+              </label>
+            </div>
+            <div id="newCardFields" class="mt-2 d-none">
+              <label class="form-label">New card name</label>
+              <input class="form-control mb-2"
+                     name="new_card_name"
+                     placeholder="e.g., Acme Commercial 2025" />
 
-            fields.forEach(f => {
-                const div = document.createElement('div');
-                div.className = 'mb-3';
+              <label class="form-label">Client ID (optional)</label>
+              <input class="form-control mb-2"
+                     name="new_card_client_name"
+                     type="number"
+                     min="1"
+                     placeholder="clients.id" />
 
-                // Label
-                const label = document.createElement('label');
-                label.className = 'form-label';
-                label.textContent = f.label || f.key || 'Field';
+              <label class="form-label">Site ID (optional)</label>
+              <input class="form-control"
+                     name="new_card_site_name"
+                     type="number"
+                     min="1"
+                     placeholder="sites.id" />
+              <div class="form-text">
+                Stored as client/site scope on the bill rate card (matches DB columns).
+              </div>
+            </div>
+          </div>
+        </div>
 
-                // Input
-                let input;
-                switch (f.type) {
-                    case 'textarea':
-                        input = document.createElement('textarea');
-                        input.className = 'form-control';
-                        input.disabled = true;
-                        break;
-                    case 'select':
-                        input = document.createElement('select');
-                        input.className = 'form-select';
-                        input.disabled = true;
-                        if (f.options_json) {
-                            try {
-                                const opts = JSON.parse(f.options_json).choices || [];
-                                opts.forEach(o => {
-                                    const option = document.createElement('option');
-                                    option.value = o.id;
-                                    option.textContent = o.label;
-                                    input.appendChild(option);
-                                });
-                            } catch (e) {
-                                console.warn('Invalid options JSON for field', f);
-                            }
-                        }
-                        break;
-                    case 'checkbox':
-                        input = document.createElement('input');
-                        input.type = 'checkbox';
-                        input.className = 'form-check-input';
-                        input.disabled = true;
-                        input.checked = !!f.default || false;
-                        break;
-                    default:
-                        input = document.createElement('input');
-                        input.type = f.type || 'text';
-                        input.className = 'form-control';
-                        input.disabled = true;
-                }
+        <hr class="my-3" />
 
-                div.appendChild(label);
-                div.appendChild(input);
-                frag.appendChild(div);
-            });
+        <!-- Row details -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Job type</label>
+            <select class="form-select" name="job_type_id" id="jobTypeSelect" required></select>
+            <div class="form-text">Loaded from Job Types API.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Rate (hourly)</label>
+            <div class="input-group">
+              <span class="input-group-text">£</span>
+              <input class="form-control"
+                     name="rate"
+                     type="number"
+                     step="0.01"
+                     min="0"
+                     placeholder="0.00"
+                     required />
+            </div>
+          </div>
 
-            body.innerHTML = '';
-            body.appendChild(frag);
+          <div class="col-md-6">
+            <label class="form-label">Effective from</label>
+            <input class="form-control" name="effective_from" type="date" required />
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective to (optional)</label>
+            <input class="form-control" name="effective_to" type="date" />
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" type="button" data-mdb-dismiss="modal">
+          Cancel
+        </button>
+        <button class="btn btn-primary btn-sm" type="submit">
+          <span class="create-label">Save</span>
+          <span class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit bill rate card -->
+<div class="modal fade" id="editCardModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="editCardForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit bill rate card</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ecCardId" value="">
+        <div class="mb-2">
+          <label class="form-label">Card name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control form-control-sm" id="ecName" required>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Client ID (optional)</label>
+          <input type="number" class="form-control form-control-sm" id="ecClientId" min="1" placeholder="clients.id">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Site ID (optional)</label>
+          <input type="number" class="form-control form-control-sm" id="ecSiteId" min="1" placeholder="sites.id">
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="ecActive" checked>
+          <label class="form-check-label" for="ecActive">Active</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit bill rate row -->
+<div class="modal fade" id="editRowModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <form class="modal-content" id="editRowForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit bill rate</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="erCardId" value="">
+        <input type="hidden" id="erRowId" value="">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label">Job type</label>
+            <select class="form-select form-select-sm" id="erJobTypeId" required></select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Rate (hourly)</label>
+            <div class="input-group input-group-sm">
+              <span class="input-group-text">£</span>
+              <input class="form-control" id="erRate" type="number" step="0.01" min="0" required>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective from</label>
+            <input class="form-control form-control-sm" id="erFrom" type="date" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Effective to (optional)</label>
+            <input class="form-control form-control-sm" id="erTo" type="date">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+(function () {
+  const cardsBody        = document.getElementById('cardsBody');
+  const refreshBtn       = document.getElementById('refreshBtn');
+  const createModalEl    = document.getElementById('createRowModal');
+  const cardSelect       = document.getElementById('cardSelect');
+  const createNewCardChk = document.getElementById('createNewCardChk');
+  const newCardFields    = document.getElementById('newCardFields');
+  const jobTypeSelect    = document.getElementById('jobTypeSelect');
+  const form             = document.getElementById('createRowForm');
+  const editCardModalEl  = document.getElementById('editCardModal');
+  const editRowModalEl   = document.getElementById('editRowModal');
+  const editCardForm     = document.getElementById('editCardForm');
+  const editRowForm      = document.getElementById('editRowForm');
+  const erJobTypeId      = document.getElementById('erJobTypeId');
+
+  // Toggle new card fields
+  createNewCardChk.addEventListener('change', () => {
+    const on = createNewCardChk.checked;
+    newCardFields.classList.toggle('d-none', !on);
+    cardSelect.disabled = on;
+  });
+
+  // Load job types + cards whenever modal opens
+  createModalEl.addEventListener('show.mdb.modal', async () => {
+    await Promise.all([loadJobTypes(), loadCardsForSelect()]);
+  });
+
+  editRowModalEl.addEventListener('show.mdb.modal', async () => {
+    await loadJobTypesForEdit();
+  });
+
+  async function loadJobTypesForEdit() {
+    try {
+      erJobTypeId.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch("/plugin/time_billing_module/api/refs/job-types", { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Job types failed');
+      const data  = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      const hid = document.getElementById('erRowId');
+      const current = (hid && hid.dataset.pendingJobType) ? hid.dataset.pendingJobType : '';
+      if (!items.length) {
+        erJobTypeId.innerHTML = '<option value="">No job types</option>';
+        return;
+      }
+      erJobTypeId.innerHTML = items.map(j => `<option value="${j.id}">${j.name}</option>`).join('');
+      if (current) erJobTypeId.value = String(current);
+      if (hid) delete hid.dataset.pendingJobType;
+    } catch (e) {
+      console.error(e);
+      erJobTypeId.innerHTML = '<option value="">Failed to load</option>';
+    }
+  }
+
+  async function loadJobTypes() {
+    try {
+      jobTypeSelect.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch("/plugin/time_billing_module/api/refs/job-types", { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Job types failed');
+      const data  = await r.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!items.length) {
+        jobTypeSelect.innerHTML = '<option value="">No job types</option>';
+        return;
+      }
+      jobTypeSelect.innerHTML = items.map(j => `<option value="${j.id}">${j.name}</option>`).join('');
+    } catch (e) {
+      console.error(e);
+      jobTypeSelect.innerHTML = '<option value="">Failed to load job types</option>';
+    }
+  }
+
+  async function loadCardsForSelect() {
+    try {
+      cardSelect.innerHTML = '<option value="">Loading…</option>';
+      const r = await fetch('/plugin/time_billing_module/api/bill-cards', { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('Cards failed');
+      const items = await r.json();
+      if (!Array.isArray(items) || !items.length) {
+        cardSelect.innerHTML = '<option value="">No cards yet</option>';
+        return;
+      }
+      cardSelect.innerHTML = items.map(c =>
+        `<option value="${c.id}">${c.name}${c.client_label ? ' — ' + c.client_label : ''}</option>`
+      ).join('');
+    } catch (e) {
+      console.error(e);
+      cardSelect.innerHTML = '<option value="">Failed to load cards</option>';
+    }
+  }
+
+  // Render cards list with rows
+  async function refreshCards() {
+    try {
+      cardsBody.innerHTML = '<div class="text-muted">Loading…</div>';
+      const r = await fetch('/plugin/time_billing_module/api/bill-cards', { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error('List failed');
+      const cards = await r.json();
+
+      if (!Array.isArray(cards) || !cards.length) {
+        cardsBody.innerHTML = `
+          <div class="text-center py-4">
+            <div class="mb-2 text-muted">No bill rate cards yet.</div>
+            <button class="btn btn-primary btn-sm"
+                    data-mdb-toggle="modal"
+                    data-mdb-target="#createRowModal">
+              <i class="bi bi-plus-lg me-1"></i> Create first card and rate
+            </button>
+          </div>`;
+        return;
+      }
+
+      // For each card, fetch its rows
+      const blocks = await Promise.all(cards.map(async c => {
+        let rows = [];
+        try {
+          const r2 = await fetch(`/plugin/time_billing_module/api/bill-cards/${c.id}/rows`, { headers: { 'Accept': 'application/json' } });
+          if (r2.ok) rows = await r2.json();
+        } catch (e) {
+          console.warn(e);
         }
 
-        load();
-    })();
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+        const rowsHtml = Array.isArray(rows) && rows.length
+          ? rows.map(w => {
+              const jt = w.job_type_id != null ? String(w.job_type_id) : '';
+              const from = w.effective_from ? String(w.effective_from).slice(0, 10) : '';
+              const to = w.effective_to ? String(w.effective_to).slice(0, 10) : '';
+              return `
+              <tr>
+                <td>${esc(w.job_type_name || w.job_type_id)}</td>
+                <td>£${Number(w.rate || 0).toFixed(2)}</td>
+                <td>${esc(from)}</td>
+                <td>${esc(to)}</td>
+                <td class="text-end text-nowrap">
+                  <button type="button" class="btn btn-sm btn-outline-primary js-edit-row"
+                    data-card-id="${c.id}" data-row-id="${w.id}"
+                    data-job-type-id="${jt}"
+                    data-rate="${Number(w.rate || 0)}"
+                    data-from="${esc(from)}" data-to="${esc(to)}">Edit</button>
+                  <button type="button" class="btn btn-sm btn-outline-danger js-del-row"
+                    data-card-id="${c.id}" data-row-id="${w.id}"
+                    data-label="${esc(w.job_type_name || 'row')}">Delete</button>
+                </td>
+              </tr>`;
+            }).join('')
+          : `<tr><td colspan="5" class="text-muted text-center">No rows yet.</td></tr>`;
+
+        const cname = esc(c.name || '');
+        const cref = c.client_ref != null && c.client_ref !== '' ? String(c.client_ref) : '';
+        const sref = c.site_ref != null && c.site_ref !== '' ? String(c.site_ref) : '';
+        const scopeLbl = [c.client_label, c.site_label].filter(Boolean).join(' · ');
+        return `
+          <div class="mb-3 border rounded">
+            <div class="p-2 bg-light d-flex flex-wrap align-items-center justify-content-between gap-2">
+              <div>
+                <strong>${cname}</strong>
+                ${scopeLbl ? `<span class="text-muted ms-2">(${esc(scopeLbl)})</span>` : ''}
+                ${String(c.active) === '0' ? '<span class="badge bg-secondary ms-2">inactive</span>' : ''}
+              </div>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary js-edit-card"
+                  data-id="${c.id}" data-name="${cname}" data-client-ref="${esc(cref)}" data-site-ref="${esc(sref)}"
+                  data-active="${String(c.active) === '0' ? '0' : '1'}">Edit card</button>
+                <button type="button" class="btn btn-outline-danger js-del-card"
+                  data-id="${c.id}" data-name="${cname}">Delete card</button>
+                <button type="button" class="btn btn-outline-primary"
+                      data-mdb-toggle="modal"
+                      data-mdb-target="#createRowModal"
+                      data-card-id="${c.id}">
+                  Add rate
+                </button>
+              </div>
+            </div>
+            <div class="p-2">
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th>Job type</th>
+                      <th>Rate</th>
+                      <th>Effective from</th>
+                      <th>Effective to</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>${rowsHtml}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>`;
+      }));
+
+      cardsBody.innerHTML = blocks.join('');
+
+      // Preselect card when clicking "Add rate" on a card block
+      cardsBody.querySelectorAll('[data-mdb-target="#createRowModal"][data-card-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          createNewCardChk.checked = false;
+          newCardFields.classList.add('d-none');
+          cardSelect.disabled = false;
+          cardSelect.value = btn.getAttribute('data-card-id') || '';
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-edit-card').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('ecCardId').value = btn.getAttribute('data-id') || '';
+          document.getElementById('ecName').value = btn.getAttribute('data-name') || '';
+          const cr = btn.getAttribute('data-client-ref');
+          const sr = btn.getAttribute('data-site-ref');
+          document.getElementById('ecClientId').value = cr && cr !== 'null' ? cr : '';
+          document.getElementById('ecSiteId').value = sr && sr !== 'null' ? sr : '';
+          document.getElementById('ecActive').checked = (btn.getAttribute('data-active') || '1') !== '0';
+          const m = mdb.Modal.getOrCreateInstance(editCardModalEl);
+          m.show();
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-del-card').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = parseInt(btn.getAttribute('data-id') || '0', 10);
+          const nm = btn.getAttribute('data-name') || 'this card';
+          if (!id || !confirm(`Delete bill rate card "${nm}"?\n\nAll bill rate rows on this card will be removed.`)) return;
+          try {
+            const r = await fetch(`/plugin/time_billing_module/api/bill-cards/${id}`, {
+              method: 'DELETE',
+              headers: window.tbMergeCsrfHeaders({ 'Accept': 'application/json' }, 'DELETE')
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(j.error || 'Delete failed'); return; }
+            await refreshCards();
+          } catch (e) {
+            console.error(e);
+            alert('Delete failed');
+          }
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-edit-row').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cardId = btn.getAttribute('data-card-id') || '';
+          const rowId = btn.getAttribute('data-row-id') || '';
+          document.getElementById('erCardId').value = cardId;
+          document.getElementById('erRowId').value = rowId;
+          document.getElementById('erRowId').dataset.pendingJobType = btn.getAttribute('data-job-type-id') || '';
+          document.getElementById('erRate').value = btn.getAttribute('data-rate') || '0';
+          document.getElementById('erFrom').value = btn.getAttribute('data-from') || '';
+          document.getElementById('erTo').value = btn.getAttribute('data-to') || '';
+          const m = mdb.Modal.getOrCreateInstance(editRowModalEl);
+          m.show();
+        });
+      });
+
+      cardsBody.querySelectorAll('.js-del-row').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const cardId = parseInt(btn.getAttribute('data-card-id') || '0', 10);
+          const rowId = parseInt(btn.getAttribute('data-row-id') || '0', 10);
+          const lab = btn.getAttribute('data-label') || 'row';
+          if (!cardId || !rowId || !confirm(`Delete bill rate row for "${lab}"?`)) return;
+          try {
+            const r = await fetch(`/plugin/time_billing_module/api/bill-cards/${cardId}/rows/${rowId}`, {
+              method: 'DELETE',
+              headers: window.tbMergeCsrfHeaders({ 'Accept': 'application/json' }, 'DELETE')
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(j.error || 'Delete failed'); return; }
+            await refreshCards();
+          } catch (e) {
+            console.error(e);
+            alert('Delete failed');
+          }
+        });
+      });
+    } catch (e) {
+      console.error(e);
+      cardsBody.innerHTML = '<div class="text-danger">Failed to load cards.</div>';
+    }
+  }
+
+  refreshBtn.addEventListener('click', refreshCards);
+
+  // Submit: create new card if checked, then add row
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn     = form.querySelector('button[type="submit"]');
+    const spinner = btn.querySelector('.spinner-border');
+    const label   = btn.querySelector('.create-label');
+    const fd      = new FormData(form);
+
+    const wantNew = createNewCardChk.checked;
+    let cardId    = fd.get('card_id') ? parseInt(fd.get('card_id'), 10) : null;
+
+    const payloadRow = {
+      job_type_id   : parseInt(fd.get('job_type_id'), 10),
+      rate          : parseFloat(fd.get('rate')),
+      effective_from: (fd.get('effective_from') || '').toString(),
+      effective_to  : (fd.get('effective_to') || '').toString() || null
+    };
+
+    // Validations
+    if (wantNew) {
+      const n = (fd.get('new_card_name') || '').toString().trim();
+      if (!n) {
+        alert('New card name is required');
+        return;
+      }
+    } else {
+      if (!Number.isInteger(cardId)) {
+        alert('Select an existing card or create a new one');
+        return;
+      }
+    }
+
+    if (!Number.isInteger(payloadRow.job_type_id)) {
+      alert('Choose job type');
+      return;
+    }
+    if (Number.isNaN(payloadRow.rate)) {
+      alert('Provide a valid rate');
+      return;
+    }
+    if (!payloadRow.effective_from) {
+      alert('Effective from is required');
+      return;
+    }
+    if (payloadRow.effective_to && payloadRow.effective_to < payloadRow.effective_from) {
+      alert('Effective to must be after effective from');
+      return;
+    }
+
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    label.textContent = 'Saving…';
+
+    try {
+      // 1) Create card if needed
+      if (wantNew) {
+        const newCard = {
+          name        : (fd.get('new_card_name') || '').toString().trim(),
+          client_name : fd.get('new_card_client_name') ? parseInt(fd.get('new_card_client_name'), 10) : null,
+          site_name   : fd.get('new_card_site_name') ? parseInt(fd.get('new_card_site_name'), 10) : null,
+          active      : 1
+        };
+        const r1 = await fetch('/plugin/time_billing_module/api/bill-cards', {
+          method : 'POST',
+          headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
+          body   : JSON.stringify(newCard)
+        });
+        if (!r1.ok) {
+          let msg = 'Card create failed';
+          try {
+            const j = await r1.json();
+            if (j && j.error) msg = j.error;
+          } catch {}
+          throw new Error(msg);
+        }
+        const j1 = await r1.json();
+        cardId   = j1.id;
+      }
+
+      // 2) Add row to the chosen/new card
+      const r2 = await fetch(`/plugin/time_billing_module/api/bill-cards/${cardId}/rows`, {
+        method : 'POST',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
+        body   : JSON.stringify(payloadRow)
+      });
+      if (!r2.ok) {
+        let msg = 'Row add failed';
+        try {
+          const j = await r2.json();
+          if (j && j.error) msg = j.error;
+        } catch {}
+        throw new Error(msg);
+      }
+
+      // Done
+      const modal = mdb.Modal.getInstance(createModalEl);
+      if (modal) modal.hide();
+      form.reset();
+      createNewCardChk.checked = false;
+      newCardFields.classList.add('d-none');
+      cardSelect.disabled = false;
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save: ' + (err.message || 'Unknown error'));
+    } finally {
+      btn.disabled = false;
+      spinner.classList.add('d-none');
+      label.textContent = 'Save';
+    }
+  });
+
+  editCardForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = parseInt(document.getElementById('ecCardId').value, 10);
+    const name = document.getElementById('ecName').value.trim();
+    if (!id || !name) { alert('Name required'); return; }
+    const cidRaw = document.getElementById('ecClientId').value.trim();
+    const sidRaw = document.getElementById('ecSiteId').value.trim();
+    const payload = {
+      name,
+      client_name: cidRaw ? parseInt(cidRaw, 10) : null,
+      site_name: sidRaw ? parseInt(sidRaw, 10) : null,
+      active: document.getElementById('ecActive').checked ? 1 : 0
+    };
+    try {
+      const r = await fetch(`/plugin/time_billing_module/api/bill-cards/${id}`, {
+        method: 'PUT',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'PUT'),
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'Update failed'); return; }
+      const m = mdb.Modal.getInstance(editCardModalEl);
+      if (m) m.hide();
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Update failed');
+    }
+  });
+
+  editRowForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const cardId = parseInt(document.getElementById('erCardId').value, 10);
+    const rowId = parseInt(document.getElementById('erRowId').value, 10);
+    const payload = {
+      job_type_id: parseInt(erJobTypeId.value, 10),
+      rate: parseFloat(document.getElementById('erRate').value),
+      effective_from: document.getElementById('erFrom').value,
+      effective_to: document.getElementById('erTo').value.trim() || null
+    };
+    if (!cardId || !rowId) { alert('Invalid row'); return; }
+    if (!Number.isInteger(payload.job_type_id)) { alert('Choose job type'); return; }
+    if (Number.isNaN(payload.rate)) { alert('Invalid rate'); return; }
+    if (!payload.effective_from) { alert('Effective from required'); return; }
+    if (payload.effective_to && payload.effective_to < payload.effective_from) {
+      alert('Effective to must be on or after effective from');
+      return;
+    }
+    try {
+      const r = await fetch(`/plugin/time_billing_module/api/bill-cards/${cardId}/rows/${rowId}`, {
+        method: 'PUT',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'PUT'),
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(j.error || 'Update failed'); return; }
+      const m = mdb.Modal.getInstance(editRowModalEl);
+      if (m) m.hide();
+      await refreshCards();
+    } catch (err) {
+      console.error(err);
+      alert('Update failed');
+    }
+  });
+
+  // Initial load
+  refreshCards();
+})();
 </script>
 {% endblock %}

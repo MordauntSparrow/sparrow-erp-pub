@@ -1,0 +1,7 @@
+{% extends "scheduling_module/base_public.html" %}
+{% block title %}Shift not found{% endblock %}
+{% block content %}
+<h1 class="h5 mb-3">Shift not found</h1>
+<p class="text-secondary">This shift doesn't exist or you don't have access to view it.</p>
+<a href="{{ url_for('public_scheduling.public_index') }}" class="btn btn-outline-secondary btn-sm">Back to Scheduling</a>
+{% endblock %}

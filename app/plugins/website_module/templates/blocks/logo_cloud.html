@@ -1,0 +1,15 @@
+{% set raw = (urls|replace('</p>', '\n')|replace('<br>', '\n')|replace('<br/>', '\n')|replace('<br />', '\n')|striptags) %}
+{% set gray = grayscale|default(true) %}
+<section class="py-4 py-md-5 border-top border-bottom bg-body-tertiary">
+  <div class="container text-center">
+    {% if heading %}<p class="text-muted text-uppercase small fw-semibold mb-4{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="heading" data-wb-plain="1"{% endif %}>{{ heading }}</p>{% endif %}
+    <div class="d-flex flex-wrap justify-content-center align-items-center gap-4 gap-md-5">
+      {% for line in raw.splitlines() %}
+        {% set u = line|trim %}
+        {% if u %}
+      <img src="{{ u }}" alt="" class="{% if gray %}opacity-75{% endif %}" style="max-height: 2.25rem; max-width: 8rem; width: auto; object-fit: contain;" loading="lazy">
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</section>

@@ -1,62 +1,313 @@
 {% extends "base.html" %}
-
-{% block title %}Core Module Settings{% endblock %}
+{% block title %}Core settings · Sparrow ERP{% endblock %}
 
 {% block content %}
-<h1>Core Module Settings</h1>
-<form method="POST" enctype="multipart/form-data">
-    <!-- Company Name -->
-    <div class="form-group mb-3">
-        <label for="company_name">Company Name</label>
-        <input type="text" id="company_name" name="company_name" class="form-control" 
-               value="{{ config.site_settings.company_name }}" required>
-    </div>
+<div class="container mt-4 mb-5">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h1 class="h3 mb-0">Core settings</h1>
+    <a href="{{ url_for('routes.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+  </div>
+  <p class="text-muted small mb-4">
+    Values in the <strong>Email</strong>, <strong>Integrations</strong>, <strong>LLM</strong>, and <strong>Security</strong> tabs are written to <code>app/config/.env</code> on this server (admin only).
+    Secrets are never shown again after save—only an indicator that a value is set.
+  </p>
 
-    <!-- Branding Preference -->
-    <div class="form-group mb-3">
-        <label for="branding">Navbar Branding</label>
-        <select id="branding" name="branding" class="form-select">
-            <option value="name" {% if config.site_settings.branding == 'name' %}selected{% endif %}>Company Name</option>
+  <ul class="nav nav-tabs mb-3 flex-wrap" id="coreSettingsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'general' %}active{% endif %}" id="tab-general" data-mdb-toggle="tab" data-mdb-target="#pane-general" type="button" role="tab" aria-controls="pane-general" aria-selected="{{ 'true' if active_tab == 'general' else 'false' }}">General &amp; branding</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'email' %}active{% endif %}" id="tab-email" data-mdb-toggle="tab" data-mdb-target="#pane-email" type="button" role="tab">Email (SMTP)</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'integrations' %}active{% endif %}" id="tab-integrations" data-mdb-toggle="tab" data-mdb-target="#pane-integrations" type="button" role="tab">GitLab &amp; cache</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'llm' %}active{% endif %}" id="tab-llm" data-mdb-toggle="tab" data-mdb-target="#pane-llm" type="button" role="tab">LLM / AI keys</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'security' %}active{% endif %}" id="tab-security" data-mdb-toggle="tab" data-mdb-target="#pane-security" type="button" role="tab">Security</button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 rounded-bottom p-3 p-md-4" style="--mdb-gutter-x: 0;">
+    <!-- General -->
+    <div class="tab-pane fade {% if active_tab == 'general' %}show active{% endif %}" id="pane-general" role="tabpanel" aria-labelledby="tab-general">
+      <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="general">
+
+        <div class="mb-3">
+          <label class="form-label" for="company_name">Company name</label>
+          <input type="text" id="company_name" name="company_name" class="form-control" required
+                 value="{{ config.site_settings.company_name|default('Sparrow ERP', true) }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="branding">Navbar branding</label>
+          <select id="branding" name="branding" class="form-select">
+            <option value="name" {% if (config.site_settings.branding|default('name')) == 'name' %}selected{% endif %}>Company name</option>
             <option value="logo" {% if config.site_settings.branding == 'logo' %}selected{% endif %}>Logo</option>
-        </select>
-    </div>
-
-    <!-- Logo Upload -->
-    <div class="form-group mb-3">
-        <label for="logo">Company Logo</label>
-        <input type="file" id="logo" name="logo" class="form-control" accept="image/*">
-        {% if config.site_settings.logo_path %}
-            <img src="{{ url_for('static', filename=config.site_settings.logo_path) }}" 
-                 alt="Logo Preview" class="img-thumbnail mt-2" style="max-height: 100px;">
-        {% endif %}
-    </div>
-
-    <!-- Theme Selection -->
-    <div class="form-group mb-3">
-        <label for="theme">Theme</label>
-        <select id="theme" name="theme" class="form-select">
-            <option value="default" {% if config.theme_settings.theme == 'default' %}selected{% endif %}>Default</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="logo">Company logo</label>
+          <input type="file" id="logo" name="logo" class="form-control" accept="image/*">
+          {% if config.site_settings.logo_path %}
+          <img src="{{ url_for('static', filename=config.site_settings.logo_path) }}" alt="Logo preview" class="img-thumbnail mt-2" style="max-height: 100px;">
+          {% endif %}
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="theme">Theme</label>
+          <select id="theme" name="theme" class="form-select">
+            <option value="default" {% if (config.theme_settings.theme|default('default')) == 'default' %}selected{% endif %}>Default</option>
             <option value="dark" {% if config.theme_settings.theme == 'dark' %}selected{% endif %}>Dark</option>
             <option value="modern" {% if config.theme_settings.theme == 'modern' %}selected{% endif %}>Modern</option>
-        </select>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="custom_css">Custom CSS</label>
+          <input type="file" id="custom_css" name="custom_css" class="form-control" accept=".css">
+          {% if config.theme_settings.custom_css_path %}
+          <p class="small mt-2 mb-0">Current: <a href="{{ url_for('static', filename=config.theme_settings.custom_css_path) }}" target="_blank">{{ config.theme_settings.custom_css_path.split('/')[-1] }}</a></p>
+          {% endif %}
+        </div>
+
+        <hr class="my-4">
+        <h2 class="h6 text-uppercase text-muted">AI assistants (model id)</h2>
+        <p class="small text-muted">Stored in <code>manifest.json</code>, not .env. API keys are on the <strong>LLM / AI keys</strong> tab.</p>
+        {% set _ai = config.ai_settings|default({}, true) %}
+        {% set _cur_model = (_ai.chat_model or '')|trim %}
+        <div class="mb-3">
+          <label class="form-label" for="ai_chat_model">Chat model id</label>
+          <select id="ai_chat_model" name="ai_chat_model" class="form-select" aria-describedby="ai_chat_model_help">
+            <option value="" {% if not _cur_model %}selected{% endif %}>Use <code>OPENAI_MODEL</code> from .env</option>
+            {% for val, lbl in chat_model_choices %}
+            <option value="{{ val }}" {% if _cur_model == val %}selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
+            {% if _cur_model and _cur_model not in chat_model_choice_values %}
+            <option value="{{ _cur_model }}" selected>Saved: {{ _cur_model }}</option>
+            {% endif %}
+            <option value="__custom__">Other… (type model id)</option>
+          </select>
+          <div id="ai_chat_model_custom_wrap" class="mt-2" style="display: none;">
+            <label class="form-label small text-muted mb-1" for="ai_chat_model_custom">Custom model id</label>
+            <input type="text" id="ai_chat_model_custom" name="ai_chat_model_custom" class="form-control font-monospace small" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. openai/gpt-4o">
+          </div>
+          <div id="ai_chat_model_help" class="form-text">Pick a preset or <strong>Other…</strong> for any OpenAI-compatible id. Blank top option uses the default model from the LLM tab / <code>.env</code>.</div>
+        </div>
+        <script>
+        (function () {
+          var sel = document.getElementById('ai_chat_model');
+          var wrap = document.getElementById('ai_chat_model_custom_wrap');
+          var inp = document.getElementById('ai_chat_model_custom');
+          if (!sel || !wrap || !inp) return;
+          function sync() {
+            var custom = sel.value === '__custom__';
+            wrap.style.display = custom ? 'block' : 'none';
+            inp.required = custom;
+            if (custom && !inp.value) inp.focus();
+          }
+          sel.addEventListener('change', sync);
+          sync();
+        })();
+        </script>
+
+        <button type="submit" class="btn btn-primary">Save general settings</button>
+      </form>
     </div>
 
-    <!-- Custom CSS Upload -->
-    <div class="form-group mb-3">
-        <label for="custom_css">Custom CSS</label>
-        <input type="file" id="custom_css" name="custom_css" class="form-control" accept=".css">
-        {% if config.theme_settings.custom_css_path %}
-            <p class="mt-2">Current Custom CSS: 
-                <a href="{{ url_for('static', filename=config.theme_settings.custom_css_path) }}" target="_blank">
-                    {{ config.theme_settings.custom_css_path.split('/')[-1] }}
-                </a>
-            </p>
-        {% endif %}
+    <!-- Email -->
+    <div class="tab-pane fade {% if active_tab == 'email' %}show active{% endif %}" id="pane-email" role="tabpanel">
+      <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="smtp">
+        <div class="mb-3">
+          <label class="form-label" for="smtp_host">SMTP host</label>
+          <input type="text" class="form-control" id="smtp_host" name="smtp_host" value="{{ env_ctx.smtp.host }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_port">SMTP port</label>
+          <input type="text" class="form-control" id="smtp_port" name="smtp_port" value="{{ env_ctx.smtp.port|default('587', true) }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_username">SMTP username</label>
+          <input type="text" class="form-control" id="smtp_username" name="smtp_username" value="{{ env_ctx.smtp.username }}" autocomplete="username">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_password">SMTP password</label>
+          <input type="password" class="form-control" id="smtp_password" name="smtp_password" value="" autocomplete="new-password"
+                 placeholder="{% if env_ctx.smtp.password_set %}Leave blank to keep current password{% else %}Enter password{% endif %}">
+          {% if env_ctx.smtp.password_set %}<div class="form-text">A password is already saved in .env.</div>{% endif %}
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_use_tls">Use TLS</label>
+          <select class="form-select" id="smtp_use_tls" name="smtp_use_tls">
+            <option value="true" {% if env_ctx.smtp.use_tls %}selected{% endif %}>Yes</option>
+            <option value="false" {% if not env_ctx.smtp.use_tls %}selected{% endif %}>No</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Save email settings</button>
+      </form>
     </div>
 
-    <button type="submit" class="btn btn-primary">Save Changes</button>
-</form>
+    <!-- GitLab & Redis -->
+    <div class="tab-pane fade {% if active_tab == 'integrations' %}show active{% endif %}" id="pane-integrations" role="tabpanel">
+      <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="integrations">
 
-<!-- Back to Dashboard -->
-<a href="{{ url_for('routes.dashboard') }}" class="btn btn-secondary mt-3">Back to Dashboard</a>
+        <h3 class="h6">GitLab (updates &amp; marketplace)</h3>
+        <p class="small text-muted">Use a <strong>read_api</strong> or project access token if the repository is private. Without this, the Version page cannot check for updates.</p>
+
+        <div class="mb-3">
+          <label class="form-label" for="gitlab_token">GitLab read token (<code>GITLAB_TOKEN</code>)</label>
+          <input type="text" class="form-control font-monospace small" id="gitlab_token" name="gitlab_token" autocomplete="off" spellcheck="false"
+                 value="{{ env_ctx.gitlab.token_current }}">
+          <div class="form-text small">
+            Prefilled from the server environment: <code>GITLAB_TOKEN</code>, or if that is empty, <code>SPARROW_OFFICIAL_REGISTRY_TOKEN</code> (handy for Railway/host-only deploy tokens).
+            Saving writes this value into <code>GITLAB_TOKEN</code> in <code>.env</code> so it persists with the app. Anyone with Settings access can see this field.
+          </div>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_gitlab_token" value="1" id="clear_gitlab_token">
+          <label class="form-check-label text-danger small" for="clear_gitlab_token">Remove <code>GITLAB_TOKEN</code> from <code>.env</code> (host env such as <code>SPARROW_OFFICIAL_REGISTRY_TOKEN</code> may still apply until you unset it on the platform)</label>
+        </div>
+
+        <div class="row g-2">
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="gitlab_username">Deploy username (<code>GITLAB_USERNAME</code>)</label>
+            <input type="text" class="form-control" id="gitlab_username" name="gitlab_username" value="{{ env_ctx.gitlab.username }}" autocomplete="off">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label" for="gitlab_password">Deploy password</label>
+            <input type="password" class="form-control" id="gitlab_password" name="gitlab_password" autocomplete="new-password"
+                   placeholder="{% if env_ctx.gitlab.password_set %}Leave blank to keep{% else %}Optional if using token{% endif %}">
+          </div>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_gitlab_password" value="1" id="clear_gitlab_password">
+          <label class="form-check-label small" for="clear_gitlab_password">Remove deploy password from .env</label>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="gitlab_project_id">Project ID (<code>GITLAB_PROJECT_ID</code> / <code>CORE_PROJECT_ID</code>)</label>
+          <input type="text" class="form-control" id="gitlab_project_id" name="gitlab_project_id" value="{{ env_ctx.gitlab.project_id }}" placeholder="e.g. 65546585">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="core_manifest_remote_url">Core manifest URL (optional)</label>
+          <input type="url" class="form-control" id="core_manifest_remote_url" name="core_manifest_remote_url" value="{{ env_ctx.gitlab.core_manifest_url }}"
+                 placeholder="Override <code>CORE_MANIFEST_REMOTE_URL</code> if not using default GitLab API path">
+        </div>
+
+        <hr>
+        <h3 class="h6">Sessions &amp; cache</h3>
+        <div class="mb-3">
+          <label class="form-label" for="redis_url"><code>REDIS_URL</code></label>
+          <input type="text" class="form-control font-monospace small" id="redis_url" name="redis_url" value="{{ env_ctx.infra.redis_url }}" placeholder="redis://…">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save integrations</button>
+      </form>
+    </div>
+
+    <!-- LLM -->
+    <div class="tab-pane fade {% if active_tab == 'llm' %}show active{% endif %}" id="pane-llm" role="tabpanel">
+      <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="llm">
+        <p class="small text-muted">Contractor AI uses the OpenAI-compatible SDK. Keys are stored only in .env.</p>
+
+        <div class="mb-3">
+          <label class="form-label" for="openai_api_key"><code>OPENAI_API_KEY</code></label>
+          <input type="password" class="form-control" id="openai_api_key" name="openai_api_key" autocomplete="new-password"
+                 placeholder="{% if env_ctx.llm.openai_key_set %}Set — leave blank to keep{% else %}sk- or OpenRouter key{% endif %}">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_openai_api_key" value="1" id="clear_openai_api_key">
+          <label class="form-check-label small" for="clear_openai_api_key">Clear <code>OPENAI_API_KEY</code></label>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="sparrow_openai_key"><code>SPARROW_OPENAI_API_KEY</code> (alias)</label>
+          <input type="password" class="form-control" id="sparrow_openai_key" name="sparrow_openai_key" autocomplete="new-password"
+                 placeholder="{% if env_ctx.llm.sparrow_key_set %}Set — leave blank to keep{% endif %}">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_sparrow_openai_key" value="1" id="clear_sparrow_openai_key">
+          <label class="form-check-label small" for="clear_sparrow_openai_key">Clear alias</label>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="gemini_api_key"><code>GEMINI_API_KEY</code></label>
+          <input type="password" class="form-control" id="gemini_api_key" name="gemini_api_key" autocomplete="new-password"
+                 placeholder="{% if env_ctx.llm.gemini_key_set %}Set — leave blank to keep{% endif %}">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_gemini_key" value="1" id="clear_gemini_key">
+          <label class="form-check-label small" for="clear_gemini_key">Clear <code>GEMINI_API_KEY</code></label>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="openai_base_url_preset">Base URL preset</label>
+          <select class="form-select" id="openai_base_url_preset" name="openai_base_url_preset">
+            <option value="" {% if not env_ctx.llm.preset %}selected{% endif %}>None (use explicit URL or default OpenAI)</option>
+            <option value="openrouter" {% if env_ctx.llm.preset == 'openrouter' %}selected{% endif %}>OpenRouter</option>
+            <option value="gemini" {% if env_ctx.llm.preset == 'gemini' %}selected{% endif %}>Gemini (OpenAI-compatible)</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="openai_base_url"><code>OPENAI_BASE_URL</code> (optional override)</label>
+          <input type="text" class="form-control font-monospace small" id="openai_base_url" name="openai_base_url" value="{{ env_ctx.llm.base_url }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="openai_model"><code>OPENAI_MODEL</code> (when manifest model is blank)</label>
+          <input type="text" class="form-control" id="openai_model" name="openai_model" value="{{ env_ctx.llm.model }}" placeholder="e.g. gpt-4o-mini">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="openrouter_http_referer">OpenRouter <code>HTTP-Referer</code></label>
+          <input type="url" class="form-control" id="openrouter_http_referer" name="openrouter_http_referer" value="{{ env_ctx.llm.openrouter_referer }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="openrouter_site_title">OpenRouter <code>X-Title</code></label>
+          <input type="text" class="form-control" id="openrouter_site_title" name="openrouter_site_title" value="{{ env_ctx.llm.openrouter_title }}">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save LLM settings</button>
+      </form>
+    </div>
+
+    <!-- Security -->
+    <div class="tab-pane fade {% if active_tab == 'security' %}show active{% endif %}" id="pane-security" role="tabpanel">
+      <form method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="security">
+        <div class="alert alert-warning small">
+          Rotating <code>SECRET_KEY</code> invalidates existing sessions. Do this in a maintenance window if possible.
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="secret_key"><code>SECRET_KEY</code></label>
+          <input type="password" class="form-control font-monospace" id="secret_key" name="secret_key" autocomplete="new-password"
+                 placeholder="{% if env_ctx.security.secret_set %}Leave blank to keep{% else %}Required in production{% endif %}">
+          {% if env_ctx.security.secret_set %}<div class="form-text">A value is set.</div>{% endif %}
+        </div>
+        <div class="form-check mb-4">
+          <input class="form-check-input" type="checkbox" name="clear_secret_key" value="1" id="clear_secret_key">
+          <label class="form-check-label text-danger small" for="clear_secret_key">Remove SECRET_KEY (not recommended)</label>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label" for="jwt_secret_key"><code>JWT_SECRET_KEY</code> (optional)</label>
+          <input type="password" class="form-control font-monospace" id="jwt_secret_key" name="jwt_secret_key" autocomplete="new-password"
+                 placeholder="{% if env_ctx.security.jwt_set %}Leave blank to keep{% else %}Defaults to SECRET_KEY if empty{% endif %}">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="clear_jwt_secret_key" value="1" id="clear_jwt_secret_key">
+          <label class="form-check-label small" for="clear_jwt_secret_key">Remove JWT_SECRET_KEY</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save security settings</button>
+      </form>
+    </div>
+  </div>
+</div>
 {% endblock %}

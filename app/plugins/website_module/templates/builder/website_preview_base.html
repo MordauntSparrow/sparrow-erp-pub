@@ -1,0 +1,10 @@
+{% extends "public/website_public_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+{{ rendered|safe }}
+{% endblock %}
+{% block site_body_end %}
+{% if builder_canvas_bridge %}
+{% include "builder/canvas_bridge.html" %}
+{% endif %}
+{% endblock %}

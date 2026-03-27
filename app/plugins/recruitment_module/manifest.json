@@ -1,0 +1,16 @@
+{
+    "system_name": "recruitment_module",
+    "version": "0.0.2",
+    "installed": true,
+    "enabled": true,
+    "name": "Recruitment Module",
+    "description": "",
+    "dependencies": [
+        "website_module",
+        "time_billing_module",
+        "hr_module"
+    ],
+    "icon": "icon.png",
+    "dashboard_category": "People & HR",
+    "update_available": false
+}

@@ -3,6 +3,7 @@ from flask import render_template
 import os
 import json
 import uuid
+import html as html_module
 import mimetypes
 import requests
 from datetime import datetime, timedelta
@@ -942,9 +943,18 @@ class BuilderPageStore:
             'id': page_id,
             'title': title,
             'route': route,
-            'seo': {'title': title, 'description': ''},
+            'seo': {
+                'title': title,
+                'description': '',
+                'keywords': '',
+                'image': '',
+                'noindex': False,
+                'nofollow': False,
+                'omit_from_sitemap': False,
+            },
             'vars': {},
             'blocks': [],
+            'settings': {'merge_mode': 'augment'},
             'draft': True,
             'version': 1,
             'updated_at': datetime.utcnow().isoformat(),
@@ -966,74 +976,565 @@ class BlocksRegistry:
         self._blocks = {
             'hero': {
                 'label': 'Hero',
-                'icon': 'bi-lightning',
-                'defaults': {'headline': 'Headline', 'sub': 'Subheadline', 'cta_text': 'Get Started', 'bg': 'light'},
+                'icon': 'bi-lightning-charge',
+                'category': 'Hero & CTA',
+                'description': 'Full-width headline, subtext and primary button',
+                'defaults': {
+                    'headline': 'Build something remarkable',
+                    'sub': 'Professional layouts powered by Material Design — fast, responsive, yours.',
+                    'cta_text': 'Get started',
+                    'cta_href': '#',
+                    'bg': 'gradient',
+                    'align': 'center',
+                    'image': '',
+                },
                 'schema': [
                     {'name': 'headline', 'type': 'text',
                         'label': 'Headline', 'required': True},
                     {'name': 'sub', 'type': 'text', 'label': 'Subheadline'},
-                    {'name': 'cta_text', 'type': 'text', 'label': 'CTA Text'},
+                    {'name': 'cta_text', 'type': 'text', 'label': 'Button label'},
+                    {'name': 'cta_href', 'type': 'text', 'label': 'Button link'},
                     {'name': 'bg', 'type': 'select', 'label': 'Background',
-                        'options': ['light', 'dark', 'image']},
+                        'options': ['light', 'dark', 'gradient', 'image']},
+                    {'name': 'image', 'type': 'imageurl',
+                        'label': 'Background image (when style is Image)', 'required': False},
+                    {'name': 'align', 'type': 'select', 'label': 'Alignment',
+                        'options': ['left', 'center', 'right']},
                 ],
                 'template': 'blocks/hero.html',
             },
+            'cta_banner': {
+                'label': 'CTA banner',
+                'icon': 'bi-megaphone',
+                'category': 'Hero & CTA',
+                'description': 'Bold strip with call to action',
+                'defaults': {
+                    'title': 'Ready to grow?',
+                    'subtitle': 'Join thousands of teams using our platform.',
+                    'btn_text': 'Contact us',
+                    'btn_href': '#',
+                    'tone': 'primary',
+                },
+                'schema': [
+                    {'name': 'title', 'type': 'text', 'label': 'Title', 'required': True},
+                    {'name': 'subtitle', 'type': 'text', 'label': 'Subtitle'},
+                    {'name': 'btn_text', 'type': 'text', 'label': 'Button text', 'required': True},
+                    {'name': 'btn_href', 'type': 'text', 'label': 'Button link', 'required': True},
+                    {'name': 'tone', 'type': 'select', 'label': 'Style',
+                     'options': ['primary', 'dark', 'light', 'success']},
+                ],
+                'template': 'blocks/cta_banner.html',
+            },
+            'heading': {
+                'label': 'Heading',
+                'icon': 'bi-type-h1',
+                'category': 'Content',
+                'description': 'Semantic title (H1–H6)',
+                'defaults': {'text': 'Section title', 'level': '2', 'align': 'left', 'sub': ''},
+                'schema': [
+                    {'name': 'text', 'type': 'text', 'label': 'Text', 'required': True},
+                    {'name': 'level', 'type': 'select', 'label': 'Level',
+                     'options': ['1', '2', '3', '4', '5', '6']},
+                    {'name': 'align', 'type': 'select', 'label': 'Align',
+                     'options': ['left', 'center', 'right']},
+                    {'name': 'sub', 'type': 'text', 'label': 'Eyebrow / kicker (optional)'},
+                ],
+                'template': 'blocks/heading.html',
+            },
             'text': {
-                'label': 'Text',
-                'icon': 'bi-fonts',
-                'defaults': {'html': '<p>Write something…</p>'},
+                'label': 'Rich text',
+                'icon': 'bi-text-paragraph',
+                'category': 'Content',
+                'description': 'Paragraphs, lists and basic HTML',
+                'defaults': {'html': '<p class="lead text-muted mb-0">Tell your story with clear, compelling copy. Edit this block to match your brand voice.</p>'},
                 'schema': [{'name': 'html', 'type': 'richtext', 'label': 'Content', 'required': True}],
                 'template': 'blocks/text.html',
+            },
+            'card': {
+                'label': 'Card',
+                'icon': 'bi-card-heading',
+                'category': 'Content',
+                'description': 'Image, title, body and optional button',
+                'defaults': {
+                    'title': 'Card title',
+                    'body': '<p class="text-muted mb-0">Supporting description for this feature or service.</p>',
+                    'image': '',
+                    'btn_text': '',
+                    'btn_href': '#',
+                    'shadow': 'soft',
+                },
+                'schema': [
+                    {'name': 'title', 'type': 'text', 'label': 'Title', 'required': True},
+                    {'name': 'body', 'type': 'richtext', 'label': 'Body'},
+                    {'name': 'image', 'type': 'imageurl', 'label': 'Image URL (optional)', 'required': False},
+                    {'name': 'btn_text', 'type': 'text', 'label': 'Button text (optional)'},
+                    {'name': 'btn_href', 'type': 'text', 'label': 'Button link'},
+                    {'name': 'shadow', 'type': 'select', 'label': 'Elevation',
+                     'options': ['none', 'soft', 'strong']},
+                ],
+                'template': 'blocks/card.html',
+            },
+            'testimonial': {
+                'label': 'Testimonial',
+                'icon': 'bi-chat-quote',
+                'category': 'Content',
+                'description': 'Quote with avatar and attribution',
+                'defaults': {
+                    'quote': 'This product transformed how we work every day.',
+                    'author': 'Alex Morgan',
+                    'role': 'CEO, Example Co.',
+                    'avatar': '',
+                    'style': 'card',
+                },
+                'schema': [
+                    {'name': 'quote', 'type': 'richtext', 'label': 'Quote', 'required': True},
+                    {'name': 'author', 'type': 'text', 'label': 'Name', 'required': True},
+                    {'name': 'role', 'type': 'text', 'label': 'Role / company'},
+                    {'name': 'avatar', 'type': 'imageurl', 'label': 'Avatar image URL', 'required': False},
+                    {'name': 'style', 'type': 'select', 'label': 'Layout',
+                     'options': ['card', 'minimal', 'highlight']},
+                ],
+                'template': 'blocks/testimonial.html',
+            },
+            'stats_row': {
+                'label': 'Stats row',
+                'icon': 'bi-graph-up-arrow',
+                'category': 'Content',
+                'description': 'Three key metrics in a row',
+                'defaults': {
+                    'v1': '10k+', 'l1': 'Customers',
+                    'v2': '99.9%', 'l2': 'Uptime',
+                    'v3': '24/7', 'l3': 'Support',
+                },
+                'schema': [
+                    {'name': 'v1', 'type': 'text', 'label': 'Value 1', 'required': True},
+                    {'name': 'l1', 'type': 'text', 'label': 'Label 1', 'required': True},
+                    {'name': 'v2', 'type': 'text', 'label': 'Value 2', 'required': True},
+                    {'name': 'l2', 'type': 'text', 'label': 'Label 2', 'required': True},
+                    {'name': 'v3', 'type': 'text', 'label': 'Value 3', 'required': True},
+                    {'name': 'l3', 'type': 'text', 'label': 'Label 3', 'required': True},
+                ],
+                'template': 'blocks/stats_row.html',
+            },
+            'alert_block': {
+                'label': 'Alert',
+                'icon': 'bi-info-circle',
+                'category': 'Content',
+                'description': 'Notice, success or warning callout',
+                'defaults': {'message': '<strong>Heads up!</strong> Use alerts for short, important messages.', 'variant': 'info', 'dismissible': False},
+                'schema': [
+                    {'name': 'message', 'type': 'richtext', 'label': 'Message', 'required': True},
+                    {'name': 'variant', 'type': 'select', 'label': 'Style',
+                     'options': ['primary', 'secondary', 'success', 'danger', 'warning', 'info', 'light', 'dark']},
+                    {'name': 'dismissible', 'type': 'switch', 'label': 'Dismissible'},
+                ],
+                'template': 'blocks/alert_block.html',
+            },
+            'divider': {
+                'label': 'Divider',
+                'icon': 'bi-dash-lg',
+                'category': 'Layout',
+                'description': 'Visual separation between sections',
+                'defaults': {'style': 'line', 'spacing': '3'},
+                'schema': [
+                    {'name': 'style', 'type': 'select', 'label': 'Style',
+                     'options': ['line', 'fade', 'dots', 'spacer']},
+                    {'name': 'spacing', 'type': 'select', 'label': 'Spacing',
+                     'options': ['1', '2', '3', '4', '5']},
+                ],
+                'template': 'blocks/divider.html',
             },
             'image': {
                 'label': 'Image',
                 'icon': 'bi-image',
-                'defaults': {'src': '', 'alt': '', 'rounded': True},
+                'category': 'Media',
+                'description': 'Responsive image with optional caption',
+                'defaults': {
+                    'src': '', 'alt': '', 'rounded': True, 'caption': '', 'shadow': True,
+                    'priority_lcp': False,
+                },
                 'schema': [
-                    {'name': 'src', 'type': 'text',
+                    {'name': 'src', 'type': 'imageurl',
                         'label': 'Image URL', 'required': True},
-                    {'name': 'alt', 'type': 'text', 'label': 'Alt text'},
+                    {'name': 'alt', 'type': 'text', 'label': 'Alt text', 'required': True},
+                    {'name': 'caption', 'type': 'text', 'label': 'Caption (optional)'},
                     {'name': 'rounded', 'type': 'switch',
                         'label': 'Rounded corners'},
+                    {'name': 'shadow', 'type': 'switch', 'label': 'Drop shadow'},
+                    {'name': 'priority_lcp', 'type': 'switch',
+                        'label': 'Load with high priority (above-the-fold / LCP)'},
                 ],
                 'template': 'blocks/image.html',
             },
+            'video': {
+                'label': 'Video',
+                'icon': 'bi-play-btn',
+                'category': 'Media',
+                'description': 'YouTube or Vimeo embed',
+                'defaults': {'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'ratio': '16x9', 'rounded': True},
+                'schema': [
+                    {'name': 'url', 'type': 'text', 'label': 'Video URL', 'required': True},
+                    {'name': 'ratio', 'type': 'select', 'label': 'Aspect ratio',
+                     'options': ['16x9', '4x3', '1x1']},
+                    {'name': 'rounded', 'type': 'switch', 'label': 'Rounded frame'},
+                ],
+                'template': 'blocks/video.html',
+            },
+            'accordion_faq': {
+                'label': 'FAQ accordion',
+                'icon': 'bi-question-circle',
+                'category': 'Content',
+                'description': 'Expandable questions & answers (up to 5)',
+                'defaults': {
+                    'section_title': 'Frequently asked questions',
+                    'section_sub': '',
+                    'q1': 'How do I get started?',
+                    'a1': '<p>You can edit this text in the builder. Add more Q&amp;A pairs below.</p>',
+                    'q2': 'Is my data secure?',
+                    'a2': '<p>Describe your security and compliance approach here.</p>',
+                    'q3': '', 'a3': '',
+                    'q4': '', 'a4': '',
+                    'q5': '', 'a5': '',
+                },
+                'schema': [
+                    {'name': 'section_title', 'type': 'text', 'label': 'Section title', 'required': True},
+                    {'name': 'section_sub', 'type': 'text', 'label': 'Subtitle (optional)'},
+                    {'name': 'q1', 'type': 'text', 'label': 'Question 1', 'required': True},
+                    {'name': 'a1', 'type': 'richtext', 'label': 'Answer 1', 'required': True},
+                    {'name': 'q2', 'type': 'text', 'label': 'Question 2'},
+                    {'name': 'a2', 'type': 'richtext', 'label': 'Answer 2'},
+                    {'name': 'q3', 'type': 'text', 'label': 'Question 3'},
+                    {'name': 'a3', 'type': 'richtext', 'label': 'Answer 3'},
+                    {'name': 'q4', 'type': 'text', 'label': 'Question 4'},
+                    {'name': 'a4', 'type': 'richtext', 'label': 'Answer 4'},
+                    {'name': 'q5', 'type': 'text', 'label': 'Question 5'},
+                    {'name': 'a5', 'type': 'richtext', 'label': 'Answer 5'},
+                ],
+                'template': 'blocks/accordion_faq.html',
+            },
+            'feature_icons': {
+                'label': 'Icon features',
+                'icon': 'bi-stars',
+                'category': 'Content',
+                'description': 'Three selling points with Bootstrap icons',
+                'defaults': {
+                    'title': 'Everything you need',
+                    'subtitle': 'Ship faster with a solid foundation.',
+                    'i1': 'bi-lightning-charge', 't1': 'Fast', 'd1': 'Performance tuned for real users.',
+                    'i2': 'bi-shield-check', 't2': 'Secure', 'd2': 'Security-minded defaults.',
+                    'i3': 'bi-puzzle', 't3': 'Flexible', 'd3': 'Extend with modules and custom code.',
+                },
+                'schema': [
+                    {'name': 'title', 'type': 'text', 'label': 'Heading', 'required': True},
+                    {'name': 'subtitle', 'type': 'text', 'label': 'Subtitle'},
+                    {'name': 'i1', 'type': 'text', 'label': 'Icon 1 (e.g. bi-lightning-charge)'},
+                    {'name': 't1', 'type': 'text', 'label': 'Title 1', 'required': True},
+                    {'name': 'd1', 'type': 'text', 'label': 'Description 1', 'required': True},
+                    {'name': 'i2', 'type': 'text', 'label': 'Icon 2'},
+                    {'name': 't2', 'type': 'text', 'label': 'Title 2', 'required': True},
+                    {'name': 'd2', 'type': 'text', 'label': 'Description 2', 'required': True},
+                    {'name': 'i3', 'type': 'text', 'label': 'Icon 3'},
+                    {'name': 't3', 'type': 'text', 'label': 'Title 3', 'required': True},
+                    {'name': 'd3', 'type': 'text', 'label': 'Description 3', 'required': True},
+                ],
+                'template': 'blocks/feature_icons.html',
+            },
+            'checklist': {
+                'label': 'Checklist',
+                'icon': 'bi-check2-square',
+                'category': 'Content',
+                'description': 'Bulleted list with check icons (one line per item)',
+                'defaults': {
+                    'title': "What's included",
+                    'items': 'Free onboarding\nEmail support\nRegular updates\nUK-friendly hosting options',
+                },
+                'schema': [
+                    {'name': 'title', 'type': 'text', 'label': 'Heading', 'required': True},
+                    {'name': 'items', 'type': 'richtext', 'label': 'Items (one per line)', 'required': True},
+                ],
+                'template': 'blocks/checklist.html',
+            },
+            'logo_cloud': {
+                'label': 'Logo cloud',
+                'icon': 'bi-building',
+                'category': 'Content',
+                'description': '“Trusted by” row — image URLs, one per line',
+                'defaults': {
+                    'heading': 'Trusted by teams like yours',
+                    'urls': '',
+                    'grayscale': True,
+                },
+                'schema': [
+                    {'name': 'heading', 'type': 'text', 'label': 'Heading'},
+                    {'name': 'urls', 'type': 'richtext', 'label': 'Image URLs (one per line)', 'required': False},
+                    {'name': 'grayscale', 'type': 'switch', 'label': 'Grayscale logos'},
+                ],
+                'template': 'blocks/logo_cloud.html',
+            },
+            'map_embed': {
+                'label': 'Map',
+                'icon': 'bi-geo-alt',
+                'category': 'Media',
+                'description': 'Google Maps embed URL (iframe src)',
+                'defaults': {
+                    'embed_src': '',
+                    'height': 360,
+                    'rounded': True,
+                    'caption': '',
+                },
+                'schema': [
+                    {'name': 'embed_src', 'type': 'text', 'label': 'Embed URL (iframe src)', 'required': False},
+                    {'name': 'height', 'type': 'number', 'label': 'Height (px)', 'required': True},
+                    {'name': 'rounded', 'type': 'switch', 'label': 'Rounded corners'},
+                    {'name': 'caption', 'type': 'text', 'label': 'Caption (optional)'},
+                ],
+                'template': 'blocks/map_embed.html',
+            },
+            'newsletter': {
+                'label': 'Newsletter signup',
+                'icon': 'bi-envelope-heart',
+                'category': 'Hero & CTA',
+                'description': 'Email field + button (set form action to your handler)',
+                'defaults': {
+                    'heading': 'Stay in the loop',
+                    'sub': 'Monthly product news — no spam.',
+                    'placeholder': 'you@company.com',
+                    'button': 'Subscribe',
+                    'action': '#',
+                    'method': 'post',
+                },
+                'schema': [
+                    {'name': 'heading', 'type': 'text', 'label': 'Heading', 'required': True},
+                    {'name': 'sub', 'type': 'text', 'label': 'Subtitle'},
+                    {'name': 'placeholder', 'type': 'text', 'label': 'Input placeholder'},
+                    {'name': 'button', 'type': 'text', 'label': 'Button label', 'required': True},
+                    {'name': 'action', 'type': 'text', 'label': 'Form action URL', 'required': True},
+                    {'name': 'method', 'type': 'select', 'label': 'Method',
+                     'options': ['post', 'get']},
+                ],
+                'template': 'blocks/newsletter.html',
+            },
+            'social_row': {
+                'label': 'Social links',
+                'icon': 'bi-share',
+                'category': 'Content',
+                'description': 'Icon row for major networks (fill only what you use)',
+                'defaults': {
+                    'facebook': '', 'instagram': '', 'linkedin': '', 'x': '', 'youtube': '', 'github': '',
+                },
+                'schema': [
+                    {'name': 'facebook', 'type': 'text', 'label': 'Facebook URL'},
+                    {'name': 'instagram', 'type': 'text', 'label': 'Instagram URL'},
+                    {'name': 'linkedin', 'type': 'text', 'label': 'LinkedIn URL'},
+                    {'name': 'x', 'type': 'text', 'label': 'X (Twitter) URL'},
+                    {'name': 'youtube', 'type': 'text', 'label': 'YouTube URL'},
+                    {'name': 'github', 'type': 'text', 'label': 'GitHub URL'},
+                ],
+                'template': 'blocks/social_row.html',
+            },
+            'team_member': {
+                'label': 'Team member',
+                'icon': 'bi-person-badge',
+                'category': 'Content',
+                'description': 'Photo, name, role and short bio',
+                'defaults': {
+                    'name': 'Alex Morgan',
+                    'role': 'Founder & CEO',
+                    'bio': '<p>Short bio — background, focus, and what drives the team.</p>',
+                    'photo': '',
+                    'linkedin': '',
+                },
+                'schema': [
+                    {'name': 'name', 'type': 'text', 'label': 'Name', 'required': True},
+                    {'name': 'role', 'type': 'text', 'label': 'Role / title'},
+                    {'name': 'bio', 'type': 'richtext', 'label': 'Bio'},
+                    {'name': 'photo', 'type': 'imageurl', 'label': 'Photo URL', 'required': False},
+                    {'name': 'linkedin', 'type': 'text', 'label': 'LinkedIn URL (optional)'},
+                ],
+                'template': 'blocks/team_member.html',
+            },
+            'contact_block': {
+                'label': 'Contact info',
+                'icon': 'bi-telephone',
+                'category': 'Content',
+                'description': 'Heading + rich text (address, hours, phones)',
+                'defaults': {
+                    'title': 'Contact us',
+                    'body': '<p><strong>Phone:</strong> 01234 567890<br><strong>Email:</strong> hello@example.com<br><strong>Hours:</strong> Mon–Fri 9–5</p>',
+                },
+                'schema': [
+                    {'name': 'title', 'type': 'text', 'label': 'Heading', 'required': True},
+                    {'name': 'body', 'type': 'richtext', 'label': 'Content', 'required': True},
+                ],
+                'template': 'blocks/contact_block.html',
+            },
+            'embed_frame': {
+                'label': 'Embed (iframe)',
+                'icon': 'bi-code-square',
+                'category': 'Media',
+                'description': 'Trusted https embed only (calendars, Typeform, etc.)',
+                'defaults': {
+                    'src': '',
+                    'title': 'Embedded content',
+                    'height': 480,
+                    'rounded': True,
+                },
+                'schema': [
+                    {'name': 'src', 'type': 'text', 'label': 'Page URL (https only)', 'required': False},
+                    {'name': 'title', 'type': 'text', 'label': 'Title (accessibility)'},
+                    {'name': 'height', 'type': 'number', 'label': 'Height (px)', 'required': True},
+                    {'name': 'rounded', 'type': 'switch', 'label': 'Rounded frame'},
+                ],
+                'template': 'blocks/embed_frame.html',
+            },
+            'pricing_table': {
+                'label': 'Pricing table',
+                'icon': 'bi-currency-pound',
+                'category': 'Hero & CTA',
+                'description': 'Three plan cards with price, bullets, and CTA',
+                'defaults': {
+                    'heading': 'Simple, transparent pricing',
+                    'sub': 'Pick the plan that fits. Change any time.',
+                    'p1_name': 'Starter', 'p1_price': '£9', 'p1_period': '/ month',
+                    'p1_features': 'Up to 3 users\nEmail support\nCore features',
+                    'p1_btn': 'Get started', 'p1_href': '#', 'p1_featured': False,
+                    'p2_name': 'Pro', 'p2_price': '£29', 'p2_period': '/ month',
+                    'p2_features': 'Up to 25 users\nPriority support\nAll features',
+                    'p2_btn': 'Start trial', 'p2_href': '#', 'p2_featured': True,
+                    'p3_name': 'Enterprise', 'p3_price': 'Let’s talk', 'p3_period': '',
+                    'p3_features': 'Unlimited users\nDedicated success\nSLA & security review',
+                    'p3_btn': 'Contact sales', 'p3_href': '#', 'p3_featured': False,
+                },
+                'schema': [
+                    {'name': 'heading', 'type': 'text', 'label': 'Section heading', 'required': True},
+                    {'name': 'sub', 'type': 'text', 'label': 'Subtitle'},
+                    {'name': 'p1_name', 'type': 'text', 'label': 'Plan 1 name', 'required': True},
+                    {'name': 'p1_price', 'type': 'text', 'label': 'Plan 1 price', 'required': True},
+                    {'name': 'p1_period', 'type': 'text', 'label': 'Plan 1 period (e.g. / month)'},
+                    {'name': 'p1_features', 'type': 'richtext', 'label': 'Plan 1 features (one per line)'},
+                    {'name': 'p1_btn', 'type': 'text', 'label': 'Plan 1 button'},
+                    {'name': 'p1_href', 'type': 'text', 'label': 'Plan 1 link'},
+                    {'name': 'p1_featured', 'type': 'switch', 'label': 'Highlight plan 1'},
+                    {'name': 'p2_name', 'type': 'text', 'label': 'Plan 2 name', 'required': True},
+                    {'name': 'p2_price', 'type': 'text', 'label': 'Plan 2 price', 'required': True},
+                    {'name': 'p2_period', 'type': 'text', 'label': 'Plan 2 period'},
+                    {'name': 'p2_features', 'type': 'richtext', 'label': 'Plan 2 features (one per line)'},
+                    {'name': 'p2_btn', 'type': 'text', 'label': 'Plan 2 button'},
+                    {'name': 'p2_href', 'type': 'text', 'label': 'Plan 2 link'},
+                    {'name': 'p2_featured', 'type': 'switch', 'label': 'Highlight plan 2'},
+                    {'name': 'p3_name', 'type': 'text', 'label': 'Plan 3 name', 'required': True},
+                    {'name': 'p3_price', 'type': 'text', 'label': 'Plan 3 price', 'required': True},
+                    {'name': 'p3_period', 'type': 'text', 'label': 'Plan 3 period'},
+                    {'name': 'p3_features', 'type': 'richtext', 'label': 'Plan 3 features (one per line)'},
+                    {'name': 'p3_btn', 'type': 'text', 'label': 'Plan 3 button'},
+                    {'name': 'p3_href', 'type': 'text', 'label': 'Plan 3 link'},
+                    {'name': 'p3_featured', 'type': 'switch', 'label': 'Highlight plan 3'},
+                ],
+                'template': 'blocks/pricing_table.html',
+            },
+            'content_tabs': {
+                'label': 'Tabs',
+                'icon': 'bi-folder2-open',
+                'category': 'Content',
+                'description': 'Up to 3 tabs with rich HTML panels',
+                'defaults': {
+                    't1_label': 'Overview',
+                    't1_body': '<p>First tab content — product summary, key benefits, or onboarding tips.</p>',
+                    't2_label': 'Details',
+                    't2_body': '<p>Second tab — specifications, FAQs, or deeper copy.</p>',
+                    't3_label': 'Resources',
+                    't3_body': '<p>Third tab — downloads, links, or next steps.</p>',
+                },
+                'schema': [
+                    {'name': 't1_label', 'type': 'text', 'label': 'Tab 1 label', 'required': True},
+                    {'name': 't1_body', 'type': 'richtext', 'label': 'Tab 1 content', 'required': True},
+                    {'name': 't2_label', 'type': 'text', 'label': 'Tab 2 label'},
+                    {'name': 't2_body', 'type': 'richtext', 'label': 'Tab 2 content'},
+                    {'name': 't3_label', 'type': 'text', 'label': 'Tab 3 label'},
+                    {'name': 't3_body', 'type': 'richtext', 'label': 'Tab 3 content'},
+                ],
+                'template': 'blocks/content_tabs.html',
+            },
+            'timeline': {
+                'label': 'Timeline',
+                'icon': 'bi-clock-history',
+                'category': 'Content',
+                'description': 'Vertical timeline (up to 4 milestones)',
+                'defaults': {
+                    'heading': 'Our journey',
+                    'sub': 'From idea to launch.',
+                    'e1_date': '2022', 'e1_title': 'Founded', 'e1_body': '<p>Started with a clear mission.</p>',
+                    'e2_date': '2023', 'e2_title': 'First customers', 'e2_body': '<p>Shipped the MVP and learned fast.</p>',
+                    'e3_date': '2024', 'e3_title': 'Scale', 'e3_body': '<p>Expanded the team and product surface.</p>',
+                    'e4_date': '', 'e4_title': '', 'e4_body': '',
+                },
+                'schema': [
+                    {'name': 'heading', 'type': 'text', 'label': 'Heading', 'required': True},
+                    {'name': 'sub', 'type': 'text', 'label': 'Subtitle'},
+                    {'name': 'e1_date', 'type': 'text', 'label': 'Event 1 date / label'},
+                    {'name': 'e1_title', 'type': 'text', 'label': 'Event 1 title', 'required': True},
+                    {'name': 'e1_body', 'type': 'richtext', 'label': 'Event 1 description'},
+                    {'name': 'e2_date', 'type': 'text', 'label': 'Event 2 date / label'},
+                    {'name': 'e2_title', 'type': 'text', 'label': 'Event 2 title'},
+                    {'name': 'e2_body', 'type': 'richtext', 'label': 'Event 2 description'},
+                    {'name': 'e3_date', 'type': 'text', 'label': 'Event 3 date / label'},
+                    {'name': 'e3_title', 'type': 'text', 'label': 'Event 3 title'},
+                    {'name': 'e3_body', 'type': 'richtext', 'label': 'Event 3 description'},
+                    {'name': 'e4_date', 'type': 'text', 'label': 'Event 4 date / label'},
+                    {'name': 'e4_title', 'type': 'text', 'label': 'Event 4 title'},
+                    {'name': 'e4_body', 'type': 'richtext', 'label': 'Event 4 description'},
+                ],
+                'template': 'blocks/timeline.html',
+            },
             'section': {
                 'label': 'Section',
-                'icon': 'bi-layout-text-sidebar',
-                'defaults': {'blocks': [], 'bg': 'light'},
+                'icon': 'bi-layout-sidebar-inset',
+                'category': 'Layout',
+                'description': 'Groups nested blocks with background',
+                'defaults': {'blocks': [], 'bg': 'light', 'padding': '5'},
                 'schema': [
                     {'name': 'bg', 'type': 'select', 'label': 'Background',
-                        'options': ['light', 'dark', 'image']},
+                        'options': ['light', 'dark', 'white', 'muted']},
+                    {'name': 'padding', 'type': 'select', 'label': 'Vertical padding',
+                     'options': ['3', '4', '5', '6']},
                     {'name': 'blocks', 'type': 'blocks', 'label': 'Nested blocks'},
                 ],
                 'template': 'blocks/section.html',
             },
             'columns': {
                 'label': 'Columns',
-                'icon': 'bi-columns',
+                'icon': 'bi-columns-gap',
+                'category': 'Layout',
+                'description': 'Multi-column row for nested blocks',
                 'defaults': {'columns': [[], []]},
                 'schema': [{'name': 'columns', 'type': 'columns', 'label': 'Column content', 'required': True}],
                 'template': 'blocks/columns.html',
             },
             'button': {
                 'label': 'Button',
-                'icon': 'bi-hand-index',
-                'defaults': {'text': 'Click Me', 'href': '#', 'style': 'primary'},
+                'icon': 'bi-hand-index-thumb',
+                'category': 'Actions',
+                'description': 'Standalone link styled as a button',
+                'defaults': {'text': 'Learn more', 'href': '#', 'style': 'primary', 'size': 'md', 'outline': False},
                 'schema': [
                     {'name': 'text', 'type': 'text',
                         'label': 'Button text', 'required': True},
                     {'name': 'href', 'type': 'text',
                         'label': 'Link', 'required': True},
-                    {'name': 'style', 'type': 'select', 'label': 'Style',
-                     'options': ['primary', 'secondary', 'success', 'info', 'warning', 'danger', 'link']},
+                    {'name': 'style', 'type': 'select', 'label': 'Colour',
+                     'options': ['primary', 'secondary', 'success', 'info', 'warning', 'danger', 'dark', 'light', 'link']},
+                    {'name': 'size', 'type': 'select', 'label': 'Size',
+                     'options': ['sm', 'md', 'lg']},
+                    {'name': 'outline', 'type': 'switch', 'label': 'Outline style'},
                 ],
                 'template': 'blocks/button.html',
             },
             'spacer': {
                 'label': 'Spacer',
                 'icon': 'bi-arrows-expand',
-                'defaults': {'height': 20},
+                'category': 'Layout',
+                'description': 'Vertical whitespace',
+                'defaults': {'height': 32},
                 'schema': [{'name': 'height', 'type': 'number', 'label': 'Height (px)', 'required': True}],
                 'template': 'blocks/spacer.html',
             },
@@ -1093,6 +1594,15 @@ class BlocksRegistry:
             if ftype in ('blocks', 'columns'):
                 if req and not isinstance(val, list):
                     return False, f"{field.get('label') or name} must be a list"
+            elif ftype == 'number':
+                if req:
+                    try:
+                        float(val)
+                    except (TypeError, ValueError):
+                        return False, f"{field.get('label') or name} must be a number"
+            elif ftype == 'imageurl':
+                if req and not str(val or '').strip():
+                    return False, f"{field.get('label') or name} is required"
             else:
                 if req and not str(val or '').strip():
                     return False, f"{field.get('label') or name} is required"
@@ -1106,8 +1616,29 @@ class BlocksRegistry:
                 'icon': v['icon'],
                 'defaults': v['defaults'],
                 'schema': v['schema'],
+                'category': v.get('category', 'Content'),
+                'description': v.get('description', ''),
             }
         return safe
+
+    def grouped_palette(self):
+        """Ordered categories for the builder sidebar (Material-style palette)."""
+        flat = self.safe_registry()
+        order = [
+            'Layout',
+            'Hero & CTA',
+            'Content',
+            'Media',
+            'Actions',
+            'Other',
+        ]
+        buckets: dict[str, list[tuple[str, dict]]] = {c: [] for c in order}
+        for k, v in flat.items():
+            c = (v.get('category') or 'Content').strip()
+            if c not in buckets:
+                c = 'Other'
+            buckets[c].append((k, v))
+        return [(c, buckets[c]) for c in order if buckets[c]]
 
 
 # ------------------------
@@ -1122,26 +1653,59 @@ class BuilderRenderer:
     def __init__(self):
         self._registry = BlocksRegistry()
 
-    def render_block(self, block: dict) -> str:
+    def render_block(self, block: dict, path: list) -> str:
         btype = block.get('type')
         props = dict(block.get('props') or {})
         if not self._registry.exists(btype):
             return ''
 
         tpl = self._registry.template(btype)
+        # Stable unique suffix for this block instance (accordions, a11y ids)
+        self._block_seq = getattr(self, '_block_seq', 0) + 1
+        props['_block_uid'] = self._block_seq
+        props['canvas_mode'] = bool(getattr(self, '_canvas_mode', False))
 
         if btype == 'section':
             children = props.get('blocks', [])
-            html = [self.render_block(child) for child in children]
-            props['blocks_html'] = '\n'.join(html)
+            props['_wb_canvas_parent_path'] = json.dumps(
+                path, separators=(',', ':'))
+            parts = [self.render_block(child, path + [j]) for j, child in enumerate(children)]
+            props['blocks_html'] = '\n'.join(parts)
         elif btype == 'columns':
+            col_list = props.get('columns', [])
+            props['_wb_col_parent_paths_json'] = [
+                json.dumps(path + ['c', ci], separators=(',', ':'))
+                for ci in range(len(col_list))
+            ]
             cols_html = []
-            for col in props.get('columns', []):
-                html = [self.render_block(child) for child in col]
-                cols_html.append('\n'.join(html))
+            for c, col in enumerate(col_list):
+                cell_parts = [
+                    self.render_block(child, path + ['c', c, b])
+                    for b, child in enumerate(col)
+                ]
+                cols_html.append('\n'.join(cell_parts))
             props['columns_html'] = cols_html
 
-        return render_template(tpl, **props)
+        inner = render_template(tpl, **props)
+        if getattr(self, '_canvas_mode', False):
+            path_json = json.dumps(path, separators=(',', ':'))
+            safe_path = html_module.escape(path_json)
+            safe_type = html_module.escape(str(btype or ''))
+            return (
+                '<div class="wb-canvas-block" tabindex="-1" '
+                f'data-wb-path="{safe_path}" data-wb-type="{safe_type}">'
+                '<span class="wb-canvas-drag-handle" draggable="false" '
+                'title="Drag to reorder">⠿</span>'
+                f'{inner}</div>'
+            )
+        return inner
 
-    def render_page(self, page_json: dict) -> str:
-        return '\n'.join(self.render_block(blk) for blk in page_json.get('blocks', []))
+    def render_page(self, page_json: dict, canvas_mode: bool = False) -> str:
+        """
+        canvas_mode: wrap each block for builder preview (click-to-select via postMessage).
+        Live/published pages must use canvas_mode=False (default).
+        """
+        self._canvas_mode = canvas_mode
+        self._block_seq = 0
+        blocks = page_json.get('blocks') or []
+        return '\n'.join(self.render_block(blk, [i]) for i, blk in enumerate(blocks))

@@ -2,7 +2,13 @@
   <div class="row g-3">
     {% for col_html in columns_html %}
     <div class="col{% if columns_html|length==2 %}-md-6{% elif columns_html|length==3 %}-md-4{% elif columns_html|length==4 %}-md-3{% endif %}">
+      {% if canvas_mode and _wb_col_parent_paths_json %}
+      <div class="wb-canvas-nested-root" data-wb-parent-path="{{ _wb_col_parent_paths_json[loop.index0]|e }}">
+      {% endif %}
       {{ col_html|safe }}
+      {% if canvas_mode and _wb_col_parent_paths_json %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>

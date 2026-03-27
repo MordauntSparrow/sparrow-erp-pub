@@ -77,6 +77,31 @@
     </div>
   </div>
 
+  {% if data.summaries_by_job_type %}
+  <div class="card mb-3">
+    <div class="card-header py-2">
+      <strong>Totals by job type</strong>
+      <span class="text-muted small"> (hours × rate)</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="list-group list-group-flush">
+        {% for s in data.summaries_by_job_type %}
+        <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
+          <div class="d-flex flex-column">
+            <span class="badge me-1" style="background-color: {{ s.job_type_colour_hex or '#6c757d' }}; color: #fff">{{ s.job_type_name or s.job_type_id }}</span>
+            <span class="text-muted small mt-1">Entries: {{ s.entry_count or 0 }}</span>
+          </div>
+          <div class="text-end">
+            <div class="text-muted small">{{ '%.2f'|format(s.total_hours or 0) }} h</div>
+            <div class="fw-semibold">£{{ '%.2f'|format(s.total_pay or 0) }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Timesheet Table -->
   <div class="card">
     <div class="card-body">

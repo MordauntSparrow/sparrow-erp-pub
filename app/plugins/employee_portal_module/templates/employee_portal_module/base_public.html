@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="{% block meta_description %}Employee portal: sign in to access time billing, HR, compliance, scheduling and more.{% endblock %}">
+  <title>{% block title %}{{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Employee Portal' }}{% endblock %}</title>
+  {% if ((config or {}).get('site_settings') or {}).get('favicon_path') %}
+  <link rel="icon" href="{{ url_for('static', filename=((config or {}).get('site_settings') or {}).get('favicon_path')) }}" type="image/x-icon">
+  {% endif %}
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    {# Theme from session/DB only (portal_theme is resolved light/dark). No URL param. #}
+    {% set _body_theme = portal_theme|default('light') %}
+
+    /* Dark: clearly dark page (WCAG AA), distinct from cards */
+    .portal-theme-dark body,
+    body.portal-theme-dark {
+      background-color: #020617 !important;   /* darker than cards so theme is obvious */
+      color: #e2e8f0 !important;
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    /* Light: soft grey page (not stark white), high contrast */
+    .portal-theme-light body,
+    body.portal-theme-light {
+      background-color: #e2e8f0 !important;   /* medium light grey so not harsh */
+      color: #0f172a !important;
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+
+    /* Dark: nav */
+    .portal-theme-dark .ep-nav,
+    .portal-theme-dark .navbar-module,
+    body.portal-theme-dark .ep-nav,
+    body.portal-theme-dark .navbar-module {
+      background-color: #0f172a !important;
+      color: #e2e8f0 !important;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    /* Light: nav */
+    .portal-theme-light .ep-nav,
+    .portal-theme-light .navbar-module,
+    body.portal-theme-light .ep-nav,
+    body.portal-theme-light .navbar-module {
+      background-color: #f8fafc !important;   /* off-white, not pure white */
+      color: #0f172a !important;
+      border-bottom: 1px solid #cbd5e1;
+    }
+
+    .navbar-brand, .nav-link { color: inherit !important; }
+    /* Module name (navbar-text) must contrast the header in both themes */
+    .portal-theme-dark .ep-nav .navbar-text, .portal-theme-dark .navbar-module .navbar-text,
+    body.portal-theme-dark .ep-nav .navbar-text, body.portal-theme-dark .navbar-module .navbar-text { color: #e2e8f0 !important; }
+    .portal-theme-light .ep-nav .navbar-text, .portal-theme-light .navbar-module .navbar-text,
+    body.portal-theme-light .ep-nav .navbar-text, body.portal-theme-light .navbar-module .navbar-text { color: #0f172a !important; }
+
+    /* Links: dark — WCAG AA (4.5:1) on dark backgrounds */
+    .portal-theme-dark a, body.portal-theme-dark a { color: #7dd3fc !important; text-decoration: none; }
+    .portal-theme-dark a:hover, body.portal-theme-dark a:hover { color: #bae6fd !important; }
+    /* Links: light */
+    .portal-theme-light a, body.portal-theme-light a { color: #0369a1 !important; text-decoration: none; }
+    .portal-theme-light a:hover, body.portal-theme-light a:hover { color: #0284c7 !important; }
+
+    /* Cards: dark — elevated so they stand out from page */
+    .portal-theme-dark .ep-card,
+    .portal-theme-dark .card-module,
+    body.portal-theme-dark .ep-card,
+    body.portal-theme-dark .card-module {
+      background-color: #1e293b !important;
+      color: #e2e8f0 !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      border-radius: 1rem;
+    }
+    /* Cards: light — off-white on grey page */
+    .portal-theme-light .ep-card,
+    .portal-theme-light .card-module,
+    body.portal-theme-light .ep-card,
+    body.portal-theme-light .card-module {
+      background-color: #f8fafc !important;   /* soft off-white */
+      color: #0f172a !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 1rem;
+    }
+    .ep-card:hover { opacity: 0.98; }
+    .ep-link { color: inherit; text-decoration: none; }
+    .ep-link:hover { color: inherit; opacity: 0.9; }
+
+    .ep-avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; border: 3px solid #3b82f6; }
+    .ep-avatar-initials {
+      width: 96px; height: 96px; border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff;
+      font-size: 2rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Module tiles: dark */
+    .portal-theme-dark .module-tile, body.portal-theme-dark .module-tile {
+      background-color: #1e293b !important; color: #e2e8f0 !important; border: 1px solid rgba(255,255,255,0.15);
+      display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-radius: 1rem;
+      text-decoration: none; transition: background .15s, opacity .15s;
+    }
+    .portal-theme-dark .module-tile:hover, body.portal-theme-dark .module-tile:hover {
+      background-color: #334155 !important; color: #f8fafc !important;
+    }
+    /* Module tiles: light */
+    .portal-theme-light .module-tile, body.portal-theme-light .module-tile {
+      background-color: #fff !important; color: #0f172a !important; border: 1px solid #cbd5e1;
+      display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-radius: 1rem;
+      text-decoration: none; transition: background .15s, opacity .15s;
+    }
+    .portal-theme-light .module-tile:hover, body.portal-theme-light .module-tile:hover {
+      background-color: #f8fafc !important; color: #0f172a !important;
+    }
+    .module-tile i { font-size: 1.5rem; opacity: 0.9; }
+    .module-tile--disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+
+    /* Secondary text: WCAG AA (≥4.5:1) — dark: lighter grey on dark bg; light: dark grey on white */
+    .portal-theme-dark .text-secondary, body.portal-theme-dark .text-secondary,
+    .portal-theme-dark .text-muted, body.portal-theme-dark .text-muted { color: #cbd5e1 !important; }
+    .portal-theme-light .text-secondary, body.portal-theme-light .text-secondary,
+    .portal-theme-light .text-muted, body.portal-theme-light .text-muted { color: #475569 !important; }
+
+    /* Form labels and small text: always readable (WCAG AA) */
+    .portal-theme-dark .form-label, body.portal-theme-dark .form-label,
+    .portal-theme-dark .form-check-label, body.portal-theme-dark .form-check-label { color: #e2e8f0 !important; }
+    .portal-theme-light .form-label, body.portal-theme-light .form-label,
+    .portal-theme-light .form-check-label, body.portal-theme-light .form-check-label { color: #1e293b !important; }
+
+    .btn-primary, a.btn-primary { background-color: #3b82f6 !important; border-color: #3b82f6 !important; color: #fff !important; }
+    .btn-primary:hover, .btn-primary:focus, a.btn-primary:hover, a.btn-primary:focus { color: #fff !important; }
+    body.portal-theme-light .btn-primary, body.portal-theme-light a.btn-primary { color: #fff !important; }
+    body.portal-theme-light .btn-primary:hover, body.portal-theme-light .btn-primary:focus, body.portal-theme-light a.btn-primary:hover, body.portal-theme-light a.btn-primary:focus { color: #fff !important; }
+    .portal-theme-dark .btn-outline-primary, body.portal-theme-dark .btn-outline-primary { border-color: #7dd3fc !important; color: #7dd3fc !important; }
+    .portal-theme-dark .btn-outline-primary:hover, body.portal-theme-dark .btn-outline-primary:hover { background-color: rgba(125,211,252,0.15) !important; color: #bae6fd !important; border-color: #bae6fd !important; }
+    .portal-theme-light .btn-outline-primary, body.portal-theme-light .btn-outline-primary { border-color: #0369a1 !important; color: #0369a1 !important; }
+    .portal-theme-light .btn-outline-primary:hover, body.portal-theme-light .btn-outline-primary:hover { background-color: #f0f9ff !important; color: #0284c7 !important; border-color: #0284c7 !important; }
+    .portal-theme-dark .btn-outline-secondary, body.portal-theme-dark .btn-outline-secondary { border-color: #94a3b8 !important; color: #cbd5e1 !important; }
+    .portal-theme-dark .btn-outline-secondary:hover, body.portal-theme-dark .btn-outline-secondary:hover { background-color: rgba(148,163,184,0.2) !important; color: #e2e8f0 !important; border-color: #cbd5e1 !important; }
+    .portal-theme-light .btn-outline-light, body.portal-theme-light .btn-outline-light { border-color: #64748b !important; color: #475569 !important; }
+    .portal-theme-light .btn-outline-light:hover, body.portal-theme-light .btn-outline-light:hover { background-color: #e2e8f0 !important; color: #0f172a !important; }
+    .btn-outline-warning, .btn-warning, .btn-info { color: #1f1f1f !important; }
+
+    /* List groups and form containers in modules (e.g. swap, open shifts) — theme-aware so light mode is never black on black */
+    .portal-theme-dark .list-group-item.bg-dark, body.portal-theme-dark .list-group-item.bg-dark { background-color: #1e293b !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.15) !important; }
+    .portal-theme-dark .list-group-item.bg-dark .text-muted, body.portal-theme-dark .list-group-item.bg-dark .text-muted { color: #cbd5e1 !important; }
+    .portal-theme-dark .card.bg-dark, body.portal-theme-dark .card.bg-dark, .portal-theme-dark .card-body.bg-dark, body.portal-theme-dark .card-body.bg-dark { background-color: #1e293b !important; color: #e2e8f0 !important; }
+    .portal-theme-light .list-group-item.bg-dark, body.portal-theme-light .list-group-item.bg-dark { background-color: #f8fafc !important; color: #0f172a !important; border-color: #e2e8f0 !important; }
+    .portal-theme-light .list-group-item.bg-dark span, .portal-theme-light .list-group-item.bg-dark div, body.portal-theme-light .list-group-item.bg-dark span, body.portal-theme-light .list-group-item.bg-dark div { color: #0f172a !important; }
+    .portal-theme-light .list-group-item.bg-dark .text-muted, body.portal-theme-light .list-group-item.bg-dark .text-muted { color: #475569 !important; }
+    .portal-theme-light .card.bg-dark, body.portal-theme-light .card.bg-dark, .portal-theme-light .card-body.bg-dark, body.portal-theme-light .card-body.bg-dark { background-color: #f8fafc !important; color: #0f172a !important; }
+
+    /* Icons and .text-primary in cards: ensure contrast in both themes */
+    .portal-theme-dark .text-primary, body.portal-theme-dark .text-primary { color: #7dd3fc !important; }
+    .portal-theme-light .text-primary, body.portal-theme-light .text-primary { color: #0369a1 !important; }
+
+    /* Form controls with bg-dark / form-control-dark: light theme override so inputs are readable */
+    .portal-theme-light .form-control.bg-dark, .portal-theme-light .form-select.bg-dark,
+    .portal-theme-light .form-control.form-control-dark, .portal-theme-light .form-select.form-control-dark,
+    body.portal-theme-light .form-control.bg-dark, body.portal-theme-light .form-select.bg-dark,
+    body.portal-theme-light .form-control.form-control-dark, body.portal-theme-light .form-select.form-control-dark {
+      background-color: #ffffff !important; color: #0f172a !important; border-color: #cbd5e1 !important;
+    }
+  </style>
+  {% block head %}{% endblock %}
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="portal-theme-{{ _body_theme }}">
+  <a href="#main-content" class="visually-hidden-focusable position-absolute top-0 start-0 m-2 btn btn-sm btn-outline-secondary">Skip to main content</a>
+  {% block nav %}
+  <nav class="ep-nav navbar navbar-expand" aria-label="Primary">
+    <div class="container">
+      {% set _site = (config or {}).get('site_settings') or {} %}
+      {% if _site.get('branding') == 'logo' and _site.get('logo_path') %}
+        <a class="navbar-brand d-flex align-items-center" href="{{ url_for('public_employee_portal.dashboard') }}">
+          <img src="{{ url_for('static', filename=_site.logo_path) }}" alt="{{ _site.get('company_name') }}" height="40">
+        </a>
+      {% else %}
+        <a class="navbar-brand fw-semibold" href="{{ url_for('public_employee_portal.dashboard') }}">
+          {{ _site.get('company_name') or 'Employee Portal' }}
+        </a>
+      {% endif %}
+      <div class="navbar-nav ms-auto align-items-center gap-2">
+        <span class="navbar-text small me-1" aria-hidden="true">Theme</span>
+        <form method="post" action="{{ url_for('routes.contractor_set_theme') }}" class="d-inline">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          {% set _pref = portal_theme_preference|default('light') %}
+          <button type="submit" name="theme" value="light" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'light' else 'btn-secondary' }}" title="Light mode" aria-label="Light theme">Light</button>
+          <button type="submit" name="theme" value="dark" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'dark' else 'btn-secondary' }}" title="Dark mode" aria-label="Dark theme">Dark</button>
+          <button type="submit" name="theme" value="auto" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'auto' else 'btn-secondary' }}" title="Auto: light by day, dark by night (UTC)" aria-label="Auto theme by time">Auto</button>
+        </form>
+        {% if user is defined and user %}
+        <a class="nav-link" href="{{ url_for('public_employee_portal.logout') }}">Log out</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+  {% endblock %}
+  <main id="main-content" class="container py-4" role="main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="text-center py-3 mt-4 small text-secondary">
+    <span>Powered by <strong>Sparrow ERP</strong></span>
+    <span class="mx-1">&copy; 2025 {{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Sparrow ERP' }}.</span>
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  {% block scripts %}{% endblock %}
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

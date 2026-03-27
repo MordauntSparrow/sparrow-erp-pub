@@ -164,7 +164,7 @@
         const wid = e.currentTarget.dataset.wid;
         const res = await fetch(apiIssue, {
           method:'POST',
-          headers:{'Content-Type':'application/json'},
+          headers: window.tbMergeCsrfHeaders({'Content-Type':'application/json'}, 'POST'),
           body: JSON.stringify({ user_id: uid, week_id: wid })
         });
         if(res.ok){
@@ -220,7 +220,7 @@
 
     const res = await fetch(apiIssueBulk, {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers: window.tbMergeCsrfHeaders({'Content-Type':'application/json'}, 'POST'),
       body: JSON.stringify({ all_active: true, from_week_id: fromW, to_week_id: toW })
     });
 

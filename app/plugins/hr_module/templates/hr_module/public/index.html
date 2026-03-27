@@ -1,0 +1,27 @@
+{% extends "hr_module/base_public.html" %}
+{% block content %}
+<h1 class="h5 mb-1">{{ module_name }}</h1>
+<p class="text-secondary small mb-4">{{ module_description }}</p>
+<div class="mb-3">
+  <a href="{{ url_for('public_hr.profile') }}" class="btn btn-outline-light btn-sm"><i class="bi bi-person me-1"></i>View / update my details</a>
+</div>
+<h2 class="h6 text-secondary mb-2">Document requests</h2>
+{% if requests_list %}
+  <div class="d-flex flex-column gap-3">
+    {% for r in requests_list %}
+    <div class="card card-module p-3">
+      <div class="d-flex justify-content-between align-items-start">
+        <a href="{{ url_for('public_hr.request_detail', req_id=r.id) }}">{{ r.title }}</a>
+        <span class="badge {% if r.status == 'approved' %}bg-success{% elif r.status == 'rejected' %}bg-danger{% elif r.status == 'pending' or r.status == 'overdue' %}bg-warning text-dark{% elif r.status == 'uploaded' %}bg-info{% else %}bg-secondary{% endif %}">{{ r.status|hr_doc_request_status }}</span>
+      </div>
+      {% if r.request_type and r.request_type != 'other' %}<p class="small text-muted mb-0">{{ r.request_type|hr_request_type }}</p>{% endif %}
+      {% if r.description %}<p class="small text-secondary mb-0 mt-1">{{ r.description[:100] }}{% if r.description|length > 100 %}…{% endif %}</p>{% endif %}
+      {% if r.required_by_date %}<p class="small text-muted mb-0">Required by {{ r.required_by_date }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-secondary">No document requests at the moment.</p>
+{% endif %}
+<a href="/employee-portal/" class="btn btn-outline-light btn-sm mt-3">Back to Portal</a>
+{% endblock %}

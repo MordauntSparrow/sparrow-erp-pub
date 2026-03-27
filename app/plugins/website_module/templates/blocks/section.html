@@ -1,6 +1,20 @@
-{% set bg_class = 'bg-light' if bg=='light' else ('bg-dark text-white' if bg=='dark' else '') %}
-<section class="py-4 {{ bg_class }}">
+{% set bg_map = {
+  'light': 'bg-light',
+  'dark': 'bg-dark text-white',
+  'white': 'bg-white',
+  'muted': 'bg-light',
+  'image': 'bg-light',
+} %}
+{% set bg_class = bg_map.get(bg, 'bg-light') %}
+{% set py = 'py-' ~ (padding|string|default('5')) %}
+<section class="{{ py }} {{ bg_class }}">
   <div class="container">
+    {% if canvas_mode and _wb_canvas_parent_path %}
+    <div class="wb-canvas-nested-root" data-wb-parent-path="{{ _wb_canvas_parent_path|e }}">
+    {% endif %}
     {{ blocks_html|safe }}
+    {% if canvas_mode and _wb_canvas_parent_path %}
+    </div>
+    {% endif %}
   </div>
 </section>

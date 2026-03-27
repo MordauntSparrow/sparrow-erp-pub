@@ -753,7 +753,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Fetch helper (returns ok, data, status)
         async function fetchJSON(url, opts) {
-            const r = await fetch(url, opts);
+            const o = opts || {};
+            const method = (o.method || "GET").toUpperCase();
+            const baseHeaders = { "Content-Type": "application/json" };
+            const headers = typeof window.tbMergeCsrfHeaders === "function"
+                ? window.tbMergeCsrfHeaders(Object.assign({}, baseHeaders, o.headers || {}), method)
+                : Object.assign({}, baseHeaders, o.headers || {});
+            const r = await fetch(url, Object.assign({}, o, { headers }));
             let j = null;
             try { j = await r.json(); } catch (_) {}
             return { ok: r.ok, data: j, status: r.status };
@@ -993,7 +999,13 @@ document.addEventListener('DOMContentLoaded', function () {
         // 4) Local utility helpers
         // ------------------------------------------------------------------
         async function fetchJSON(url, opts) {
-            const r = await fetch(url, opts);
+            const o = opts || {};
+            const method = (o.method || "GET").toUpperCase();
+            const baseHeaders = { "Content-Type": "application/json" };
+            const headers = typeof window.tbMergeCsrfHeaders === "function"
+                ? window.tbMergeCsrfHeaders(Object.assign({}, baseHeaders, o.headers || {}), method)
+                : Object.assign({}, baseHeaders, o.headers || {});
+            const r = await fetch(url, Object.assign({}, o, { headers }));
             let j = null;
             try { j = await r.json(); } catch (_) {}
             return { ok: r.ok, data: j, status: r.status };
@@ -1229,6 +1241,8 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
 </div>`;
         }
+
+        window.__TB_WEEK2_API = API;
     })();
 });
 </script>
@@ -1237,9 +1251,13 @@ document.addEventListener('DOMContentLoaded', function () {
 /* Row mode, autosave queue, CRUD actions, binders, and init */
 document.addEventListener('DOMContentLoaded', function () {
     (function () {
-        // Note: these helpers reference functions exposed by the previous script
-        // and global API constants that are available in outer scope.
-        // For clarity we redeclare the DOM refs used here.
+        // Note: these helpers reference functions exposed by the previous script.
+        const API = window.__TB_WEEK2_API;
+        if (!API || !API.upsert) {
+            console.error("Time billing week2: API config missing (__TB_WEEK2_API).");
+            return;
+        }
+
         const bodyDesktop   = document.getElementById('entryBody');
         const bodyMobile    = document.getElementById('mobileBody');
         const addBtnD       = document.getElementById('btnAddRow');
@@ -1330,7 +1348,13 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         async function fetchJSON(url, opts) {
-            const r = await fetch(url, opts);
+            const o = opts || {};
+            const method = (o.method || "GET").toUpperCase();
+            const baseHeaders = { "Content-Type": "application/json" };
+            const headers = typeof window.tbMergeCsrfHeaders === "function"
+                ? window.tbMergeCsrfHeaders(Object.assign({}, baseHeaders, o.headers || {}), method)
+                : Object.assign({}, baseHeaders, o.headers || {});
+            const r = await fetch(url, Object.assign({}, o, { headers }));
             let j = null;
             try { j = await r.json(); } catch (_) {}
             return { ok: r.ok, data: j, status: r.status };

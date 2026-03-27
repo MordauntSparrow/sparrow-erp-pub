@@ -1,0 +1,117 @@
+{% extends "scheduling_module/base_public.html" %}
+{% block content %}
+<h1 class="h5 mb-2">Scheduling assistant</h1>
+<p class="text-muted small mb-3">Ask about your availability, shifts, or who could cover a shift. I can also add availability or submit time off for you.</p>
+
+{% if not ai_available %}
+<div class="card card-module p-4 text-secondary">
+  <p class="mb-0 small">AI assistance is not set up or enabled yet.</p>
+</div>
+{% else %}
+<div id="chat-container" class="card card-module overflow-hidden d-flex flex-column" style="min-height: 320px;">
+  <div id="chat-messages" class="flex-grow-1 overflow-auto p-3" style="max-height: 360px;">
+    <div class="text-muted small mb-2">
+      <i class="bi bi-robot me-1"></i> You can say things like:
+    </div>
+    <div class="d-flex flex-wrap gap-1 mb-3">
+      <button type="button" class="btn btn-outline-secondary btn-sm suggest-prompt">What are my shifts this week?</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm suggest-prompt">Show my availability</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm suggest-prompt">I'm free Tuesday afternoons 2–6</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm suggest-prompt">Who could take my shift on Friday?</button>
+      <button type="button" class="btn btn-outline-secondary btn-sm suggest-prompt">Request time off Dec 23 to Dec 27</button>
+    </div>
+  </div>
+  <div class="p-3 border-top border-secondary">
+    <form id="chat-form" class="d-flex gap-2">
+      <input type="text" id="chat-input" class="form-control form-control-dark bg-dark text-light" placeholder="Ask about availability, shifts, or cover..." autocomplete="off">
+      <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+    </form>
+    <p class="small text-muted mt-2 mb-0">Your questions stay between you and the assistant. Use it to update availability or find cover so you need to ask admin less.</p>
+  </div>
+</div>
+<div id="chat-error" class="alert alert-warning mt-2 d-none" role="alert"></div>
+
+<script>
+(function() {
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var messagesEl = document.getElementById('chat-messages');
+  var errorEl = document.getElementById('chat-error');
+  var sendBtn = document.getElementById('chat-send');
+
+  var history = [];
+
+  function addMessage(role, content) {
+    var wrap = document.createElement('div');
+    wrap.className = 'mb-2 ' + (role === 'user' ? 'text-end' : '');
+    var bubble = document.createElement('div');
+    bubble.className = 'd-inline-block text-start p-2 rounded ' + (role === 'user' ? 'bg-primary text-white' : 'bg-secondary bg-opacity-25');
+    bubble.style.maxWidth = '90%';
+    bubble.textContent = content;
+    wrap.appendChild(bubble);
+    messagesEl.appendChild(wrap);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function setLoading(on) {
+    sendBtn.disabled = on;
+    if (on) sendBtn.textContent = '…';
+    else sendBtn.textContent = 'Send';
+  }
+
+  function showError(msg) {
+    if (errorEl) {
+      errorEl.textContent = msg;
+      errorEl.classList.remove('d-none');
+    }
+  }
+
+  function hideError() {
+    if (errorEl) errorEl.classList.add('d-none');
+  }
+
+  document.querySelectorAll('.suggest-prompt').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (input) input.value = this.textContent;
+      input.focus();
+    });
+  });
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var text = (input && input.value) ? input.value.trim() : '';
+    if (!text) return;
+    addMessage('user', text);
+    if (input) input.value = '';
+    hideError();
+    setLoading(true);
+
+    fetch('{{ url_for("public_scheduling.api_ai_chat") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ message: text, history: history })
+    })
+      .then(function(r) { return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; }); })
+      .then(function(res) {
+        if (res.ok && res.data.reply) {
+          history.push({ role: 'user', content: text });
+          history.push({ role: 'assistant', content: res.data.reply });
+          addMessage('assistant', res.data.reply);
+        } else {
+          var err = (res.data && res.data.error) || 'Something went wrong.';
+          showError(err);
+        }
+      })
+      .catch(function() {
+        showError('Network error. Please try again.');
+      })
+      .finally(function() { setLoading(false); });
+  });
+})();
+</script>
+{% endif %}
+
+<div class="mt-3">
+  <a href="{{ url_for('public_scheduling.public_index') }}" class="btn btn-outline-secondary btn-sm">Back to Scheduling</a>
+</div>
+{% endblock %}

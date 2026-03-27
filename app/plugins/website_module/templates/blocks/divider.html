@@ -1,0 +1,14 @@
+{% set my = 'my-' ~ (spacing|string|default('3')) %}
+{% if style == 'spacer' %}
+<div class="{{ my }}" aria-hidden="true"></div>
+{% elif style == 'dots' %}
+<div class="d-flex justify-content-center align-items-center gap-2 {{ my }}">
+  <span class="rounded-circle bg-primary" style="width:6px;height:6px;opacity:.5;"></span>
+  <span class="rounded-circle bg-primary" style="width:8px;height:8px;"></span>
+  <span class="rounded-circle bg-primary" style="width:6px;height:6px;opacity:.5;"></span>
+</div>
+{% elif style == 'fade' %}
+<div class="{{ my }}" style="height:1px;background:linear-gradient(90deg,transparent,rgba(13,110,253,.35),transparent);"></div>
+{% else %}
+<hr class="opacity-25 {{ my }}">
+{% endif %}

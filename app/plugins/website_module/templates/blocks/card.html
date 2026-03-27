@@ -1,0 +1,15 @@
+{% set shadow_cls = '' if shadow == 'none' else ('shadow-3' if shadow == 'strong' else 'shadow-2') %}
+<div class="card border-0 {{ shadow_cls }} rounded-4 overflow-hidden h-100 mb-4">
+  {% if image %}
+  <div class="ratio ratio-16x9 bg-light">
+    <img src="{{ image }}" class="object-fit-cover" alt="{{ (title or 'Card image')|striptags|trim|truncate(120) }}" loading="lazy" decoding="async">
+  </div>
+  {% endif %}
+  <div class="card-body p-4 p-md-5">
+    <h3 class="card-title h5 fw-bold mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="title" data-wb-plain="1"{% endif %}>{{ title }}</h3>
+    <div class="card-text{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="body" data-wb-rich="1"{% endif %}>{{ body|safe }}</div>
+    {% if btn_text %}
+    <a href="{{ btn_href or '#' }}" class="btn btn-primary btn-md mt-3" data-wb-no-select="1" data-wb-cta="card">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="btn_text" data-wb-plain="1">{{ btn_text }}</span>{% else %}{{ btn_text }}{% endif %}</a>
+    {% endif %}
+  </div>
+</div>

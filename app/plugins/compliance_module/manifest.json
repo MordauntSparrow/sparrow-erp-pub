@@ -1,0 +1,15 @@
+{
+    "system_name": "compliance_module",
+    "version": "0.0.2",
+    "installed": true,
+    "enabled": true,
+    "name": "Compliance Module",
+    "description": "",
+    "dependencies": [
+        "employee_portal_module",
+        "website_module"
+    ],
+    "icon": "icon.png",
+    "dashboard_category": "Compliance & risk",
+    "update_available": false
+}

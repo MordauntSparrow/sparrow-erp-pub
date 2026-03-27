@@ -1,7 +1,56 @@
-<section class="py-5 {{ 'bg-light' if bg=='light' else ('bg-dark text-white' if bg=='dark' else '') }}">
-  <div class="container text-center">
-    <h1 class="display-5 fw-bold mb-3">{{ headline }}</h1>
-    {% if sub %}<p class="lead mb-4">{{ sub }}</p>{% endif %}
-    {% if cta_text %}<a href="#" class="btn btn-primary btn-lg">{{ cta_text }}</a>{% endif %}
+{# Material-style hero: gradient / light / dark, optional CTA #}
+{% set align_class = 'text-start' if align == 'left' else ('text-end' if align == 'right' else 'text-center') %}
+{% set row_align = 'justify-content-start' if align == 'left' else ('justify-content-end' if align == 'right' else 'justify-content-center') %}
+{% if bg == 'gradient' %}
+<section class="position-relative overflow-hidden py-5">
+  <div class="position-absolute top-0 start-0 w-100 h-100" style="background: linear-gradient(135deg, #0d6efd 0%, #6610f2 45%, #6f42c1 100%); opacity: 0.95;"></div>
+  <div class="position-absolute top-0 start-0 w-100 h-100" style="background: radial-gradient(ellipse 80% 60% at 20% 20%, rgba(255,255,255,0.15), transparent);"></div>
+  <div class="container position-relative py-4">
+    <div class="{{ align_class }} text-white">
+      <h1 class="display-4 fw-bold mb-3 text-white{% if canvas_mode %} wb-inline-target{% endif %}" style="letter-spacing: -0.02em;"{% if canvas_mode %} data-wb-field="headline" data-wb-plain="1"{% endif %}>{{ headline }}</h1>
+      {% if sub %}<p class="lead mb-4 opacity-90 mx-auto{% if canvas_mode %} wb-inline-target{% endif %}" style="max-width: 42rem;"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+      {% if cta_text %}
+      <div class="d-flex flex-wrap gap-2 {{ row_align }}">
+        <a href="{{ cta_href or '#' }}" class="btn btn-light btn-lg shadow-3 px-4 ripple-surface" data-wb-no-select="1" data-wb-cta="hero">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="cta_text" data-wb-plain="1">{{ cta_text }}</span>{% else %}{{ cta_text }}{% endif %}</a>
+      </div>
+      {% endif %}
+    </div>
   </div>
 </section>
+{% elif bg == 'image' and image and image|trim %}
+<section class="position-relative overflow-hidden py-5 py-md-6">
+  <img src="{{ image|trim }}" alt="{{ (headline or 'Hero image')|striptags|trim|truncate(120) }}" width="1920" height="1080" class="position-absolute top-0 start-0 w-100 h-100" style="object-fit: cover; z-index: 0;" fetchpriority="high" decoding="async" loading="eager" data-wb-skip-lazy="1">
+  <div class="position-absolute top-0 start-0 w-100 h-100" style="background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,.25) 100%); z-index: 1;"></div>
+  <div class="container position-relative py-4" style="z-index: 2;">
+    <div class="{{ align_class }} text-white">
+      <h1 class="display-4 fw-bold mb-3 text-white{% if canvas_mode %} wb-inline-target{% endif %}" style="letter-spacing: -0.02em;"{% if canvas_mode %} data-wb-field="headline" data-wb-plain="1"{% endif %}>{{ headline }}</h1>
+      {% if sub %}<p class="lead mb-4 opacity-90 mx-auto{% if canvas_mode %} wb-inline-target{% endif %}" style="max-width: 42rem;"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+      {% if cta_text %}
+      <div class="d-flex flex-wrap gap-2 {{ row_align }}">
+        <a href="{{ cta_href or '#' }}" class="btn btn-light btn-lg shadow-3 px-4 ripple-surface" data-wb-no-select="1" data-wb-cta="hero">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="cta_text" data-wb-plain="1">{{ cta_text }}</span>{% else %}{{ cta_text }}{% endif %}</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% elif bg == 'dark' %}
+<section class="py-5 py-md-6 bg-dark text-white">
+  <div class="container">
+    <div class="{{ align_class }}">
+      <h1 class="display-5 fw-bold mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="headline" data-wb-plain="1"{% endif %}>{{ headline }}</h1>
+      {% if sub %}<p class="lead text-white-50 mb-4 mx-auto{% if canvas_mode %} wb-inline-target{% endif %}" style="max-width: 40rem;"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+      {% if cta_text %}<a href="{{ cta_href or '#' }}" class="btn btn-primary btn-lg px-4" data-wb-no-select="1" data-wb-cta="hero">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="cta_text" data-wb-plain="1">{{ cta_text }}</span>{% else %}{{ cta_text }}{% endif %}</a>{% endif %}
+    </div>
+  </div>
+</section>
+{% else %}
+<section class="py-5 bg-light">
+  <div class="container">
+    <div class="{{ align_class }}">
+      <h1 class="display-5 fw-bold text-dark mb-3{% if canvas_mode %} wb-inline-target{% endif %}" style="letter-spacing: -0.02em;"{% if canvas_mode %} data-wb-field="headline" data-wb-plain="1"{% endif %}>{{ headline }}</h1>
+      {% if sub %}<p class="lead text-muted mb-4 mx-auto{% if canvas_mode %} wb-inline-target{% endif %}" style="max-width: 40rem;"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+      {% if cta_text %}<a href="{{ cta_href or '#' }}" class="btn btn-primary btn-lg px-4 shadow-1-strong" data-wb-no-select="1" data-wb-cta="hero">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="cta_text" data-wb-plain="1">{{ cta_text }}</span>{% else %}{{ cta_text }}{% endif %}</a>{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}

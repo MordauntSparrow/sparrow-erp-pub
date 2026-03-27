@@ -1,0 +1,20 @@
+<section class="py-5 bg-primary text-white">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-8 text-center">
+        <h2 class="h4 fw-bold mb-2{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="heading" data-wb-plain="1"{% endif %}>{{ heading }}</h2>
+        {% if sub %}<p class="text-white-50 mb-4{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+        <form class="row g-2 justify-content-center" action="{{ action|e }}" method="{{ (method or 'post')|e }}" target="_blank" data-wb-no-select="1">
+          <div class="col-sm-8 col-md-6">
+            <label class="visually-hidden" for="nl-email-{{ _block_uid }}">Email</label>
+            <input id="nl-email-{{ _block_uid }}" type="email" name="email" class="form-control form-control-lg rounded-3" placeholder="{{ placeholder|e }}" autocomplete="email">
+          </div>
+          <div class="col-auto">
+            <button type="submit" class="btn btn-light btn-lg px-4 rounded-3" data-wb-cta="newsletter">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="button" data-wb-plain="1">{{ button }}</span>{% else %}{{ button }}{% endif %}</button>
+          </div>
+        </form>
+        <p class="small text-white-50 mt-3 mb-0">Point the form action at your email tool or API. For same-site POST, add your app’s CSRF token.</p>
+      </div>
+    </div>
+  </div>
+</section>

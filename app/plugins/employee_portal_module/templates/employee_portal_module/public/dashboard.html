@@ -1,0 +1,230 @@
+{% extends "employee_portal_module/base_public.html" %}
+{% block title %}Dashboard – {{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Employee Portal' }}{% endblock %}
+{% block content %}
+{% if welcome_message %}
+<section class="mb-4" role="region" aria-label="Welcome">
+  <div class="ep-card p-3">
+    <p class="mb-0">{{ welcome_message }}</p>
+  </div>
+</section>
+{% endif %}
+
+{% set _glance = summary_context|default({}) %}
+{% set _sched = _glance.scheduling_summary|default({}) if _glance else {} %}
+{% set _has_attention = (_glance.pending_policies|default(0) > 0) or (_glance.pending_training|default(0) > 0) or (_glance.pending_hr_requests|default(0) > 0) or (_glance.pending_todo_count|default(0) > 0) or (_glance.unread_messages|default(0) > 0) or (scheduling_enabled|default(False) and (_sched.shifts_this_week|default(0) > 0 or _sched.pending_shift_tasks|default(0) > 0)) %}
+<section class="mb-4" role="region" aria-label="At a glance">
+  <div class="ep-card p-3">
+    <h3 class="h6 text-secondary text-uppercase mb-2">At a glance</h3>
+    {% if _has_attention %}
+    <ul class="list-unstyled mb-0 small">
+      {% if scheduling_enabled|default(False) and _sched %}
+      {% if _sched.shifts_this_week|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-calendar-week text-primary me-2" aria-hidden="true"></i><a href="{{ url_for('public_scheduling.public_index') }}">{{ _sched.shifts_this_week }} shift(s) this week</a>{% if _sched.shifts_today|default(0) > 0 %} ({{ _sched.shifts_today }} today){% endif %}</li>
+      {% endif %}
+      {% if _sched.pending_shift_tasks|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-list-task text-secondary me-2" aria-hidden="true"></i><a href="{{ url_for('public_employee_portal.dashboard', todo_filter='pending') }}">{{ _sched.pending_shift_tasks }} shift task(s) to complete</a></li>
+      {% endif %}
+      {% endif %}
+      {% if _glance.pending_policies|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-shield-check text-warning me-2" aria-hidden="true"></i><a href="{{ url_for('public_compliance.public_index') }}">{{ _glance.pending_policies }} policy/policies to sign</a></li>
+      {% endif %}
+      {% if _glance.pending_training|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-mortarboard text-success me-2" aria-hidden="true"></i><a href="{{ url_for('public_training.public_index') }}">{{ _glance.pending_training }} training item(s) to complete</a></li>
+      {% endif %}
+      {% if _glance.pending_hr_requests|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-person-badge text-info me-2" aria-hidden="true"></i><a href="{{ url_for('public_hr.public_index') }}">{{ _glance.pending_hr_requests }} HR document request(s)</a></li>
+      {% endif %}
+      {% if _glance.pending_todo_count|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-list-check text-warning me-2" aria-hidden="true"></i>{{ _glance.pending_todo_count }} to-do(s) pending</li>
+      {% endif %}
+      {% if _glance.unread_messages|default(0) > 0 %}
+      <li class="mb-1"><i class="bi bi-envelope text-primary me-2" aria-hidden="true"></i>{{ _glance.unread_messages }} unread message(s)</li>
+      {% endif %}
+    </ul>
+    {% else %}
+    <p class="text-secondary small mb-0">Nothing needs your attention right now.</p>
+    {% endif %}
+    {% if ai_summary %}
+    <p class="mt-2 mb-0 small fst-italic">{{ ai_summary }}</p>
+    {% endif %}
+    <p class="mt-2 mb-0">
+      {% if ai_available|default(False) %}
+      <a href="{{ url_for('public_employee_portal.assistant_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-chat-dots me-1"></i>Ask assistant</a>
+      {% else %}
+      <span class="btn btn-sm btn-outline-secondary disabled opacity-50" style="pointer-events: none;" tabindex="-1" role="button" aria-disabled="true" title="AI assistance is not set up or enabled yet."><i class="bi bi-chat-dots me-1"></i>Ask assistant</span>
+      {% endif %}
+    </p>
+  </div>
+</section>
+
+<div class="text-center py-4" role="region" aria-label="Profile">
+  {% if user and user.get('profile_picture_path') %}
+    <img src="{{ url_for('static', filename=user.profile_picture_path) }}" alt="" class="ep-avatar" width="96" height="96">
+  {% else %}
+    <div class="ep-avatar-initials mx-auto" aria-hidden="true">
+      {{ ((user.get('initials') or user.get('name') or user.get('email') or '?')|string)[:2]|upper }}
+    </div>
+  {% endif %}
+  <h2 class="h5 mt-3 mb-0">{{ user.get('name') or user.get('email') }}</h2>
+  <p class="text-secondary small mb-0">Employee Portal</p>
+</div>
+
+{% set _has_quick_actions = (scheduling_enabled|default(False)) or (pending_policies|default(0) > 0) or (pending_hr_requests|default(0) > 0) or (pending_training|default(0) > 0) %}
+{% if _has_quick_actions %}
+<section class="mb-4" aria-labelledby="quick-actions-heading">
+  <h3 id="quick-actions-heading" class="h6 text-secondary text-uppercase mb-3">Quick actions</h3>
+  <div class="d-flex flex-wrap gap-2">
+    {% if scheduling_enabled|default(False) %}
+    <a href="{{ url_for('public_scheduling.request_time_off_page') }}" class="btn btn-outline-light btn-sm">Request time off</a>
+    <a href="{{ url_for('public_scheduling.report_sickness_page') }}" class="btn btn-outline-warning btn-sm">Report sickness</a>
+    {% endif %}
+    {% if pending_policies|default(0) > 0 %}
+    <a href="{{ url_for('public_compliance.public_index') }}" class="btn btn-warning btn-sm">{{ pending_policies }} policy/policies to sign</a>
+    {% endif %}
+    {% if pending_hr_requests|default(0) > 0 %}
+    <a href="{{ url_for('public_hr.public_index') }}" class="btn btn-info btn-sm">{{ pending_hr_requests }} document request(s)</a>
+    {% endif %}
+    {% if pending_training|default(0) > 0 %}
+    <a href="{{ url_for('public_training.public_index') }}" class="btn btn-success btn-sm"><i class="bi bi-mortarboard me-1"></i>{{ pending_training }} training item(s) to complete</a>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="mb-4" aria-labelledby="modules-heading">
+  <h3 id="modules-heading" class="h6 text-secondary text-uppercase mb-3">Modules</h3>
+  <div class="d-flex flex-column gap-2">
+    {% for mod in module_links %}
+    {% if mod.enabled|default(True) %}
+    <a href="{{ mod.url }}" class="module-tile">
+      <i class="bi {{ mod.icon }}"></i>
+      <span class="fw-medium">{{ mod.name }}</span>
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    {% else %}
+    <span class="module-tile module-tile--disabled" title="This module is not enabled.">
+      <i class="bi {{ mod.icon }}"></i>
+      <span class="fw-medium">{{ mod.name }}</span>
+      <span class="ms-auto small text-secondary">Not available</span>
+    </span>
+    {% endif %}
+    {% endfor %}
+    {% if ai_available|default(False) %}
+    <a href="{{ url_for('public_employee_portal.assistant_page') }}" class="module-tile">
+      <i class="bi bi-chat-dots"></i>
+      <span class="fw-medium">Portal assistant</span>
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    {% else %}
+    <span class="module-tile module-tile--disabled" title="AI assistance is not set up or enabled yet." aria-disabled="true">
+      <i class="bi bi-chat-dots"></i>
+      <span class="fw-medium">Portal assistant</span>
+      <span class="ms-auto small text-secondary">Unavailable</span>
+    </span>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mb-4" aria-labelledby="messages-heading">
+  <h3 id="messages-heading" class="h6 text-secondary text-uppercase mb-3">
+    <i class="bi bi-envelope me-1" aria-hidden="true"></i> Messages
+    {% if (unread_message_count|default(0)) > 0 %}
+    <span class="badge bg-primary ms-1" aria-label="{{ unread_message_count }} unread">{{ unread_message_count }}</span>
+    {% endif %}
+  </h3>
+  {% if messages %}
+  <div class="d-flex flex-column gap-2">
+    {% for m in messages %}
+    <a href="{{ url_for('public_employee_portal.message_detail', msg_id=m.id) }}" class="ep-card p-3 text-decoration-none d-block {% if not m.read_at %}border-start border-primary border-3{% endif %}" style="color: inherit;">
+      <div class="d-flex justify-content-between align-items-start">
+        <strong class="small text-secondary">{{ m.source_module|replace('_module','') }}</strong>
+        <span class="small text-secondary">{{ m.created_at.strftime('%d %b') if m.created_at else '' }}</span>
+      </div>
+      <div class="fw-medium mt-1">{{ m.subject }}</div>
+      {% if m.body %}
+      <p class="small text-secondary mb-0 mt-1">{{ m.body[:120] }}{% if m.body|length > 120 %}…{% endif %}</p>
+      {% endif %}
+      <span class="small mt-1 d-inline-block">{% if m.read_at %}Read{% else %}View & mark read{% endif %} <i class="bi bi-chevron-right"></i></span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-secondary small mb-0">No messages. When your organisation sends you a message, it will appear here.</p>
+  {% endif %}
+</section>
+
+<section class="mb-4" aria-labelledby="todos-heading">
+  <h3 id="todos-heading" class="h6 text-secondary text-uppercase mb-3">
+    <i class="bi bi-list-check me-1" aria-hidden="true"></i> To-do
+    {% if (pending_todo_count|default(0)) > 0 %}
+    <span class="badge bg-warning text-dark ms-1" aria-label="{{ pending_todo_count }} pending">{{ pending_todo_count }}</span>
+    {% endif %}
+  </h3>
+  <div class="d-flex flex-wrap gap-2 mb-2" role="tablist" aria-label="Filter todos">
+    <a href="{{ url_for('public_employee_portal.dashboard', todo_filter='pending') }}" class="btn btn-sm {{ 'btn-primary' if todo_filter == 'pending' else 'btn-outline-light' }}">Pending</a>
+    <a href="{{ url_for('public_employee_portal.dashboard', todo_filter='completed') }}" class="btn btn-sm {{ 'btn-primary' if todo_filter == 'completed' else 'btn-outline-light' }}">Completed</a>
+    <a href="{{ url_for('public_employee_portal.dashboard', todo_filter='all') }}" class="btn btn-sm {{ 'btn-primary' if todo_filter == 'all' else 'btn-outline-light' }}">All</a>
+  </div>
+  {% if todo_filter == 'pending' %}
+  <p class="small text-secondary mb-2">Completed tasks are hidden here to keep your list short and fast on mobile. Use <strong>Completed</strong> or <strong>All</strong> when you need history.</p>
+  {% endif %}
+  {% if pending_todos_truncated|default(false) %}
+  <p class="small text-warning mb-2">Showing {{ todos|length }} of {{ pending_todo_count }} pending — oldest may be hidden to keep the page fast. Your organisation can archive or complete old tasks in admin.</p>
+  {% endif %}
+  {% if todos %}
+  <div class="d-flex flex-column gap-2">
+    {% for t in todos %}
+    <div class="ep-card p-3 {% if t.completed_at %}opacity-75{% endif %}">
+      <div class="d-flex align-items-start gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary p-1 js-todo-complete" data-id="{{ t.id }}" title="Mark done" aria-label="Mark todo as done" {% if t.completed_at %}disabled{% endif %}>
+          {% if t.completed_at %}<i class="bi bi-check-lg text-success"></i>{% else %}<i class="bi bi-circle"></i>{% endif %}
+        </button>
+        <div class="flex-grow-1 min-w-0">
+          <span class="small text-secondary">{{ t.source_module|replace('_module','') }}</span>
+          <div class="fw-medium">
+            {% if t.link_url %}
+            <a href="{{ t.link_url }}" class="ep-link">{{ t.title }}</a>
+            {% else %}
+            {{ t.title }}
+            {% endif %}
+          </div>
+          {% if t.due_date and not t.completed_at %}
+          <span class="small text-warning">Due {{ t.due_date.strftime('%d %b %Y') }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-secondary small mb-0">{% if todo_filter == 'completed' %}No completed items.{% elif todo_filter == 'pending' %}Nothing pending right now.{% else %}Nothing to do right now.{% endif %}</p>
+  {% endif %}
+</section>
+
+<script>
+(function() {
+  function handleApiError(res, fallbackMsg) {
+    if (!res.ok) {
+      try { return res.json().then(function(d) { alert(d.error || fallbackMsg); }); }
+      catch (e) { alert(fallbackMsg); }
+    }
+    return Promise.resolve();
+  }
+  document.querySelectorAll('.js-todo-complete').forEach(function(btn) {
+    if (btn.disabled) return;
+    btn.addEventListener('click', function() {
+      var id = btn.getAttribute('data-id');
+      var url = '{{ url_for("public_employee_portal.api_todo_complete", todo_id=0) }}'.replace('0', id);
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+      }).then(function(res) {
+        return handleApiError(res, 'Could not complete todo.').then(function() {
+          if (res.ok) window.location.reload();
+        });
+      }).catch(function() { alert('Something went wrong. Please try again.'); });
+    });
+  });
+})();
+</script>
+{% endblock %}

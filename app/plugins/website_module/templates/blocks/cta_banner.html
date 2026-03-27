@@ -1,0 +1,13 @@
+<section class="py-4 py-md-5 rounded-4 my-3 overflow-hidden {% if tone == 'primary' %}text-white{% elif tone == 'dark' %}bg-dark text-white{% elif tone == 'success' %}bg-success text-white{% else %}bg-light text-dark border{% endif %}" {% if tone == 'primary' %}style="background: linear-gradient(120deg, #0d6efd, #0a58ca);"{% endif %}>
+  <div class="container">
+    <div class="row align-items-center g-3">
+      <div class="col-lg-8">
+        <h2 class="h3 fw-bold mb-2 {% if tone == 'light' %}text-dark{% endif %}{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="title" data-wb-plain="1"{% endif %}>{{ title }}</h2>
+        {% if subtitle %}<p class="mb-0 {% if tone == 'light' %}text-muted{% elif tone in ['primary','dark','success'] %}opacity-90{% endif %}{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="subtitle" data-wb-plain="1"{% endif %}>{{ subtitle }}</p>{% endif %}
+      </div>
+      <div class="col-lg-4 text-lg-end">
+        <a href="{{ btn_href }}" class="btn {% if tone == 'light' %}btn-primary{% else %}btn-light text-primary{% endif %} btn-lg px-4 shadow-sm" data-wb-no-select="1" data-wb-cta="cta_banner">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="btn_text" data-wb-plain="1">{{ btn_text }}</span>{% else %}{{ btn_text }}{% endif %}</a>
+      </div>
+    </div>
+  </div>
+</section>

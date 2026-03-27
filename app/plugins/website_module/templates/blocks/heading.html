@@ -1,0 +1,12 @@
+{% set lv = (level|string) if level is not none else '2' %}
+{% set tag = 'h' ~ lv %}
+{% set align_class = 'text-center' if align == 'center' else ('text-end' if align == 'right' else 'text-start') %}
+<div class="mb-4 {{ align_class }}">
+  {% if sub %}<p class="text-uppercase small fw-semibold text-primary mb-2 letter-spacing-1{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="sub" data-wb-plain="1"{% endif %}>{{ sub }}</p>{% endif %}
+  {% if tag == 'h1' %}<h1 class="display-5 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h1>
+  {% elif tag == 'h2' %}<h2 class="h2 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h2>
+  {% elif tag == 'h3' %}<h3 class="h3 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h3>
+  {% elif tag == 'h4' %}<h4 class="h4 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h4>
+  {% elif tag == 'h5' %}<h5 class="h5 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h5>
+  {% else %}<h6 class="h6 fw-bold text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="text" data-wb-plain="1"{% endif %}>{{ text }}</h6>{% endif %}
+</div>

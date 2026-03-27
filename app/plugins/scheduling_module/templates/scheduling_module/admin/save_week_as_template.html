@@ -1,0 +1,31 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Save week as template – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Save week as template</h1>
+<p class="text-muted small mb-3">Create a reusable template from this week's shifts. Optionally limit to one contractor.</p>
+<form method="post" action="{{ url_for('internal_scheduling.admin_save_week_as_template') }}" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="week_monday" value="{{ week_start.isoformat() }}">
+  <div class="mb-3">
+    <label class="form-label">Week</label>
+    <input type="text" class="form-control" value="{{ week_start.strftime('%d %b') }} – {{ (week_start + timedelta(days=6)).strftime('%d %b %Y') }}" readonly disabled>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Contractor (optional)</label>
+    <select name="contractor_id" class="form-select">
+      <option value="">All shifts in week</option>
+      {% for c in contractors %}
+      <option value="{{ c.id }}">{{ c.name or c.email }}</option>
+      {% endfor %}
+    </select>
+    <div class="form-text">Leave as "All" to include every shift; pick one to use only that person's pattern.</div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Template name (optional)</label>
+    <input type="text" name="name" class="form-control" placeholder="e.g. Standard week">
+    <div class="form-text">Default: "Week of YYYY-MM-DD"</div>
+  </div>
+  <button type="submit" class="btn btn-primary">Create template</button>
+  <a href="{{ url_for('internal_scheduling.admin_schedule_week', week=week_start.isoformat()) }}" class="btn btn-outline-secondary">Cancel</a>
+</form>
+{% endblock %}

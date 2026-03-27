@@ -1,10 +1,23 @@
 {
     "system_name": "time_billing_module",
-    "version": "0.0.1",
-    "installed": true,
-    "enabled": true,
-    "name": "Time Billing Module",
-    "description": "",
+    "name": "Shift Timesheets",
+    "description": "Captures weekly contractor timesheets with auto rates, travel, and billing variance rollups.",
+    "version": "0.0.10",
+    "changelog": "Contractor run sheets (/time-billing/runsheets): templates, crew search, publish, withdraw/reactivate payroll; migration 010 assignment columns; admin template fixes; production API errors + toasts; optional rate limits on contractor search.",
     "icon": "icon.png",
-    "update_available": false
+    "enabled": true,
+    "installed": true,
+    "update_available": false,
+    "settings": {
+        "scheduler_week_prefill_enabled": {
+            "value": "true",
+            "editable": true,
+            "tooltip": "If enabled, the weekly timesheet is prefilled from schedule_shifts (scheduled times + clock data when present)."
+        },
+        "scheduler_source_scheduled_edit_allowed": {
+            "value": "false",
+            "editable": true,
+            "tooltip": "If false, staff cannot edit scheduled_start/end on scheduler-prefilled entries (they can still override actual times)."
+        }
+    }
 }

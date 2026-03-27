@@ -1,0 +1,90 @@
+{% set aid = 'faq-' ~ _block_uid %}
+<section class="py-5">
+  <div class="container">
+    <div class="text-center mb-4 mb-md-5">
+      <h2 class="h3 fw-bold{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="section_title" data-wb-plain="1"{% endif %}>{{ section_title }}</h2>
+      {% if section_sub %}<p class="text-muted mb-0{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="section_sub" data-wb-plain="1"{% endif %}>{{ section_sub }}</p>{% endif %}
+    </div>
+    <div class="accordion accordion-flush shadow-1-strong rounded-4 overflow-hidden mx-auto" style="max-width: 48rem;" id="{{ aid }}">
+      {% if q1 and q1|trim %}
+      <div class="accordion-item border-0 border-bottom">
+        <h3 class="accordion-header" id="{{ aid }}-h1">
+          <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#{{ aid }}-c1" aria-expanded="false" aria-controls="{{ aid }}-c1">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="q1" data-wb-plain="1">{{ q1 }}</span>{% else %}{{ q1 }}{% endif %}</button>
+        </h3>
+        <div id="{{ aid }}-c1" class="accordion-collapse collapse" aria-labelledby="{{ aid }}-h1" data-bs-parent="#{{ aid }}">
+          <div class="accordion-body text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="a1" data-wb-rich="1"{% endif %}>{{ a1|safe }}</div>
+        </div>
+      </div>
+      {% endif %}
+      {% if q2 and q2|trim %}
+      <div class="accordion-item border-0 border-bottom">
+        <h3 class="accordion-header" id="{{ aid }}-h2">
+          <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#{{ aid }}-c2" aria-expanded="false" aria-controls="{{ aid }}-c2">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="q2" data-wb-plain="1">{{ q2 }}</span>{% else %}{{ q2 }}{% endif %}</button>
+        </h3>
+        <div id="{{ aid }}-c2" class="accordion-collapse collapse" aria-labelledby="{{ aid }}-h2" data-bs-parent="#{{ aid }}">
+          <div class="accordion-body text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="a2" data-wb-rich="1"{% endif %}>{{ a2|safe }}</div>
+        </div>
+      </div>
+      {% endif %}
+      {% if q3 and q3|trim %}
+      <div class="accordion-item border-0 border-bottom">
+        <h3 class="accordion-header" id="{{ aid }}-h3">
+          <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#{{ aid }}-c3" aria-expanded="false" aria-controls="{{ aid }}-c3">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="q3" data-wb-plain="1">{{ q3 }}</span>{% else %}{{ q3 }}{% endif %}</button>
+        </h3>
+        <div id="{{ aid }}-c3" class="accordion-collapse collapse" aria-labelledby="{{ aid }}-h3" data-bs-parent="#{{ aid }}">
+          <div class="accordion-body text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="a3" data-wb-rich="1"{% endif %}>{{ a3|safe }}</div>
+        </div>
+      </div>
+      {% endif %}
+      {% if q4 and q4|trim %}
+      <div class="accordion-item border-0 border-bottom">
+        <h3 class="accordion-header" id="{{ aid }}-h4">
+          <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#{{ aid }}-c4" aria-expanded="false" aria-controls="{{ aid }}-c4">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="q4" data-wb-plain="1">{{ q4 }}</span>{% else %}{{ q4 }}{% endif %}</button>
+        </h3>
+        <div id="{{ aid }}-c4" class="accordion-collapse collapse" aria-labelledby="{{ aid }}-h4" data-bs-parent="#{{ aid }}">
+          <div class="accordion-body text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="a4" data-wb-rich="1"{% endif %}>{{ a4|safe }}</div>
+        </div>
+      </div>
+      {% endif %}
+      {% if q5 and q5|trim %}
+      <div class="accordion-item border-0">
+        <h3 class="accordion-header" id="{{ aid }}-h5">
+          <button class="accordion-button collapsed fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#{{ aid }}-c5" aria-expanded="false" aria-controls="{{ aid }}-c5">{% if canvas_mode %}<span class="wb-inline-target" data-wb-field="q5" data-wb-plain="1">{{ q5 }}</span>{% else %}{{ q5 }}{% endif %}</button>
+        </h3>
+        <div id="{{ aid }}-c5" class="accordion-collapse collapse" aria-labelledby="{{ aid }}-h5" data-bs-parent="#{{ aid }}">
+          <div class="accordion-body text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="a5" data-wb-rich="1"{% endif %}>{{ a5|safe }}</div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% if not canvas_mode and (q1 and q1|trim or q2 and q2|trim or q3 and q3|trim or q4 and q4|trim or q5 and q5|trim) %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+{% if q1 and q1|trim %}
+    {"@type": "Question", "name": {{ q1|striptags|trim|tojson }}, "acceptedAnswer": {"@type": "Answer", "text": {{ ((a1|striptags|trim) if a1 else '')|tojson }} } }
+{% endif %}
+{% if q2 and q2|trim %}
+{% if q1 and q1|trim %},{% endif %}
+    {"@type": "Question", "name": {{ q2|striptags|trim|tojson }}, "acceptedAnswer": {"@type": "Answer", "text": {{ ((a2|striptags|trim) if a2 else '')|tojson }} } }
+{% endif %}
+{% if q3 and q3|trim %}
+{% if (q1 and q1|trim) or (q2 and q2|trim) %},{% endif %}
+    {"@type": "Question", "name": {{ q3|striptags|trim|tojson }}, "acceptedAnswer": {"@type": "Answer", "text": {{ ((a3|striptags|trim) if a3 else '')|tojson }} } }
+{% endif %}
+{% if q4 and q4|trim %}
+{% if (q1 and q1|trim) or (q2 and q2|trim) or (q3 and q3|trim) %},{% endif %}
+    {"@type": "Question", "name": {{ q4|striptags|trim|tojson }}, "acceptedAnswer": {"@type": "Answer", "text": {{ ((a4|striptags|trim) if a4 else '')|tojson }} } }
+{% endif %}
+{% if q5 and q5|trim %}
+{% if (q1 and q1|trim) or (q2 and q2|trim) or (q3 and q3|trim) or (q4 and q4|trim) %},{% endif %}
+    {"@type": "Question", "name": {{ q5|striptags|trim|tojson }}, "acceptedAnswer": {"@type": "Answer", "text": {{ ((a5|striptags|trim) if a5 else '')|tojson }} } }
+{% endif %}
+  ]
+}
+</script>
+{% endif %}

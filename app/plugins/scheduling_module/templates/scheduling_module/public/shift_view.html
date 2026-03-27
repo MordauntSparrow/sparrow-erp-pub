@@ -1,0 +1,122 @@
+{% extends "scheduling_module/base_public.html" %}
+{% block title %}Shift details{% endblock %}
+{% block content %}
+<h1 class="h5 mb-3">Shift details</h1>
+<div class="card card-module p-3 mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <span class="badge {% if shift.status == 'published' %}bg-primary{% elif shift.status == 'draft' %}bg-secondary{% else %}bg-dark{% endif %}">{{ shift.status or '—' }}</span>
+    {% if is_open %}
+    <span class="badge bg-warning text-dark">Open shift – available to claim</span>
+    {% endif %}
+  </div>
+  <dl class="row mb-0 small">
+    <dt class="col-sm-3 text-secondary">Date</dt>
+    <dd class="col-sm-9">{{ shift.work_date.isoformat() if shift.work_date else '—' }}</dd>
+    <dt class="col-sm-3 text-secondary">Time</dt>
+    <dd class="col-sm-9">{{ time_display(shift.scheduled_start)|default('—') }} – {{ time_display(shift.scheduled_end)|default('—') }}</dd>
+    <dt class="col-sm-3 text-secondary">{{ assignment_label|default('Client') }}</dt>
+    <dd class="col-sm-9">{{ shift.client_name or '—' }}</dd>
+    {% if shift.site_name %}
+    <dt class="col-sm-3 text-secondary">Site</dt>
+    <dd class="col-sm-9">{{ shift.site_name }}{% if shift.site_postcode %} · {{ shift.site_postcode }}{% endif %}</dd>
+    {% endif %}
+    <dt class="col-sm-3 text-secondary">Job type</dt>
+    <dd class="col-sm-9">{{ shift.job_type_name or '—' }}</dd>
+    {% if (shift.assignments and shift.assignments|length) or (shift.contractor_name and not is_open) %}
+    <dt class="col-sm-3 text-secondary">Assigned to</dt>
+    <dd class="col-sm-9">{% if shift.assignments %}{{ shift.assignments|map(attribute='contractor_name')|join(', ') }}{% else %}{{ shift.contractor_name or '—' }}{% endif %}</dd>
+    {% endif %}
+  </dl>
+  {% if shift.notes %}
+  <div class="mt-3 pt-3 border-top border-secondary">
+    <div class="text-secondary small mb-1">Shift notes</div>
+    <div class="bg-dark bg-opacity-25 rounded p-2 small" style="white-space: pre-wrap;">{{ shift.notes }}</div>
+  </div>
+  {% endif %}
+  {% if assignment_instructions %}
+  <div class="mt-3 pt-3 border-top border-secondary">
+    <div class="text-secondary small mb-1">Location &amp; instructions</div>
+    <div class="bg-dark bg-opacity-25 rounded p-2 small" style="white-space: pre-wrap;">{{ assignment_instructions }}</div>
+  </div>
+  {% endif %}
+  {% if not is_open and shift_tasks is defined %}
+  <div class="mt-3 pt-3 border-top border-secondary" id="tasks">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="text-secondary small mb-1">Tasks</div>
+      <span class="small text-secondary" id="tasks-status"></span>
+    </div>
+    {% if shift_tasks %}
+    <ul class="list-group list-group-flush small" id="tasks-list">
+      {% for t in shift_tasks %}
+      <li class="list-group-item bg-transparent border-secondary d-flex justify-content-between align-items-center px-0">
+        <span>{{ t.title }}</span>
+        <button type="button" class="btn btn-sm {{ 'btn-outline-secondary' if t.completed_at else 'btn-outline-success' }} js-task-toggle"
+                data-task-id="{{ t.id }}"
+                data-complete="{{ '0' if t.completed_at else '1' }}"
+                {% if t.completed_at %}title="Mark not done"{% else %}title="Mark done"{% endif %}>
+          {% if t.completed_at %}Done{% else %}Done{% endif %}
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="small text-secondary">No tasks.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if is_open %}
+  <div class="mt-4 pt-3 border-top border-secondary">
+    {% if eligible %}
+    <form method="post" action="{{ url_for('public_scheduling.claim_open_shift', shift_id=shift.id) }}" class="d-inline">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-success">Claim this shift</button>
+    </form>
+    {% elif ineligible_reason %}
+    <p class="small text-warning mb-2">You can't claim this shift: {{ ineligible_reason }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+<div class="d-flex flex-wrap gap-2">
+  <a href="{{ url_for('public_scheduling.public_schedule_week', week=week_monday) if week_monday else url_for('public_scheduling.public_schedule_week') }}" class="btn btn-outline-secondary btn-sm">Back to schedule</a>
+  {% if is_open %}
+  <a href="{{ url_for('public_scheduling.open_shifts_page') }}" class="btn btn-outline-secondary btn-sm">Browse open shifts</a>
+  {% endif %}
+  <a href="{{ url_for('public_scheduling.public_index') }}" class="btn btn-outline-secondary btn-sm">Scheduling home</a>
+</div>
+{% if not is_open and shift_tasks is defined and shift_tasks %}
+<script>
+(function() {
+  var statusEl = document.getElementById('tasks-status');
+  function setStatus(t) { if (statusEl) statusEl.textContent = t || ''; }
+  document.querySelectorAll('.js-task-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var taskId = btn.getAttribute('data-task-id');
+      var complete = btn.getAttribute('data-complete') === '1';
+      btn.disabled = true;
+      setStatus('Saving…');
+      fetch('{{ url_for("public_scheduling.api_shift_task_complete", shift_id=shift.id, task_id=0) }}'.replace('/0/complete', '/' + taskId + '/complete'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ complete: complete })
+      }).then(function(r) {
+        return r.json().then(function(d) { return { ok: r.ok, d: d }; });
+      }).then(function(x) {
+        if (!x.ok) {
+          alert((x.d && x.d.error) || 'Unable to save.');
+          btn.disabled = false;
+          setStatus('');
+          return;
+        }
+        window.location.reload();
+      }).catch(function() {
+        alert('Unable to save.');
+        btn.disabled = false;
+        setStatus('');
+      });
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

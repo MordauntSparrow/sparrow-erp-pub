@@ -40,7 +40,7 @@
           <td>{{ user.last_name }}</td>
           <td>{{ user.email }}</td>
           <td>{{ user.role }}</td>
-          <td>{{ user.permissions }}</td>
+          <td class="small text-muted">{{ user.permissions }}</td>
           <td>{{ user.created_at }}</td>
           <td>{{ user.last_login or "Never" }}</td>
           <td>
@@ -56,6 +56,7 @@
             </button>
             {% if current_user.role|lower == 'superuser' or user.role|lower != 'superuser' %}
             <form action="{{ url_for('routes.delete_user', user_id=user.id) }}" method="POST" class="d-inline">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?');">
                 Delete
               </button>
@@ -74,6 +75,7 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <form id="addUserForm" method="POST" action="{{ url_for('routes.add_user') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title" id="addUserModalLabel">Add New User</h5>
           <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
@@ -104,10 +106,14 @@
             <label for="addRole" class="form-label">Role</label>
             <select id="addRole" name="role" class="form-select">
               <option value="admin">Admin</option>
-              <option value="staff">Staff</option>
+              <option value="staff" selected>Staff</option>
               <option value="crew">Crew</option>
-              <!-- You might choose not to allow role assignment for superuser/clinical_lead here -->
+              <option value="clinical_lead">Clinical lead</option>
+              {% if current_user.role|lower == 'superuser' %}
+              <option value="superuser">Superuser (allowlist only)</option>
+              {% endif %}
             </select>
+            <div class="form-text">Choosing a role fills suggested permissions below; you can adjust before save.</div>
           </div>
           <!-- Password -->
           <div class="mb-3">
@@ -121,13 +127,22 @@
           </div>
           <!-- Permissions -->
           <div class="mb-3">
-            <label for="addPermissions" class="form-label">Permissions</label>
-            <select id="addPermissions" name="permissions" multiple class="form-select">
+            <label class="form-label">Permissions</label>
+            <div id="addPermissionsBox" class="border rounded p-2 bg-light" style="max-height:240px;overflow-y:auto">
+              {% for row in permission_catalog %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="permissions" value="{{ row.id }}" id="addperm-{{ loop.index }}">
+                <label class="form-check-label small" for="addperm-{{ loop.index }}">{{ row.label }}</label>
+              </div>
+              {% else %}
               {% for perm in available_permissions %}
-              <option value="{{ perm }}">{{ perm }}</option>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="permissions" value="{{ perm }}" id="addperm-f-{{ loop.index }}">
+                <label class="form-check-label small" for="addperm-f-{{ loop.index }}">{{ perm }}</label>
+              </div>
               {% endfor %}
-            </select>
-            <div class="form-text">Hold down Ctrl (or Cmd on Mac) to select multiple permissions.</div>
+              {% endfor %}
+            </div>
           </div>
           <!-- Personal PIN -->
           <div class="mb-3">
@@ -150,6 +165,7 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <form id="editUserForm" method="POST">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title" id="editUserModalLabel">Edit User: <span id="modalUsername"></span></h5>
           <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
@@ -179,8 +195,8 @@
               <option value="admin">Admin</option>
               <option value="staff">Staff</option>
               <option value="crew">Crew</option>
-              <option value="superuser">Superuser</option>
-              <option value="clinical_lead">Clinical Lead</option>
+              <option value="clinical_lead">Clinical lead</option>
+              <option value="superuser" {% if current_user.role|lower != 'superuser' %}disabled{% endif %}>Superuser (allowlist — superusers only)</option>
             </select>
           </div>
           <!-- New Password (optional) -->
@@ -195,13 +211,22 @@
           </div>
           <!-- Permissions -->
           <div class="mb-3">
-            <label for="modalPermissions" class="form-label">Permissions</label>
-            <select id="modalPermissions" name="permissions" multiple class="form-select">
+            <label class="form-label">Permissions</label>
+            <div id="editPermissionsBox" class="border rounded p-2 bg-light" style="max-height:240px;overflow-y:auto">
+              {% for row in permission_catalog %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="permissions" value="{{ row.id }}" id="editperm-{{ loop.index }}">
+                <label class="form-check-label small" for="editperm-{{ loop.index }}">{{ row.label }}</label>
+              </div>
+              {% else %}
               {% for perm in available_permissions %}
-              <option value="{{ perm }}">{{ perm }}</option>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="permissions" value="{{ perm }}" id="editperm-f-{{ loop.index }}">
+                <label class="form-check-label small" for="editperm-f-{{ loop.index }}">{{ perm }}</label>
+              </div>
               {% endfor %}
-            </select>
-            <div class="form-text">Hold down Ctrl (or Cmd on Mac) to select multiple permissions.</div>
+              {% endfor %}
+            </div>
           </div>
           <!-- Personal PIN Reset Section for all users -->
           <div class="mb-3">
@@ -222,12 +247,43 @@
   </div>
 </div>
 
+<script type="application/json" id="roleDefaultPermissionsJson">{{ role_default_permissions|tojson }}</script>
+
 <!-- MDBootstrap Bundle JS (includes Popper) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.0.0/mdb.min.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-  // Precompute the base URL for the delete endpoint.
+  // Precompute the base URL for the delete endpoint and CSRF token for dynamic forms.
   const deleteUserBaseUrl = "{{ url_for('routes.delete_user', user_id='') }}";
+  const csrfToken = {{ csrf_token()|tojson }};
+  let ROLE_DEFAULTS = {};
+  try {
+    ROLE_DEFAULTS = JSON.parse(document.getElementById('roleDefaultPermissionsJson').textContent || '{}');
+  } catch (e) { ROLE_DEFAULTS = {}; }
+
+  function setPermissionChecks(containerId, ids) {
+    const box = document.getElementById(containerId);
+    if (!box || !Array.isArray(ids)) return;
+    const want = new Set(ids);
+    box.querySelectorAll('input[name="permissions"][type="checkbox"]').forEach(function(cb) {
+      cb.checked = want.has(cb.value);
+    });
+  }
+
+  const addRole = document.getElementById('addRole');
+  if (addRole) {
+    addRole.addEventListener('change', function() {
+      setPermissionChecks('addPermissionsBox', ROLE_DEFAULTS[this.value] || []);
+    });
+    setPermissionChecks('addPermissionsBox', ROLE_DEFAULTS[addRole.value] || []);
+  }
+
+  const modalRole = document.getElementById('modalRole');
+  if (modalRole) {
+    modalRole.addEventListener('change', function() {
+      setPermissionChecks('editPermissionsBox', ROLE_DEFAULTS[this.value] || []);
+    });
+  }
 
   // Live search: Trigger AJAX call when typing in search input.
   const searchInput = document.getElementById("searchInput");
@@ -253,6 +309,7 @@ document.addEventListener("DOMContentLoaded", function() {
     if (currentUserIsSuperuser || user.role.toLowerCase() !== 'superuser') {
       deleteButtonHtml = `
         <form action="${deleteUserBaseUrl}${user.id}" method="POST" class="d-inline">
+          <input type="hidden" name="_csrf_token" value="${csrfToken}">
           <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this user?');">
             Delete
           </button>
@@ -260,13 +317,19 @@ document.addEventListener("DOMContentLoaded", function() {
       `;
     }
 
+    let permCell = user.permissions;
+    try {
+      const pr = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
+      if (Array.isArray(pr)) permCell = pr.join(', ');
+    } catch (e) { /* keep raw */ }
+
     tr.innerHTML = `
       <td>${user.username}</td>
       <td>${user.first_name}</td>
       <td>${user.last_name}</td>
       <td>${user.email}</td>
       <td>${user.role}</td>
-      <td>${user.permissions}</td>
+      <td class="small text-muted">${permCell}</td>
       <td>${user.created_at}</td>
       <td>${user.last_login || "Never"}</td>
       <td>
@@ -320,25 +383,13 @@ document.addEventListener("DOMContentLoaded", function() {
         if (!Array.isArray(permissions)) {
           permissions = [];
         }
-        console.log("Editing user:", userId, username, firstName, lastName, email, role, permissions);
         document.getElementById('modalUserId').value = userId;
         document.getElementById('modalUsername').innerText = username;
         document.getElementById('modalEmail').value = email;
         document.getElementById('modalRole').value = role;
         document.getElementById('modalFirstName').value = firstName;
         document.getElementById('modalLastName').value = lastName;
-        
-        const permissionsSelect = document.getElementById('modalPermissions');
-        for (let i = 0; i < permissionsSelect.options.length; i++) {
-          permissionsSelect.options[i].selected = false;
-        }
-        permissions.forEach(perm => {
-          for (let i = 0; i < permissionsSelect.options.length; i++) {
-            if (permissionsSelect.options[i].value === perm) {
-              permissionsSelect.options[i].selected = true;
-            }
-          }
-        });
+        setPermissionChecks('editPermissionsBox', permissions);
         
         // Disable the role dropdown if the edited user's role is superuser or clinical_lead and the editor is not a superuser.
         const modalRoleSelect = document.getElementById('modalRole');

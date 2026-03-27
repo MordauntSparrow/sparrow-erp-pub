@@ -1,0 +1,242 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Analytics — Inventory Control{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  {% include "admin/_inventory_nav.html" %}
+  <h1 class="h3 mb-4">Analytics &amp; Reports</h1>
+  <p class="text-muted mb-4">View and download stock levels, activity, and movers reports.</p>
+
+  <ul class="nav nav-tabs mb-3" id="analyticsTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="stock-tab" data-bs-toggle="tab" data-bs-target="#stock-pane" type="button" role="tab">Stock levels</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="activity-tab" data-bs-toggle="tab" data-bs-target="#activity-pane" type="button" role="tab">Activity</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="movers-tab" data-bs-toggle="tab" data-bs-target="#movers-pane" type="button" role="tab">Fast / slow movers</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="analyticsTabContent">
+    <!-- Stock levels -->
+    <div class="tab-pane fade show active" id="stock-pane" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <span>Stock levels report</span>
+          <div class="d-flex gap-2 align-items-center">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="stockRefresh">Refresh</button>
+            <a class="btn btn-sm btn-success" id="stockDownload" href="#" download="inventory_stock_levels.csv">Download CSV</a>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive" style="max-height: 400px;">
+            <table class="table table-sm table-hover mb-0" id="stockTable">
+              <thead class="table-light sticky-top"><tr><th>Item SKU</th><th>Item name</th><th>Location</th><th>On hand</th><th>Reserved</th><th>Available</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-footer text-muted small" id="stockStatus">Load report to view data.</div>
+      </div>
+    </div>
+
+    <!-- Activity -->
+    <div class="tab-pane fade" id="activity-pane" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <span>Recent transaction activity</span>
+          <div class="d-flex gap-2 align-items-center">
+            <select class="form-select form-select-sm" id="activityDays" style="width:auto;">
+              <option value="7">Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="activityRefresh">Refresh</button>
+            <a class="btn btn-sm btn-success" id="activityDownload" href="#" download="inventory_activity.csv">Download CSV</a>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive" style="max-height: 400px;">
+            <table class="table table-sm table-hover mb-0" id="activityTable">
+              <thead class="table-light sticky-top"><tr><th>Date</th><th>Type</th><th>Item</th><th>Location</th><th>Qty</th><th>Ref</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-footer text-muted small" id="activityStatus">Load report to view data.</div>
+      </div>
+    </div>
+
+    <!-- Movers -->
+    <div class="tab-pane fade" id="movers-pane" role="tabpanel">
+      <div class="row">
+        <div class="col-md-6 mb-4">
+          <div class="card shadow-sm h-100">
+            <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+              <span>Fast movers</span>
+              <div class="d-flex gap-2">
+                <select class="form-select form-select-sm" id="moversDays" style="width:auto;">
+                  <option value="7">7 days</option>
+                  <option value="30" selected>30 days</option>
+                  <option value="90">90 days</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="moversRefresh">Refresh</button>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div class="table-responsive" style="max-height: 320px;">
+                <table class="table table-sm table-hover mb-0" id="fastMoversTable">
+                  <thead class="table-light"><tr><th>SKU</th><th>Name</th><th>Tx count</th><th>Qty in</th><th>Qty out</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-6 mb-4">
+          <div class="card shadow-sm h-100">
+            <div class="card-header">Slow movers</div>
+            <div class="card-body p-0">
+              <div class="table-responsive" style="max-height: 320px;">
+                <table class="table table-sm table-hover mb-0" id="slowMoversTable">
+                  <thead class="table-light"><tr><th>SKU</th><th>Name</th><th>Tx count</th><th>Qty in</th><th>Qty out</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mb-2">
+        <a class="btn btn-sm btn-success" id="moversDownload" href="#" download="inventory_movers.csv">Download movers CSV</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+  const base = '/plugin/inventory_control';
+
+  function downloadCsv(rows, headers, filename) {
+    if (!rows.length) { alert('No data to download'); return; }
+    const escape = function(v) {
+      if (v == null) return '';
+      const s = String(v);
+      return s.indexOf(',') >= 0 || s.indexOf('"') >= 0 ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const line = function(r) { return headers.map(function(h) { return escape(r[h]); }).join(','); };
+    const csv = [headers.join(',')].concat(rows.map(line)).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function loadStockLevels() {
+    document.getElementById('stockStatus').textContent = 'Loading…';
+    fetch(base + '/api/analytics/stock_levels?limit=500', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        const report = data.report || [];
+        const tbody = document.querySelector('#stockTable tbody');
+        tbody.innerHTML = '';
+        report.forEach(function(row) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + (row.item_sku || '') + '</td><td>' + (row.item_name || '') + '</td><td>' + (row.location_code || '') + ' ' + (row.location_name || '') + '</td><td>' + (row.quantity_on_hand ?? '') + '</td><td>' + (row.quantity_reserved ?? '') + '</td><td>' + (row.quantity_available ?? '') + '</td>';
+          tbody.appendChild(tr);
+        });
+        document.getElementById('stockStatus').textContent = report.length + ' row(s).';
+        document.getElementById('stockDownload')._report = report;
+      })
+      .catch(function() { document.getElementById('stockStatus').textContent = 'Error loading report.'; });
+  }
+
+  document.getElementById('stockRefresh').addEventListener('click', loadStockLevels);
+  document.getElementById('stockDownload').addEventListener('click', function(e) {
+    const report = this._report;
+    if (!report || !report.length) { e.preventDefault(); alert('Load the report first, then download.'); return; }
+    e.preventDefault();
+    downloadCsv(report, ['item_sku','item_name','location_code','location_name','quantity_on_hand','quantity_reserved','quantity_available'], 'inventory_stock_levels.csv');
+  });
+
+  function loadActivity() {
+    const days = document.getElementById('activityDays').value;
+    document.getElementById('activityStatus').textContent = 'Loading…';
+    fetch(base + '/api/analytics/activity?days=' + days + '&limit=300', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        const activity = data.activity || [];
+        const tbody = document.querySelector('#activityTable tbody');
+        tbody.innerHTML = '';
+        activity.forEach(function(row) {
+          const d = (row.performed_at || '').slice(0, 19).replace('T', ' ');
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + d + '</td><td>' + (row.transaction_type || '') + '</td><td>' + (row.item_sku || '') + ' ' + (row.item_name || '') + '</td><td>' + (row.location_code || '') + '</td><td>' + (row.quantity ?? '') + '</td><td>' + (row.reference_type || '') + ' ' + (row.reference_id || '') + '</td>';
+          tbody.appendChild(tr);
+        });
+        document.getElementById('activityStatus').textContent = activity.length + ' transaction(s).';
+        document.getElementById('activityDownload')._activity = activity;
+      })
+      .catch(function() { document.getElementById('activityStatus').textContent = 'Error loading activity.'; });
+  }
+
+  document.getElementById('activityDays').addEventListener('change', loadActivity);
+  document.getElementById('activityRefresh').addEventListener('click', loadActivity);
+  document.getElementById('activityDownload').addEventListener('click', function(e) {
+    const activity = this._activity;
+    if (!activity || !activity.length) { e.preventDefault(); alert('Load the report first, then download.'); return; }
+    e.preventDefault();
+    downloadCsv(activity, ['performed_at','transaction_type','item_sku','item_name','location_code','location_name','quantity','reference_type','reference_id'], 'inventory_activity.csv');
+  });
+
+  function loadMovers() {
+    const days = document.getElementById('moversDays').value;
+    fetch(base + '/api/analytics/movers?days=' + days + '&top=25', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        const fast = data.fast_movers || [];
+        const slow = data.slow_movers || [];
+        const fastTbody = document.querySelector('#fastMoversTable tbody');
+        const slowTbody = document.querySelector('#slowMoversTable tbody');
+        fastTbody.innerHTML = '';
+        slowTbody.innerHTML = '';
+        fast.forEach(function(row) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + (row.sku || '') + '</td><td>' + (row.name || '') + '</td><td>' + (row.tx_count || 0) + '</td><td>' + (row.qty_in || 0) + '</td><td>' + (row.qty_out || 0) + '</td>';
+          fastTbody.appendChild(tr);
+        });
+        slow.forEach(function(row) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = '<td>' + (row.sku || '') + '</td><td>' + (row.name || '') + '</td><td>' + (row.tx_count || 0) + '</td><td>' + (row.qty_in || 0) + '</td><td>' + (row.qty_out || 0) + '</td>';
+          slowTbody.appendChild(tr);
+        });
+        document.getElementById('moversDownload')._movers = { fast: fast, slow: slow };
+      })
+      .catch(function() {});
+  }
+
+  document.getElementById('moversDays').addEventListener('change', loadMovers);
+  document.getElementById('moversRefresh').addEventListener('click', loadMovers);
+  document.getElementById('moversDownload').addEventListener('click', function(e) {
+    const m = this._movers;
+    if (!m || (!m.fast.length && !m.slow.length)) { e.preventDefault(); alert('Load the report first, then download.'); return; }
+    e.preventDefault();
+    const headers = ['sku','name','tx_count','qty_in','qty_out','mover_type'];
+    const rows = (m.fast || []).map(function(r) { return { sku: r.sku, name: r.name, tx_count: r.tx_count, qty_in: r.qty_in, qty_out: r.qty_out, mover_type: 'fast' }; })
+      .concat((m.slow || []).map(function(r) { return { sku: r.sku, name: r.name, tx_count: r.tx_count, qty_in: r.qty_in, qty_out: r.qty_out, mover_type: 'slow' }; }));
+    downloadCsv(rows, headers, 'inventory_movers.csv');
+  });
+
+  document.getElementById('stock-tab').addEventListener('shown.bs.tab', function() { loadStockLevels(); });
+  document.getElementById('activity-tab').addEventListener('shown.bs.tab', function() { loadActivity(); });
+  document.getElementById('movers-tab').addEventListener('shown.bs.tab', function() { loadMovers(); });
+  loadStockLevels();
+})();
+</script>
+{% endblock %}

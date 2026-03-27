@@ -88,15 +88,17 @@
     <a href="/" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
 </div>
 
-<!-- Flash messages -->
+{# Only show plugin admin actions; consume all queued flashes so login/core/version noise does not stack here. #}
 <div aria-live="polite" aria-atomic="true">
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {% if category in ('plugins_page_success', 'plugins_page_danger', 'plugins_page_error') %}
+                <div class="alert alert-{% if category == 'plugins_page_success' %}success{% else %}danger{% endif %} alert-dismissible fade show" role="alert">
                     {{ message }}
                     <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
                 </div>
+                {% endif %}
             {% endfor %}
         {% endif %}
     {% endwith %}
@@ -156,10 +158,12 @@
 
                             {% if not plugin.enabled %}
                             <form action="/plugin/{{ plugin.system_name }}/enable" method="POST" class="action-form" data-action-label="Enabling {{ plugin.name }}…">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-success btn-sm action-btn" data-loading-text="Enabling…">Enable</button>
                             </form>
                             {% else %}
                             <form action="/plugin/{{ plugin.system_name }}/disable" method="POST" class="action-form" data-action-label="Disabling {{ plugin.name }}…">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-warning btn-sm action-btn" data-loading-text="Disabling…">Disable</button>
                             </form>
                             {% endif %}
@@ -167,6 +171,7 @@
                             <form action="/plugin/{{ plugin.system_name }}/uninstall" method="POST" class="action-form"
                                   data-action-label="Uninstalling {{ plugin.name }}…"
                                   onsubmit="return confirm('Uninstall {{ plugin.name }}? This will disable any dependents.');">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-outline-danger btn-sm action-btn" data-loading-text="Uninstalling…">Uninstall</button>
                             </form>
                         </div>
@@ -256,6 +261,7 @@
                                   class="action-form"
                                   data-action-label="Installing {{ p.name }}…"
                                   action="{{ url_for('routes.install_plugin_remote', plugin_system_name=p.system_name) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-success w-100 action-btn" data-loading-text="Installing…">Install</button>
                             </form>
                         </div>

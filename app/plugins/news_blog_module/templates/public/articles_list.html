@@ -1,0 +1,294 @@
+{% extends "public/base_news_blog_module.html" %}
+
+{# -----------------------------------------------------------------------------
+  v1 upgrade notes:
+  - Jinja does NOT support Python-style **kwargs expansion in function calls.
+  - Replace url_for(request.endpoint, **(request.view_args...)) with explicit routing.
+  - Canonical/OG URLs should not include page/q to avoid index bloat.
+  - Pagination links SHOULD preserve q + current filter context.
+----------------------------------------------------------------------------- #}
+
+{# Determine the correct base endpoint for this page (list / category / tag) #}
+{% if tag and tag.slug %}
+  {% set _base_endpoint = 'public_news_blog.public_articles_by_tag' %}
+  {% set _base_kwargs = {'tag_slug': tag.slug} %}
+{% elif category and category.slug %}
+  {% set _base_endpoint = 'public_news_blog.public_articles_by_category' %}
+  {% set _base_kwargs = {'category_slug': category.slug} %}
+{% else %}
+  {% set _base_endpoint = 'public_news_blog.public_articles_list' %}
+  {% set _base_kwargs = {} %}
+{% endif %}
+
+{% block title %}
+  {% if filter_title %}
+    {{ filter_title }} | {{ nav_item_label }} | {{ config.site_settings.company_name }}
+  {% else %}
+    {{ nav_item_label }} | {{ config.site_settings.company_name }}
+  {% endif %}
+{% endblock %}
+
+{% block meta_description %}
+{# v1: escape attribute content #}
+<meta name="description" content="{{ ((filter_title ~ ' — ') if filter_title else '') ~ ('Browse the latest ' ~ (nav_item_label|lower) ~ ' from ' ~ config.site_settings.company_name ~ '.') | e }}">
+{% endblock %}
+
+{% block canonical %}
+{# v1: canonical should NOT include page (and usually not q) to avoid index bloat/duplication #}
+<link rel="canonical" href="{{ url_for(_base_endpoint, _external=True, **_base_kwargs) }}">
+{% endblock %}
+
+{% block open_graph %}
+<meta property="og:site_name" content="{{ config.site_settings.company_name }}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="{% if filter_title %}{{ filter_title }} | {% endif %}{{ nav_item_label }} | {{ config.site_settings.company_name }}">
+<meta property="og:description" content="{{ ((filter_title ~ ' — ') if filter_title else '') ~ ('Browse the latest ' ~ (nav_item_label|lower) ~ ' from ' ~ config.site_settings.company_name ~ '.') | e }}">
+<meta property="og:url" content="{{ url_for(_base_endpoint, _external=True, **_base_kwargs) }}">
+{% endblock %}
+
+{% block twitter_card %}
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{% if filter_title %}{{ filter_title }} | {% endif %}{{ nav_item_label }} | {{ config.site_settings.company_name }}">
+<meta name="twitter:description" content="{{ ((filter_title ~ ' — ') if filter_title else '') ~ ('Browse the latest ' ~ (nav_item_label|lower) ~ ' from ' ~ config.site_settings.company_name ~ '.') | e }}">
+{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "name": {{ (nav_item_label ~ ((' - ' ~ filter_title) if filter_title else ''))|tojson }},
+  "itemListOrder": "https://schema.org/ItemListOrderDescending",
+  "numberOfItems": {{ (total or (articles|length))|tojson }},
+  "itemListElement": [
+    {% for a in articles %}
+    {
+      "@type": "ListItem",
+      "position": {{ loop.index }},
+      "url": {{ url_for('public_news_blog.public_article_detail', slug=a.slug, _external=True)|tojson }},
+      "name": {{ (a.title or '')|tojson }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<style>
+.article-search-bar {
+  background: #fff;
+  border-radius: 1.2em;
+  box-shadow: 0 0.2rem 0.7rem rgba(60,60,90,0.06);
+  padding: 1.2em 1.5em;
+  margin-bottom: 2.0em;
+  gap: 1em;
+}
+.article-search-bar .form-control,
+.article-search-bar .btn {
+  min-width: 180px;
+  max-width: 520px;
+  font-size: 1.05em;
+  border-radius: 0.8em;
+  height: 2.6em;
+}
+.article-search-bar input[type="text"] {
+  min-width: 220px;
+  max-width: 520px;
+}
+.article-search-bar .btn {
+  min-width: 48px;
+  box-shadow: 0 2px 8px 0 rgba(0, 95, 255, 0.08);
+}
+@media (max-width: 900px) {
+  .article-search-bar {
+    flex-direction: column !important;
+    padding: 1em 0.7em;
+    gap: 0.7em;
+  }
+  .article-search-bar .form-control,
+  .article-search-bar .btn {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+.article-card:hover {
+  box-shadow: 0 0.5rem 2rem rgba(0,0,0,0.15)!important;
+  transform: translateY(-2px) scale(1.015);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.article-cover {
+  width: 100%;
+  height: 190px;
+  object-fit: cover;
+  border-top-left-radius: .75rem;
+  border-top-right-radius: .75rem;
+}
+.article-meta {
+  gap: .75rem;
+  flex-wrap: wrap;
+}
+</style>
+
+<div class="container py-5">
+
+  <!-- Header -->
+  <div class="row mb-3">
+    <div class="col-12">
+      <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+        <div>
+          <h2 class="mb-1 d-flex align-items-center">
+            <i class="bi bi-newspaper me-2"></i> {{ nav_item_label }}
+          </h2>
+
+          {% if filter_title %}
+            <div class="text-muted">
+              <span class="badge bg-light text-dark">
+                <i class="bi bi-funnel me-1"></i>{{ filter_title }}
+              </span>
+              <a class="ms-2 small" href="{{ url_for('public_news_blog.public_articles_list') }}">Clear</a>
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="text-muted small">
+          {% if total is not none %}
+            {{ total }} article{{ '' if total == 1 else 's' }}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Bar -->
+  <form class="article-search-bar d-flex align-items-center flex-wrap"
+        method="get"
+        action="{{ url_for(_base_endpoint, **_base_kwargs) }}">
+    <input type="text"
+           class="form-control"
+           name="q"
+           placeholder="Search articles..."
+           value="{{ q or '' }}">
+    <button type="submit" class="btn btn-primary ms-0 mt-2 mt-lg-0">
+      <i class="bi bi-search"></i>
+    </button>
+  </form>
+
+  <!-- Articles Grid -->
+  {% if articles %}
+    <div class="row g-4">
+      {% for article in articles %}
+        <div class="col-12 col-md-6 col-lg-4">
+          <a href="{{ url_for('public_news_blog.public_article_detail', slug=article.slug) }}"
+             class="text-decoration-none">
+
+            <div class="card h-100 shadow-sm hover-shadow border-0 article-card" style="border-radius:.75rem;">
+              {% if article.cover_image_path %}
+                <img class="article-cover"
+                     src="{{ url_for('static', filename=article.cover_image_path) }}"
+                     alt="{{ article.cover_image_alt or article.title }}">
+              {% endif %}
+
+              <div class="card-body pb-3">
+                <div class="d-flex align-items-center article-meta mb-2 text-muted small">
+                  <span>
+                    <i class="bi bi-calendar3 me-1"></i>
+                    {{ article.published_at or '—' }}
+                  </span>
+
+                  {% if article.primary_category and article.primary_category.name %}
+                    <span class="badge bg-light text-dark">
+                      <i class="bi bi-folder2-open me-1"></i>{{ article.primary_category.name }}
+                    </span>
+                  {% endif %}
+                </div>
+
+                <h5 class="card-title mb-2 fs-5 fw-bold">{{ article.title }}</h5>
+
+                {% if article.summary %}
+                  <p class="mb-2 text-muted">
+                    {{ article.summary|truncate(150) }}
+                  </p>
+                {% else %}
+                  <p class="mb-2 text-muted">
+                    {{ (article.content or '')|striptags|truncate(150) }}
+                  </p>
+                {% endif %}
+
+                {% if article.tags %}
+                  <div class="mt-2">
+                    {% for t in article.tags[:4] %}
+                      <span class="badge bg-light text-dark me-1">
+                        <i class="bi bi-tag me-1"></i>{{ t.name }}
+                      </span>
+                    {% endfor %}
+                    {% if article.tags|length > 4 %}
+                      <span class="text-muted small">+{{ article.tags|length - 4 }}</span>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              </div>
+
+              <div class="card-footer bg-white border-0 text-end pb-3">
+                <span class="btn btn-outline-primary btn-sm">
+                  Read More <i class="bi bi-arrow-right"></i>
+                </span>
+              </div>
+            </div>
+
+          </a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="alert alert-info mt-4">
+      No articles found. Please try a different search.
+    </div>
+  {% endif %}
+
+  <!-- Pagination -->
+  {% if total and total > page_size %}
+    {% set total_pages = ((total-1)//page_size)+1 %}
+
+    {# v1: prev/next should preserve q and the current endpoint (category/tag/list) #}
+    {% if page > 1 %}
+      <link rel="prev" href="{{ url_for(_base_endpoint, _external=True, q=q, page=page-1, **_base_kwargs) }}">
+    {% endif %}
+    {% if page < total_pages %}
+      <link rel="next" href="{{ url_for(_base_endpoint, _external=True, q=q, page=page+1, **_base_kwargs) }}">
+    {% endif %}
+
+    <nav class="mt-4" aria-label="Articles pagination">
+      <ul class="pagination justify-content-center flex-wrap">
+        {% if page > 1 %}
+          <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for(_base_endpoint, q=q, page=page-1, **_base_kwargs) }}">
+              Prev
+            </a>
+          </li>
+        {% endif %}
+
+        {% for p in range(1, total_pages+1) %}
+          <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link"
+               href="{{ url_for(_base_endpoint, q=q, page=p, **_base_kwargs) }}">
+              {{ p }}
+            </a>
+          </li>
+        {% endfor %}
+
+        {% if page < total_pages %}
+          <li class="page-item">
+            <a class="page-link"
+               href="{{ url_for(_base_endpoint, q=q, page=page+1, **_base_kwargs) }}">
+              Next
+            </a>
+          </li>
+        {% endif %}
+      </ul>
+    </nav>
+  {% endif %}
+
+</div>
+{% endblock %}

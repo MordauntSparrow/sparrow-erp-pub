@@ -14,6 +14,7 @@ from urllib.parse import urlparse, quote
 from apscheduler.schedulers.background import BackgroundScheduler
 from typing import List, Dict, Any, Optional, Set
 import time
+import hashlib
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -26,11 +27,74 @@ from flask_login import UserMixin
 from functools import wraps
 from flask import flash, redirect, url_for
 
+# Official Sparrow registry — used when env vars are unset so deployments work without .env.
+# Override with GITLAB_TOKEN / GITLAB_USERNAME / GITLAB_PASSWORD / CORE_PROJECT_ID (or GITLAB_PROJECT_ID).
+_OFFICIAL_REGISTRY_CORE_PROJECT_ID = "65546585"
+_OFFICIAL_REGISTRY_GITLAB_TOKEN = "gldt-QqB_xpu896k88KP84rzW"
+_OFFICIAL_REGISTRY_GITLAB_USERNAME = "gitlab+deploy-token-9123788"
+_OFFICIAL_REGISTRY_GITLAB_PASSWORD = "gldt-QqB_xpu896k88KP84rzW"
+
+
+def effective_gitlab_read_token() -> str:
+    """
+    GitLab API token for official registry (manifests, update zips).
+    Uses ``GITLAB_TOKEN`` first; if unset, ``SPARROW_OFFICIAL_REGISTRY_TOKEN``;
+    if still unset, built-in official-registry read token for controlled deployments.
+    """
+    return (
+        (os.environ.get("GITLAB_TOKEN") or "").strip()
+        or (os.environ.get("SPARROW_OFFICIAL_REGISTRY_TOKEN") or "").strip()
+        or _OFFICIAL_REGISTRY_GITLAB_TOKEN
+    )
+
+
+def effective_gitlab_basic_credentials() -> tuple:
+    """(username, password) for GitLab HTTP basic auth; env first, then official-registry defaults."""
+    user = (os.environ.get("GITLAB_USERNAME") or "").strip() or _OFFICIAL_REGISTRY_GITLAB_USERNAME
+    password = (os.environ.get("GITLAB_PASSWORD") or "").strip() or _OFFICIAL_REGISTRY_GITLAB_PASSWORD
+    return (user, password)
+
+
+def effective_core_project_id() -> str:
+    """GitLab project id for core/registry API; env first, then official default."""
+    return (
+        (os.environ.get("GITLAB_PROJECT_ID") or os.environ.get("CORE_PROJECT_ID") or "").strip()
+        or _OFFICIAL_REGISTRY_CORE_PROJECT_ID
+    )
+
 
 def get_db_connection():
     """
     Establish and return a new database connection using environment variables.
     """
+    # Support optional connection pooling via mysql.connector.pooling.MySQLConnectionPool
+    # Set environment variable DB_POOL_SIZE to enable pooling (e.g., 5)
+    try:
+        pool_size_raw = os.getenv('DB_POOL_SIZE')
+        if pool_size_raw and int(pool_size_raw) > 0:
+            # lazy-create a module-level pool
+            if not hasattr(get_db_connection, '_pool') or get_db_connection._pool is None:
+                try:
+                    from mysql.connector import pooling
+                    pool_cfg = {
+                        'pool_name': 'sparrow_pool',
+                        'pool_size': int(pool_size_raw),
+                        'host': os.getenv('DB_HOST', 'localhost'),
+                        'user': os.getenv('DB_USER', 'root'),
+                        'password': os.getenv('DB_PASSWORD', 'rootpassword'),
+                        'database': os.getenv('DB_NAME', 'sparrow_erp'),
+                    }
+                    get_db_connection._pool = pooling.MySQLConnectionPool(
+                        **pool_cfg)
+                except Exception:
+                    # If pool creation fails, fallback to direct connections
+                    get_db_connection._pool = None
+            if getattr(get_db_connection, '_pool', None):
+                return get_db_connection._pool.get_connection()
+    except Exception:
+        # Any error using pooling should fall back to direct connect
+        pass
+
     return mysql.connector.connect(
         host=os.getenv("DB_HOST", "localhost"),
         user=os.getenv("DB_USER", "root"),
@@ -169,27 +233,33 @@ class AuthManager:
 def has_permission(permission):
     """
     Check if the current user has the given permission.
-    Admin users automatically have all permissions.
+    Admin and superuser automatically have all permissions.
     """
-    if current_user.role == 'admin':
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser"):
         return True
-    return permission in current_user.permissions
+    return permission in (current_user.permissions or [])
 
 
 def permission_required(permission):
     """
     Decorator to require a specific permission for a route.
-    Admin users automatically bypass this check.
+    Admin and superuser bypass this check.
     """
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            if current_user.role == 'admin':
+            if not getattr(current_user, "is_authenticated", False):
+                return redirect(url_for("routes.login"))
+            if has_permission(permission):
                 return f(*args, **kwargs)
-            if permission in current_user.permissions:
-                return f(*args, **kwargs)
-            flash("Access denied: You do not have the required permission.", "danger")
-            return redirect(url_for('routes.dashboard'))
+            flash(
+                "You do not have access to this area. Contact your administrator if you need permission.",
+                "danger",
+            )
+            return redirect(url_for("routes.dashboard"))
         return wrapper
     return decorator
 
@@ -299,19 +369,74 @@ class EmailManager:
         return self.send_email(subject, text_body, recipients, sender=sender, html_body=html_body)
 
 
+# Copied from factory_manifest.json into manifest.json on install / upgrade / enable
+PLUGIN_DASHBOARD_MANIFEST_KEYS = (
+    "dashboard_category",
+    "dashboard_icon",
+    "access_permission",
+    "declared_permissions",
+)
+
+
+def _load_factory_manifest_dict(factory_path: str) -> dict:
+    """Best-effort read of factory_manifest.json (empty dict on missing/error)."""
+    if not factory_path or not os.path.exists(factory_path):
+        return {}
+    try:
+        with open(factory_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError, TypeError):
+        return {}
+
+
+def merge_plugin_dashboard_fields_from_factory(
+    local: dict, factory: dict | None
+) -> None:
+    """
+    Copy dashboard / access metadata from factory into the local plugin manifest
+    when the factory defines them. Safe to call with empty factory.
+    """
+    if not isinstance(local, dict) or not factory or not isinstance(factory, dict):
+        return
+    for key in PLUGIN_DASHBOARD_MANIFEST_KEYS:
+        val = factory.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str):
+            s = val.strip()
+            if not s:
+                continue
+            local[key] = s
+        elif isinstance(val, list) and key == "declared_permissions":
+            local[key] = val
+        else:
+            local[key] = val
+
+
 class UpdateManager:
-    # Environment-based configuration
-    GITLAB_USERNAME = os.environ.get("GITLAB_USERNAME")
-    GITLAB_PASSWORD = os.environ.get("GITLAB_PASSWORD")
-    GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "default_token")
-    CORE_MANIFEST_REMOTE_URL = os.environ.get(
-        "CORE_MANIFEST_REMOTE_URL",
-        "https://gitlab.com/api/v4/projects/65546585/repository/files/manifest.json/raw?ref=main"
-    )
-    PLUGIN_MANIFEST_REMOTE_URL_TEMPLATE = os.environ.get(
-        "PLUGIN_MANIFEST_REMOTE_URL_TEMPLATE",
-        "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins/%s/manifest.json/raw?ref=main"
-    )
+    @staticmethod
+    def _zip_relative_member_is_safe(rel: str) -> bool:
+        """Reject zip-slip and absolute paths (member path uses forward slashes)."""
+        rel = (rel or "").replace("\\", "/").lstrip("/")
+        if not rel or rel.startswith("/"):
+            return False
+        parts = rel.split("/")
+        if ".." in parts:
+            return False
+        if parts[-1] in (".", ".."):
+            return False
+        return True
+
+    @staticmethod
+    def _resolved_dest_within_root(root: str, dest: str) -> bool:
+        """Ensure dest does not escape root after normalization (defense in depth)."""
+        abs_root = os.path.abspath(root)
+        abs_dest = os.path.abspath(dest)
+        try:
+            return os.path.commonpath([abs_root, abs_dest]) == abs_root
+        except ValueError:
+            return False
 
     UPDATE_DIR = "app/updates"
     BACKUP_DIR = "app/backups"
@@ -348,15 +473,22 @@ class UpdateManager:
             'interval', hours=1, id='forced_plugin_update_check', name='Check for forced plugin updates'
         )
 
+        self.gitlab_project_id = effective_core_project_id()
+        self.gitlab_token = effective_gitlab_read_token()
+        self._gitlab_basic_user, self._gitlab_basic_pass = effective_gitlab_basic_credentials()
+        self._gitlab_api_base = f"https://gitlab.com/api/v4/projects/{self.gitlab_project_id}"
+        self._default_core_manifest_url = (
+            f"{self._gitlab_api_base}/repository/files/manifest.json/raw?ref=main"
+        )
+
     # ------------- Internal helpers -------------
     def _gitlab_session(self):
         s = requests.Session()
-        if self.GITLAB_USERNAME and self.GITLAB_PASSWORD:
-            # Basic auth for deploy token
-            s.auth = (self.GITLAB_USERNAME, self.GITLAB_PASSWORD)
-        elif self.GITLAB_TOKEN and self.GITLAB_TOKEN != "default_token":
-            # Fallback for PATs
-            s.headers.update({"PRIVATE-TOKEN": self.GITLAB_TOKEN})
+        if self._gitlab_basic_user and self._gitlab_basic_pass:
+            # Basic auth for deploy token (env or official-registry defaults)
+            s.auth = (self._gitlab_basic_user, self._gitlab_basic_pass)
+        elif self.gitlab_token:
+            s.headers.update({"PRIVATE-TOKEN": self.gitlab_token})
         s.headers.update({"Accept": "application/json"})
         return s
 
@@ -380,10 +512,10 @@ class UpdateManager:
     # ------------- Manifest Fetching -------------
     def get_core_manifest_remote(self):
         with self._gitlab_session() as s:
-            r = s.get(os.environ.get(
-                "CORE_MANIFEST_REMOTE_URL",
-                f"https://gitlab.com/api/v4/projects/65546585/repository/files/manifest.json/raw?ref=main"
-            ))
+            r = s.get(
+                os.environ.get("CORE_MANIFEST_REMOTE_URL")
+                or self._default_core_manifest_url
+            )
             if r.status_code == 200:
                 try:
                     return json.loads(r.text)  # raw endpoint returns text
@@ -406,7 +538,9 @@ class UpdateManager:
 
         if factory_manifest.get('repository') == 'official':
             encoded_name = quote(plugin_name, safe='')
-            plugin_manifest_url = f"https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2F{encoded_name}%2Fmanifest.json/raw?ref=main"
+            plugin_manifest_url = (
+                f"{self._gitlab_api_base}/repository/files/plugins%2F{encoded_name}%2Fmanifest.json/raw?ref=main"
+            )
         else:
             base_repo = (factory_manifest.get('repository') or '').rstrip('/')
             if not base_repo:
@@ -433,6 +567,9 @@ class UpdateManager:
             elif r.status_code == 401:
                 raise Exception(
                     f"Unauthorized fetching plugin manifest for {plugin_name} (401).")
+            elif r.status_code == 404:
+                # Plugin not in remote marketplace (e.g. local-only); return empty so callers get "Unknown" version
+                return {}
             else:
                 raise Exception(
                     f"Failed to fetch plugin manifest for {plugin_name}: {r.status_code} - {r.text[:500]}")
@@ -442,7 +579,7 @@ class UpdateManager:
             raise ValueError("Plugin name must be provided.")
         plugin_manifest = self.plugin_manager.get_factory_manifest(plugin_name)
         if plugin_manifest.get('repository') == 'official':
-            url = "https://gitlab.com/api/v4/projects/65546585/repository/files/manifest.json/raw?ref=main"
+            url = f"{self._gitlab_api_base}/repository/files/manifest.json/raw?ref=main"
         else:
             repo = (plugin_manifest.get('repository') or '').rstrip('/')
             if not repo:
@@ -544,9 +681,17 @@ class UpdateManager:
                     remote.get("description", "")).strip()
                 meta["icon"] = remote.get(
                     "icon", "default-icon.png") or "default-icon.png"
-                meta["download_url"] = self.convert_to_api_endpoint(
-                    remote.get("download_url", "") or ""
-                )
+                try:
+                    plan = self._resolve_artifact_plan(
+                        remote, section=None, require_complete_base=False
+                    )
+                    meta["download_url"] = plan.get("latest_download_url") or plan.get(
+                        "initial_download_url"
+                    ) or ""
+                except Exception:
+                    meta["download_url"] = self.convert_to_api_endpoint(
+                        remote.get("download_url", "") or ""
+                    )
 
                 # Optional: repository badge (may fail silently)
                 try:
@@ -588,12 +733,25 @@ class UpdateManager:
         return core_manifest.get('version', 'Unknown')
 
     def get_latest_version(self):
-        core_manifest = self.get_core_manifest_remote()
-        return core_manifest.get('core', {}).get('current_version', 'Unknown')
+        """
+        Published core version from remote manifest (GitLab API).
+        Returns None if the remote cannot be reached or auth fails (401/403),
+        so local /version still loads without credentials.
+        """
+        try:
+            core_manifest = self.get_core_manifest_remote()
+            v = core_manifest.get("core", {}).get("current_version")
+            return v if v else None
+        except Exception as e:
+            print(f"[WARN] get_latest_version: remote core manifest unavailable: {e}")
+            return None
 
     def get_plugin_latest_version(self, plugin_name):
-        plugin = self.get_plugin_manifest_remote(plugin_name)
-        return plugin.get('current_version', 'Unknown')
+        try:
+            plugin = self.get_plugin_manifest_remote(plugin_name) or {}
+            return plugin.get('current_version', 'Unknown')
+        except Exception:
+            return 'Unknown'
 
     def get_plugins_versions(self):
         """
@@ -633,8 +791,11 @@ class UpdateManager:
     def get_update_status(self):
         current_version = self.get_current_version()
         latest_version = self.get_latest_version()
-        core_update_available = self._version_tuple(
-            current_version) < self._version_tuple(latest_version)
+        if latest_version:
+            core_update_available = self._version_tuple(
+                current_version) < self._version_tuple(latest_version)
+        else:
+            core_update_available = False
 
         plugins_versions = self.get_plugins_versions()
         plugin_updates = []
@@ -649,8 +810,19 @@ class UpdateManager:
                 plugin_update_available = False
                 print(
                     f"Error determining latest version for plugin {plugin_name}: {e}")
+            # Human-readable title from local manifest (manifest.json "name")
+            display_name = plugin_name.replace("_", " ").title()
+            try:
+                local = self.plugin_manager.get_plugin(plugin_name)
+                if isinstance(local, dict):
+                    dn = (local.get("name") or "").strip()
+                    if dn:
+                        display_name = dn
+            except Exception:
+                pass
             plugin_updates.append({
                 "plugin_name": plugin_name,
+                "display_name": display_name,
                 "current_version": plugin_version,
                 "latest_version": plugin_latest_version,
                 "update_available": plugin_update_available
@@ -677,13 +849,10 @@ class UpdateManager:
         if len(path_parts) < 7 or path_parts[3] != '-' or path_parts[4] != 'raw':
             return download_url
 
-        namespace = path_parts[1]
-        project = path_parts[2]
         branch = path_parts[5]
         file_path = "/".join(path_parts[6:])
-        project_identifier = quote(f"{namespace}/{project}", safe='')
         encoded_file_path = quote(file_path, safe='')
-        return f"https://gitlab.com/api/v4/projects/65546585/repository/files/{encoded_file_path}/raw?ref={branch}"
+        return f"{self._gitlab_api_base}/repository/files/{encoded_file_path}/raw?ref={branch}"
 
     # ------------- Backup and Restore -------------
     def backup(self, backup_name="whole_system_backup"):
@@ -713,6 +882,12 @@ class UpdateManager:
 
         def is_excluded(path):
             p = os.path.normpath(path)
+            base = os.path.basename(p)
+            # Never archive environment / secret files (backup confidentiality)
+            if base == ".env" or (
+                base.startswith(".env.") and not base.startswith("..")
+            ):
+                return True
             for ex in exclude_dirs:
                 if p == ex or p.startswith(ex + os.sep):
                     return True
@@ -746,12 +921,47 @@ class UpdateManager:
         return backup_path
 
     def restore_backup(self, backup_name, restore_to):
-        backup_zip = os.path.join(self.BACKUP_DIR, f"{backup_name}.zip")
+        # basename only: backup_name must not be a path (prevents escape from BACKUP_DIR)
+        stem = str(backup_name).strip()
+        if not stem or os.path.basename(stem) != stem:
+            raise Exception("Invalid backup name.")
+        allowed = frozenset(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+        )
+        if not all(c in allowed for c in stem):
+            raise Exception("Invalid backup name.")
+        backup_zip = os.path.join(self.BACKUP_DIR, f"{stem}.zip")
         if not os.path.exists(backup_zip):
             raise Exception(f"Backup {backup_zip} not found.")
-        os.makedirs(restore_to, exist_ok=True)
-        with zipfile.ZipFile(backup_zip, 'r') as zip_ref:
-            zip_ref.extractall(restore_to)
+        abs_restore = os.path.abspath(restore_to)
+        os.makedirs(abs_restore, exist_ok=True)
+        with zipfile.ZipFile(backup_zip, "r") as zip_ref:
+            names = [
+                n.replace("\\", "/")
+                for n in zip_ref.namelist()
+                if n and not n.startswith("__MACOSX")
+            ]
+            for member in names:
+                if member.endswith("/"):
+                    continue
+                rel = member
+                if not self._zip_relative_member_is_safe(rel):
+                    raise Exception(f"Unsafe path in backup archive: {member!r}")
+                dest = os.path.join(abs_restore, rel)
+                if not self._resolved_dest_within_root(abs_restore, dest):
+                    raise Exception(f"Zip-slip blocked for member: {member!r}")
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                with zip_ref.open(member) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                try:
+                    info = zip_ref.getinfo(member)
+                    mode = (info.external_attr >> 16) & 0o777
+                    if mode:
+                        os.chmod(dest, mode)
+                except Exception:
+                    pass
 
     # ------------- Update Installation -------------
     def download_update(self, url, save_path):
@@ -775,8 +985,60 @@ class UpdateManager:
                 raise Exception(
                     f"Failed to download update from {url}: {r.status_code} - {snippet}")
 
-    def apply_zip(self, zip_path, target_path):
-        """Extract a zip into target_path, handling single-root and flat zips, with basic safety."""
+    @staticmethod
+    def _should_skip_zip_extract_on_upgrade(
+        zip_mode: Optional[str],
+        strip_leading_app: bool,
+        rel_path: str,
+        dest_path: str,
+    ) -> bool:
+        """
+        On *upgrade* only, avoid overwriting paths that hold deployment-specific data.
+
+        - Plugin upgrades: preserve existing templates/public/, data/, static/uploads/,
+          pages.json, manifest.json (user site + module settings).
+        - Core upgrades (strip_leading_app): preserve any existing file under config/
+          (secrets, tokens); new config/* members from the zip still extract.
+
+        Install / full extract: pass zip_mode='install' (or None).
+        """
+        mode = (zip_mode or "install").strip().lower()
+        if mode != "upgrade":
+            return False
+        if not os.path.exists(dest_path):
+            return False
+        norm = (rel_path or "").replace("\\", "/").lstrip("/")
+        if strip_leading_app:
+            if norm.startswith("config/") or norm == "config":
+                return True
+            return False
+        # Plugin package root
+        if norm in ("pages.json", "manifest.json"):
+            return True
+        for prefix in ("data/", "templates/public/", "static/uploads/"):
+            if norm.startswith(prefix):
+                return True
+        return False
+
+    def apply_zip(
+        self,
+        zip_path,
+        target_path,
+        strip_leading_app=False,
+        zip_mode: Optional[str] = "install",
+    ):
+        """
+        Extract a zip into target_path, handling single-root and flat zips, with basic safety.
+
+        If strip_leading_app is True (e.g. for core update into app/), any relative path
+        starting with "app/" is stripped so files land in target_path instead of target_path/app/.
+        This ensures zips built as e.g. Core_v1.1.5/app/auth_jwt.py still add new files to app/.
+
+        zip_mode:
+          - 'install' (default): extract all members (first-time plugin install, dev, etc.).
+          - 'upgrade': do not overwrite preserved user/deployment paths (see
+            _should_skip_zip_extract_on_upgrade); new files from the zip are still added.
+        """
         if not os.path.exists(zip_path):
             raise Exception(f"Update file not found: {zip_path}")
 
@@ -789,8 +1051,7 @@ class UpdateManager:
                 return
 
             def is_safe(rel):
-                # prevent zip slip and absolute paths
-                return rel and not rel.startswith('/') and '..' not in rel.split('/')
+                return self._zip_relative_member_is_safe(rel)
 
             top = set(n.split('/')[0] for n in names)
             flatten = (len(top) == 1 and any('/' in n for n in names))
@@ -801,10 +1062,22 @@ class UpdateManager:
                     continue
                 rel = member[len(
                     root) + 1:] if (flatten and member.startswith(root + '/')) else member
+                if strip_leading_app and rel.startswith('app/'):
+                    rel = rel[4:].lstrip('/')
+                if not rel:
+                    continue
                 if not is_safe(rel):
                     continue
                 dest = os.path.join(target_path, rel)
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                if not self._resolved_dest_within_root(target_path, dest):
+                    continue
+                if self._should_skip_zip_extract_on_upgrade(
+                    zip_mode, strip_leading_app, rel, dest
+                ):
+                    continue
+                parent = os.path.dirname(dest)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
                 with zf.open(member) as src, open(dest, 'wb') as out:
                     shutil.copyfileobj(src, out)
                 # optional: preserve Unix perms
@@ -819,10 +1092,103 @@ class UpdateManager:
     def run_update_instructions(self, script_path):
         try:
             print(f"Executing update instructions from {script_path}...")
-            subprocess.run(["python", script_path], check=True)
+            subprocess.run([sys.executable, script_path], check=True)
             print("Update instructions executed successfully.")
         except subprocess.CalledProcessError as e:
             raise Exception(f"Running update instructions failed: {e}")
+
+    def run_upgrade_scripts(self):
+        """
+        Run idempotent upgrade scripts for core + all plugins that have install.py.
+        Discovers plugins by scanning PLUGINS_DIR for directories containing install.py
+        (so new plugins without manifest.json still get DB upgrades run).
+        Intended for live-dev environments where code is deployed and DB migrations
+        need a manual repair/run step.
+        """
+        import subprocess
+        import sys
+        import os
+
+        report = {
+            "core": {"ran": False, "ok": False, "message": ""},
+            "plugins_ran": [],
+            "plugins_skipped": [],
+            "plugins_failed": []
+        }
+
+        print("[UPGRADE] ---------- Upgrade scripts run starting ----------")
+        print(f"[UPGRADE] APP_ROOT={self.APP_ROOT!r}, PLUGINS_DIR={self.PLUGINS_DIR!r}")
+
+        # Core upgrade script (if present)
+        core_script = os.path.join(self.APP_ROOT, "core", "install.py")
+        if os.path.exists(core_script):
+            print(f"[UPGRADE] Running core: {core_script}")
+            try:
+                result = subprocess.run(
+                    [sys.executable, core_script, "upgrade"],
+                    check=True, capture_output=True, text=True
+                )
+                report["core"] = {
+                    "ran": True,
+                    "ok": True,
+                    "message": (result.stdout or "").strip()
+                }
+                print(f"[UPGRADE] Core OK. stdout: {result.stdout or '(none)'}")
+                if result.stderr:
+                    print(f"[UPGRADE] Core stderr: {result.stderr}")
+            except subprocess.CalledProcessError as e:
+                err = (e.stderr or e.stdout or str(e)).strip()
+                report["core"] = {"ran": True, "ok": False, "message": err}
+                print(f"[UPGRADE] Core FAILED: {err}")
+        else:
+            report["core"] = {
+                "ran": False,
+                "ok": True,
+                "message": "No core install.py found."
+            }
+            print(f"[UPGRADE] Core skipped (no install.py at {core_script})")
+
+        # Discover plugins that have install.py (so new plugins get upgrades even without manifest.json)
+        plugin_names_with_install = []
+        if os.path.isdir(self.PLUGINS_DIR):
+            for name in sorted(os.listdir(self.PLUGINS_DIR), key=str.lower):
+                if name.startswith("__"):
+                    continue
+                path = os.path.join(self.PLUGINS_DIR, name)
+                if not os.path.isdir(path):
+                    continue
+                script_path = os.path.join(path, "install.py")
+                if os.path.isfile(script_path):
+                    plugin_names_with_install.append(name)
+        print(f"[UPGRADE] Plugins with install.py ({len(plugin_names_with_install)}): {plugin_names_with_install}")
+
+        for plugin_name in plugin_names_with_install:
+            script_path = os.path.join(self.PLUGINS_DIR, plugin_name, "install.py")
+            if not os.path.exists(script_path):
+                report["plugins_skipped"].append(plugin_name)
+                print(f"[UPGRADE] Skip {plugin_name}: install.py missing")
+                continue
+
+            print(f"[UPGRADE] Running plugin: {plugin_name} -> {script_path}")
+            try:
+                result = subprocess.run(
+                    [sys.executable, script_path, "upgrade"],
+                    check=True, capture_output=True, text=True
+                )
+                report["plugins_ran"].append(plugin_name)
+                print(f"[UPGRADE] Plugin {plugin_name} OK. stdout: {(result.stdout or '').strip() or '(none)'}")
+                if result.stderr:
+                    print(f"[UPGRADE] Plugin {plugin_name} stderr: {result.stderr}")
+            except subprocess.CalledProcessError as e:
+                err = (e.stderr or e.stdout or str(e)).strip()
+                report["plugins_failed"].append(
+                    {"plugin": plugin_name, "error": err})
+                print(f"[UPGRADE] Plugin {plugin_name} FAILED: {err}")
+
+        print("[UPGRADE] ---------- Upgrade scripts run complete ----------")
+        print(f"[UPGRADE] Summary: core ran={report['core']['ran']} ok={report['core']['ok']}; "
+              f"plugins ran={len(report['plugins_ran'])}, skipped={len(report['plugins_skipped'])}, failed={len(report['plugins_failed'])}")
+        return report
 
     # ------------- Detailed Logging -------------
     def log_update(self, update_type, name, update_mode, old_version, new_version, status, details):
@@ -877,6 +1243,147 @@ class UpdateManager:
 
         # If checks fail, return None
         return None
+
+    def _normalize_release_entries(self, releases_raw):
+        """
+        Normalize legacy `releases` metadata into a list of dict entries.
+        Supports:
+        - list[dict]
+        - dict version->dict
+        """
+        normalized = []
+        if isinstance(releases_raw, list):
+            for item in releases_raw:
+                if isinstance(item, dict):
+                    normalized.append(dict(item))
+            return normalized
+
+        if isinstance(releases_raw, dict):
+            for ver, item in releases_raw.items():
+                if not isinstance(item, dict):
+                    continue
+                entry = dict(item)
+                entry.setdefault("version", str(ver))
+                normalized.append(entry)
+        return normalized
+
+    def _changelog_artifact_entries(self, block: dict) -> List[dict]:
+        """
+        Entries from `changelog` when it is a list of objects with `version`.
+        Artifact fields on the same row as the release notes:
+        - artifact_url or download_url
+        - artifact_type: complete | partial (default complete when URL present)
+        - base_version: for partial, which full release to layer on
+        """
+        cl = block.get("changelog")
+        if not isinstance(cl, list):
+            return []
+        out: List[dict] = []
+        for item in cl:
+            if isinstance(item, dict) and (item.get("version") or "").strip():
+                out.append(dict(item))
+        return out
+
+    def _resolve_artifact_plan(self, manifest: dict, section: str = None, require_complete_base: bool = False) -> dict:
+        """
+        Resolve update/install artifacts for core/plugins with backward compatibility.
+
+        Preferred schema — same object as changelog rows (no separate releases dict):
+            changelog: [{version, date, changes, artifact_url?, artifact_type?, base_version?}, ...]
+
+        Legacy / optional:
+            releases: [{version, artifact_url, ...}, ...]  (deprecated; changelog wins on same version)
+            download_url, complete_download_url/full_download_url at block level
+        """
+        block = manifest.get(section, {}) if section else manifest
+        if not isinstance(block, dict):
+            block = {}
+
+        current_version = (block.get("current_version") or "").strip()
+        releases = self._normalize_release_entries(block.get("releases") or [])
+        changelog_entries = self._changelog_artifact_entries(block)
+
+        def _release_url(entry: dict) -> str:
+            return (
+                (entry.get("artifact_url") or "").strip()
+                or (entry.get("download_url") or "").strip()
+            )
+
+        by_version: Dict[str, dict] = {}
+        # Legacy `releases` first (changelog overrides when both define a URL for a version)
+        for rel in releases:
+            ver = (rel.get("version") or "").strip()
+            if ver:
+                by_version[ver] = rel
+        for entry in changelog_entries:
+            ver = (entry.get("version") or "").strip()
+            if ver and _release_url(entry):
+                by_version[ver] = entry
+
+        selected = by_version.get(current_version) if current_version else None
+        if not selected and by_version:
+            # Fallback: highest version that declares an artifact URL
+            def _ver_key(v: str):
+                return parse(v) if v else parse("0")
+            best_ver = max(by_version.keys(), key=_ver_key)
+            selected = by_version[best_ver]
+
+        legacy_latest = (block.get("download_url") or "").strip()
+        legacy_complete = (
+            (block.get("complete_download_url") or "").strip()
+            or (block.get("full_download_url") or "").strip()
+        )
+
+        initial_url = ""
+        latest_url = ""
+        artifact_type = "legacy"
+
+        if selected:
+            artifact_type = ((selected.get("artifact_type") or "complete").strip().lower() or "complete")
+            selected_url = _release_url(selected)
+
+            if artifact_type == "partial":
+                base_url = (
+                    (selected.get("complete_artifact_url") or "").strip()
+                    or (selected.get("complete_download_url") or "").strip()
+                    or (selected.get("full_download_url") or "").strip()
+                )
+
+                base_version = (selected.get("base_version") or "").strip()
+                if not base_url and base_version:
+                    base_rel = by_version.get(base_version)
+                    if base_rel:
+                        base_url = _release_url(base_rel)
+
+                if not base_url:
+                    base_url = legacy_complete
+
+                if require_complete_base and not base_url:
+                    raise Exception(
+                        "Partial artifact requires a complete base artifact URL."
+                    )
+
+                initial_url = base_url or selected_url
+                latest_url = selected_url
+            else:
+                initial_url = selected_url or legacy_complete or legacy_latest
+                latest_url = selected_url or legacy_latest
+        else:
+            initial_url = legacy_complete or legacy_latest
+            latest_url = legacy_latest or initial_url
+
+        if not initial_url:
+            raise Exception("No resolvable artifact URL in manifest.")
+
+        initial_url = self.convert_to_api_endpoint(initial_url)
+        latest_url = self.convert_to_api_endpoint(latest_url) if latest_url else None
+
+        return {
+            "initial_download_url": initial_url,
+            "latest_download_url": latest_url,
+            "current_version": current_version or "Unknown",
+            "artifact_type": artifact_type,
+        }
 
     def apply_update(self, update_type, plugin_name=None, update_mode="manual"):
         import os
@@ -948,19 +1455,50 @@ class UpdateManager:
             if update_type == "core":
                 print("Fetching core manifest...")
                 core_manifest = self.get_core_manifest_remote()
+                plan = self._resolve_artifact_plan(
+                    core_manifest, section="core", require_complete_base=False
+                )
+                initial_download_url = plan["initial_download_url"]
+                latest_download_url = plan["latest_download_url"]
 
-                print("Downloading core update...")
-                download_url = core_manifest.get(
-                    "core", {}).get("download_url")
-                if not download_url:
-                    raise Exception("No download URL for core update.")
-                download_url = self.convert_to_api_endpoint(download_url)
+                print("Downloading core update (base artifact)...")
+                url_name = unquote(
+                    os.path.basename(urlparse(initial_download_url).path)
+                )
+                if not url_name.lower().endswith(".zip"):
+                    url_name = "core_update_base.zip"
+                zip_path_initial = os.path.join(self.UPDATE_DIR, url_name)
+                self.download_update(initial_download_url, zip_path_initial)
 
-                zip_path = os.path.join(self.UPDATE_DIR, "core_update.zip")
-                self.download_update(download_url, zip_path)
+                print("Applying core update (base)...")
+                self.apply_zip(
+                    zip_path_initial,
+                    system_root,
+                    strip_leading_app=True,
+                    zip_mode="upgrade",
+                )
 
-                print("Applying core update...")
-                self.apply_zip(zip_path, system_root)
+                if (
+                    latest_download_url
+                    and latest_download_url != initial_download_url
+                ):
+                    print("Downloading core overlay (latest / delta)...")
+                    overlay_name = unquote(
+                        os.path.basename(urlparse(latest_download_url).path)
+                    )
+                    if not overlay_name.lower().endswith(".zip"):
+                        overlay_name = "core_update_overlay.zip"
+                    zip_path_overlay = os.path.join(
+                        self.UPDATE_DIR, overlay_name
+                    )
+                    self.download_update(latest_download_url, zip_path_overlay)
+                    print("Applying core overlay...")
+                    self.apply_zip(
+                        zip_path_overlay,
+                        system_root,
+                        strip_leading_app=True,
+                        zip_mode="upgrade",
+                    )
 
                 # Update local core manifest version (app/config/manifest.json)
                 manifest_path = os.path.join(
@@ -1010,30 +1548,40 @@ class UpdateManager:
                 plugin_manifest = self.get_plugin_manifest_remote(
                     plugin_name) or {}
 
-                print(f"Downloading plugin update for {plugin_name}...")
-                download_url = plugin_manifest.get("download_url")
-                if not download_url:
-                    raise Exception(
-                        f"No download URL for plugin {plugin_name} update.")
-                download_url = self.convert_to_api_endpoint(download_url)
-
-                # Prefer the actual filename from the URL if it ends with .zip
-                url_name = unquote(os.path.basename(
-                    urlparse(download_url).path))
-                if url_name.lower().endswith(".zip"):
-                    zip_path = os.path.join(self.UPDATE_DIR, url_name)
-                else:
-                    zip_path = os.path.join(
-                        self.UPDATE_DIR, f"{plugin_name}_update.zip")
-
-                self.download_update(download_url, zip_path)
-
                 # Compute correct target path
                 plugin_path = os.path.join(system_root, "plugins", plugin_name)
                 os.makedirs(plugin_path, exist_ok=True)
 
-                print(f"Applying plugin update for {plugin_name}...")
-                self.apply_zip(zip_path, plugin_path)
+                plan = self._resolve_artifact_plan(
+                    plugin_manifest, section=None, require_complete_base=False
+                )
+                initial_download_url = plan["initial_download_url"]
+                latest_download_url = plan["latest_download_url"]
+
+                print(f"Downloading plugin update for {plugin_name} (base artifact)...")
+                url_name = unquote(os.path.basename(
+                    urlparse(initial_download_url).path))
+                if not url_name.lower().endswith(".zip"):
+                    url_name = f"{plugin_name}_update_base.zip"
+                zip_path_initial = os.path.join(self.UPDATE_DIR, url_name)
+                self.download_update(initial_download_url, zip_path_initial)
+
+                print(f"Applying plugin update for {plugin_name} (base)...")
+                self.apply_zip(
+                    zip_path_initial, plugin_path, zip_mode="upgrade")
+
+                if latest_download_url and latest_download_url != initial_download_url:
+                    print(
+                        f"Downloading plugin overlay for {plugin_name} (latest / delta)...")
+                    overlay_name = unquote(os.path.basename(
+                        urlparse(latest_download_url).path))
+                    if not overlay_name.lower().endswith(".zip"):
+                        overlay_name = f"{plugin_name}_update_overlay.zip"
+                    zip_path_overlay = os.path.join(self.UPDATE_DIR, overlay_name)
+                    self.download_update(latest_download_url, zip_path_overlay)
+                    print(f"Applying plugin overlay for {plugin_name}...")
+                    self.apply_zip(
+                        zip_path_overlay, plugin_path, zip_mode="upgrade")
 
                 # Determine new version from *local factory manifest after extraction*
                 new_version = _get_factory_version_local(plugin_name)
@@ -1052,6 +1600,13 @@ class UpdateManager:
                 # Keep local manifest version in sync (as requested)
                 if new_version and new_version != "Unknown":
                     local["version"] = new_version
+
+                merge_plugin_dashboard_fields_from_factory(
+                    local,
+                    _load_factory_manifest_dict(
+                        os.path.join(plugin_path, "factory_manifest.json")
+                    ),
+                )
 
                 _write_json(local_manifest_path, local)
 
@@ -1144,7 +1699,7 @@ class UpdateManager:
             return 'No changelog available.'
 
     def get_remote_plugin_list(self):
-        url = "https://gitlab.com/api/v4/projects/65546585/repository/tree?path=plugins&ref=main&per_page=100"
+        url = f"{self._gitlab_api_base}/repository/tree?path=plugins&ref=main&per_page=100"
         with self._gitlab_session() as s:
             r = s.get(url)
             if r.status_code == 200:
@@ -1254,30 +1809,34 @@ class UpdateManager:
             raise Exception(
                 f"Failed to fetch remote manifest for '{plugin_name}': {e}")
 
-        download_url = remote_manifest.get("download_url")
-        if not download_url:
-            raise Exception(
-                f"No download_url in remote manifest for '{plugin_name}'.")
+        # Fresh install requires a complete base artifact when latest is partial.
+        plan = self._resolve_artifact_plan(
+            remote_manifest, section=None, require_complete_base=True
+        )
+        initial_download_url = plan["initial_download_url"]
+        latest_download_url = plan["latest_download_url"]
 
-        # --- Normalize download URL to GitLab API endpoint ---
-        download_url = self.convert_to_api_endpoint(download_url)
-        if not download_url.startswith("https://gitlab.com/api/v4/"):
+        api_root = f"{self._gitlab_api_base}/"
+        if not initial_download_url.startswith(api_root):
             raise Exception(
-                f"Download URL not normalized to API endpoint for '{plugin_name}': {download_url}")
+                f"Initial download URL not from configured GitLab project for '{plugin_name}': {initial_download_url}")
+        if latest_download_url and not latest_download_url.startswith(api_root):
+            raise Exception(
+                f"Latest download URL not from configured GitLab project for '{plugin_name}': {latest_download_url}")
 
-        # --- Compute local zip path ---
-        url_name = unquote(os.path.basename(urlparse(download_url).path))
+        # --- Compute local zip path (initial complete artifact) ---
+        url_name = unquote(os.path.basename(urlparse(initial_download_url).path))
         if not url_name.lower().endswith(".zip"):
-            url_name = f"{plugin_name}_update.zip"
-        zip_path = os.path.join(self.UPDATE_DIR, url_name)
+            url_name = f"{plugin_name}_complete.zip"
+        zip_path_initial = os.path.join(self.UPDATE_DIR, url_name)
 
-        # --- Download zip ---
+        # --- Download initial zip ---
         try:
-            self.download_update(download_url, zip_path)
+            self.download_update(initial_download_url, zip_path_initial)
             print(
-                f"[DEBUG] Downloaded zip for '{plugin_name}' to: {zip_path} (exists={os.path.exists(zip_path)})")
+                f"[DEBUG] Downloaded zip for '{plugin_name}' to: {zip_path_initial} (exists={os.path.exists(zip_path_initial)})")
         except Exception as e:
-            raise Exception(f"Failed to download '{plugin_name}' zip: {e}")
+            raise Exception(f"Failed to download '{plugin_name}' initial zip: {e}")
 
         # --- Prepare target plugin path ---
         plugin_target = os.path.join(self.PLUGINS_DIR, plugin_name)
@@ -1285,15 +1844,36 @@ class UpdateManager:
 
         # --- Extract safely ---
         try:
-            self.apply_zip(zip_path, plugin_target)
-            print(f"[DEBUG] Extracted '{plugin_name}' into: {plugin_target}")
+            self.apply_zip(
+                zip_path_initial, plugin_target, zip_mode="install")
+            print(
+                f"[DEBUG] Extracted '{plugin_name}' initial artifact into: {plugin_target}")
             try:
                 print(
                     f"[DEBUG] Listing of {plugin_target}: {os.listdir(plugin_target)}")
             except Exception as le:
                 print(f"[DEBUG] Could not list {plugin_target}: {le}")
         except Exception as e:
-            raise Exception(f"Failed to extract '{plugin_name}' zip: {e}")
+            raise Exception(f"Failed to extract '{plugin_name}' initial zip: {e}")
+
+        # --- Overlay latest partial artifact (optional) ---
+        zip_path_latest = None
+        overlay_applied = False
+        if latest_download_url and latest_download_url != initial_download_url:
+            try:
+                latest_name = unquote(os.path.basename(urlparse(latest_download_url).path))
+                if not latest_name.lower().endswith(".zip"):
+                    latest_name = f"{plugin_name}_latest.zip"
+                zip_path_latest = os.path.join(self.UPDATE_DIR, latest_name)
+                self.download_update(latest_download_url, zip_path_latest)
+                self.apply_zip(
+                    zip_path_latest, plugin_target, zip_mode="install")
+                overlay_applied = True
+                print(
+                    f"[DEBUG] Overlay applied for '{plugin_name}' from {zip_path_latest}")
+            except Exception as e:
+                raise Exception(
+                    f"Failed to overlay latest partial artifact for '{plugin_name}': {e}")
 
         # --- Local manifest path ---
         local_manifest_path = os.path.join(plugin_target, "manifest.json")
@@ -1306,8 +1886,9 @@ class UpdateManager:
                 local_manifest = {}
 
         # --- Minimum viable manifest ---
+        zip_for_version = zip_path_latest or zip_path_initial
         inferred_version = self._parse_version_from_zip_name(
-            zip_path, plugin_name) or remote_manifest.get("current_version")
+            zip_for_version, plugin_name) or remote_manifest.get("current_version")
         local_manifest.setdefault("system_name", plugin_name)
         if inferred_version:
             local_manifest["version"] = inferred_version
@@ -1341,6 +1922,13 @@ class UpdateManager:
                     break
         local_manifest["icon"] = str(icon_val).replace("\\", "/")
 
+        merge_plugin_dashboard_fields_from_factory(
+            local_manifest,
+            _load_factory_manifest_dict(
+                os.path.join(plugin_target, "factory_manifest.json")
+            ),
+        )
+
         # --- Persist manifest (flush + fsync) ---
         try:
             print(f"[DEBUG] Writing manifest at: {local_manifest_path}")
@@ -1371,6 +1959,25 @@ class UpdateManager:
                 if e.stderr:
                     print("[STDERR]", e.stderr)
                 raise
+
+            # If we installed a complete base artifact and overlaid a newer
+            # partial artifact, run the upgrade step too so DB migrations catch up.
+            if overlay_applied:
+                try:
+                    result = subprocess.run(
+                        [sys.executable, script_path, "upgrade"],
+                        check=True, capture_output=True, text=True
+                    )
+                    print(result.stdout)
+                    if result.stderr:
+                        print("[STDERR]", result.stderr)
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] Plugin upgrade script failed: {e}")
+                    if e.stdout:
+                        print("[STDOUT]", e.stdout)
+                    if e.stderr:
+                        print("[STDERR]", e.stderr)
+                    raise
         else:
             print(
                 f"[WARN] No install.py found in plugin directory for {plugin_name}.")
@@ -1937,21 +2544,108 @@ class PluginManager:
 
         return plugin_list
 
+    # Stable Bootstrap icon suffixes (no "bi-" prefix) for dashboard tiles when no image icon.
+    _DASHBOARD_TILE_GLYPHS = (
+        "puzzle-fill",
+        "box-seam",
+        "grid-3x3-gap",
+        "layers-fill",
+        "diagram-3-fill",
+        "briefcase-fill",
+        "heart-pulse",
+        "cart3",
+        "calendar3",
+        "people-fill",
+        "journal-richtext",
+        "shield-check",
+        "globe2",
+        "camera-video-fill",
+        "newspaper",
+        "clock-history",
+        "truck",
+        "building",
+        "clipboard2-pulse",
+        "megaphone-fill",
+        "graph-up-arrow",
+        "folder2-open",
+        "gear-wide-connected",
+        "lightning-charge-fill",
+    )
+
+    def _dashboard_tile_style(self, system_name: str, manifest: dict) -> dict:
+        """Deterministic accent colour + fallback icon for dashboard cards."""
+        s = (manifest.get("dashboard_icon") or "").strip()
+        while s:
+            low = s.lower()
+            if low.startswith("bi "):
+                s = s[3:].strip()
+            elif low.startswith("bi-"):
+                s = s[3:].strip()
+            else:
+                break
+        glyph = s
+        h = int(
+            hashlib.md5(
+                (system_name or "").encode("utf-8"),
+                usedforsecurity=False,
+            ).hexdigest(),
+            16,
+        )
+        if not glyph:
+            glyph = self._DASHBOARD_TILE_GLYPHS[h % len(self._DASHBOARD_TILE_GLYPHS)]
+        hue = h % 360
+        return {"tile_glyph": glyph, "tile_hue": hue}
+
     def get_enabled_plugins(self):
-        """Retrieve all enabled plugins with their name and system_name (fresh scan)."""
-        plugins = []
+        """
+        Enabled plugins with dashboard metadata.
+
+        Optional manifest keys:
+        - dashboard_category: group on home (default "Modules")
+        - dashboard_icon: Bootstrap icon, e.g. "bi-heart-pulse" or "heart-pulse"
+        """
+        plugins: list = []
         self.plugins = self.load_plugins() or {}
 
         for plugin_folder, manifest in self.plugins.items():
             if not isinstance(manifest, dict):
                 continue
-            if manifest.get("enabled", False):
-                plugins.append({
-                    "name": manifest.get("name", plugin_folder),
-                    "system_name": manifest.get("system_name", plugin_folder)
-                })
+            if not manifest.get("enabled", False):
+                continue
+            sys_name = (
+                manifest.get("system_name") or plugin_folder or ""
+            ).strip() or plugin_folder
+            extras = self._dashboard_tile_style(sys_name, manifest)
+            category = (manifest.get("dashboard_category") or "Modules").strip()
+            if not category:
+                category = "Modules"
+            try:
+                from app.permissions_registry import plugin_access_permission_id
 
-        print(f"[DEBUG] Enabled plugins: {plugins}")
+                acc_perm = plugin_access_permission_id(manifest, sys_name)
+            except Exception:
+                acc_perm = (
+                    (manifest.get("access_permission") or manifest.get("permission_required") or "").strip()
+                    or f"{sys_name}.access"
+                )
+            plugins.append(
+                {
+                    "name": manifest.get("name", plugin_folder),
+                    "system_name": sys_name,
+                    "description": (manifest.get("description") or "").strip(),
+                    "icon": manifest.get("icon") or "",
+                    "dashboard_category": category,
+                    "tile_glyph": extras["tile_glyph"],
+                    "tile_hue": extras["tile_hue"],
+                    "permission_required": manifest.get("permission_required"),
+                    "access_permission": acc_perm,
+                }
+            )
+
+        plugins.sort(
+            key=lambda p: (p["dashboard_category"].lower(), p["name"].lower())
+        )
+        print(f"[DEBUG] Enabled plugins: {[p['system_name'] for p in plugins]}")
         return plugins
 
     def is_plugin_enabled(self, system_name):
@@ -2242,6 +2936,8 @@ class PluginManager:
                     manifest["icon"] = cand.replace("\\", "/")
                     break
 
+            merge_plugin_dashboard_fields_from_factory(manifest, seed)
+
             os.makedirs(plugin_folder, exist_ok=True)
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 json.dump(manifest, f, indent=4)
@@ -2265,8 +2961,13 @@ class PluginManager:
                     "update_available": False
                 }
 
-        # Already enabled?
+        factory_data = _load_factory_manifest_dict(factory_path)
+        merge_plugin_dashboard_fields_from_factory(manifest, factory_data)
+
+        # Already enabled? Persist manifest so dashboard_category / dashboard_icon stay synced from factory.
         if manifest.get('enabled', False):
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=4)
             print(f"[DEBUG] Plugin '{system_name}' is already enabled.")
             return True, f"{system_name} is already enabled."
 
@@ -2434,12 +3135,26 @@ class PluginManager:
         return plugin.get_manifest()
 
     def get_available_permissions(self):
-        perms = set()
-        for manifest in self.plugins.values():
-            perm = manifest.get("permission_required")
-            if perm:
-                perms.add(perm)
-        return list(perms)
+        """Flat list of permission IDs (module access + declared features)."""
+        try:
+            from app.permissions_registry import (
+                collect_permission_catalog,
+                permission_ids_for_catalog,
+            )
+
+            return permission_ids_for_catalog(
+                collect_permission_catalog(self)
+            )
+        except Exception as e:
+            print(f"[WARN] get_available_permissions fallback: {e}")
+            perms = set()
+            for manifest in self.plugins.values():
+                if not isinstance(manifest, dict):
+                    continue
+                perm = manifest.get("permission_required")
+                if perm:
+                    perms.add(perm)
+            return sorted(perms)
 
     def register_admin_routes(self, app):
         """
@@ -2452,7 +3167,14 @@ class PluginManager:
             try:
                 module = importlib.import_module(
                     f"app.plugins.{plugin_name}.routes")
-                if hasattr(module, "get_blueprint"):
+                if hasattr(module, "get_blueprints"):
+                    for blueprint in module.get_blueprints():
+                        app.register_blueprint(blueprint)
+                    print(
+                        f"[DEBUG] Admin routes registered for plugin: {plugin_name} "
+                        f"({len(module.get_blueprints())} blueprint(s))"
+                    )
+                elif hasattr(module, "get_blueprint"):
                     blueprint = module.get_blueprint()
                     app.register_blueprint(blueprint)
                     print(
@@ -2474,7 +3196,15 @@ class PluginManager:
             try:
                 module = importlib.import_module(
                     f"app.plugins.{plugin_name}.routes")
-                if hasattr(module, "get_public_blueprint"):
+                if hasattr(module, "get_public_blueprints"):
+                    blueprints = module.get_public_blueprints()
+                    for blueprint in blueprints:
+                        app.register_blueprint(blueprint)
+                    print(
+                        f"[DEBUG] Public routes registered for plugin: {plugin_name} "
+                        f"({len(blueprints)} blueprint(s))"
+                    )
+                elif hasattr(module, "get_public_blueprint"):
                     blueprint = module.get_public_blueprint()
                     app.register_blueprint(blueprint)
                     print(
@@ -2484,3 +3214,11 @@ class PluginManager:
                         f"[DEBUG] Plugin {plugin_name} does not provide get_public_blueprint().")
             except Exception as e:
                 print(f"[ERROR] Error registering plugin {plugin_name}: {e}")
+
+        # Contractor theme: session (set on login) + Jinja + POST /contractor-ui/set-theme
+        try:
+            from app.contractor_ui_theme import register_contractor_public_theme
+
+            register_contractor_public_theme(app)
+        except ImportError:
+            pass

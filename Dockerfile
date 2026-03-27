@@ -1,25 +1,27 @@
 FROM python:3.11-slim
 
-# System packages (only if you actually need them)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-# Install app dependencies
+# Install nginx, supervisor, and build dependencies for Python packages like mysqlclient
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx supervisor curl unzip gcc default-libmysqlclient-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir gunicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
-COPY . /app
+# Copy app code
+COPY . .
 
-# Environment settings
-ENV TZ=Europe/London
+# Copy nginx config into place
+COPY nginx.conf /etc/nginx/sites-available/default
 
-# Railway sets $PORT automatically
-CMD gunicorn "gunicorn_run:app" \
-    -b 0.0.0.0:${PORT:-82} \
-    -w 2 -k gthread --threads 8 --timeout 120
+# Copy supervisor config
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose nginx port (Railway will map this to the public URL)
+EXPOSE 80
+
+# Start supervisor (which manages nginx and your Python processes)
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

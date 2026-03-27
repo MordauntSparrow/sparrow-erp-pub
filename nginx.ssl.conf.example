@@ -1,0 +1,40 @@
+# Optional: HTTPS server for control-centre when you have SSL certs.
+# Copy to /etc/nginx/sites-enabled/control-centre-ssl.conf (or include from main config)
+# and set ssl_certificate / ssl_certificate_key to your cert paths.
+# Modern nginx: use "listen 443 ssl;" and "http2 on;" (http2 directive, not listen modifier).
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ~^control-centre\..+$;
+
+    ssl_certificate /etc/ssl/certs/control-centre.crt;
+    ssl_certificate_key /etc/ssl/private/control-centre.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {
+        proxy_pass http://127.0.0.1:82;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_read_timeout 86400;
+    }
+}
+
+# Optional: redirect control-centre HTTP to HTTPS (use when SSL block above is active)
+# server {
+#     listen 80;
+#     server_name ~^control-centre\..+$;
+#     location ^~ /.well-known/acme-challenge/ { root /var/www/letsencrypt; try_files $uri =404; }
+#     location / { return 301 https://$host$request_uri; }
+# }

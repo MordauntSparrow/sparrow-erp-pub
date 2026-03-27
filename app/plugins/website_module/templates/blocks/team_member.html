@@ -1,0 +1,39 @@
+<div class="container py-4 py-md-5">
+  <div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+      <div class="card border-0 shadow-2 rounded-4 overflow-hidden">
+        <div class="row g-0">
+          {% set ph = (photo or '')|trim %}
+          {% if ph %}
+          <div class="col-sm-4">
+            <img src="{{ ph|e }}" class="w-100 h-100 object-fit-cover" style="min-height: 200px;" alt="{{ (name or 'Team member')|striptags|trim|truncate(100) }}" loading="lazy" decoding="async">
+          </div>
+          <div class="col-sm-8">
+            <div class="card-body p-4 p-md-5">
+              <h2 class="h5 fw-bold mb-1{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="name" data-wb-plain="1"{% endif %}>{{ name }}</h2>
+              {% if role %}<p class="text-primary small fw-semibold mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="role" data-wb-plain="1"{% endif %}>{{ role }}</p>{% endif %}
+              <div class="text-muted small{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="bio" data-wb-rich="1"{% endif %}>{{ bio|safe }}</div>
+              {% set li = (linkedin or '')|trim %}
+              {% if li %}
+              <a href="{{ li|e }}" class="btn btn-outline-primary btn-sm rounded-3 mt-3" target="_blank" rel="noopener noreferrer" data-wb-no-select="1" data-wb-cta="team_linkedin">LinkedIn</a>
+              {% endif %}
+            </div>
+          </div>
+          {% else %}
+          <div class="col-12">
+            <div class="card-body p-4 p-md-5">
+              <h2 class="h5 fw-bold mb-1{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="name" data-wb-plain="1"{% endif %}>{{ name }}</h2>
+              {% if role %}<p class="text-primary small fw-semibold mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="role" data-wb-plain="1"{% endif %}>{{ role }}</p>{% endif %}
+              <div class="text-muted small{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="bio" data-wb-rich="1"{% endif %}>{{ bio|safe }}</div>
+              {% set li = (linkedin or '')|trim %}
+              {% if li %}
+              <a href="{{ li|e }}" class="btn btn-outline-primary btn-sm rounded-3 mt-3" target="_blank" rel="noopener noreferrer" data-wb-no-select="1" data-wb-cta="team_linkedin">LinkedIn</a>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

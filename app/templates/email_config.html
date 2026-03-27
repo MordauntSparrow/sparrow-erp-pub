@@ -6,6 +6,7 @@
 <div class="container mt-4">
   <h1>Email Configuration</h1>
   <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label for="host" class="form-label">SMTP Host</label>
       <input type="text" class="form-control" id="host" name="host" value="{{ email_config.host }}">
@@ -20,7 +21,9 @@
     </div>
     <div class="mb-3">
       <label for="password" class="form-label">SMTP Password</label>
-      <input type="password" class="form-control" id="password" name="password" value="{{ email_config.password }}">
+      <input type="password" class="form-control" id="password" name="password" value=""
+        autocomplete="new-password"
+        placeholder="{% if email_config.password_set %}Leave blank to keep the current password{% else %}Enter SMTP password{% endif %}">
     </div>
     <div class="mb-3">
       <label for="use_tls" class="form-label">Use TLS</label>

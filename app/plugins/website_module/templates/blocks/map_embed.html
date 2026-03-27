@@ -1,0 +1,10 @@
+{% set src = (embed_src or '')|trim %}
+{% set h = (height|default(360))|int %}
+{% if src and (src|lower)[:8] == 'https://' %}
+<div class="container py-4 py-md-5">
+  {% if caption %}<p class="small text-muted mb-2{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="caption" data-wb-plain="1"{% endif %}>{{ caption }}</p>{% endif %}
+  <div class="w-100 {% if rounded|default(true) %}rounded-4 overflow-hidden shadow-3{% endif %}" style="height: {{ h }}px;">
+    <iframe src="{{ src|e }}" title="Map" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade" class="border-0 w-100 h-100"></iframe>
+  </div>
+</div>
+{% endif %}

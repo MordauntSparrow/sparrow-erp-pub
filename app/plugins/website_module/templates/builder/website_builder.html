@@ -1,0 +1,1642 @@
+{% extends "admin/website_admin_base.html" %}
+
+{% block title %}Website Builder — {{ page.title }}{% endblock %}
+
+{% block content %}
+<div id="builderToast" class="alert alert-success py-2 px-3 small position-fixed top-0 end-0 m-3 shadow-4" style="display:none; z-index: 1080; max-width: 320px; border-radius: 12px;" role="status"></div>
+
+{# Media upload modal #}
+<div class="modal fade" id="wbMediaModal" tabindex="-1" aria-labelledby="wbMediaModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content rounded-4 shadow-4">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title" id="wbMediaModalLabel">Upload image</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="file" id="wbMediaFile" class="form-control form-control-sm rounded-3" accept="image/jpeg,image/png,image/gif,image/webp">
+        <p class="text-muted small mt-2 mb-0">JPEG, PNG, WebP or GIF · max 8MB. URL is filled into the block field automatically.</p>
+        <div id="wbMediaError" class="alert alert-danger small py-2 mt-2 d-none"></div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-light rounded-pill" data-mdb-dismiss="modal">Cancel</button>
+        <button type="button" id="wbMediaUploadBtn" class="btn btn-primary rounded-pill px-4">Upload</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="wb-studio" class="wb-studio">
+  <header class="wb-toolbar d-flex flex-wrap align-items-center gap-2 gap-md-3 px-3 py-2 border-bottom bg-white shadow-1">
+    <div class="d-flex align-items-center gap-2 me-auto">
+      <span class="wb-brand-icon d-flex align-items-center justify-content-center rounded-3 text-white shadow-1" aria-hidden="true">
+        <i class="bi bi-grid-1x2-fill"></i>
+      </span>
+      <div>
+        <div class="fw-bold text-dark lh-sm">Site builder</div>
+        <div class="small text-muted">Material layout · <code class="small bg-light px-1 rounded">{{ page.route }}</code></div>
+      </div>
+    </div>
+
+    <div class="btn-group btn-group-sm" role="group" aria-label="History">
+      <button type="button" id="wbUndoBtn" class="btn btn-outline-secondary" title="Undo (Ctrl+Z)" disabled><i class="bi bi-arrow-counterclockwise"></i></button>
+      <button type="button" id="wbRedoBtn" class="btn btn-outline-secondary" title="Redo (Ctrl+Y)" disabled><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+
+    <div class="dropdown">
+      <button class="btn btn-outline-primary btn-sm dropdown-toggle rounded-pill px-3" type="button" id="wbStarterDropdown" data-mdb-toggle="dropdown" aria-expanded="false">
+        <i class="bi bi-stars me-1"></i>Starters
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end shadow-3 rounded-3 border-0 py-2" aria-labelledby="wbStarterDropdown" style="min-width: 220px;">
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="landing">Landing essentials</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="article">Article layout</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="services">Services + CTA</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="pricing">Pricing table</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="contact">Contact page</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="trust_bundle">Trust: testimonial + CTA</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="thank_you">Thank-you / conversion</button></li>
+        <li><button class="dropdown-item small wb-starter" type="button" data-starter="faq_page">FAQ + SEO (accordion)</button></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><button class="dropdown-item small text-muted wb-starter" type="button" data-starter="blank_section">Empty section (nested)</button></li>
+      </ul>
+    </div>
+
+    <div class="btn-group btn-group-sm" role="group" aria-label="Viewport">
+      <button type="button" class="btn btn-outline-secondary wb-view-btn" data-width="375" title="Mobile"><i class="bi bi-phone"></i></button>
+      <button type="button" class="btn btn-outline-secondary wb-view-btn" data-width="768" title="Tablet"><i class="bi bi-tablet"></i></button>
+      <button type="button" class="btn btn-outline-secondary wb-view-btn active" data-width="100%" title="Desktop"><i class="bi bi-laptop"></i></button>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <button id="saveBtn" type="button" class="btn btn-primary btn-sm px-3 rounded-pill shadow-1"><i class="bi bi-cloud-check me-1"></i>Save</button>
+      <a class="btn btn-outline-secondary btn-sm px-3 rounded-pill" target="_blank" rel="noopener" href="{% if page.route == '/' %}{{ url_for('website_admin_routes.builder_preview_root') }}{% else %}{{ url_for('website_admin_routes.builder_preview', page_route=page.route.lstrip('/')) }}{% endif %}"><i class="bi bi-box-arrow-up-right me-1"></i>Preview</a>
+      <button id="publishBtn" type="button" class="btn btn-success btn-sm px-3 rounded-pill shadow-1"><i class="bi bi-rocket-takeoff me-1"></i>Publish</button>
+    </div>
+  </header>
+
+  <div class="row g-0 wb-main">
+    <aside class="col-lg-4 col-xl-3 wb-sidebar border-end bg-light">
+      <div class="d-flex flex-column h-100 wb-sidebar-inner">
+        <ul class="nav nav-pills nav-fill wb-pills mx-2 mt-3 mb-2 gap-1" role="tablist">
+          <li class="nav-item"><button class="nav-link active py-2" type="button" data-mdb-toggle="tab" data-mdb-target="#tab-blocks">Components</button></li>
+          <li class="nav-item"><button class="nav-link py-2" type="button" data-mdb-toggle="tab" data-mdb-target="#tab-layers">Layers</button></li>
+          <li class="nav-item"><button class="nav-link py-2" type="button" data-mdb-toggle="tab" data-mdb-target="#tab-settings">Page</button></li>
+        </ul>
+
+        <div class="tab-content flex-grow-1 overflow-hidden px-2 pb-2">
+          <div class="tab-pane fade show active h-100 overflow-auto" id="tab-blocks">
+            <p class="small text-muted px-2 mb-2">Preview: <strong>click</strong> to select · <strong>double-click</strong> teal text to edit · drag <strong>⠿</strong> to reorder <strong>top-level</strong> blocks and <strong>inside sections / columns</strong> · toolbar / <kbd>Del</kbd> · or drag components here / on the preview.</p>
+            <div id="blocksPalette" class="wb-palette pb-4">
+              {% for category, items in grouped_palette %}
+              <div class="wb-cat-label text-uppercase small fw-bold text-muted px-2 mb-2 mt-1">{{ category }}</div>
+              {% for key, meta in items %}
+              <div class="wb-palette-card card border-0 shadow-1 mb-2 rounded-3 overflow-hidden" data-type="{{ key }}" role="button" tabindex="0">
+                <div class="card-body p-2 d-flex align-items-start gap-2">
+                  <div class="wb-palette-icon rounded-2 d-flex align-items-center justify-content-center flex-shrink-0">
+                    <i class="bi {{ meta.icon }}"></i>
+                  </div>
+                  <div class="min-w-0 flex-grow-1">
+                    <div class="fw-semibold small text-dark">{{ meta.label }}</div>
+                    {% if meta.description %}<div class="text-muted" style="font-size: 0.7rem; line-height: 1.3;">{{ meta.description }}</div>{% endif %}
+                  </div>
+                  <i class="bi bi-grip-vertical text-muted wb-drag-hint flex-shrink-0" aria-hidden="true"></i>
+                </div>
+              </div>
+              {% endfor %}
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="tab-pane fade h-100 overflow-auto" id="tab-layers">
+            <div id="wbBreadcrumb" class="d-flex align-items-center flex-wrap gap-2 px-2 mb-2 small">
+              <button type="button" id="wbDrillBack" class="btn btn-sm btn-outline-secondary rounded-pill d-none py-0 px-2"><i class="bi bi-arrow-left"></i> Back</button>
+              <span id="wbBreadcrumbText" class="text-muted"></span>
+            </div>
+            <p class="small text-muted px-2 mb-2">Drag <i class="bi bi-grip-vertical"></i> to reorder, or drop new components on the <strong>preview</strong>. <strong>→</strong> edits blocks inside a section; <strong>1 2 …</strong> edits a column.</p>
+            <ul class="list-group list-group-flush rounded-3 border wb-layers-list shadow-1" id="layersList" style="min-height: 120px;"></ul>
+          </div>
+
+          <div class="tab-pane fade h-100 overflow-auto" id="tab-settings">
+            <div class="card border-0 shadow-1 rounded-3 mb-3">
+              <div class="card-body p-3">
+                <label class="form-label fw-semibold small mb-1">Merge with HTML template</label>
+                <select id="mergeModeSelect" class="form-select form-select-sm rounded-3">
+                  <option value="augment">After template — builder below your HTML</option>
+                  <option value="prepend">Before template — builder above your HTML</option>
+                  <option value="replace">Replace — builder only (full body)</option>
+                </select>
+                <p class="text-muted small mt-2 mb-0">Custom Jinja in <strong>Pages → Content</strong> stays unless you use <em>Replace</em>.</p>
+              </div>
+            </div>
+            <div class="card border-0 shadow-1 rounded-3 mb-3">
+              <div class="card-header bg-white py-2 small fw-bold border-0">Block properties</div>
+              <div class="card-body p-3 pt-0">
+                <div id="settingsForm" class="small"></div>
+              </div>
+            </div>
+            <div class="card border-0 shadow-1 rounded-3 mb-3">
+              <div class="card-header bg-white py-2 small fw-bold border-0">Page variables</div>
+              <div class="card-body p-3 pt-0"><div id="varsForm" class="small"></div></div>
+            </div>
+            <div class="card border-0 shadow-1 rounded-3 mb-3">
+              <div class="card-header bg-white py-2 small fw-bold border-0">SEO &amp; search preview</div>
+              <div class="card-body p-3 pt-0">
+                <div class="border rounded-3 p-2 bg-white small mb-3" id="wbSerpPreview" aria-live="polite">
+                  <div class="text-primary text-truncate fw-medium" id="wbSerpTitle">—</div>
+                  <div class="text-success text-truncate" style="font-size:0.72rem;" id="wbSerpUrl">—</div>
+                  <div class="text-secondary" style="font-size:0.78rem; line-height:1.35;" id="wbSerpDesc">—</div>
+                </div>
+                <label class="form-label small">Title <span class="text-muted fw-normal" id="seoTitleHint"></span></label>
+                <input id="seoTitle" class="form-control form-control-sm rounded-3 mb-2" maxlength="200" value="{{ page.seo.title or '' }}" autocomplete="off">
+                <label class="form-label small">Meta description <span class="text-muted fw-normal" id="seoDescHint"></span></label>
+                <textarea id="seoDesc" class="form-control form-control-sm rounded-3 mb-2" rows="2" maxlength="320">{{ page.seo.description or '' }}</textarea>
+                <label class="form-label small">Keywords (comma-separated)</label>
+                <input id="seoKeywords" class="form-control form-control-sm rounded-3 mb-2" value="{% if page.seo.keywords is string %}{{ page.seo.keywords }}{% elif page.seo.keywords %}{{ page.seo.keywords | join(', ') }}{% endif %}" placeholder="optional">
+                <label class="form-label small">Social share image URL</label>
+                <input id="seoOgImage" class="form-control form-control-sm rounded-3 mb-2" value="{{ page.seo.image or '' }}" placeholder="Upload to media or paste https://…">
+                <p class="small text-muted mb-2">Published builder SEO overrides Page Manager meta for the <strong>live</strong> site. Ideal: title ~50–60 chars, description ~140–160.</p>
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="seoNoindex" {% if page.seo.noindex|default(false) %}checked{% endif %}>
+                  <label class="form-check-label small" for="seoNoindex">Noindex</label>
+                </div>
+                <div class="form-check">
+                  <input type="checkbox" class="form-check-input" id="seoNofollow" {% if page.seo.nofollow|default(false) %}checked{% endif %}>
+                  <label class="form-check-label small" for="seoNofollow">Nofollow</label>
+                </div>
+                <div class="form-check mb-0">
+                  <input type="checkbox" class="form-check-input" id="seoOmitSitemap" {% if page.seo.omit_from_sitemap|default(false) %}checked{% endif %}>
+                  <label class="form-check-label small" for="seoOmitSitemap">Omit from sitemap</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="col-lg-8 col-xl-9 wb-canvas-wrap">
+      <div class="wb-canvas-toolbar d-flex align-items-center justify-content-between px-3 py-2 border-bottom bg-white">
+        <span class="small text-muted"><i class="bi bi-eye me-1"></i>Live preview</span>
+        <button type="button" class="btn btn-link btn-sm text-decoration-none p-0" data-mdb-toggle="collapse" data-mdb-target="#builderHelp" aria-expanded="true">Help</button>
+      </div>
+      <div class="collapse show border-bottom" id="builderHelp">
+        <div class="px-3 py-2 small bg-info bg-opacity-10 text-dark d-flex justify-content-between align-items-start gap-2">
+          <span><strong>Shortcuts:</strong> Double-click to edit text · Drag <strong>⠿</strong> to reorder blocks · <kbd>Esc</kbd> cancels inline edit · Toolbar / <kbd>Del</kbd> · Ctrl+Z / Y · Ctrl+S · Layers → <strong>→</strong> for nested sections/columns.</span>
+          <button type="button" class="btn-close btn-sm" data-mdb-dismiss="collapse" data-mdb-target="#builderHelp" aria-label="Dismiss"></button>
+        </div>
+      </div>
+      <div class="wb-canvas p-3 p-md-4">
+        <div class="wb-device-frame mx-auto shadow-3 rounded-4 overflow-hidden bg-white border" id="wbDeviceFrame">
+          <div class="wb-device-bar d-flex align-items-center gap-1 px-3 py-2 border-bottom bg-light">
+            <span class="rounded-circle bg-danger-subtle" style="width:10px;height:10px;"></span>
+            <span class="rounded-circle bg-warning-subtle" style="width:10px;height:10px;"></span>
+            <span class="rounded-circle bg-success-subtle" style="width:10px;height:10px;"></span>
+            <span class="small text-muted ms-2 text-truncate flex-grow-1 text-center">Preview</span>
+          </div>
+          <div class="wb-preview-stack">
+            <iframe id="previewFrame" class="wb-preview-iframe d-block border-0"
+              src="{% if page.route == '/' %}{{ url_for('website_admin_routes.builder_preview_root') }}{% else %}{{ url_for('website_admin_routes.builder_preview', page_route=page.route.lstrip('/')) }}{% endif %}"
+              title="Page preview"></iframe>
+            {# Sortable cannot drop into cross-origin iframe document — overlay accepts palette clones #}
+            <div id="wbPreviewDropShield" class="wb-preview-drop-shield" aria-hidden="true">
+              <div id="wbPreviewDropHint" class="wb-preview-drop-hint" hidden>Drop here — release to add</div>
+              <ul id="wbPreviewDropList" class="wb-preview-drop-list list-unstyled mb-0"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<style>
+  .wb-studio { min-height: calc(100vh - 140px); display: flex; flex-direction: column; margin: -1rem -0.75rem 0; background: #eceff1; }
+  .wb-main { flex: 1; min-height: 0; }
+  .wb-brand-icon { width: 40px; height: 40px; background: linear-gradient(135deg, #0E7C86, #0a5c63); }
+  .wb-sidebar { max-height: calc(100vh - 160px); overflow: hidden; }
+  @media (min-width: 992px) { .wb-sidebar-inner { max-height: calc(100vh - 160px); } }
+  .wb-pills .nav-link { border-radius: 10px; font-size: 0.8rem; font-weight: 600; color: #546e7a; }
+  .wb-pills .nav-link.active { background: linear-gradient(135deg, #0E7C86, #0b6b74); color: #fff; box-shadow: 0 2px 8px rgba(14,124,134,.35); }
+  .wb-cat-label { letter-spacing: .06em; font-size: 0.65rem; }
+  .wb-palette-card { cursor: grab; transition: transform .15s, box-shadow .15s; }
+  .wb-palette-card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.08) !important; }
+  .wb-palette-card:active { cursor: grabbing; }
+  .wb-palette-icon { width: 36px; height: 36px; background: linear-gradient(145deg, #e3f2fd, #bbdefb); color: #1565c0; font-size: 1rem; }
+  .wb-layers-list .list-group-item { border-left: 3px solid transparent; }
+  .wb-layers-list .list-group-item.active { background: #e0f2f1; border-left-color: #0E7C86; color: #004d40; }
+  .wb-layer-grip { cursor: grab; color: #90a4ae; }
+  .wb-canvas-wrap { display: flex; flex-direction: column; min-height: 0; background: linear-gradient(180deg, #eceff1 0%, #cfd8dc 100%); }
+  .wb-canvas { flex: 1; overflow: auto; }
+  .wb-device-frame { max-width: 100%; transition: width .25s ease; }
+  /* Stack iframe + drop shield in one cell so overlay matches preview size */
+  .wb-preview-stack {
+    display: grid;
+    grid-template: 1fr / 1fr;
+    width: 100%;
+    position: relative;
+  }
+  .wb-preview-stack > * { grid-area: 1 / 1; }
+  .wb-preview-iframe { width: 100%; height: min(72vh, 820px); min-height: 420px; vertical-align: top; z-index: 1; }
+  .wb-preview-drop-shield {
+    z-index: 2;
+    pointer-events: none;
+    min-height: min(72vh, 820px);
+    height: 100%;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+    transition: background .15s ease, box-shadow .15s ease;
+  }
+  .wb-preview-drop-shield.wb-preview-drop-active {
+    pointer-events: auto;
+    background: rgba(14, 124, 134, 0.14);
+    box-shadow: inset 0 0 0 3px rgba(14, 124, 134, 0.55);
+  }
+  /* Sortable clone must paint above the shield (iframe is underneath) */
+  .wb-studio .sortable-drag,
+  body > .sortable-drag {
+    z-index: 10060 !important;
+    opacity: 0.96;
+    cursor: grabbing !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,.18);
+  }
+  .wb-preview-drop-hint {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, calc(-100% - 10px));
+    z-index: 4;
+    padding: 0.45rem 0.85rem;
+    border-radius: 10px;
+    background: #0E7C86;
+    color: #fff;
+    font-size: 0.78rem;
+    font-weight: 600;
+    box-shadow: 0 6px 24px rgba(0,0,0,.22);
+    pointer-events: none;
+    max-width: min(240px, 85vw);
+    text-align: center;
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .wb-preview-drop-hint[hidden] { display: none !important; }
+  .wb-preview-drop-list {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 200px;
+    height: 100%;
+    position: relative;
+  }
+  .wb-preview-drop-list .sortable-ghost { opacity: 0.35; }
+  @media (max-width: 991.98px) {
+    .wb-sidebar { max-height: 38vh; border-bottom: 1px solid #dee2e6; }
+    .wb-sidebar-inner { max-height: 38vh; }
+    .wb-preview-iframe { height: 48vh; min-height: 260px; }
+    .wb-preview-drop-shield { min-height: 48vh; }
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+  const REGISTRY = {{ blocks_registry | tojson }};
+  const WB_UPLOAD_URL = {{ url_for('website_admin_routes.builder_media_upload') | tojson }};
+
+  let drill = null; // null | { kind:'section', rootIndex } | { kind:'column', rootIndex, colIndex }
+
+  let state = {
+    route: "{{ page.route }}",
+    blocks: {{ page.blocks | tojson }},
+    vars: {{ page.vars | tojson if page.vars else '{}' }},
+    seo: {{ (page.seo or {}) | tojson }},
+    settings: {{ (page.settings or {'merge_mode': 'augment'}) | tojson }},
+    selectedIndex: null,
+    /* When set, Layers/settings follow this path (Wix-style preview click). Mutually exclusive with drill. */
+    canvasSelectPath: null
+  };
+
+  (function normalizeSeoState() {
+    const s = state.seo || {};
+    let kw = s.keywords;
+    if (Array.isArray(kw)) kw = kw.filter(Boolean).join(', ');
+    else if (kw == null) kw = '';
+    else kw = String(kw);
+    state.seo = {
+      title: s.title != null ? String(s.title) : '',
+      description: s.description != null ? String(s.description) : '',
+      keywords: kw,
+      image: s.image != null ? String(s.image) : '',
+      noindex: !!s.noindex,
+      nofollow: !!s.nofollow,
+      omit_from_sitemap: !!s.omit_from_sitemap,
+    };
+  })();
+
+  const layersEl = document.getElementById('layersList');
+  const paletteEl = document.getElementById('blocksPalette');
+  const previewDropShield = document.getElementById('wbPreviewDropShield');
+  const previewDropListEl = document.getElementById('wbPreviewDropList');
+  let paletteSortable = null;
+  let layerSortable = null;
+  let previewDropSortable = null;
+
+  function setPreviewDropActive(on) {
+    if (!previewDropShield) return;
+    if (on) {
+      previewDropShield.classList.add('wb-preview-drop-active');
+      previewDropShield.setAttribute('aria-hidden', 'false');
+    } else {
+      previewDropShield.classList.remove('wb-preview-drop-active');
+      previewDropShield.setAttribute('aria-hidden', 'true');
+      const hint = document.getElementById('wbPreviewDropHint');
+      if (hint) {
+        hint.hidden = true;
+        hint.textContent = 'Drop here — release to add';
+      }
+    }
+  }
+
+  function schedulePreviewDropDeactivate() {
+    requestAnimationFrame(() => {
+      setTimeout(() => setPreviewDropActive(false), 0);
+    });
+  }
+
+  /* Sortable sometimes omits onEnd when cloning onto an empty list — always clear on release */
+  (function initPreviewDropGlobalHandlers() {
+    document.addEventListener('pointermove', (e) => {
+      if (!previewDropShield?.classList.contains('wb-preview-drop-active')) return;
+      const hint = document.getElementById('wbPreviewDropHint');
+      if (!hint) return;
+      const rect = previewDropShield.getBoundingClientRect();
+      const inside = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (!inside) {
+        hint.hidden = true;
+        return;
+      }
+      hint.hidden = false;
+      hint.style.left = `${e.clientX - rect.left}px`;
+      hint.style.top = `${e.clientY - rect.top}px`;
+      const dragEl = document.querySelector('.sortable-drag, .sortable-fallback');
+      const dragLabel = dragEl && dragEl.querySelector('.fw-semibold');
+      const nm = dragLabel && dragLabel.textContent.trim();
+      hint.textContent = nm ? `Release to add “${nm}”` : 'Drop here — release to add';
+    }, true);
+    document.addEventListener('pointerup', () => schedulePreviewDropDeactivate(), true);
+    document.addEventListener('pointercancel', () => schedulePreviewDropDeactivate(), true);
+    document.addEventListener('touchend', () => schedulePreviewDropDeactivate(), true);
+    window.addEventListener('blur', () => setPreviewDropActive(false));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') setPreviewDropActive(false);
+    }, true);
+  })();
+
+  let history = [];
+  let histPos = 0;
+  let dirty = false;
+  let wbMediaTarget = null;
+
+  function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function defBlock(type, propOverrides) {
+    const p = deepClone(REGISTRY[type].defaults || {});
+    Object.assign(p, propOverrides || {});
+    return { type, props: p };
+  }
+
+  const STARTER_BUILDERS = {
+    landing: () => [
+      defBlock('hero', { headline: 'Your story starts here', sub: 'Polished layouts, fast performance, full control.', cta_text: 'Get started', cta_href: '#' }),
+      defBlock('divider', { style: 'fade', spacing: '4' }),
+      defBlock('heading', { text: 'Why teams choose us', level: '2', sub: 'PROVEN RESULTS', align: 'center' }),
+      defBlock('stats_row', {}),
+      defBlock('cta_banner', { title: 'Ready to launch?', subtitle: 'Start building in minutes.', btn_text: 'Contact us', btn_href: '#' }),
+    ],
+    article: () => [
+      defBlock('heading', { text: 'Article headline', level: '2', sub: 'Editorial' }),
+      defBlock('text', { html: '<p class="lead">Lead paragraph hooks your readers.</p>' }),
+      defBlock('image', { src: '', alt: 'Feature image', caption: '', rounded: true, shadow: true }),
+      defBlock('text', { html: '<p>Continue with body copy, lists, and rich HTML.</p>' }),
+      defBlock('divider', { style: 'line', spacing: '3' }),
+      defBlock('testimonial', { quote: '<p>“Clear, professional, and easy to maintain.”</p>', author: 'Jordan Lee', role: 'Editor' }),
+    ],
+    services: () => {
+      const pack = (b) => ({ type: b.type, props: deepClone(b.props) });
+      return [
+        defBlock('heading', { text: 'What we offer', level: '2', align: 'center' }),
+        {
+          type: 'columns',
+          props: {
+            columns: [
+              [pack(defBlock('card', { title: 'Consulting', body: '<p class="text-muted mb-0">Strategy and delivery.</p>', btn_text: 'Details', btn_href: '#' }))],
+              [pack(defBlock('card', { title: 'Build', body: '<p class="text-muted mb-0">Implementation at pace.</p>', btn_text: 'Details', btn_href: '#' }))],
+              [pack(defBlock('card', { title: 'Support', body: '<p class="text-muted mb-0">Always-on assistance.</p>', btn_text: 'Details', btn_href: '#' }))],
+            ]
+          }
+        },
+        defBlock('cta_banner', { title: 'Questions?', subtitle: 'We respond within one business day.', btn_text: 'Email us', btn_href: 'mailto:hello@example.com', tone: 'dark' }),
+      ];
+    },
+    pricing: () => [defBlock('pricing_table', {})],
+    contact: () => [
+      defBlock('heading', { text: 'Get in touch', level: '2', sub: 'CONTACT', align: 'center' }),
+      defBlock('contact_block', {}),
+      defBlock('map_embed', { embed_src: '', caption: 'Paste your Google Maps embed URL in the map block settings.', height: 320 }),
+      defBlock('divider', { style: 'line', spacing: '4' }),
+      defBlock('newsletter', {
+        heading: 'News & updates',
+        sub: 'Low volume — unsubscribe any time.',
+        placeholder: 'you@company.com',
+        button: 'Subscribe',
+        action: '#',
+        method: 'post',
+      }),
+      defBlock('social_row', {}),
+    ],
+    trust_bundle: () => [
+      defBlock('testimonial', {
+        quote: '<p>“Professional, fast, and genuinely helpful — we’d recommend them without hesitation.”</p>',
+        author: 'Alex Morgan',
+        role: 'Operations Director',
+      }),
+      defBlock('cta_banner', {
+        title: 'Ready when you are',
+        subtitle: 'Book a short intro call — no obligation.',
+        btn_text: 'Book a call',
+        btn_href: '#',
+        tone: 'primary',
+      }),
+    ],
+    thank_you: () => [
+      defBlock('heading', { text: 'Thank you', level: '2', sub: 'SUCCESS', align: 'center' }),
+      defBlock('text', {
+        html: '<p class="text-muted mb-0">We’ve received your submission. You can close this page or return to the home page.</p>',
+      }),
+    ],
+    faq_page: () => [
+      defBlock('heading', { text: 'Questions & answers', level: '2', sub: 'FAQ', align: 'center' }),
+      defBlock('accordion_faq', {}),
+    ],
+    blank_section: () => {
+      const pack = (b) => ({ type: b.type, props: deepClone(b.props) });
+      return [{
+        type: 'section',
+        props: {
+          bg: 'light', padding: '5',
+          blocks: [
+            pack(defBlock('heading', { text: 'Section title', level: '3' })),
+            pack(defBlock('text', { html: '<p>Add nested blocks from the palette while drilled into this section.</p>' })),
+          ]
+        }
+      }];
+    },
+  };
+
+  function getSnapshot() {
+    return JSON.stringify({
+      blocks: deepClone(state.blocks),
+      vars: deepClone(state.vars || {}),
+      seo: deepClone(state.seo || {}),
+      settings: deepClone(state.settings || {}),
+      drill: drill ? deepClone(drill) : null,
+      selectedIndex: state.selectedIndex,
+      canvasSelectPath: state.canvasSelectPath ? state.canvasSelectPath.slice() : null
+    });
+  }
+
+  function applySnapshot(raw) {
+    const p = JSON.parse(raw);
+    state.blocks = p.blocks;
+    state.vars = p.vars;
+    state.seo = p.seo;
+    state.settings = p.settings;
+    drill = p.drill;
+    state.selectedIndex = p.selectedIndex;
+    state.canvasSelectPath = p.canvasSelectPath && p.canvasSelectPath.length ? p.canvasSelectPath.slice() : null;
+    syncMergeModeFromState();
+    refreshLayers();
+    bindSortables();
+    renderSettings();
+    updatePreviewDebounced();
+    updateUndoRedoBtns();
+    updateDrillChrome();
+    syncSeoFormFromState();
+  }
+
+  function syncSeoFormFromState() {
+    const s = state.seo || {};
+    const t = document.getElementById('seoTitle');
+    const d = document.getElementById('seoDesc');
+    const k = document.getElementById('seoKeywords');
+    const img = document.getElementById('seoOgImage');
+    const ni = document.getElementById('seoNoindex');
+    const nf = document.getElementById('seoNofollow');
+    const os = document.getElementById('seoOmitSitemap');
+    if (t) t.value = s.title || '';
+    if (d) d.value = s.description || '';
+    if (k) k.value = typeof s.keywords === 'string' ? s.keywords : '';
+    if (img) img.value = s.image || '';
+    if (ni) ni.checked = !!s.noindex;
+    if (nf) nf.checked = !!s.nofollow;
+    if (os) os.checked = !!s.omit_from_sitemap;
+    updateSerpPreview();
+  }
+
+  function serpTitleClass(len) {
+    if (len <= 0) return 'text-danger';
+    if (len > 60) return 'text-warning';
+    if (len < 30) return 'text-secondary';
+    return 'text-primary';
+  }
+
+  function serpDescClass(len) {
+    if (len <= 0) return 'text-danger';
+    if (len > 160) return 'text-warning';
+    if (len < 70) return 'text-secondary';
+    return 'text-secondary';
+  }
+
+  function updateSerpPreview() {
+    const s = state.seo || {};
+    const title = (s.title || '').trim();
+    const desc = (s.description || '').trim();
+    const route = (state.route || '/').replace(/^\//, '') || 'home';
+    const elT = document.getElementById('wbSerpTitle');
+    const elU = document.getElementById('wbSerpUrl');
+    const elD = document.getElementById('wbSerpDesc');
+    const hT = document.getElementById('seoTitleHint');
+    const hD = document.getElementById('seoDescHint');
+    const fakeHost = (typeof location !== 'undefined' && location.host) ? location.host : 'yoursite.com';
+    if (elT) {
+      elT.textContent = title || '(add a title)';
+      elT.className = 'text-truncate fw-medium ' + serpTitleClass(title.length);
+    }
+    if (elU) elU.textContent = fakeHost + '/' + route;
+    if (elD) {
+      elD.textContent = desc || '(add a description — important for CTR)';
+      elD.className = serpDescClass(desc.length);
+    }
+    if (hT) hT.textContent = '(' + title.length + ' chars)';
+    if (hD) hD.textContent = '(' + desc.length + ' chars)';
+  }
+
+  function pushHistorySnap() {
+    const snap = getSnapshot();
+    if (histPos < history.length - 1) history = history.slice(0, histPos + 1);
+    if (history.length && history[histPos] === snap) return;
+    history.push(snap);
+    histPos = history.length - 1;
+    while (history.length > 60) { history.shift(); histPos--; }
+    updateUndoRedoBtns();
+  }
+
+  function updateUndoRedoBtns() {
+    const u = document.getElementById('wbUndoBtn');
+    const r = document.getElementById('wbRedoBtn');
+    if (u) u.disabled = histPos <= 0;
+    if (r) r.disabled = histPos >= history.length - 1;
+  }
+
+  function undo() {
+    if (histPos <= 0) return;
+    histPos--;
+    applySnapshot(history[histPos]);
+    dirty = true;
+    updateUndoRedoBtns();
+  }
+
+  function redo() {
+    if (histPos >= history.length - 1) return;
+    histPos++;
+    applySnapshot(history[histPos]);
+    dirty = true;
+    updateUndoRedoBtns();
+  }
+
+  function getRootBlock(i) {
+    return state.blocks[i];
+  }
+
+  function getListFromPath(path) {
+    if (!path || path.length === 0) return state.blocks;
+    if (path.length === 1) return state.blocks;
+    if (path[1] === 'c') {
+      const root = state.blocks[path[0]];
+      if (!root || root.type !== 'columns') return state.blocks;
+      if (!root.props.columns) root.props.columns = [];
+      while (root.props.columns.length <= path[2]) root.props.columns.push([]);
+      return root.props.columns[path[2]] || [];
+    }
+    const rootBlk = state.blocks[path[0]];
+    if (!rootBlk || rootBlk.type !== 'section') return state.blocks;
+    let list = rootBlk.props.blocks || [];
+    for (let i = 1; i < path.length - 1; i++) {
+      const node = list[path[i]];
+      if (!node || node.type !== 'section') return list;
+      list = node.props.blocks || [];
+    }
+    return list;
+  }
+
+  function getMutableChildList(parentPath) {
+    if (!parentPath || parentPath.length === 0) return state.blocks;
+    const r = parentPath[0];
+    const root = state.blocks[r];
+    if (!root) return null;
+    if (parentPath.length === 1) {
+      if (root.type !== 'section') return null;
+      if (!root.props.blocks) root.props.blocks = [];
+      return root.props.blocks;
+    }
+    if (parentPath[1] === 'c' && parentPath.length === 3) {
+      if (root.type !== 'columns') return null;
+      const ci = parentPath[2];
+      if (!root.props.columns) root.props.columns = [];
+      while (root.props.columns.length <= ci) root.props.columns.push([]);
+      return root.props.columns[ci];
+    }
+    /* Nested sections: parentPath points to each section in the chain, e.g. [2,0,1] → children of root[2].blocks[0].blocks[1] */
+    if (root.type !== 'section') return null;
+    let list = root.props.blocks || [];
+    for (let j = 1; j < parentPath.length; j++) {
+      const idx = parentPath[j];
+      const node = list[idx];
+      if (!node || node.type !== 'section') return null;
+      if (j === parentPath.length - 1) {
+        if (!node.props.blocks) node.props.blocks = [];
+        return node.props.blocks;
+      }
+      list = node.props.blocks || [];
+    }
+    return null;
+  }
+
+  function setChildListByParentPath(parentPath, newList) {
+    if (!parentPath || parentPath.length === 0) {
+      state.blocks = newList;
+      return;
+    }
+    const r = parentPath[0];
+    const root = state.blocks[r];
+    if (!root) return;
+    if (parentPath.length === 1) {
+      root.props.blocks = newList;
+      return;
+    }
+    if (parentPath[1] === 'c' && parentPath.length === 3) {
+      if (!root.props.columns) root.props.columns = [];
+      root.props.columns[parentPath[2]] = newList;
+      return;
+    }
+    let list = root.props.blocks || [];
+    for (let j = 1; j < parentPath.length; j++) {
+      const idx = parentPath[j];
+      const node = list[idx];
+      if (!node || node.type !== 'section') return;
+      if (j === parentPath.length - 1) {
+        node.props.blocks = newList;
+        return;
+      }
+      list = node.props.blocks || [];
+    }
+  }
+
+  function patchBlockPropAtPath(path, field, value) {
+    if (!path || !path.length || !field) return false;
+    const list = getListFromPath(path);
+    const idx = path[path.length - 1];
+    const b = list[idx];
+    if (!b || !b.props) return false;
+    b.props[field] = value;
+    return true;
+  }
+
+  function getActiveBlocks() {
+    if (state.canvasSelectPath && state.canvasSelectPath.length) {
+      return getListFromPath(state.canvasSelectPath);
+    }
+    if (!drill) return state.blocks;
+    const root = getRootBlock(drill.rootIndex);
+    if (!root) return state.blocks;
+    if (drill.kind === 'section') {
+      if (root.type !== 'section') return state.blocks;
+      if (!root.props.blocks) root.props.blocks = [];
+      return root.props.blocks;
+    }
+    if (drill.kind === 'column') {
+      if (root.type !== 'columns') return state.blocks;
+      if (!root.props.columns) root.props.columns = [[], []];
+      while (root.props.columns.length <= drill.colIndex) root.props.columns.push([]);
+      return root.props.columns[drill.colIndex];
+    }
+    return state.blocks;
+  }
+
+  function applyCanvasPath(path) {
+    if (!Array.isArray(path) || path.length === 0) return false;
+    state.canvasSelectPath = path.slice();
+    drill = null;
+    state.selectedIndex = path[path.length - 1];
+    return true;
+  }
+
+  function clearCanvasPath() {
+    state.canvasSelectPath = null;
+  }
+
+  function getPathForCurrentSelection() {
+    if (state.canvasSelectPath && state.canvasSelectPath.length) return state.canvasSelectPath.slice();
+    if (state.selectedIndex == null) return null;
+    if (!drill) return [state.selectedIndex];
+    if (drill.kind === 'section') return [drill.rootIndex, state.selectedIndex];
+    if (drill.kind === 'column') return [drill.rootIndex, 'c', drill.colIndex, state.selectedIndex];
+    return null;
+  }
+
+  function syncCanvasHighlightToIframe() {
+    const iframe = document.getElementById('previewFrame');
+    if (!iframe || !iframe.contentWindow) return;
+    const path = getPathForCurrentSelection();
+    try {
+      iframe.contentWindow.postMessage({ wb: 'sparrow-builder', type: 'highlight', path }, window.location.origin);
+    } catch (err) {}
+  }
+
+  function getSelectedBlock() {
+    const list = getActiveBlocks();
+    if (state.selectedIndex == null || !list[state.selectedIndex]) return null;
+    return list[state.selectedIndex];
+  }
+
+  function updateDrillChrome() {
+    const back = document.getElementById('wbDrillBack');
+    const txt = document.getElementById('wbBreadcrumbText');
+    if (!back || !txt) return;
+    if (state.canvasSelectPath && state.canvasSelectPath.length > 1) {
+      back.classList.remove('d-none');
+      txt.textContent = 'Preview selection · Back returns to root layers';
+      return;
+    }
+    if (state.canvasSelectPath && state.canvasSelectPath.length === 1) {
+      back.classList.add('d-none');
+      txt.textContent = 'Page (root)';
+      return;
+    }
+    if (!drill) {
+      back.classList.add('d-none');
+      txt.textContent = 'Page (root)';
+      return;
+    }
+    back.classList.remove('d-none');
+    const root = getRootBlock(drill.rootIndex);
+    const label = root ? (REGISTRY[root.type]?.label || root.type) : '?';
+    if (drill.kind === 'section') {
+      txt.textContent = `Inside: ${label} · block #${drill.rootIndex + 1}`;
+    } else {
+      txt.textContent = `Column ${drill.colIndex + 1} · ${label} · #${drill.rootIndex + 1}`;
+    }
+  }
+
+  function clearDrill() {
+    drill = null;
+    state.canvasSelectPath = null;
+    state.selectedIndex = null;
+    updateDrillChrome();
+    refreshLayers();
+    bindSortables();
+    renderSettings();
+  }
+
+  function syncMergeModeFromState() {
+    const sel = document.getElementById('mergeModeSelect');
+    if (!sel) return;
+    const m = (state.settings && state.settings.merge_mode) || 'augment';
+    sel.value = ['augment','prepend','replace'].includes(m) ? m : 'augment';
+  }
+  syncMergeModeFromState();
+  document.getElementById('mergeModeSelect')?.addEventListener('change', (e) => {
+    state.settings = state.settings || {};
+    state.settings.merge_mode = e.target.value;
+    dirty = true;
+    pushHistorySnap();
+    updatePreviewDebounced();
+  });
+
+  document.getElementById('wbDrillBack')?.addEventListener('click', () => {
+    if (state.canvasSelectPath) {
+      clearCanvasPath();
+      state.selectedIndex = null;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+    clearDrill();
+    pushHistorySnap();
+    dirty = true;
+  });
+
+  function showBuilderToast(msg, variant) {
+    const el = document.getElementById('builderToast');
+    if (!el) return;
+    el.className = 'alert py-2 px-3 small position-fixed top-0 end-0 m-3 shadow-4 ' + (variant === 'danger' ? 'alert-danger' : 'alert-success');
+    el.style.borderRadius = '12px';
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(showBuilderToast._t);
+    showBuilderToast._t = setTimeout(() => { el.style.display = 'none'; }, 3200);
+  }
+
+  function addBlockFromType(type, index) {
+    if (!REGISTRY[type]) return;
+    const defaults = deepClone(REGISTRY[type].defaults || {});
+    const list = getActiveBlocks();
+    const i = (typeof index === 'number' && index >= 0) ? index : list.length;
+    list.splice(i, 0, { type, props: defaults });
+    state.canvasSelectPath = null;
+    state.selectedIndex = i;
+    pushHistorySnap();
+    refreshLayers();
+    bindSortables();
+    updatePreviewDebounced();
+    renderSettings();
+    syncCanvasHighlightToIframe();
+    dirty = true;
+  }
+
+  function refreshLayers() {
+    const list = getActiveBlocks();
+    updateDrillChrome();
+    if (!list.length) {
+      layersEl.innerHTML = '<li class="list-group-item text-muted small py-3">No blocks in this context — drag a component here, click the preview, or click a card.</li>';
+      return;
+    }
+    layersEl.innerHTML = list.map((b, i) => {
+      let extra = '';
+      if (!drill && !state.canvasSelectPath && b.type === 'section') {
+        extra = `<button type="button" class="btn btn-outline-secondary btn-sm border-0 py-0 px-1" data-act="drill-section" data-i="${i}" title="Edit inner blocks"><i class="bi bi-box-arrow-in-right"></i></button>`;
+      }
+      if (!drill && !state.canvasSelectPath && b.type === 'columns') {
+        const cols = b.props.columns || [];
+        const n = Math.max(2, cols.length);
+        for (let c = 0; c < n; c++) {
+          extra += `<button type="button" class="btn btn-outline-primary btn-sm py-0 px-1 ms-1" data-act="drill-col" data-i="${i}" data-ci="${c}" title="Column ${c + 1}">${c + 1}</button>`;
+        }
+      }
+      return `
+      <li class="list-group-item d-flex align-items-center gap-1 wb-layer-item ${i === state.selectedIndex ? 'active' : ''}" data-i="${i}">
+        <span class="wb-layer-grip" title="Drag to reorder"><i class="bi bi-grip-vertical fs-5"></i></span>
+        <span class="badge rounded-pill bg-primary bg-opacity-10 text-primary flex-shrink-0">${i + 1}</span>
+        <span class="flex-grow-1 text-truncate small fw-medium">${REGISTRY[b.type]?.label || b.type}</span>
+        <span class="d-flex align-items-center gap-1 flex-shrink-0">${extra}</span>
+        <span class="btn-group btn-group-sm flex-shrink-0">
+          <button class="btn btn-outline-secondary border-0" data-act="dup" data-i="${i}" type="button" title="Duplicate"><i class="bi bi-copy"></i></button>
+          <button class="btn btn-outline-danger border-0" data-act="del" data-i="${i}" type="button" title="Delete"><i class="bi bi-trash"></i></button>
+        </span>
+      </li>`;
+    }).join('');
+  }
+
+  function bindSortables() {
+    if (paletteSortable) { try { paletteSortable.destroy(); } catch (e) {} paletteSortable = null; }
+    if (layerSortable) { try { layerSortable.destroy(); } catch (e) {} layerSortable = null; }
+    if (previewDropSortable) { try { previewDropSortable.destroy(); } catch (e) {} previewDropSortable = null; }
+
+    if (paletteEl && typeof Sortable !== 'undefined') {
+      paletteSortable = Sortable.create(paletteEl, {
+        group: { name: 'wb', pull: 'clone', put: false },
+        sort: false,
+        animation: 180,
+        draggable: '.wb-palette-card',
+        forceFallback: true,
+        fallbackOnBody: true,
+        fallbackTolerance: 0,
+        onStart() { setPreviewDropActive(true); },
+        onEnd() { schedulePreviewDropDeactivate(); },
+        onUnchoose() { schedulePreviewDropDeactivate(); },
+      });
+    }
+
+    /* Drop onto live preview area (iframe is a separate document — Sortable targets this overlay) */
+    if (previewDropListEl && typeof Sortable !== 'undefined') {
+      previewDropSortable = Sortable.create(previewDropListEl, {
+        group: { name: 'wb', put: true, pull: false },
+        sort: false,
+        animation: 150,
+        emptyInsertThreshold: 120,
+        draggable: '.wb-palette-card',
+        onAdd(evt) {
+          try {
+            const type = evt.item.getAttribute('data-type');
+            evt.item.remove();
+            if (!type || !REGISTRY[type]) return;
+            const list = getActiveBlocks();
+            const defaults = deepClone(REGISTRY[type].defaults || {});
+            const idx = (typeof evt.newIndex === 'number' && evt.newIndex >= 0) ? evt.newIndex : list.length;
+            list.splice(idx, 0, { type, props: defaults });
+            state.selectedIndex = idx;
+            pushHistorySnap();
+            refreshLayers();
+            bindSortables();
+            updatePreviewDebounced();
+            renderSettings();
+            dirty = true;
+          } finally {
+            schedulePreviewDropDeactivate();
+          }
+          state.canvasSelectPath = null;
+        },
+        onEnd() { schedulePreviewDropDeactivate(); },
+      });
+    }
+
+    if (layersEl && typeof Sortable !== 'undefined') {
+      layerSortable = Sortable.create(layersEl, {
+        group: { name: 'wb', pull: true, put: true },
+        animation: 180,
+        handle: '.wb-layer-grip',
+        draggable: '.wb-layer-item',
+        emptyInsertThreshold: 56,
+        onEnd(evt) {
+          const list = getActiveBlocks();
+          if (evt.from === paletteEl && evt.to === layersEl) {
+            const type = evt.item.getAttribute('data-type');
+            evt.item.remove();
+            if (type && REGISTRY[type]) {
+              const defaults = deepClone(REGISTRY[type].defaults || {});
+              list.splice(evt.newIndex, 0, { type, props: defaults });
+              state.selectedIndex = evt.newIndex;
+            }
+            state.canvasSelectPath = null;
+            pushHistorySnap();
+            refreshLayers();
+            bindSortables();
+            updatePreviewDebounced();
+            renderSettings();
+            dirty = true;
+            return;
+          }
+          if (evt.from === paletteEl && previewDropListEl && evt.to === previewDropListEl) {
+            return;
+          }
+          if (evt.from === layersEl && evt.to === layersEl && evt.oldIndex !== evt.newIndex) {
+            const moved = list.splice(evt.oldIndex, 1)[0];
+            list.splice(evt.newIndex, 0, moved);
+            state.selectedIndex = evt.newIndex;
+            pushHistorySnap();
+            refreshLayers();
+            bindSortables();
+            updatePreviewDebounced();
+            syncCanvasHighlightToIframe();
+            dirty = true;
+          }
+        }
+      });
+    }
+  }
+
+  history = [getSnapshot()];
+  histPos = 0;
+  updateUndoRedoBtns();
+  refreshLayers();
+  bindSortables();
+  updateDrillChrome();
+
+  document.querySelectorAll('.wb-starter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-starter');
+      if (drill) {
+        showBuilderToast('Go back to page root to insert starters (Back button).', 'danger');
+        return;
+      }
+      const fn = STARTER_BUILDERS[id];
+      if (!fn) return;
+      state.canvasSelectPath = null;
+      pushHistorySnap();
+      const blocks = fn();
+      blocks.forEach(b => state.blocks.push(deepClone(b)));
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      dirty = true;
+      showBuilderToast('Starter inserted');
+    });
+  });
+
+  document.getElementById('wbUndoBtn')?.addEventListener('click', undo);
+  document.getElementById('wbRedoBtn')?.addEventListener('click', redo);
+
+  if (paletteEl) {
+    paletteEl.addEventListener('click', (e) => {
+      if (e.target.closest('.wb-layer-grip')) return;
+      const card = e.target.closest('.wb-palette-card');
+      if (!card) return;
+      const type = card.getAttribute('data-type');
+      if (type) addBlockFromType(type);
+    });
+    paletteEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('.wb-palette-card');
+      if (!card) return;
+      e.preventDefault();
+      const type = card.getAttribute('data-type');
+      if (type) addBlockFromType(type);
+    });
+  }
+
+  layersEl.addEventListener('click', (e) => {
+    const sec = e.target.closest('[data-act="drill-section"]');
+    if (sec) {
+      state.canvasSelectPath = null;
+      const i = parseInt(sec.getAttribute('data-i'), 10);
+      drill = { kind: 'section', rootIndex: i };
+      state.selectedIndex = null;
+      updateDrillChrome();
+      refreshLayers();
+      bindSortables();
+      renderSettings();
+      pushHistorySnap();
+      dirty = true;
+      return;
+    }
+    const col = e.target.closest('[data-act="drill-col"]');
+    if (col) {
+      state.canvasSelectPath = null;
+      const i = parseInt(col.getAttribute('data-i'), 10);
+      const ci = parseInt(col.getAttribute('data-ci'), 10);
+      drill = { kind: 'column', rootIndex: i, colIndex: ci };
+      state.selectedIndex = null;
+      updateDrillChrome();
+      refreshLayers();
+      bindSortables();
+      renderSettings();
+      pushHistorySnap();
+      dirty = true;
+      return;
+    }
+
+    const li = e.target.closest('.wb-layer-item');
+    if (!li || li.dataset.i === undefined) return;
+    const i = parseInt(li.dataset.i, 10);
+    const list = getActiveBlocks();
+
+    if (e.target.closest('[data-act="del"]')) {
+      state.canvasSelectPath = null;
+      list.splice(i, 1);
+      state.selectedIndex = Math.min(i, list.length - 1);
+      if (state.selectedIndex < 0) state.selectedIndex = null;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+
+    if (e.target.closest('[data-act="dup"]')) {
+      state.canvasSelectPath = null;
+      const clone = deepClone(list[i]);
+      list.splice(i + 1, 0, clone);
+      state.selectedIndex = i + 1;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+
+    state.canvasSelectPath = null;
+    state.selectedIndex = i;
+    refreshLayers();
+    renderSettings();
+    syncCanvasHighlightToIframe();
+  });
+
+  function builderCsrfToken() {
+    const m = document.querySelector('meta[name="csrf-token"]');
+    const fromMeta = m && m.getAttribute('content') ? m.getAttribute('content').trim() : '';
+    if (fromMeta) return fromMeta;
+    function readCookie(name) {
+      const prefix = name + '=';
+      const parts = document.cookie.split(';');
+      for (let j = 0; j < parts.length; j++) {
+        const c = parts[j].trim();
+        if (c.indexOf(prefix) === 0) return decodeURIComponent(c.substring(prefix.length));
+      }
+      return '';
+    }
+    return readCookie('csrf_token') || readCookie('_csrf_token') || '';
+  }
+
+  function openMediaPicker(blk, fieldName, inputEl) {
+    wbMediaTarget = { blk, fieldName, inputEl };
+    document.getElementById('wbMediaError').classList.add('d-none');
+    document.getElementById('wbMediaFile').value = '';
+    const modalEl = document.getElementById('wbMediaModal');
+    if (window.mdb && mdb.Modal) {
+      mdb.Modal.getOrCreateInstance(modalEl).show();
+    } else {
+      modalEl.classList.add('show');
+      modalEl.style.display = 'block';
+    }
+  }
+
+  document.getElementById('wbMediaUploadBtn')?.addEventListener('click', async () => {
+    const inp = document.getElementById('wbMediaFile');
+    const err = document.getElementById('wbMediaError');
+    err.classList.add('d-none');
+    if (!inp.files || !inp.files[0]) {
+      err.textContent = 'Choose a file first.';
+      err.classList.remove('d-none');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', inp.files[0]);
+    const token = builderCsrfToken();
+    const headers = {};
+    if (token) headers['X-CSRFToken'] = token;
+    try {
+      const res = await fetch(WB_UPLOAD_URL, { method: 'POST', body: fd, credentials: 'same-origin', headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        err.textContent = data.error || 'Upload failed';
+        err.classList.remove('d-none');
+        return;
+      }
+      if (wbMediaTarget) {
+        wbMediaTarget.blk.props[wbMediaTarget.fieldName] = data.url;
+        if (wbMediaTarget.inputEl) wbMediaTarget.inputEl.value = data.url;
+        pushHistorySnap();
+        updatePreviewDebounced();
+        dirty = true;
+      }
+      const modalEl = document.getElementById('wbMediaModal');
+      if (window.mdb && mdb.Modal) mdb.Modal.getInstance(modalEl)?.hide();
+      else { modalEl.classList.remove('show'); modalEl.style.display = 'none'; }
+      showBuilderToast('Image uploaded');
+    } catch (e) {
+      err.textContent = 'Network error';
+      err.classList.remove('d-none');
+    }
+  });
+
+  function renderSettings() {
+    const wrap = document.getElementById('settingsForm');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    const blk = getSelectedBlock();
+    if (!blk) {
+      wrap.innerHTML = '<p class="text-muted small mb-0">Select a layer to edit its properties.</p>';
+      return;
+    }
+
+    const schema = REGISTRY[blk.type]?.schema || [];
+    const form = document.createElement('div');
+
+    schema.forEach(field => {
+      const name = field.name;
+      const label = document.createElement('label');
+      label.className = 'form-label small fw-semibold mb-1 mt-2';
+      label.textContent = field.label || name;
+
+      if (field.type === 'blocks') {
+        const note = document.createElement('div');
+        note.className = 'text-muted small border rounded-3 p-2 bg-light';
+        if (!drill) {
+          note.innerHTML = '<i class="bi bi-arrow-return-right me-1"></i>Click <strong>→</strong> on this row in <strong>Layers</strong> to add or reorder blocks <em>inside</em> this section.';
+        } else {
+          note.innerHTML = '<i class="bi bi-info-circle me-1"></i>Nested <strong>Section</strong> — use <strong>Back</strong> then drill into this row to edit its children.';
+        }
+        form.appendChild(label);
+        form.appendChild(note);
+        return;
+      }
+      if (field.type === 'columns') {
+        const note = document.createElement('div');
+        note.className = 'text-muted small border rounded-3 p-2 bg-light';
+        if (!drill) {
+          note.innerHTML = '<i class="bi bi-layout-three-columns me-1"></i>Click column <strong>1 2 …</strong> on this row to edit that column’s blocks.';
+        } else {
+          note.innerHTML = '<i class="bi bi-info-circle me-1"></i>Column layout — go back to page level to pick another column.';
+        }
+        form.appendChild(label);
+        form.appendChild(note);
+        return;
+      }
+
+      let input;
+      if (field.type === 'select') {
+        input = document.createElement('select');
+        input.className = 'form-select form-select-sm rounded-3';
+        (field.options || []).forEach(opt => {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          if (String(blk.props[name]) === String(opt)) o.selected = true;
+          input.appendChild(o);
+        });
+        input.addEventListener('change', () => {
+          blk.props[name] = input.value;
+          pushHistorySnap();
+          updatePreviewDebounced();
+          dirty = true;
+        });
+        form.appendChild(label);
+        form.appendChild(input);
+        return;
+      }
+      if (field.type === 'switch') {
+        const line = document.createElement('div');
+        line.className = 'form-check form-switch mt-2';
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'form-check-input';
+        input.checked = !!blk.props[name];
+        line.appendChild(input);
+        line.appendChild(document.createTextNode(' ' + (field.label || name)));
+        form.appendChild(line);
+        input.addEventListener('change', () => {
+          blk.props[name] = input.checked;
+          pushHistorySnap();
+          updatePreviewDebounced();
+          dirty = true;
+        });
+        return;
+      }
+      if (field.type === 'richtext') {
+        input = document.createElement('textarea');
+        input.className = 'form-control form-control-sm rounded-3';
+        input.rows = 5;
+        input.value = blk.props[name] || '';
+      } else if (field.type === 'number') {
+        input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'form-control form-control-sm rounded-3';
+        input.value = blk.props[name] != null ? blk.props[name] : '';
+      } else if (field.type === 'imageurl') {
+        const row = document.createElement('div');
+        row.className = 'input-group input-group-sm';
+        input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control rounded-start-3';
+        input.placeholder = 'https://… or upload';
+        input.value = blk.props[name] || '';
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.className = 'btn btn-outline-primary rounded-end-3';
+        up.innerHTML = '<i class="bi bi-cloud-upload"></i>';
+        up.title = 'Upload';
+        up.addEventListener('click', () => openMediaPicker(blk, name, input));
+        row.appendChild(input);
+        row.appendChild(up);
+        const onVal = () => {
+          blk.props[name] = input.value;
+          updatePreviewDebounced();
+          dirty = true;
+        };
+        input.addEventListener('input', onVal);
+        input.addEventListener('blur', () => { pushHistorySnap(); });
+        form.appendChild(label);
+        form.appendChild(row);
+        return;
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm rounded-3';
+        input.value = blk.props[name] || '';
+      }
+
+      const onInput = () => {
+        if (field.type === 'number') {
+          const v = parseFloat(input.value);
+          blk.props[name] = isNaN(v) ? input.value : v;
+        } else {
+          blk.props[name] = input.value;
+        }
+        updatePreviewDebounced();
+        dirty = true;
+      };
+      input.addEventListener('input', onInput);
+      input.addEventListener('blur', () => { pushHistorySnap(); });
+      form.appendChild(label);
+      form.appendChild(input);
+    });
+
+    wrap.appendChild(form);
+
+    const varsWrap = document.getElementById('varsForm');
+    if (!varsWrap) return;
+    varsWrap.innerHTML = '';
+    const vars = state.vars || {};
+    Object.keys(vars).forEach(k => {
+      const row = document.createElement('div');
+      row.className = 'input-group input-group-sm mb-2';
+      const sk = String(k).replace(/"/g, '&quot;');
+      const sv = String(vars[k]).replace(/"/g, '&quot;');
+      row.innerHTML = `<span class="input-group-text rounded-start-3">${sk}</span><input class="form-control rounded-end-3" value="${sv}">`;
+      const inp = row.querySelector('input');
+      inp.addEventListener('input', () => { vars[k] = inp.value; dirty = true; });
+      inp.addEventListener('blur', () => pushHistorySnap());
+      varsWrap.appendChild(row);
+    });
+
+    const addRow = document.createElement('div');
+    addRow.className = 'input-group input-group-sm';
+    addRow.innerHTML = `<input class="form-control rounded-start-3" placeholder="Name"><input class="form-control" placeholder="Value"><button class="btn btn-outline-secondary rounded-end-3" type="button">Add</button>`;
+    addRow.querySelector('button').addEventListener('click', () => {
+      const name = addRow.children[0].value.trim();
+      const val = addRow.children[1].value;
+      if (!name) return;
+      pushHistorySnap();
+      state.vars[name] = val;
+      pushHistorySnap();
+      renderSettings();
+      dirty = true;
+    });
+    varsWrap.appendChild(addRow);
+  }
+
+  renderSettings();
+
+  document.querySelectorAll('.wb-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.wb-view-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const w = btn.getAttribute('data-width');
+      const frame = document.getElementById('wbDeviceFrame');
+      if (w.endsWith('%')) {
+        frame.style.width = '100%';
+        frame.style.maxWidth = '100%';
+      } else {
+        frame.style.width = w + 'px';
+        frame.style.maxWidth = '100%';
+      }
+    });
+  });
+
+  ['input', 'change'].forEach(evt => {
+    document.addEventListener(evt, (e) => {
+      if (e.target.closest('#settingsForm') || e.target.closest('#varsForm')) dirty = true;
+    }, true);
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (!dirty) return;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      if (e.shiftKey) { e.preventDefault(); redo(); }
+      else { e.preventDefault(); undo(); }
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'y') {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      document.getElementById('saveBtn').click();
+      return;
+    }
+    if (e.key === 'Delete' && state.selectedIndex != null && !e.target.matches('input, textarea, select')) {
+      const list = getActiveBlocks();
+      list.splice(state.selectedIndex, 1);
+      state.canvasSelectPath = null;
+      state.selectedIndex = Math.min(state.selectedIndex, list.length - 1);
+      if (state.selectedIndex < 0) state.selectedIndex = null;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+    }
+  });
+
+  function updatePreview(force = false) {
+    const iframe = document.getElementById('previewFrame');
+    const url = new URL(iframe.src, window.location.origin);
+    if (force) url.searchParams.set('_', Date.now());
+    iframe.src = url.toString();
+  }
+  const updatePreviewDebounced = (() => { let t; return () => { clearTimeout(t); t = setTimeout(() => updatePreview(true), 450); }; })();
+
+  window.addEventListener('message', (e) => {
+    if (e.origin !== window.location.origin) return;
+    const d = e.data;
+    if (!d || d.wb !== 'sparrow-builder') return;
+    if (d.type === 'clear') {
+      state.selectedIndex = null;
+      state.canvasSelectPath = null;
+      refreshLayers();
+      renderSettings();
+      return;
+    }
+    if (d.type === 'select' && Array.isArray(d.path)) {
+      applyCanvasPath(d.path);
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+    if (d.type === 'delete' && Array.isArray(d.path)) {
+      applyCanvasPath(d.path);
+      const list = getActiveBlocks();
+      const idx = state.selectedIndex;
+      if (idx != null && list[idx] !== undefined) {
+        list.splice(idx, 1);
+        state.canvasSelectPath = null;
+        if (list.length === 0) state.selectedIndex = null;
+        else state.selectedIndex = Math.min(idx, list.length - 1);
+      }
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+    if (d.type === 'duplicate' && Array.isArray(d.path)) {
+      applyCanvasPath(d.path);
+      const list = getActiveBlocks();
+      const idx = state.selectedIndex;
+      if (idx != null && list[idx]) {
+        const clone = deepClone(list[idx]);
+        list.splice(idx + 1, 0, clone);
+        state.selectedIndex = idx + 1;
+        state.canvasSelectPath = null;
+      }
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+      return;
+    }
+    if (d.type === 'patch' && Array.isArray(d.path) && d.field) {
+      const val = typeof d.value === 'string' ? d.value : '';
+      if (patchBlockPropAtPath(d.path, d.field, val)) {
+        applyCanvasPath(d.path);
+        pushHistorySnap();
+        refreshLayers();
+        bindSortables();
+        updatePreviewDebounced();
+        renderSettings();
+        syncCanvasHighlightToIframe();
+        dirty = true;
+      }
+      return;
+    }
+    if (d.type === 'reorder' && Array.isArray(d.order)) {
+      const order = d.order;
+      const n = state.blocks.length;
+      if (order.length !== n) return;
+      const seen = new Set(order);
+      if (seen.size !== n) return;
+      for (let i = 0; i < n; i++) {
+        if (order[i] < 0 || order[i] >= n) return;
+      }
+      state.blocks = order.map((i) => deepClone(state.blocks[i]));
+      state.canvasSelectPath = null;
+      drill = null;
+      state.selectedIndex = null;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+    }
+    if (d.type === 'reorderNested' && Array.isArray(d.parentPath) && Array.isArray(d.order)) {
+      const list = getMutableChildList(d.parentPath);
+      if (!list) return;
+      const n = list.length;
+      if (d.order.length !== n) return;
+      const seen = new Set(d.order);
+      if (seen.size !== n) return;
+      for (let i = 0; i < n; i++) {
+        if (d.order[i] < 0 || d.order[i] >= n) return;
+      }
+      const newList = d.order.map((i) => deepClone(list[i]));
+      setChildListByParentPath(d.parentPath, newList);
+      state.canvasSelectPath = null;
+      drill = null;
+      state.selectedIndex = null;
+      pushHistorySnap();
+      refreshLayers();
+      bindSortables();
+      updatePreviewDebounced();
+      renderSettings();
+      syncCanvasHighlightToIframe();
+      dirty = true;
+    }
+  });
+
+  document.getElementById('previewFrame')?.addEventListener('load', () => {
+    syncCanvasHighlightToIframe();
+  });
+
+  function builderJsonFetchInit(bodyObj) {
+    const headers = { 'Content-Type': 'application/json' };
+    const t = builderCsrfToken();
+    if (t) headers['X-CSRFToken'] = t;
+    return { method: 'POST', credentials: 'same-origin', headers, body: JSON.stringify(bodyObj) };
+  }
+  function builderPostFetchInit() {
+    const headers = {};
+    const t = builderCsrfToken();
+    if (t) headers['X-CSRFToken'] = t;
+    return { method: 'POST', credentials: 'same-origin', headers };
+  }
+
+  async function saveDraft() {
+    const saveUrl = "{{ url_for('website_admin_routes.builder_save', page_route=page.route.lstrip('/')) }}";
+    const res = await fetch(saveUrl, builderJsonFetchInit({ blocks: state.blocks, vars: state.vars, seo: state.seo, settings: state.settings }));
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Save failed' }));
+      showBuilderToast(err.error || 'Save failed', 'danger');
+      return false;
+    }
+    dirty = false;
+    showBuilderToast('Draft saved');
+    return true;
+  }
+
+  document.getElementById('saveBtn').addEventListener('click', async () => {
+    const ok = await saveDraft();
+    if (ok) updatePreviewDebounced();
+  });
+  document.getElementById('publishBtn').addEventListener('click', async () => {
+    const ok = await saveDraft();
+    if (!ok) return;
+    const pubUrl = "{{ url_for('website_admin_routes.builder_publish', page_route=page.route.lstrip('/')) }}";
+    const res = await fetch(pubUrl, builderPostFetchInit());
+    if (!res.ok) { showBuilderToast('Publish failed', 'danger'); return; }
+    showBuilderToast('Published — live on your site');
+    updatePreviewDebounced();
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const seoTitle = document.getElementById('seoTitle');
+    const seoDesc = document.getElementById('seoDesc');
+    const seoKeywords = document.getElementById('seoKeywords');
+    const seoOgImage = document.getElementById('seoOgImage');
+    const seoNoindex = document.getElementById('seoNoindex');
+    const seoNofollow = document.getElementById('seoNofollow');
+    const seoOmitSitemap = document.getElementById('seoOmitSitemap');
+    if (seoTitle) {
+      seoTitle.addEventListener('input', e => { state.seo.title = e.target.value; dirty = true; updateSerpPreview(); });
+      seoTitle.addEventListener('blur', () => pushHistorySnap());
+    }
+    if (seoDesc) {
+      seoDesc.addEventListener('input', e => { state.seo.description = e.target.value; dirty = true; updateSerpPreview(); });
+      seoDesc.addEventListener('blur', () => pushHistorySnap());
+    }
+    if (seoKeywords) {
+      seoKeywords.addEventListener('input', e => { state.seo.keywords = e.target.value; dirty = true; });
+      seoKeywords.addEventListener('blur', () => pushHistorySnap());
+    }
+    if (seoOgImage) {
+      seoOgImage.addEventListener('input', e => { state.seo.image = e.target.value; dirty = true; });
+      seoOgImage.addEventListener('blur', () => pushHistorySnap());
+    }
+    [seoNoindex, seoNofollow, seoOmitSitemap].forEach(el => {
+      if (!el) return;
+      el.addEventListener('change', () => {
+        state.seo.noindex = !!(seoNoindex && seoNoindex.checked);
+        state.seo.nofollow = !!(seoNofollow && seoNofollow.checked);
+        state.seo.omit_from_sitemap = !!(seoOmitSitemap && seoOmitSitemap.checked);
+        dirty = true;
+        pushHistorySnap();
+      });
+    });
+    syncSeoFormFromState();
+  });
+</script>
+{% endblock %}

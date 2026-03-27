@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block title %}Edit – {{ course.title }}{% endblock %}
+{% block content %}
+{% set delivery_labels = {
+  'internal': 'Internal (lessons/quizzes)',
+  'internal_signoff': 'Internal + supervisor sign-off',
+  'external_required': 'External certificate required',
+  'evidence_only': 'Evidence only (admin review)'
+} %}
+<div class="container mt-4">
+  <h1 class="h4 mb-3">{{ course.title }}</h1>
+  <form method="post" class="card p-3 mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save_course">
+    <div class="row g-2">
+      <div class="col-md-6 mb-2">
+        <label class="form-label">Title</label>
+        <input class="form-control" name="title" value="{{ course.title }}" required>
+      </div>
+      <div class="col-md-6 mb-2">
+        <label class="form-label">Slug</label>
+        <input class="form-control" name="slug" value="{{ course.slug }}">
+      </div>
+      <div class="col-12 mb-2">
+        <label class="form-label">Summary</label>
+        <textarea class="form-control" name="summary" rows="2">{{ course.summary or '' }}</textarea>
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Delivery</label>
+        <select class="form-select" name="delivery_type">
+          {% for d in delivery_types %}
+          <option value="{{ d }}" {% if course.delivery_type == d %}selected{% endif %}>{{ delivery_labels.get(d, d) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Grace days</label>
+        <input class="form-control" type="number" name="grace_days" value="{{ course.grace_days or 0 }}" min="0">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Compliance policy ID</label>
+        <input class="form-control" type="number" name="comp_policy_id" value="{{ course.comp_policy_id or '' }}" placeholder="optional">
+      </div>
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="require_verify" value="1" id="rv" {% if course.require_certificate_verification %}checked{% endif %}>
+          <label class="form-check-label" for="rv">Require admin verification for uploads</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="active" value="1" id="act" {% if course.active %}checked{% endif %}>
+          <label class="form-check-label" for="act">Active</label>
+        </div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm mt-2">Save course</button>
+  </form>
+
+  <h2 class="h6 text-uppercase text-muted mt-4">Auto-assign rules (contractor)</h2>
+  <div class="card mb-4">
+    <div class="card-body">
+      <p class="small text-muted mb-3">
+        When a contractor is hired or their <code>role_id</code> changes, Sparrow will auto-assign this course based on these rules.
+        This does not affect Compliance acknowledgements.
+      </p>
+      <form method="post" class="row g-2 align-items-end mb-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="add_rule">
+        <div class="col-md-5">
+          <label class="form-label small">Role</label>
+          <select class="form-select form-select-sm" name="role_id" required>
+            <option value="">Select…</option>
+            {% for r in roles %}
+            <option value="{{ r.id }}">{{ r.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Due offset (days)</label>
+          <input class="form-control form-control-sm" type="number" name="due_date_offset_days" placeholder="e.g. 14">
+        </div>
+        <div class="col-md-3">
+          <div class="form-check mt-4">
+            <input class="form-check-input" type="checkbox" name="mandatory" value="1" id="rule_mand_{{ course.id }}">
+            <label class="form-check-label small" for="rule_mand_{{ course.id }}">Mandatory</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-outline-primary btn-sm">Add rule</button>
+        </div>
+      </form>
+
+      {% if assignment_rules %}
+      <hr>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Role</th>
+              <th>Due offset</th>
+              <th>Mandatory</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in assignment_rules %}
+            <tr>
+              <td>{{ r.role_name or '—' }}</td>
+              <td>{{ r.due_date_offset_days if r.due_date_offset_days is not none else '—' }}</td>
+              <td>{% if r.mandatory %}<span class="badge bg-danger">Yes</span>{% else %}—{% endif %}</td>
+              <td class="text-end">
+                <form method="post" class="d-inline" onsubmit="return confirm('Delete this rule?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete_rule">
+                  <input type="hidden" name="rule_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No rules configured yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <h2 class="h6 text-uppercase text-muted">Modules & lessons</h2>
+  {% for m in modules %}
+  <div class="card mb-3">
+    <div class="card-header py-2">{{ m.title }} <span class="text-muted small">(module id {{ m.id }})</span></div>
+    <div class="card-body">
+      <ul class="list-unstyled mb-3">
+        {% for les in lessons_by_mod.get(m.id, []) %}
+        <li class="mb-3 border-bottom pb-2">
+          <strong>{{ les.title }}</strong>
+          <span class="badge bg-light text-dark border ms-1">{{ les.lesson_type }}</span>
+          {% if les.body_text %}<pre class="small bg-light p-2 mt-1 mb-1">{{ les.body_text[:400] }}{% if les.body_text|length > 400 %}…{% endif %}</pre>{% endif %}
+          {% if les.external_url %}<p class="small mb-0"><a href="{{ les.external_url }}" target="_blank" rel="noopener">{{ les.external_url }}</a></p>{% endif %}
+          {% if les.file_path %}<p class="small text-muted mb-0">File: {{ les.file_path }}</p>{% endif %}
+          {% if les.lesson_type == 'quiz' %}
+          <div class="mt-2 small">
+            {% for q in questions_by_lesson.get(les.id, []) %}
+            <div class="mb-1"><em>{{ q.question_text }}</em>
+              <ul class="mb-0">
+                {% for o in q.options %}
+                <li>{% if o.is_correct %}✓ {% endif %}{{ o.option_text }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endfor %}
+          </div>
+          <form method="post" class="row g-1 align-items-end mt-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add_question">
+            <input type="hidden" name="lesson_id" value="{{ les.id }}">
+            <div class="col-md-8">
+              <input class="form-control form-control-sm" name="question_text" placeholder="New question">
+            </div>
+            <div class="col-md-4">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">Add question</button>
+            </div>
+          </form>
+          {% for q in questions_by_lesson.get(les.id, []) %}
+          <form method="post" class="row g-1 align-items-end mt-1">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="add_option">
+            <input type="hidden" name="question_id" value="{{ q.id }}">
+            <div class="col-md-6">
+              <input class="form-control form-control-sm" name="option_text" placeholder="Option text">
+            </div>
+            <div class="col-md-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="is_correct" value="1" id="c{{ q.id }}">
+                <label class="form-check-label small" for="c{{ q.id }}">Correct</label>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <button type="submit" class="btn btn-sm btn-outline-primary">Add option</button>
+            </div>
+          </form>
+          {% endfor %}
+          {% endif %}
+          <form method="post" enctype="multipart/form-data" class="mt-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="upload_lesson_file">
+            <input type="hidden" name="lesson_id" value="{{ les.id }}">
+            <label class="form-label small">Attach PDF/image to this lesson</label>
+            <input type="file" class="form-control form-control-sm" name="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp">
+            <button type="submit" class="btn btn-sm btn-outline-secondary mt-1">Upload</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="text-muted small">No lessons yet.</li>
+        {% endfor %}
+      </ul>
+      <form method="post" class="row g-2 align-items-end border-top pt-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="add_lesson">
+        <input type="hidden" name="module_id" value="{{ m.id }}">
+        <div class="col-md-4">
+          <label class="form-label small">Lesson title</label>
+          <input class="form-control form-control-sm" name="lesson_title" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Type</label>
+          <select class="form-select form-select-sm" name="lesson_type">
+            <option value="text">text</option>
+            <option value="link">link</option>
+            <option value="pdf">pdf (upload after)</option>
+            <option value="quiz">quiz</option>
+            <option value="checklist">checklist</option>
+            <option value="video">video (embed in text)</option>
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label small">Body / embed HTML</label>
+          <textarea class="form-control form-control-sm" name="body_text" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+          <label class="form-label small">External URL (link lessons)</label>
+          <input class="form-control form-control-sm" name="external_url" placeholder="https://">
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-sm btn-primary">Add lesson</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+
+  <a href="{{ url_for('internal_training.admin_course_assign', course_id=course.id) }}" class="btn btn-outline-primary btn-sm">Assign this course</a>
+  <a href="{{ url_for('internal_training.admin_courses') }}" class="btn btn-outline-secondary btn-sm">All courses</a>
+</div>
+{% endblock %}

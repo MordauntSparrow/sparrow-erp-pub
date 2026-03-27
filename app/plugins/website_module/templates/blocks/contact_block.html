@@ -1,0 +1,10 @@
+<div class="container py-4 py-md-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="p-4 p-md-5 rounded-4 bg-light border border-light">
+        <h2 class="h4 fw-bold mb-3{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="title" data-wb-plain="1"{% endif %}>{{ title }}</h2>
+        <div class="text-muted{% if canvas_mode %} wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="body" data-wb-rich="1"{% endif %}>{{ body|safe }}</div>
+      </div>
+    </div>
+  </div>
+</div>

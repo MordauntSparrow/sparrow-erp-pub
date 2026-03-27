@@ -66,14 +66,114 @@ def _record_applied(conn, filename):
         cur.close()
 
 
+def _strip_sql_comments(text):
+    """
+    Remove SQL line comments (-- to EOL) so semicolons inside comments
+    don't break statement splitting. Leaves block comments /* */ as-is
+    (no semicolons usually inside). Safe for typical migration files.
+    """
+    lines = []
+    for line in text.splitlines():
+        # Remove trailing -- comment (ignore -- inside strings for simplicity)
+        i = line.find("--")
+        if i != -1:
+            line = line[:i].rstrip()
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _benign_ddl_error(exc):
+    """Re-run safe: table/column/index/FK already present (ledger drift or partial past runs)."""
+    code = getattr(exc, "errno", None)
+    return code in (
+        1050,  # ER_TABLE_EXISTS_ERROR
+        1060,  # ER_DUP_FIELDNAME
+        1061,  # ER_DUP_KEYNAME
+        1826,  # duplicate foreign key constraint name (MySQL 8+)
+    )
+
+
 def _split_sql(statements_text):
     """
-    Simple splitter by semicolons.
-    Assumes no procedural delimiter changes in files.
-    Skips empty statements.
+    Split into statements on ';' only when not inside parentheses or quotes.
+    Naive ``split(';')`` breaks valid SQL when a semicolon appears inside a
+    string (e.g. COMMENT '...; ...') or other nested context, producing fragments
+    that MySQL reports as syntax errors near random tokens.
     """
-    parts = [s.strip() for s in statements_text.split(";")]
-    return [p for p in parts if p]
+    cleaned = _strip_sql_comments(statements_text)
+    parts = []
+    buf = []
+    depth = 0
+    i = 0
+    n = len(cleaned)
+    in_single = False
+    in_double = False
+
+    def push_char(c):
+        buf.append(c)
+
+    while i < n:
+        c = cleaned[i]
+
+        if in_single:
+            push_char(c)
+            if c == "'":
+                if i + 1 < n and cleaned[i + 1] == "'":
+                    push_char(cleaned[i + 1])
+                    i += 2
+                    continue
+                in_single = False
+            i += 1
+            continue
+
+        if in_double:
+            push_char(c)
+            if c == '"':
+                if i + 1 < n and cleaned[i + 1] == '"':
+                    push_char(cleaned[i + 1])
+                    i += 2
+                    continue
+                in_double = False
+            i += 1
+            continue
+
+        if c == "'":
+            in_single = True
+            push_char(c)
+            i += 1
+            continue
+        if c == '"':
+            in_double = True
+            push_char(c)
+            i += 1
+            continue
+
+        if c == "(":
+            depth += 1
+            push_char(c)
+            i += 1
+            continue
+        if c == ")":
+            depth = max(0, depth - 1)
+            push_char(c)
+            i += 1
+            continue
+
+        if c == ";" and depth == 0:
+            stmt = "".join(buf).strip()
+            if stmt:
+                parts.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        push_char(c)
+        i += 1
+
+    tail = "".join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return parts
 
 
 def _run_sql_file(conn, path):
@@ -83,10 +183,23 @@ def _run_sql_file(conn, path):
     with open(path, "r", encoding="utf-8") as f:
         sql = f.read()
     cur = conn.cursor()
+    fname = os.path.basename(path)
     try:
-        for stmt in _split_sql(sql):
-            if stmt:
+        stmts = _split_sql(sql)
+        for idx, stmt in enumerate(stmts):
+            if not stmt:
+                continue
+            try:
                 cur.execute(stmt)
+            except Exception as e:
+                if _benign_ddl_error(e):
+                    continue
+                conn.rollback()
+                preview = (stmt.replace("\n", " ").strip())[:240]
+                raise RuntimeError(
+                    f"{fname} statement {idx + 1}/{len(stmts)} failed: {e}\n"
+                    f"--- preview ---\n{preview}"
+                ) from e
         conn.commit()
     except Exception:
         conn.rollback()
@@ -101,6 +214,51 @@ def _list_sql_files():
         return []
     files = [f for f in os.listdir(SQL_DIR) if f.lower().endswith(".sql")]
     return sorted(files)
+
+
+def _column_exists(conn, table: str, column: str) -> bool:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = %s
+              AND COLUMN_NAME = %s
+            """,
+            (table, column),
+        )
+        row = cur.fetchone()
+        return bool(row and row[0])
+    finally:
+        cur.close()
+
+
+def _ensure_job_types_colour_hex(conn):
+    """
+    Code expects job_types.colour_hex (runsheets, week payload, admin API).
+    Migration 005 adds it; if the ledger was wrong or 005 was skipped, repair here.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE 'job_types'")
+        if not cur.fetchone():
+            return
+        if _column_exists(conn, "job_types", "colour_hex"):
+            return
+        cur.execute(
+            """
+            ALTER TABLE job_types
+              ADD COLUMN colour_hex VARCHAR(7) DEFAULT NULL
+              COMMENT 'Hex colour e.g. #3366cc for badges/rows'
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
 
 # =============================================================================
 # Public Migration Functions
@@ -128,6 +286,8 @@ def install(seed_demo: bool = False):
             if os.path.exists(demo_path) and not _already_applied(conn, demo_file):
                 _run_sql_file(conn, demo_path)
                 _record_applied(conn, demo_file)
+
+        _ensure_job_types_colour_hex(conn)
     finally:
         conn.close()
 
@@ -144,6 +304,8 @@ def upgrade():
             if not _already_applied(conn, fname):
                 _run_sql_file(conn, os.path.join(SQL_DIR, fname))
                 _record_applied(conn, fname)
+
+        _ensure_job_types_colour_hex(conn)
     finally:
         conn.close()
 

@@ -1,0 +1,4 @@
+<div class="alert alert-{{ variant }} {% if dismissible %}alert-dismissible fade show{% endif %} shadow-1-strong rounded-3 border-0 my-3" role="alert">
+  <div class="{% if canvas_mode %}wb-inline-target{% endif %}"{% if canvas_mode %} data-wb-field="message" data-wb-rich="1"{% endif %}>{{ message|safe }}</div>
+  {% if dismissible %}<button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>{% endif %}
+</div>

@@ -1,0 +1,14 @@
+{
+    "system_name": "training_module",
+    "version": "0.0.2",
+    "installed": true,
+    "enabled": false,
+    "name": "Training Module",
+    "description": "",
+    "dependencies": [
+        "website_module",
+        "employee_portal_module"
+    ],
+    "icon": "icon.png",
+    "dashboard_category": "Learning & compliance"
+}
