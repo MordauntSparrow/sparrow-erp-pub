@@ -49,3 +49,9 @@ VALUES (123, 'compliance_module', 'View and sign Health & Safety policy', '/comp
 - **Logging** – The module uses Python `logging` for login failures (email only, no password), inactive-account rejections, and errors in dashboard/API. Ensure the app’s logging is configured (level, handlers) so you can monitor and alert on failures.
 - **Redirect safety** – The `next` parameter after login is validated to allow only relative paths (no open redirect). Profile picture paths are validated before use in static URLs (no path traversal).
 - **API behaviour** – Mark-read and todo-complete APIs return 400 for invalid ids, 401 when not authenticated, 404 when the resource is not found or not owned by the current user, and 500 on server errors. Front-end handles non-OK responses with user feedback.
+
+## PWA and Web Push
+
+- The portal registers a **scoped** service worker under `/employee-portal/` only (`/employee-portal/sw.js`). Manifest: `/employee-portal/manifest.webmanifest`. Replace default icons in `static/pwa/` if you want branded tiles (or run `python app/plugins/employee_portal_module/scripts/gen_pwa_icons.py` to regenerate placeholders).
+- **Web Push** requires VAPID environment variables (`EMPLOYEE_PORTAL_VAPID_PUBLIC_KEY`, `EMPLOYEE_PORTAL_VAPID_PRIVATE_KEY`, `EMPLOYEE_PORTAL_VAPID_SUBJECT`); see `app/config/.env.example`. After `install.py`, contractors can opt in from the dashboard (“Browser notifications”). Payloads are intentionally generic (e.g. “New portal message”, “New task assigned”); click targets stay under `/employee-portal/…`.
+- **iOS Safari** – Add to Home Screen works for a basic PWA experience; Web Push for web apps has historically been limited on iOS compared to Chromium-based browsers. Test on your target iOS version; do not rely on push as the only channel for time-critical clinical or highly sensitive content.

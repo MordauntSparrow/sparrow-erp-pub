@@ -1,12 +1,12 @@
 {% extends "admin/inventory_admin_base.html" %}
-{% block page_title %}{{ item.name }} — Item overview{% endblock %}
+{% block page_title %}{{ item.name }} — Consumable overview{% endblock %}
 
 {% block content %}
 <div class="container-fluid py-4">
   <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
     <div>
       <div class="d-flex align-items-center gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-secondary" href="/plugin/inventory_control/items"><i class="bi bi-arrow-left"></i> Items</a>
+        <a class="btn btn-sm btn-outline-secondary" href="/plugin/inventory_control/items"><i class="bi bi-arrow-left"></i> Consumables</a>
         <h1 class="h4 mb-0">{{ item.name }}</h1>
         <span class="badge bg-light text-dark border">SKU: {{ item.sku or "—" }}</span>
         {% if item.unit %}<span class="badge bg-light text-dark border">UOM: {{ item.unit }}</span>{% endif %}
@@ -92,10 +92,10 @@
   <p class="text-muted small mt-2" id="status">Loading…</p>
 
   <div class="row g-3 mt-1">
-    <div class="col-12 col-lg-6">
+    <div class="col-12">
       <div class="card shadow-sm h-100">
         <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>Usage by person (consumables)</div>
+          <div>Usage by person</div>
           <select class="form-select form-select-sm" id="usageMonths" style="max-width: 160px;">
             <option value="3">Last 3 months</option>
             <option value="6" selected>Last 6 months</option>
@@ -112,27 +112,6 @@
           </div>
         </div>
         <div class="card-footer text-muted small" id="usage-status">—</div>
-      </div>
-    </div>
-
-    <div class="col-12 col-lg-6">
-      <div class="card shadow-sm h-100">
-        <div class="card-header">Equipment assets (serialised)</div>
-        <div class="card-body p-0">
-          <div class="table-responsive">
-            <table class="table table-sm mb-0">
-              <thead class="table-light"><tr><th>Serial</th><th>Status</th><th>Make / Model</th><th>Condition</th></tr></thead>
-              <tbody id="assets-table"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card-footer d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div class="text-muted small" id="assets-status">—</div>
-          <div class="d-flex gap-2">
-            <input class="form-control form-control-sm" id="newSerial" placeholder="New serial..." style="max-width: 220px;">
-            <button class="btn btn-sm btn-outline-primary" id="btnAddSerial"><i class="bi bi-plus-lg"></i> Add</button>
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -272,27 +251,6 @@
       .catch(err => { status.textContent = 'Error: ' + (err && err.message ? err.message : 'Request failed'); });
   }
 
-  function loadAssets() {
-    const tbody = document.getElementById('assets-table');
-    const status = document.getElementById('assets-status');
-    tbody.innerHTML = '';
-    status.textContent = 'Loading…';
-    fetch(`${base}/api/equipment/assets?item_id=${encodeURIComponent(itemId)}`, { credentials: 'same-origin' })
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) throw new Error(d.error);
-        const rows = d.assets || [];
-        rows.forEach(a => {
-          const tr = document.createElement('tr');
-          const makeModel = [a.make, a.model].filter(Boolean).join(' / ') || '—';
-          tr.innerHTML = `<td>${a.serial_number || ''}</td><td>${a.status || ''}</td><td>${makeModel}</td><td>${a.condition || '—'}</td>`;
-          tbody.appendChild(tr);
-        });
-        status.textContent = `${rows.length} asset(s)`;
-      })
-      .catch(err => { status.textContent = 'Error: ' + (err && err.message ? err.message : 'Request failed'); });
-  }
-
   let chartUsageMonthly = null;
   function loadUsageMonthly() {
     const months = document.getElementById('usageMonthlyMonths').value;
@@ -332,23 +290,8 @@
   document.getElementById('usageMonthlyMonths').addEventListener('change', loadUsageMonthly);
 
   document.getElementById('usageMonths').addEventListener('change', loadUsage);
-  document.getElementById('btnAddSerial').addEventListener('click', function() {
-    const sn = document.getElementById('newSerial').value.trim();
-    if (!sn) return;
-    fetch(`${base}/api/equipment/assets`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ item_id: itemId, serial_number: sn })
-    }).then(r => r.json()).then(d => {
-      if (d.error) { alert(d.error); return; }
-      document.getElementById('newSerial').value = '';
-      loadAssets();
-    }).catch(() => alert('Request failed'));
-  });
 
   loadUsage();
-  loadAssets();
   loadUsageMonthly();
 })();
 </script>

@@ -51,7 +51,7 @@
           <tbody>
             {% for r in rows %}
             <tr>
-              <td>{{ r.completed_at.strftime('%Y-%m-%d %H:%M') if r.completed_at else '—' }}</td>
+              <td>{{ r.completed_at.strftime('%d/%m/%Y %H:%M') if r.completed_at else '—' }}</td>
               <td>{{ r.contractor_name or r.contractor_id }}</td>
               <td>{{ r.item_title }}</td>
               <td class="small text-muted">{{ r.notes or '—' }}</td>

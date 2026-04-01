@@ -9,6 +9,20 @@
 </section>
 {% endif %}
 
+{% if push_notifications_available|default(false) %}
+<section class="mb-4" role="region" aria-label="Notifications">
+  <div class="ep-card p-3">
+    <h3 class="h6 text-secondary text-uppercase mb-2">Browser notifications</h3>
+    <p class="small text-muted mb-2 mb-md-3">Get a generic alert when you receive a new portal message or task (no sensitive details in the notification text).</p>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="button" class="btn btn-sm btn-primary" id="ep-push-enable">Enable notifications</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="ep-push-disable">Stop notifications</button>
+      <span class="small text-muted" id="ep-push-status" aria-live="polite"></span>
+    </div>
+  </div>
+</section>
+{% endif %}
+
 {% set _glance = summary_context|default({}) %}
 {% set _sched = _glance.scheduling_summary|default({}) if _glance else {} %}
 {% set _has_attention = (_glance.pending_policies|default(0) > 0) or (_glance.pending_training|default(0) > 0) or (_glance.pending_hr_requests|default(0) > 0) or (_glance.pending_todo_count|default(0) > 0) or (_glance.unread_messages|default(0) > 0) or (scheduling_enabled|default(False) and (_sched.shifts_this_week|default(0) > 0 or _sched.pending_shift_tasks|default(0) > 0)) %}
@@ -109,6 +123,28 @@
     </span>
     {% endif %}
     {% endfor %}
+    {% if equipment_portal_enabled|default(False) %}
+    <a href="{{ url_for('public_employee_portal.my_equipment') }}" class="module-tile">
+      <i class="bi bi-heart-pulse"></i>
+      <span class="fw-medium">My equipment &amp; kit</span>
+      {% if (contractor_equipment_count|default(0)) > 0 %}
+      <span class="badge bg-secondary ms-1">{{ contractor_equipment_count }}</span>
+      {% endif %}
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    {% endif %}
+    {% if inventory_contractor_requests_portal_enabled|default(False) %}
+    <a href="{{ url_for('public_inventory.contractor_kit_request') }}" class="module-tile">
+      <i class="bi bi-box-seam"></i>
+      <span class="fw-medium">Request stock or equipment</span>
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    <a href="{{ url_for('public_inventory.contractor_kit_requests_list') }}" class="module-tile">
+      <i class="bi bi-list-ul"></i>
+      <span class="fw-medium">My inventory requests</span>
+      <i class="bi bi-chevron-right ms-auto text-secondary"></i>
+    </a>
+    {% endif %}
     {% if ai_available|default(False) %}
     <a href="{{ url_for('public_employee_portal.assistant_page') }}" class="module-tile">
       <i class="bi bi-chat-dots"></i>
@@ -202,6 +238,88 @@
 </section>
 
 <script>
+(function() {
+  function urlBase64ToUint8Array(base64String) {
+    var padding = '='.repeat((4 - base64String.length % 4) % 4);
+    var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    var rawData = atob(base64);
+    var outputArray = new Uint8Array(rawData.length);
+    for (var i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+  var enableBtn = document.getElementById('ep-push-enable');
+  var disableBtn = document.getElementById('ep-push-disable');
+  var statusEl = document.getElementById('ep-push-status');
+  if (enableBtn && disableBtn && statusEl && 'serviceWorker' in navigator && 'PushManager' in window) {
+    function setStatus(t) { statusEl.textContent = t || ''; }
+    fetch('{{ url_for("public_employee_portal.api_push_preferences") }}', { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(p) {
+        if (p.push_enabled === false) setStatus('Notifications are off in your portal settings.');
+      }).catch(function() {});
+    enableBtn.addEventListener('click', function() {
+      setStatus('Working…');
+      Promise.all([
+        navigator.serviceWorker.ready,
+        fetch('{{ url_for("public_employee_portal.api_push_vapid_public_key") }}').then(function(r) { return r.json(); })
+      ]).then(function(results) {
+        var reg = results[0];
+        var keyData = results[1];
+        if (!keyData.configured || !keyData.publicKey) {
+          setStatus('Push is not configured on the server.');
+          return;
+        }
+        return Notification.requestPermission().then(function(perm) {
+          if (perm !== 'granted') {
+            setStatus('Permission denied or dismissed.');
+            return;
+          }
+          var vapidKey = urlBase64ToUint8Array(keyData.publicKey);
+          return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidKey }).then(function(sub) {
+            return fetch('{{ url_for("public_employee_portal.api_push_subscribe") }}', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify(sub.toJSON ? sub.toJSON() : sub)
+            }).then(function(res) {
+              if (!res.ok) return res.json().then(function(d) { throw new Error(d.error || 'Subscribe failed'); });
+              setStatus('Notifications enabled on this device.');
+            });
+          });
+        });
+      }).catch(function(e) {
+        setStatus(e.message || 'Could not enable notifications.');
+      });
+    });
+    disableBtn.addEventListener('click', function() {
+      setStatus('Working…');
+      navigator.serviceWorker.ready.then(function(reg) {
+        return reg.pushManager.getSubscription();
+      }).then(function(sub) {
+        if (!sub) {
+          setStatus('No active subscription on this device.');
+          return;
+        }
+        var json = sub.toJSON ? sub.toJSON() : {};
+        return fetch('{{ url_for("public_employee_portal.api_push_unsubscribe") }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ endpoint: json.endpoint })
+        }).then(function(res) {
+          if (!res.ok) return res.json().then(function(d) { throw new Error(d.error || 'Unsubscribe failed'); });
+          return sub.unsubscribe();
+        }).then(function() {
+          setStatus('Notifications disabled on this device.');
+        });
+      }).catch(function(e) {
+        setStatus(e.message || 'Could not disable.');
+      });
+    });
+  } else if (enableBtn) {
+    enableBtn.disabled = true;
+    if (disableBtn) disableBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Notifications are not supported in this browser.';
+  }
+})();
 (function() {
   function handleApiError(res, fallbackMsg) {
     if (!res.ok) {

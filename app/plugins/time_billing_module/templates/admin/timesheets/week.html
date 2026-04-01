@@ -133,7 +133,7 @@
             {% for e in data.entries %}
               <tr data-id="{{ e.id }}">
                 <td>
-                  {{ e.work_date.strftime('%Y-%m-%d') if e.work_date.__class__.__name__ == 'date' else e.work_date }}
+                  {{ e.work_date.strftime('%d/%m/%Y') if e.work_date.__class__.__name__ == 'date' else e.work_date }}
                 </td>
 
                 <!-- Client/Site -->

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Training register — {{ person.name or person.email }}{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-10">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_training.admin_index') }}">Training</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Person competencies</li>
+    </ol>
+  </nav>
+  <h1 class="h4 mb-1">{{ person.name or person.email }}</h1>
+  <p class="text-muted small mb-3">{{ person.email }} · <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=person.id) }}">HR profile</a></p>
+
+  <p class="small text-muted border rounded px-3 py-2 mb-4 bg-light">
+    Skills and qualifications are stored in the Training register and appear on the HR file. <strong>Clinical grade</strong> can follow HR job title only (tick “Use HR job title”), or add extra text (e.g. manager + grade). Uploaded files are for qualification evidence; dispatch eligibility uses skill/qualification labels and grade tokens.
+  </p>
+
+  <div class="card mb-4">
+    <div class="card-header"><strong>Add entry</strong></div>
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data" class="row g-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="add">
+        <div class="col-md-4">
+          <label class="form-label small">Type</label>
+          <select class="form-select form-select-sm" name="competency_kind" required>
+            {% for k in competency_kinds %}
+            <option value="{{ k }}">{{ k|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label small">Label</label>
+          <input type="text" class="form-control form-control-sm" name="label" placeholder="e.g. ALS, Paramedic, Band 6">
+          <div class="form-text">For clinical grade with HR title only, leave blank and tick below.</div>
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="use_hr_job_title" value="1" id="useHr">
+            <label class="form-check-label small" for="useHr">Use HR job title as clinical grade (optional extra label above for cases like “Manager · Grade X”)</label>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small">Issued</label>
+          <input type="date" class="form-control form-control-sm" name="issued_on">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small">Expires</label>
+          <input type="date" class="form-control form-control-sm" name="expires_on">
+        </div>
+        <div class="col-12">
+          <label class="form-label small">Qualification file (PDF or image)</label>
+          <input type="file" class="form-control form-control-sm" name="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp">
+        </div>
+        <div class="col-12">
+          <label class="form-label small">Notes</label>
+          <textarea class="form-control form-control-sm" name="notes" rows="2"></textarea>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><strong>Current register</strong></div>
+    <div class="card-body p-0">
+      {% if rows %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Type</th>
+              <th>Label / HR title</th>
+              <th>Dates</th>
+              <th>File</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr class="{% if r.expires_on and (r.expires_on|string)[:10] < today_iso %}table-warning{% endif %}">
+              <td class="text-nowrap small">{{ (r.competency_kind or '')|replace('_', ' ')|title }}</td>
+              <td class="small">
+                {% if r.use_hr_job_title %}<span class="badge bg-secondary me-1">HR title</span>{% endif %}
+                {{ r.label or '—' }}
+                {% if r.notes %}<div class="text-muted">{{ r.notes }}</div>{% endif %}
+              </td>
+              <td class="small text-nowrap">
+                {% if r.issued_on %}<div>Issued {{ r.issued_on|string|truncate(10, True, '') }}</div>{% endif %}
+                {% if r.expires_on %}<div>Expires {{ r.expires_on|string|truncate(10, True, '') }}</div>{% endif %}
+              </td>
+              <td class="small">
+                {% if r.file_path %}
+                <a href="{{ url_for('internal_training.admin_person_competency_file', contractor_id=person.id, competency_id=r.id) }}" target="_blank" rel="noopener">View</a>
+                {% else %}—{% endif %}
+              </td>
+              <td class="text-end">
+                <form method="post" class="d-inline" onsubmit="return confirm('Remove this entry?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="competency_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">Remove</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0 p-3">No entries yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

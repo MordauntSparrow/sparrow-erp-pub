@@ -9,6 +9,11 @@
 {% set username = (_user.username if _user and _user.username is defined else 'user') %}
 {% set core_ver = (core_version if core_version is defined and core_version else 'Unknown') %}
 {% set safe_updates = updates if updates is defined and updates else {} %}
+{% set _dash_ts = config.theme_settings|default({}, true) %}
+{% set dash_bg_mode = (_dash_ts.dashboard_background_mode|default('slideshow', true))|lower %}
+{% set dash_bg_color = _dash_ts.dashboard_background_color|default('#1e293b', true) %}
+{% set dash_bg_path = (_dash_ts.dashboard_background_image_path or '')|trim %}
+{% set dash_bg_image_url = url_for('static', filename=dash_bg_path) if dash_bg_path else '' %}
 
 <style>
 /* Root container */
@@ -122,22 +127,36 @@
     color: #fff;
 }
 
-/* Plugin filter */
+/* Plugin filter — beat base.html .form-control:not(...) specificity + autofill paint */
 .plugin-filter-wrap {
     margin-bottom: .75rem;
 }
-.plugin-filter-wrap .form-control {
-    background: rgba(255,255,255,.12);
-    border: 1px solid rgba(255,255,255,.28);
-    color: #fff;
+#pluginDashFilter.form-control {
+    background-color: rgba(255,255,255,.12) !important;
+    border: 1px solid rgba(255,255,255,.28) !important;
+    color: #fff !important;
     border-radius: 10px;
+    -webkit-text-fill-color: #fff;
+    caret-color: #fff;
 }
-.plugin-filter-wrap .form-control::placeholder { color: rgba(255,255,255,.55); }
-.plugin-filter-wrap .form-control:focus {
-    background: rgba(255,255,255,.18);
-    border-color: rgba(255,255,255,.45);
-    color: #fff;
+#pluginDashFilter.form-control::placeholder {
+    color: rgba(255,255,255,.55) !important;
+    opacity: 1;
+}
+#pluginDashFilter.form-control:focus {
+    background-color: rgba(255,255,255,.18) !important;
+    border-color: rgba(255,255,255,.45) !important;
+    color: #fff !important;
     box-shadow: 0 0 0 2px rgba(13,110,253,.35);
+    -webkit-text-fill-color: #fff;
+}
+/* Chrome autofill otherwise flashes white/yellow until interaction */
+#pluginDashFilter.form-control:-webkit-autofill,
+#pluginDashFilter.form-control:-webkit-autofill:hover,
+#pluginDashFilter.form-control:-webkit-autofill:focus {
+    -webkit-text-fill-color: #fff !important;
+    box-shadow: 0 0 0 1000px rgba(35,35,40,.95) inset !important;
+    transition: background-color 99999s ease-out 0s;
 }
 
 .plugin-cat-block { margin-bottom: 1rem; }
@@ -257,8 +276,9 @@ html, body { overflow-x: hidden; }
 
 <div id="dashboardRoot">
   <section class="immersive-hero">
-    <div id="immersiveBg" class="immersive-bg" aria-hidden="true"></div>
-    <canvas id="particles" class="particles-layer" aria-hidden="true"></canvas>
+    <div id="immersiveBg" class="immersive-bg" aria-hidden="true"
+         {% if dash_bg_mode == 'solid' %}style="background-image: none !important; background-color: {{ dash_bg_color }}; opacity: 1;"{% elif dash_bg_mode == 'image' and dash_bg_image_url %}style="background-image: url({{ dash_bg_image_url|tojson }}); background-size: cover; background-position: center; opacity: 1;"{% endif %}></div>
+    <canvas id="particles" class="particles-layer" aria-hidden="true"{% if dash_bg_mode != 'slideshow' %} style="display: none !important;"{% endif %}></canvas>
     <div id="immersiveOverlay" class="immersive-overlay" aria-hidden="true"></div>
 
     <div class="hero-content">
@@ -281,10 +301,12 @@ html, body { overflow-x: hidden; }
         <div class="time" id="liveClock">--:--</div>
         <div class="date" id="liveDate">Loading date…</div>
         <div class="quick-actions mt-2 d-flex gap-2 flex-wrap">
-            {% if current_user.is_authenticated and (current_user.role or '')|lower in ['admin', 'superuser'] %}
+            {% if current_user.is_authenticated and can_open_org_admin_nav() %}
             <a class="btn btn-sm btn-primary-solid" href="/plugins"><i class="bi bi-box-seam me-1"></i> Plugin library</a>
             <a class="btn btn-sm btn-secondary-solid" href="/version"><i class="bi bi-arrow-down-circle me-1"></i> Updates</a>
             <a class="btn btn-sm btn-dark-solid" href="/core/settings"><i class="bi bi-sliders me-1"></i> Settings</a>
+            {% endif %}
+            {% if current_user.is_authenticated and can_open_user_management() %}
             <a class="btn btn-sm btn-dark-solid" href="/users"><i class="bi bi-people me-1"></i> Users</a>
             {% endif %}
         </div>
@@ -295,13 +317,13 @@ html, body { overflow-x: hidden; }
       <div class="plugins-wrap">
         <div class="plugins-head">
           <div class="fw-semibold">Your modules</div>
-          {% if current_user.is_authenticated and (current_user.role or '')|lower in ['admin', 'superuser'] %}
+          {% if current_user.is_authenticated and can_open_org_admin_nav() %}
           <a class="btn btn-sm btn-primary-solid" href="/plugins"><i class="bi bi-shop me-1"></i> Marketplace</a>
           {% endif %}
         </div>
 
         {% if plugins and plugins|length > 0 %}
-        {% if current_user.is_authenticated and (current_user.role or '')|lower in ['admin', 'superuser'] %}
+        {% if current_user.is_authenticated and can_open_org_admin_nav() %}
         <p class="small text-white-50 mb-2 d-none d-md-block">Jump into a module below. Install and updates sit under <strong>System</strong> in the top bar.</p>
         {% endif %}
         <div class="plugin-filter-wrap">
@@ -378,6 +400,9 @@ html, body { overflow-x: hidden; }
 
     /* Live greetings and background */
     const userFirst = {{ user_first | tojson }};
+    const dashBgMode = {{ dash_bg_mode | tojson }};
+    const dashBgColor = {{ dash_bg_color | tojson }};
+    const dashBgImageUrl = {{ dash_bg_image_url | tojson }};
     const bg = document.getElementById('immersiveBg');
     const overlay = document.getElementById('immersiveOverlay');
     const greetShort = document.getElementById('greetShort');
@@ -428,32 +453,83 @@ html, body { overflow-x: hidden; }
         }
     }
 
-    function applyPeriod(period) {
-        if(bg) {
+    function setGreetingForPeriod(period) {
+        const g = greeting(period);
+        if (greetShort) greetShort.textContent = g[0];
+        if (greetMain) greetMain.textContent = g[1];
+    }
+
+    function applyPeriodSlideshow(period) {
+        if (bg) {
             const img = pickImage(period);
             bg.style.opacity = 0;
-            setTimeout(()=>{ bg.style.backgroundImage = `url("${img}")`; bg.style.filter = (period==='night'||period==='evening')?'brightness(.55) contrast(1.05)':'brightness(1) contrast(1)'; bg.style.opacity=1; }, 150);
+            setTimeout(()=>{ bg.style.backgroundImage = `url("${img}")`; bg.style.backgroundColor = 'transparent'; bg.style.filter = (period==='night'||period==='evening')?'brightness(.55) contrast(1.05)':'brightness(1) contrast(1)'; bg.style.opacity=1; }, 150);
         }
-        if(overlay) overlay.style.background = (period==='night'||period==='evening')?'linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.65) 70%)':'linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.65) 70%)';
-        const g = greeting(period);
-        if(greetShort) greetShort.textContent = g[0];
-        if(greetMain) greetMain.textContent = g[1];
+        if (overlay) overlay.style.background = (period==='night'||period==='evening')?'linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.65) 70%)':'linear-gradient(180deg, rgba(0,0,0,.15), rgba(0,0,0,.65) 70%)';
+        setGreetingForPeriod(period);
+    }
+
+    function applySolidBackground(period) {
+        if (bg) {
+            bg.style.backgroundImage = 'none';
+            bg.style.backgroundColor = dashBgColor;
+            bg.style.filter = 'none';
+            bg.style.opacity = 1;
+        }
+        if (overlay) overlay.style.background = 'linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.5) 70%)';
+        setGreetingForPeriod(period);
+    }
+
+    function applyCustomImageBackground(period) {
+        if (dashBgImageUrl && bg) {
+            bg.style.opacity = 0;
+            setTimeout(()=>{
+                bg.style.backgroundImage = `url("${dashBgImageUrl}")`;
+                bg.style.backgroundSize = 'cover';
+                bg.style.backgroundPosition = 'center';
+                bg.style.backgroundColor = 'transparent';
+                bg.style.filter = 'brightness(.92) contrast(1.02)';
+                bg.style.opacity = 1;
+            }, 150);
+        } else {
+            applyPeriodSlideshow(period);
+            return;
+        }
+        if (overlay) overlay.style.background = 'linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.58) 70%)';
+        setGreetingForPeriod(period);
+    }
+
+    function applyDashboardBackground(period) {
+        if (dashBgMode === 'solid') {
+            applySolidBackground(period);
+        } else if (dashBgMode === 'image') {
+            applyCustomImageBackground(period);
+        } else {
+            applyPeriodSlideshow(period);
+        }
     }
 
     function updateClock() {
         const now = new Date();
-        if(liveClock) liveClock.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit' });
-        if(liveDate) liveDate.textContent = now.toLocaleDateString([], { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+        if(liveClock) liveClock.textContent = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute:'2-digit', hour12: false });
+        if(liveDate) liveDate.textContent = now.toLocaleDateString('en-GB', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
         return now;
     }
 
     function tick() {
-        const now = updateClock();
-        const period = getPeriod(now);
-        if(period!==tick._last){applyPeriod(period); tick._last=period;}
+        updateClock();
+        const period = getPeriod(new Date());
+        if (period !== tick._last) {
+            applyDashboardBackground(period);
+            tick._last = period;
+        }
     }
 
-    document.addEventListener('DOMContentLoaded', function(){ tick(); setInterval(tick, 1000); });
+    document.addEventListener('DOMContentLoaded', function(){
+        tick._last = null;
+        tick();
+        setInterval(tick, 1000);
+    });
 
     const filterInp = document.getElementById('pluginDashFilter');
     if (filterInp) {
@@ -472,9 +548,9 @@ html, body { overflow-x: hidden; }
       });
     }
 
-    /* Particles */
+    /* Particles (slideshow mode only) */
     const canvas = document.getElementById('particles');
-    if(canvas){
+    if (canvas && dashBgMode === 'slideshow') {
         const ctx = canvas.getContext('2d'); let w=window.innerWidth; let h=window.innerHeight; let particles=[];
         const COUNT=Math.min(90, Math.max(40, Math.floor(window.innerWidth/18)));
         function rnd(a,b){return a+Math.random()*(b-a);}

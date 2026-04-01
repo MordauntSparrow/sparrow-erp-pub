@@ -577,7 +577,7 @@
           notes: get('notes') || null,
         }),
       });
-      if (r.ok) markSaved('Your times saved ' + new Date().toLocaleTimeString());
+      if (r.ok) markSaved('Your times saved ' + sparrowFormatTime(new Date()));
       else {
         const j = await r.json().catch(() => ({}));
         toast(j.error || 'Save failed', 'danger');
@@ -640,7 +640,7 @@
       body: JSON.stringify(payload),
     });
     if (r.ok) {
-      markSaved('Saved ' + new Date().toLocaleTimeString());
+      markSaved('Saved ' + sparrowFormatTime(new Date()));
       await loadExisting();
     } else {
       const j = await r.json().catch(() => ({}));

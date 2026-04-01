@@ -9,7 +9,7 @@
       Edit Contractor
     </h4>
     <div class="d-flex gap-2">
-      <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.contractors_page') }}">
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_hr.admin_employees') }}">
         <i class="bi bi-arrow-left me-1"></i> Back
       </a>
       <button id="btnSave" class="btn btn-primary btn-sm" type="button">
@@ -25,6 +25,13 @@
         <div class="col-12 col-md-4">
           <label class="form-label">Email</label>
           <input id="email" class="form-control form-control-sm" disabled>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Login username</label>
+          <input id="username" class="form-control form-control-sm" type="text" readonly
+                 title="Generated from name when you save">
+          <div class="form-text">Auto-set as <strong>firstname.lastname</strong> from the name field (suffix if needed). Used for portal and <code>/api/login</code>.</div>
         </div>
 
         <div class="col-12 col-md-4">
@@ -126,6 +133,7 @@
 
   // Elements
   const emailEl = $('#email');
+  const usernameEl = $('#username');
   const nameEl = $('#name');
   const statusEl = $('#status');
   const employmentTypeEl = $('#employment_type');
@@ -133,16 +141,22 @@
   const wageCardEl = $('#wage_rate_card_id');
   const newPwEl = $('#new_pw');
 
-  // API endpoints (build base paths server-side, append id client-side)
-  const GET_BASE = "{{ url_for('internal_time_billing.api_get_contractor', user_id=0) }}".replace(/0$/, "");
-  const UPDATE_BASE = "{{ url_for('internal_time_billing.api_update_contractor', user_id=0) }}".replace(/0$/, "");
-  const SETPW_BASE = "{{ url_for('internal_time_billing.api_contractor_set_password', user_id=0) }}".replace(/0\/set-password$/, "");
+  function tbCsrfHeaders(h, method) {
+    return (typeof window.tbMergeCsrfHeaders === "function")
+      ? window.tbMergeCsrfHeaders(h || {}, method)
+      : (h || {});
+  }
+
+  // API paths: replace numeric id segment so URLs work regardless of app root or trailing slashes
+  const GET_TMPL = "{{ url_for('internal_time_billing.api_get_contractor', user_id=0) }}";
+  const PUT_TMPL = "{{ url_for('internal_time_billing.api_update_contractor', user_id=0) }}";
+  const SETPW_TMPL = "{{ url_for('internal_time_billing.api_contractor_set_password', user_id=0) }}";
   const ROLES_URL = "{{ url_for('internal_time_billing.api_list_roles') }}";
   const WAGE_CARDS_URL = "{{ url_for('internal_time_billing.get_wage_cards') }}";
 
-  const GET_URL = (id) => `${GET_BASE}${id}`;
-  const UPDATE_URL = (id) => `${UPDATE_BASE}${id}`;
-  const SETPW_URL = (id) => `${SETPW_BASE}/${id}/set-password`;
+  const GET_URL = (id) => GET_TMPL.replace(/\/[0-9]+$/, "/" + id);
+  const UPDATE_URL = (id) => PUT_TMPL.replace(/\/[0-9]+$/, "/" + id);
+  const SETPW_URL = (id) => SETPW_TMPL.replace(/\/[0-9]+\/set-password\/?$/, "/" + id + "/set-password");
 
   async function loadRoles() {
     const r = await fetch(ROLES_URL);
@@ -186,6 +200,7 @@
 
     const c = await r.json();
     emailEl.value = c.email || '';
+    usernameEl.value = c.username || '';
     nameEl.value = c.name || '';
     statusEl.value = (c.status || 'active').toLowerCase();
     employmentTypeEl.value = (c.employment_type || 'self_employed').toLowerCase();
@@ -209,7 +224,7 @@
 
     const r = await fetch(UPDATE_URL(userId), {
       method: 'PUT',
-      headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
+      headers: tbCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
       body: JSON.stringify(payload),
     });
 
@@ -219,7 +234,11 @@
       return;
     }
 
-    showMsg('Success', 'Contractor updated successfully');
+    const data = await r.json().catch(() => ({}));
+    if (data.username) usernameEl.value = data.username;
+    showMsg('Success', data.username
+      ? ('Saved. Login username is now ' + data.username + '.')
+      : 'Contractor updated successfully');
   }
 
   async function setPassword() {
@@ -228,7 +247,7 @@
 
     const r = await fetch(SETPW_URL(userId), {
       method: 'POST',
-      headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+      headers: tbCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
       body: JSON.stringify({ password: pw }),
     });
 

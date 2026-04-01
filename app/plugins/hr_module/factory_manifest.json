@@ -7,6 +7,35 @@
   "force_update": false,
   "description": "Employee store: profiles, DBS, driving licence, right to work, contract metadata, document library, and portal requests.",
   "dashboard_category": "People & HR",
+  "access_permission": "hr_module.access",
+  "alternate_access_permissions": [
+    "hr_module.read",
+    "hr_module.edit_employees",
+    "hr_module.document_requests",
+    "hr_module.library"
+  ],
+  "declared_permissions": [
+    {
+      "id": "hr_module.access",
+      "label": "HR — full access (view, edit profiles, document requests, library)"
+    },
+    {
+      "id": "hr_module.read",
+      "label": "HR — view employees, profiles, files, requests, reports (read-only)"
+    },
+    {
+      "id": "hr_module.edit_employees",
+      "label": "HR — create employees and edit staff profiles"
+    },
+    {
+      "id": "hr_module.document_requests",
+      "label": "HR — create and approve/reject document requests"
+    },
+    {
+      "id": "hr_module.library",
+      "label": "HR — upload or delete files in employee document libraries"
+    }
+  ],
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/hr_module/icon.png",
   "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fhr_module%2Fhr_module_v0.0.1.zip/raw?ref=main",
   "dependencies": [

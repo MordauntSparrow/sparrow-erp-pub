@@ -76,7 +76,10 @@
   .btn-secondary { background-color: #6c757d; color: #fff; }
 
   /* ===== Inputs (checkboxes/radios untouched) ===== */
-  input, textarea, select, .form-control {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select,
+  .form-control:not([type="checkbox"]):not([type="radio"]) {
     {% if config.theme_settings.theme == 'dark' %}
       background-color: #1f1f1f; color: #fff; border: 1px solid #444;
     {% else %}

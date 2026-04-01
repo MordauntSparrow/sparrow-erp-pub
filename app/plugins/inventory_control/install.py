@@ -1,3 +1,4 @@
+import json
 import sys
 import os
 from pathlib import Path
@@ -74,8 +75,59 @@ def _alter_modify_enum(conn, table: str, column: str, new_type: str) -> None:
             pass
 
 
+def _ensure_default_holding_location(conn) -> None:
+    """
+    Default reconciliation / limbo location for post-event or temporary-site returns.
+    Staff verify condition, faults, and final putaway before moving to a main store.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id FROM inventory_locations WHERE code = %s LIMIT 1",
+            ("HOLD-IN",),
+        )
+        if cur.fetchone():
+            return
+        meta = json.dumps(
+            {
+                "purpose": "Holding pool — verify condition, log faults/maintenance, then put away to the correct store.",
+            }
+        )
+        cur.execute(
+            """
+            INSERT INTO inventory_locations (name, code, type, parent_location_id, address, metadata)
+            VALUES (%s, %s, %s, NULL, NULL, CAST(%s AS JSON))
+            """,
+            (
+                "Kit return / holding (reconciliation)",
+                "HOLD-IN",
+                "holding",
+                meta,
+            ),
+        )
+        conn.commit()
+        print("[inventory_control] Ensured default holding location HOLD-IN")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"[inventory_control] Default holding location: {e}")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 def _upgrade_equipment_assets(conn) -> None:
     """Add equipment asset columns for existing installs (idempotent)."""
+    _alter_add_column(conn, "inventory_equipment_assets", "next_service_due_date DATE NULL")
+    _alter_add_column(
+        conn,
+        "inventory_equipment_assets",
+        "operational_state ENUM('operational','restricted','unserviceable') NOT NULL DEFAULT 'operational'",
+    )
     _alter_add_column(conn, "inventory_equipment_assets", "make VARCHAR(120) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "model VARCHAR(120) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "purchase_date DATE NULL")
@@ -84,6 +136,82 @@ def _upgrade_equipment_assets(conn) -> None:
     _alter_add_column(conn, "inventory_equipment_assets", "condition VARCHAR(64) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
+    _alter_add_column(
+        conn,
+        "inventory_equipment_assets",
+        "warranty_start_basis VARCHAR(24) NULL",
+    )
+    _alter_add_column(conn, "inventory_equipment_assets", "warranty_start_date DATE NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "warranty_months INT NULL")
+
+
+def _ensure_asset_extension_schema(conn) -> None:
+    """
+    Maintenance events and equipment issues (formerly the asset_management plugin).
+    Idempotent; safe after inventory_equipment_assets exists.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS asset_maintenance_events (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                equipment_asset_id BIGINT NOT NULL,
+                service_date DATE NOT NULL,
+                service_type VARCHAR(128) NOT NULL,
+                notes TEXT NULL,
+                cost DECIMAL(18,2) NULL,
+                performed_by VARCHAR(255) NULL,
+                created_by CHAR(36) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_asset_maint_asset (equipment_asset_id),
+                INDEX idx_asset_maint_service_date (service_date),
+                CONSTRAINT fk_asset_maint_equipment
+                    FOREIGN KEY (equipment_asset_id) REFERENCES inventory_equipment_assets(id)
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
+        conn.commit()
+        print("[inventory_control] Ensured asset_maintenance_events")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS asset_equipment_issues (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                equipment_asset_id BIGINT NOT NULL,
+                reported_by_user_id CHAR(36) NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT NULL,
+                severity ENUM('info','low','medium','high','critical') NOT NULL DEFAULT 'medium',
+                status ENUM('open','monitoring','fix_planned','off_service','sent_external','resolved','closed') NOT NULL DEFAULT 'open',
+                scheduled_action_date DATE NULL,
+                external_reference VARCHAR(255) NULL,
+                resolution_notes TEXT NULL,
+                resolved_at TIMESTAMP NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_aei_asset (equipment_asset_id),
+                INDEX idx_aei_status (status),
+                CONSTRAINT fk_aei_equipment FOREIGN KEY (equipment_asset_id)
+                    REFERENCES inventory_equipment_assets(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
+        conn.commit()
+        print("[inventory_control] Ensured asset_equipment_issues")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+    _alter_add_column(conn, "inventory_equipment_assets", "next_service_due_date DATE NULL")
+    _alter_add_column(
+        conn,
+        "inventory_equipment_assets",
+        "operational_state ENUM('operational','restricted','unserviceable') NOT NULL DEFAULT 'operational'",
+    )
 
 
 def install():
@@ -466,6 +594,13 @@ def install():
             conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL"
         )
         _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
+        _alter_add_column(
+            conn,
+            "inventory_equipment_assets",
+            "warranty_start_basis VARCHAR(24) NULL",
+        )
+        _alter_add_column(conn, "inventory_equipment_assets", "warranty_start_date DATE NULL")
+        _alter_add_column(conn, "inventory_equipment_assets", "warranty_months INT NULL")
         cur_idx = None
         try:
             cur_idx = conn.cursor()
@@ -511,6 +646,77 @@ def install():
         _alter_add_column(conn, "inventory_batches", "unit_weight_uom VARCHAR(32) NULL")
         _alter_modify_enum(conn, "inventory_transactions", "transaction_type",
             "ENUM('in','out','adjustment','transfer','count','return','repack') NOT NULL")
+
+        _create_table(
+            conn,
+            "inventory_equipment_asset_consumables",
+            """
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            equipment_asset_id BIGINT NOT NULL,
+            inventory_item_id INT NULL,
+            label VARCHAR(255) NOT NULL,
+            batch_number VARCHAR(128) NULL,
+            lot_number VARCHAR(128) NULL,
+            expiry_date DATE NULL,
+            quantity DECIMAL(18, 4) NOT NULL DEFAULT 1,
+            depleted TINYINT(1) NOT NULL DEFAULT 0,
+            notes TEXT NULL,
+            usage_close_reason VARCHAR(32) NULL,
+            discrepancy_flag TINYINT(1) NOT NULL DEFAULT 0,
+            discrepancy_details TEXT NULL,
+            discrepancy_reported_at DATETIME NULL,
+            discrepancy_reported_by_contractor_id INT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_inv_equip_cons_asset (equipment_asset_id),
+            INDEX idx_inv_equip_cons_expiry (expiry_date)
+            """,
+        )
+
+        _create_table(
+            conn,
+            "inventory_equipment_portal_handoffs",
+            """
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            equipment_asset_id BIGINT NOT NULL,
+            contractor_id INT NOT NULL,
+            handoff_kind ENUM('to_vehicle','to_storeroom') NOT NULL,
+            vehicle_id INT NULL,
+            inventory_location_id INT NOT NULL,
+            status ENUM('pending','completed','cancelled') NOT NULL DEFAULT 'pending',
+            initiated_by_user_id VARCHAR(64) NULL,
+            notes TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME NULL,
+            cancelled_at DATETIME NULL,
+            INDEX idx_inv_handoff_contractor (contractor_id, status),
+            INDEX idx_inv_handoff_asset (equipment_asset_id, status)
+            """,
+        )
+
+        _create_table(
+            conn,
+            "inventory_contractor_kit_requests",
+            """
+            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            contractor_id INT NOT NULL,
+            need_from DATE NOT NULL,
+            need_until DATE NOT NULL,
+            request_text TEXT NOT NULL,
+            status VARCHAR(24) NOT NULL DEFAULT 'pending',
+            office_notes TEXT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME NULL,
+            resolved_by VARCHAR(128) NULL,
+            KEY idx_ickr_contractor (contractor_id),
+            KEY idx_ickr_status (status, created_at),
+            CONSTRAINT fk_ickr_contractor FOREIGN KEY (contractor_id)
+              REFERENCES tb_contractors(id) ON DELETE CASCADE ON UPDATE CASCADE
+            """,
+        )
+
+        _ensure_asset_extension_schema(conn)
+        _ensure_default_holding_location(conn)
     finally:
         try:
             conn.close()

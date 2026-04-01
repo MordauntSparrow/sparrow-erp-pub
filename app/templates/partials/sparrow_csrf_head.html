@@ -1,5 +1,6 @@
 {# SeaSurf (Flask-SeaSurf): expose token + auto-attach X-CSRFToken on mutating fetch().
    Include once per layout <head>. Also defines sparrowMergeCsrfHeaders / tbMergeCsrfHeaders for explicit use. #}
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <script>
 (function () {

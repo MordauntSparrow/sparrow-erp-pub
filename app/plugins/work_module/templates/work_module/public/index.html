@@ -1,0 +1,55 @@
+{% extends "work_module/base_public.html" %}
+{% block content %}
+<h1 class="h4 mb-2">Work planner</h1>
+<p class="text-muted small mb-3">Your schedule for today with client details. Record times, notes and photos at each stop.</p>
+{% if stops %}
+  <div class="d-flex flex-column gap-3">
+    {% for s in stops %}
+    <div class="card card-module p-3 border-start border-primary border-3">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <h2 class="h6 mb-1">{{ s.client_name or '—' }}</h2>
+          {% if s.site_name %}
+          <p class="mb-0 small text-secondary">{{ s.site_name }}{% if s.site_postcode %} · {{ s.site_postcode }}{% endif %}</p>
+          {% elif s.site_postcode %}
+          <p class="mb-0 small text-secondary">{{ s.site_postcode }}</p>
+          {% endif %}
+        </div>
+        <span class="badge bg-primary">{{ s.job_type_name or '—' }}</span>
+      </div>
+      <div class="mt-2 small d-flex flex-wrap gap-2 align-items-center">
+        <span class="text-secondary">Scheduled: {{ s.scheduled_start.strftime('%H:%M') if s.scheduled_start else '—' }} – {{ s.scheduled_end.strftime('%H:%M') if s.scheduled_end else '—' }}</span>
+        {% if s.actual_start or s.actual_end %}
+        <span class="text-success">Recorded: {{ s.actual_start.strftime('%H:%M') if s.actual_start else '—' }} – {{ s.actual_end.strftime('%H:%M') if s.actual_end else '—' }}</span>
+        {% endif %}
+      </div>
+      {% if s.notes %}
+      <div class="mt-2 small text-muted">
+        <i class="bi bi-chat-left-text me-1"></i> {{ (s.notes[:80] + '…') if s.notes and s.notes|length > 80 else (s.notes or '') }}
+      </div>
+      {% endif %}
+      {% if s.visit_id %}
+      <div class="mt-1 small text-secondary">Visit <strong>#{{ s.visit_id }}</strong></div>
+      {% endif %}
+      {% if s.photo_count and s.photo_count > 0 %}
+      <div class="mt-1 small text-muted">
+        <i class="bi bi-camera me-1"></i> {{ s.photo_count }} photo{{ 's' if s.photo_count != 1 else '' }}
+      </div>
+      {% endif %}
+      <a href="{{ url_for('public_work.stop_page', shift_id=s.id) }}" class="btn btn-primary btn-sm mt-3">
+        {% if s.actual_end %}View / edit times & photos{% else %}Record times & notes <i class="bi bi-chevron-right"></i>{% endif %}
+      </a>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="card card-module p-4 text-center">
+    <i class="bi bi-calendar-x text-muted display-6"></i>
+    <p class="text-secondary mb-0 mt-2">No stops scheduled for today. Your schedule comes from the Scheduling module.</p>
+    <a href="/scheduling/my-day" class="btn btn-outline-light btn-sm mt-2">View my schedule</a>
+  </div>
+{% endif %}
+<div class="mt-3">
+  <a href="/employee-portal/" class="btn btn-outline-light btn-sm">Back to Portal</a>
+</div>
+{% endblock %}

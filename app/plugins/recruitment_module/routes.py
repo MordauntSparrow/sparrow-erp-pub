@@ -82,18 +82,85 @@ def _get_website_settings():
     return {k: None for k in _keys}
 
 
-def _admin_required(view):
+REC_ACCESS = "recruitment_module.access"
+REC_READ = "recruitment_module.read"
+REC_SETUP = "recruitment_module.manage_setup"
+REC_APPS = "recruitment_module.manage_applications"
+REC_HIRE = "recruitment_module.hire"
+_REC_ANY_VIEW = frozenset({REC_READ, REC_SETUP, REC_APPS, REC_HIRE})
+
+
+def _rec_perm_set(user):
+    role = (getattr(user, "role", None) or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return None
+    raw = getattr(user, "permissions", None) or []
+    return {str(x) for x in raw if x}
+
+
+def _rec_may_view(user) -> bool:
+    ps = _rec_perm_set(user)
+    if ps is None:
+        return True
+    if REC_ACCESS in ps:
+        return True
+    return bool(ps & _REC_ANY_VIEW)
+
+
+def _rec_may(user, *needed: str) -> bool:
+    ps = _rec_perm_set(user)
+    if ps is None:
+        return True
+    if REC_ACCESS in ps:
+        return True
+    return any(n in ps for n in needed)
+
+
+def _rec_require_view(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not current_user.is_authenticated:
             return redirect(url_for("routes.login"))
-        role = (getattr(current_user, "role", None) or "").lower()
-        if role not in ("admin", "superuser"):
-            flash("Admin access required.", "error")
+        if not _rec_may_view(current_user):
+            flash("You do not have access to Recruitment.", "danger")
             return redirect(url_for("routes.dashboard"))
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def _rec_require(*needed: str):
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return redirect(url_for("routes.login"))
+            if not _rec_may(current_user, *needed):
+                flash("You do not have permission for this action.", "danger")
+                return redirect(url_for("routes.dashboard"))
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+@internal_bp.context_processor
+def _rec_admin_perm_context():
+    u = current_user
+    if not getattr(u, "is_authenticated", False):
+        return {
+            "rec_can_view": False,
+            "rec_can_manage_setup": False,
+            "rec_can_manage_applications": False,
+            "rec_can_hire": False,
+        }
+    return {
+        "rec_can_view": _rec_may_view(u),
+        "rec_can_manage_setup": _rec_may(u, REC_SETUP),
+        "rec_can_manage_applications": _rec_may(u, REC_APPS),
+        "rec_can_hire": _rec_may(u, REC_HIRE),
+    }
 
 
 def _applicant_user():
@@ -128,10 +195,45 @@ def _form_optional_positive_int(field: str) -> Optional[int]:
 
 
 def _app_static_dir() -> str:
-    base = getattr(current_app, "root_path", None) or os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..")
-    )
-    return os.path.join(base, "static")
+    """
+    …/app/static — same resolution as HR module (plugin-relative).
+    Avoid relying on current_app.root_path alone: it can disagree with where uploads are saved.
+    """
+    app_pkg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(app_pkg_dir, "static")
+
+
+def _project_root_dir() -> str:
+    """Repo root (parent of app/). Legacy uploads may exist under <root>/static/…"""
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+def _recruitment_cv_static_roots():
+    """Roots where recruitment CV files may exist (app static, legacy repo static)."""
+    return [
+        os.path.abspath(_app_static_dir()),
+        os.path.abspath(os.path.join(_project_root_dir(), "static")),
+    ]
+
+
+def _resolve_recruitment_cv_file(rel: str) -> Optional[str]:
+    """Resolve uploads/recruitment_cv/… to first existing file under known static roots."""
+    rel = (rel or "").replace("\\", "/").strip().lstrip("/")
+    if not rel.startswith("uploads/recruitment_cv/") or ".." in rel.split("/"):
+        return None
+    segs = [s for s in rel.split("/") if s]
+    if len(segs) < 3:
+        return None
+    for root in _recruitment_cv_static_roots():
+        candidate = os.path.abspath(os.path.join(root, *segs))
+        try:
+            if os.path.commonpath([candidate, root]) != root:
+                continue
+        except ValueError:
+            continue
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def _save_cv_upload(file_storage):
@@ -253,6 +355,13 @@ def vacancy_apply_post(slug):
     if not ok:
         _flash_public(msg, error=True)
         return redirect(url_for("public_recruitment_site.vacancy_detail", slug=slug))
+    if app_id:
+        try:
+            from . import notifications as rec_notifications
+
+            rec_notifications.notify_new_application_submitted(int(app_id))
+        except Exception:
+            pass
     _flash_public("Application submitted. You can track progress in your applicant portal.")
     return redirect(
         url_for("public_recruitment_site.applicant_application", application_id=app_id)
@@ -373,6 +482,36 @@ def applicant_application(application_id):
         config=_core_manifest,
         website_settings=_get_website_settings(),
         applicant=_applicant_user(),
+    )
+
+
+@public_site_bp.get("/recruitment/applicant/applications/<int:application_id>/cv-file")
+@_applicant_required
+def applicant_application_cv_file(application_id):
+    """Serve the applicant's own CV (same path rules as admin)."""
+    uid = int(_applicant_user()["id"])
+    app_row = rec_svc.get_application_for_applicant(application_id, uid)
+    if not app_row or not app_row.get("cv_path"):
+        abort(404)
+    rel = str(app_row["cv_path"]).replace("\\", "/").strip().lstrip("/")
+    full = _resolve_recruitment_cv_file(rel)
+    if not full:
+        abort(404)
+    ext = os.path.splitext(full)[1].lower()
+    dl = f"cv-application-{application_id}{ext}"
+    inline = ext == ".pdf" and (request.args.get("download") or "").strip() != "1"
+    mimetype = None
+    if ext == ".pdf":
+        mimetype = "application/pdf"
+    elif ext == ".doc":
+        mimetype = "application/msword"
+    elif ext == ".docx":
+        mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return send_file(
+        full,
+        mimetype=mimetype,
+        as_attachment=not inline,
+        download_name=dl,
     )
 
 
@@ -516,7 +655,7 @@ def applicant_task_post(task_id):
 
 @internal_bp.get("/")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_index():
     stats = rec_svc.admin_recruitment_dashboard_stats()
     board = rec_svc.admin_list_openings_dashboard(q=None, status_filter="all")
@@ -531,13 +670,15 @@ def admin_index():
         openings_preview=board[:12],
         applications_recent=apps,
         applicant_retention_days=rec_svc.recruitment_applicant_retention_days(),
+        stages=rec_svc.STAGES_ORDER,
+        stage_labels=rec_svc.STAGE_LABELS,
         config=_core_manifest,
     )
 
 
 @internal_bp.get("/roles")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_roles():
     roles = rec_svc.admin_list_roles()
     return render_template(
@@ -549,7 +690,7 @@ def admin_roles():
 
 @internal_bp.route("/roles/new", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_role_new():
     if request.method == "POST":
         ok, msg, rid = rec_svc.admin_save_role(
@@ -579,7 +720,7 @@ def admin_role_new():
 
 @internal_bp.route("/roles/<int:role_id>/edit", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_role_edit(role_id):
     role = rec_svc.admin_get_role(role_id)
     if not role:
@@ -613,7 +754,7 @@ def admin_role_edit(role_id):
 
 @internal_bp.get("/openings")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_openings():
     q = (request.args.get("q") or "").strip() or None
     status_filter = (request.args.get("status") or "all").strip().lower()
@@ -635,7 +776,7 @@ def admin_openings():
 
 @internal_bp.route("/openings/new", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_opening_new():
     roles = rec_svc.admin_list_roles()
     if not roles:
@@ -668,7 +809,7 @@ def admin_opening_new():
 
 @internal_bp.route("/openings/<int:opening_id>/edit", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_opening_edit(opening_id):
     opening = rec_svc.admin_get_opening(opening_id)
     if not opening:
@@ -702,7 +843,7 @@ def admin_opening_edit(opening_id):
 
 @internal_bp.route("/openings/<int:opening_id>/rules", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_opening_rules(opening_id):
     opening = rec_svc.admin_get_opening(opening_id)
     if not opening:
@@ -750,7 +891,7 @@ def admin_opening_rules(opening_id):
 
 @internal_bp.get("/form-templates")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_templates():
     rows = rec_svc.admin_list_templates()
     return render_template(
@@ -760,7 +901,7 @@ def admin_templates():
 
 @internal_bp.route("/form-templates/new", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_template_new():
     if request.method == "POST":
         schema_json, err = rec_svc.build_schema_json_from_builder_form(request.form)
@@ -803,7 +944,7 @@ def admin_template_new():
 
 @internal_bp.route("/form-templates/<int:template_id>/edit", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_template_edit(template_id):
     row = rec_svc.admin_get_template(template_id)
     if not row:
@@ -867,7 +1008,7 @@ def admin_template_edit(template_id):
 
 @internal_bp.post("/maintenance/run-applicant-retention")
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_run_applicant_retention():
     """GDPR-style purge of recruitment-only PII after retention period (scheduled or manual)."""
     stats = rec_svc.run_recruitment_data_retention_purge(_app_static_dir())
@@ -886,26 +1027,65 @@ def admin_run_applicant_retention():
 
 @internal_bp.get("/applications")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_applications():
     oid = request.args.get("opening_id")
     oid_i = int(oid) if oid and oid.isdigit() else None
     q = (request.args.get("q") or "").strip() or None
     rows = rec_svc.admin_list_applications(opening_id=oid_i, q=q)
     openings = rec_svc.admin_list_openings()
+    dash = rec_svc.admin_recruitment_dashboard_stats()
     return render_template(
         "recruitment_module/admin/applications.html",
         applications=rows,
         openings=openings,
         filter_opening_id=oid_i,
         q=q or "",
+        multi_pipeline_applicants=int(dash.get("multi_application_applicants") or 0),
+        stages=rec_svc.STAGES_ORDER,
+        stage_labels=rec_svc.STAGE_LABELS,
         config=_core_manifest,
     )
 
 
+@internal_bp.post("/applications/bulk-stage")
+@login_required
+@_rec_require(REC_APPS)
+def admin_applications_bulk_stage():
+    raw_ids = request.form.getlist("app_ids")
+    stage = (request.form.get("bulk_stage") or "").strip().lower()
+    oid = (request.form.get("return_opening_id") or "").strip()
+    q = (request.form.get("return_q") or "").strip()
+    ids = []
+    for x in raw_ids:
+        if str(x).strip().isdigit():
+            ids.append(int(x))
+    if not ids:
+        flash("Select at least one application.", "error")
+    elif stage not in rec_svc.STAGES_ORDER:
+        flash("Invalid stage.", "error")
+    else:
+        n_ok, errs = rec_svc.admin_bulk_set_application_stage(ids, stage)
+        flash(
+            f"Updated stage for {n_ok} application(s).",
+            "success" if n_ok else "warning",
+        )
+        if errs:
+            flash("Some rows failed: " + "; ".join(errs[:5]), "error")
+    redir = url_for("internal_recruitment.admin_applications")
+    params = []
+    if oid.isdigit():
+        params.append(f"opening_id={int(oid)}")
+    if q:
+        params.append("q=" + quote(q))
+    if params:
+        redir = redir + "?" + "&".join(params)
+    return redirect(redir)
+
+
 @internal_bp.route("/settings/interview-locations", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require(REC_SETUP)
 def admin_interview_presets():
     """Saved office / meeting-place text for quick fill on application interview details."""
     if request.method == "POST":
@@ -931,7 +1111,7 @@ def admin_interview_presets():
 
 @internal_bp.get("/applications/<int:application_id>/cv")
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_application_cv_file(application_id):
     """
     Serve the applicant CV for an application (admin only).
@@ -941,13 +1121,8 @@ def admin_application_cv_file(application_id):
     if not row or not row.get("cv_path"):
         abort(404)
     rel = str(row["cv_path"]).replace("\\", "/").strip().lstrip("/")
-    if not rel.startswith("uploads/recruitment_cv/"):
-        abort(404)
-    if ".." in rel:
-        abort(404)
-    static_root = os.path.normpath(_app_static_dir())
-    full = os.path.normpath(os.path.join(static_root, rel.replace("/", os.sep)))
-    if not full.startswith(static_root) or not os.path.isfile(full):
+    full = _resolve_recruitment_cv_file(rel)
+    if not full:
         abort(404)
     ext = os.path.splitext(full)[1].lower()
     dl = f"application-{application_id}-cv{ext}"
@@ -969,7 +1144,7 @@ def admin_application_cv_file(application_id):
 
 @internal_bp.route("/applications/<int:application_id>", methods=["GET", "POST"])
 @login_required
-@_admin_required
+@_rec_require_view
 def admin_application_detail(application_id):
     row = rec_svc.admin_get_application(application_id)
     if not row:
@@ -980,7 +1155,32 @@ def admin_application_detail(application_id):
     prehire = rec_svc.list_prehire_requests_admin(application_id)
     hire_ok, hire_msg = rec_svc.hire_precheck(application_id)
     if request.method == "POST":
-        action = request.form.get("action")
+        action = (request.form.get("action") or "").strip()
+        hire_actions = frozenset({"authorize_hire", "hire"})
+        if action in hire_actions:
+            if not _rec_may(current_user, REC_HIRE):
+                flash(
+                    "You do not have permission to authorise hire or create employees.",
+                    "danger",
+                )
+                return redirect(
+                    url_for(
+                        "internal_recruitment.admin_application_detail",
+                        application_id=application_id,
+                    )
+                )
+        elif action:
+            if not _rec_may(current_user, REC_APPS):
+                flash(
+                    "You do not have permission to change applications or pipeline data.",
+                    "danger",
+                )
+                return redirect(
+                    url_for(
+                        "internal_recruitment.admin_application_detail",
+                        application_id=application_id,
+                    )
+                )
         if action == "stage":
             ok, msg = rec_svc.set_application_stage(
                 application_id, request.form.get("stage") or ""
@@ -997,6 +1197,13 @@ def admin_application_detail(application_id):
                     else rec_svc.create_manual_task(application_id, tid)
                 )
                 flash("Form assigned." if ok else msg, "success" if ok else "error")
+                if ok:
+                    try:
+                        from . import notifications as rec_notifications
+
+                        rec_notifications.notify_applicant_new_task(application_id)
+                    except Exception:
+                        pass
         elif action == "notes":
             rec_svc.admin_set_application_notes(
                 application_id, request.form.get("admin_notes")
@@ -1053,6 +1260,16 @@ def admin_application_detail(application_id):
                 else msg,
                 "success" if ok else "error",
             )
+            if ok and cid:
+                try:
+                    from . import notifications as rec_notifications
+
+                    rec_notifications.notify_applicant_hired(application_id, int(cid))
+                    rec_notifications.send_post_hire_portal_welcome_message(
+                        int(cid), (row.get("opening_title") or "").strip()
+                    )
+                except Exception:
+                    pass
         return redirect(
             url_for("internal_recruitment.admin_application_detail", application_id=application_id)
         )

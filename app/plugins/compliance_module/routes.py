@@ -18,6 +18,7 @@ from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 
 from app.objects import PluginManager
+from app.portal_session import contractor_id_from_tb_user
 
 from . import services as comp_svc
 
@@ -53,8 +54,7 @@ def _staff_required(view):
 
 
 def _contractor_id():
-    u = session.get("tb_user")
-    return int(u["id"]) if u and u.get("id") is not None else None
+    return contractor_id_from_tb_user(session.get("tb_user"))
 
 
 def _admin_required(view):
@@ -63,7 +63,7 @@ def _admin_required(view):
         if not current_user.is_authenticated:
             return redirect(url_for("routes.login"))
         role = (getattr(current_user, "role", None) or "").lower()
-        if role not in ("admin", "superuser"):
+        if role not in ("admin", "superuser", "support_break_glass"):
             flash("Admin access required.", "error")
             return redirect(url_for("routes.dashboard"))
         return view(*args, **kwargs)

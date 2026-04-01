@@ -24,13 +24,13 @@
             {{ latest_version }}
           {% else %}
             <span class="text-muted">Unable to check</span>
-            <span class="d-block small text-secondary mt-1">The update server did not return a version (often 401 without credentials). Set <code>GITLAB_TOKEN</code> or <code>GITLAB_USERNAME</code> / <code>GITLAB_PASSWORD</code> in your environment, or <code>CORE_MANIFEST_REMOTE_URL</code> to an accessible manifest URL.</span>
+            <span class="d-block small text-secondary mt-1">Sparrow could not reach the update feed (often because the repository is private or sign-in is missing). Open <a href="{{ url_for('routes.core_module_settings', tab='integrations') }}">Core settings → GitLab &amp; cache</a> and add your GitLab access token or deploy credentials, or ask your host to configure an accessible manifest URL.</span>
           {% endif %}
         </p>
         {% if update_available %}
           <p><strong class="text-success">Update Available!</strong></p>
         {% elif not latest_version %}
-          <p class="text-secondary small">Configure GitLab access above to see whether a newer core release is published.</p>
+          <p class="text-secondary small">Configure GitLab access under Core settings to see whether a newer core release is available.</p>
         {% else %}
           <p>No updates available for the core module.</p>
         {% endif %}

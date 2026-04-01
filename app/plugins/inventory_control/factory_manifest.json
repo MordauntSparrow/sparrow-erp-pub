@@ -6,6 +6,21 @@
   "compatible_with": ">=1.1.0",
   "force_update": false,
   "dashboard_category": "Stock & assets",
+  "access_permission": "inventory_control.access",
+  "declared_permissions": [
+    {
+      "id": "inventory_control.access",
+      "label": "Inventory — open module and browse (dashboard, items, stock views)"
+    },
+    {
+      "id": "inventory_control.edit",
+      "label": "Inventory — full control (item/location/batch master data, invoices, all APIs)"
+    },
+    {
+      "id": "inventory_control.transactions",
+      "label": "Inventory — record stock movements (in/out/transfer/return/repack) without editing item master"
+    }
+  ],
   "description": "Production-grade inventory, costing, and stock control: item master (SKU, categories, lead time), locations and batches, FIFO/LIFO/AVG costing, reorder points, equipment assets with serial numbers (make, model, warranty, condition), sign-out to users or contractors (loaned vs permanent), usage-by-person and monthly usage charts, idempotent install/upgrade scripts, and supplier/invoice integration.",
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/inventory_control/icon.png",
   "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Finventory_control%2Finventory_control_v0.0.4.zip/raw?ref=main",

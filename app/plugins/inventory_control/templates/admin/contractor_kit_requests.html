@@ -1,0 +1,70 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Contractor stock requests{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.dashboard') }}">Inventory</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Kit requests</li>
+    </ol>
+  </nav>
+  <h1 class="h3 mb-2">Contractor kit requests</h1>
+  <p class="text-muted small mb-4">Part of <strong>kit management</strong>: contractors ask for material for dated jobs; stores fulfil from Inventory, then mark <strong>Fulfilled</strong> or <strong>Declined</strong> so there is an audit trail (resolver and time are stored). Submitted via the employee portal kit request form. Pair with <strong>serial equipment</strong> assignments under Assets when the job needs tracked radios, bags, or tools.</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+      <div class="alert alert-{{ 'danger' if category == 'error' else 'success' if category == 'success' else 'warning' }} py-2">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="table-responsive card shadow-sm">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Dates</th>
+          <th>Contractor</th>
+          <th>Request</th>
+          <th>Status</th>
+          <th style="min-width: 220px;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="{% if r.status == status_pending %}table-primary{% endif %}">
+          <td class="small text-nowrap">{{ r.need_from }} – {{ r.need_until }}</td>
+          <td class="small">
+            <div class="fw-semibold">{{ r.contractor_name or '—' }}</div>
+            <div class="text-muted">{{ r.contractor_email or '' }}</div>
+          </td>
+          <td class="small" style="max-width: 360px; white-space: pre-wrap;">{{ r.request_text }}</td>
+          <td class="small">
+            {% if r.status == status_pending %}<span class="badge bg-warning text-dark">Pending</span>
+            {% elif r.status == status_fulfilled %}<span class="badge bg-success">Fulfilled</span>
+            {% elif r.status == status_declined %}<span class="badge bg-secondary">Declined</span>
+            {% else %}<span class="badge bg-light text-dark">{{ r.status | contractor_kit_status_label }}</span>{% endif %}
+            {% if r.resolved_at %}<div class="text-muted mt-1">{{ r.resolved_by or '—' }} · {{ r.resolved_at }}</div>{% endif %}
+            {% if r.office_notes %}<div class="mt-1 fst-italic">{{ r.office_notes }}</div>{% endif %}
+          </td>
+          <td class="small">
+            {% if r.status == status_pending %}
+            <form method="post" action="{{ url_for('inventory_control_internal.inventory_contractor_kit_request_resolve', rid=r.id) }}" class="vstack gap-1">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <textarea class="form-control form-control-sm" name="office_notes" rows="2" placeholder="Optional note"></textarea>
+              <div class="btn-group btn-group-sm">
+                <button type="submit" name="status" value="{{ status_fulfilled }}" class="btn btn-success">Fulfilled</button>
+                <button type="submit" name="status" value="{{ status_declined }}" class="btn btn-outline-secondary">Declined</button>
+              </div>
+            </form>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted text-center py-4">No requests yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

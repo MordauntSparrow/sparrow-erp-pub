@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>{% block page_title %}Inventory Control{% endblock %} — Sparrow ERP</title>
+  {% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+  <title>{% block page_title %}Inventory{% endblock %} — {{ _site.get('company_name') or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   {% include 'partials/sparrow_csrf_head.html' %}
 
@@ -21,20 +22,6 @@
         color: #212529 !important;
       {% else %}
         background-color: #f8f9fa !important;
-        color: #212529 !important;
-      {% endif %}
-    }
-
-    .navbar, .footer {
-      {% if config.theme_settings.theme == 'dark' %}
-        background-color: #1f1f1f !important;
-        color: #b3b3b3 !important;
-      {% elif config.theme_settings.theme == 'modern' %}
-        background-color: #ffffff !important;
-        color: #495057 !important;
-        box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.1);
-      {% else %}
-        background-color: #ffffff !important;
         color: #212529 !important;
       {% endif %}
     }
@@ -75,7 +62,8 @@
         color: #6c757d !important;
       {% endif %}
     }
-    .inv-main .form-control, .inv-main .form-select {
+    .inv-main .form-control:not([type="checkbox"]):not([type="radio"]),
+    .inv-main .form-select {
       {% if config.theme_settings.theme == 'dark' %}
         background-color: #1f1f1f !important;
         color: #ffffff !important;
@@ -131,18 +119,23 @@
 <body>
   {% include 'partials/sparrow_admin_top_nav.html' %}
 
-  <nav class="nav-module border-bottom py-2 px-3" style="{% if config.theme_settings.theme == 'dark' %}background:#1a1a1a;border-color:#333!important{% else %}background:#f8f9fa;border-color:#dee2e6!important{% endif %}">
+  <nav class="nav-module erp-module-subnav border-bottom py-2 px-3">
     <div class="container-fluid px-3">
       <div class="d-flex flex-wrap align-items-center gap-1">
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.dashboard' %}active{% endif %}" href="{{ url_for('inventory_control_internal.dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
-        <a class="nav-link {% if request.endpoint in ('inventory_control_internal.items_page', 'inventory_control_internal.item_overview_page') %}active{% endif %}" href="{{ url_for('inventory_control_internal.items_page') }}"><i class="bi bi-box-seam me-1"></i>Items</a>
+        <a class="nav-link {% if request.endpoint in ('inventory_control_internal.items_page', 'inventory_control_internal.item_overview_page') %}active{% endif %}" href="{{ url_for('inventory_control_internal.items_page') }}"><i class="bi bi-droplet me-1"></i>Consumables</a>
+        <a class="nav-link {% set _iep = request.endpoint or '' %}{% if _iep == 'inventory_control_internal.equipment_desk_page' or _iep in ('inventory_control_internal.equipment_servicing_dashboard', 'inventory_control_internal.equipment_assignments_page', 'inventory_control_internal.equipment_assets_catalog_redirect', 'inventory_control_internal.equipment_asset_new') or _iep.startswith('inventory_control_internal.equipment_asset_') %}active{% endif %}" href="{{ url_for('inventory_control_internal.equipment_desk_page') }}"><i class="bi bi-cpu me-1"></i>Equipment</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.inventory_contractor_kit_requests_admin' %}active{% endif %}" href="{{ url_for('inventory_control_internal.inventory_contractor_kit_requests_admin') }}"><i class="bi bi-inbox me-1"></i>Kit requests</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.categories_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.categories_page') }}"><i class="bi bi-tags me-1"></i>Categories</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.locations_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.locations_page') }}"><i class="bi bi-geo-alt me-1"></i>Locations</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.batches_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.batches_page') }}"><i class="bi bi-collection me-1"></i>Batches</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.repack_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.repack_page') }}"><i class="bi bi-boxes me-1"></i>Repack / Split</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.transactions_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.transactions_page') }}"><i class="bi bi-arrow-left-right me-1"></i>Transactions</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.fit_part_to_vehicle_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.fit_part_to_vehicle_page') }}"><i class="bi bi-wrench-adjustable me-1"></i>Fit to vehicle</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.invoices_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.invoices_page') }}"><i class="bi bi-receipt me-1"></i>Invoices</a>
         <a class="nav-link {% if request.endpoint == 'inventory_control_internal.analytics_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.analytics_page') }}"><i class="bi bi-graph-up me-1"></i>Analytics</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.data_import_wizard' %}active{% endif %}" href="{{ url_for('inventory_control_internal.data_import_wizard') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Import</a>
+        <a class="nav-link {% if 'equipment/servicing' in request.path or 'equipment/assignments' in request.path or 'equipment/assets' in request.path %}active{% endif %}" href="{{ url_for('inventory_control_internal.equipment_servicing_dashboard') }}"><i class="bi bi-activity me-1"></i>Servicing</a>
       </div>
     </div>
   </nav>

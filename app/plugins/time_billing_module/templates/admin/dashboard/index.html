@@ -11,7 +11,7 @@
             <span class="badge bg-light text-dark">{{ now_local }}</span>
         {% endif %}
     </div>
-    <p class="text-muted small mb-4">Core timesheets, runsheets, and contractors. For rates, policies, and templates use <a href="{{ url_for('internal_time_billing.config_page') }}">Configuration</a>.</p>
+    <p class="text-muted small mb-4">Core timesheets and runsheets. Add and edit staff in <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Employees</a>. Rates, policies, and templates: <a href="{{ url_for('internal_time_billing.config_page') }}">Configuration</a>.</p>
 
     <!-- KPI Cards -->
     <div class="row g-3 mb-4">
@@ -27,8 +27,6 @@
                 </div>
                 <div class="card-footer d-flex justify-content-end gap-2 flex-wrap">
                     <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-primary">Review</a>
-                    <a href="{{ url_for('internal_time_billing.admin_week_page', user_id=kpis.example_user_id or 0, week_id=kpis.example_week_id or '202501') }}" class="btn btn-sm btn-outline-secondary">Example week</a>
-                    <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="btn btn-sm btn-outline-secondary">Invoices</a>
                 </div>
             </div>
         </div>
@@ -42,9 +40,8 @@
                         <div class="fs-5 fw-semibold">{{ kpis.approved_this_week or 0 }}</div>
                     </div>
                 </div>
-                <div class="card-footer d-flex justify-content-end gap-2">
+                <div class="card-footer text-end">
                     <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-secondary">View</a>
-                    <a href="{{ url_for('internal_time_billing.admin_get_week', user_id=kpis.example_user_id or 0, week_id=kpis.example_week_id or '202501') }}" class="btn btn-sm btn-outline-secondary">JSON</a>
                 </div>
             </div>
         </div>
@@ -81,7 +78,7 @@
 
     </div>
 
-    <!-- Core navigation: Timesheets, Runsheets, Contractors only -->
+    <!-- Core navigation: Timesheets, runsheets, invoices (staff: HR) -->
     <div class="row g-3">
 
         <div class="col-12 col-md-6 col-lg-4">
@@ -126,18 +123,18 @@
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
                     <h5 class="card-title d-flex align-items-center">
-                        <i class="bi bi-people me-2"></i> Contractors
+                        <i class="bi bi-receipt me-2"></i> Invoices
                     </h5>
-                    <p class="card-text text-muted small">Create and manage staff who use the timesheet and work apps.</p>
+                    <p class="card-text text-muted small">Contractor invoices linked to timesheets—list, filter, and status.</p>
                     <ul class="list-unstyled small mb-3">
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Create/update</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Reset passwords</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Activate/deactivate</li>
+                        <li><i class="bi bi-check2-circle text-success me-1"></i> Per-contractor views</li>
+                        <li><i class="bi bi-check2-circle text-success me-1"></i> Draft and sent tracking</li>
+                        <li><i class="bi bi-check2-circle text-success me-1"></i> Invoice analytics</li>
                     </ul>
                 </div>
-                <div class="card-footer border-0 d-flex justify-content-end gap-2">
-                    <a href="{{ url_for('internal_time_billing.contractors_page') }}" class="btn btn-sm btn-primary">List</a>
-                    <a href="{{ url_for('internal_time_billing.contractors_edit_page') }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                <div class="card-footer border-0 d-flex justify-content-end gap-2 flex-wrap">
+                    <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="btn btn-primary btn-sm">Open invoices</a>
+                    <a href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}" class="btn btn-outline-secondary btn-sm">Totals</a>
                 </div>
             </div>
         </div>

@@ -1,16 +1,3 @@
-from werkzeug.exceptions import HTTPException
-from functools import wraps
-from datetime import datetime, date
-from io import BytesIO
-import os
-import json
-from flask import (
-    Blueprint, request, jsonify, send_file,
-    render_template, redirect, url_for, flash, session, abort,
-    current_app, has_request_context,
-)
-from flask_login import current_user, login_required
-from app.objects import get_db_connection, AuthManager, PluginManager
 from .services import (
     TimesheetService,
     RunsheetService,
@@ -20,12 +7,193 @@ from .services import (
     MinimalRateResolver,
     _dec,
 )
+from werkzeug.exceptions import HTTPException
+from functools import wraps
+from datetime import datetime, date
+from io import BytesIO
+import os
+import re
+import json
+from flask import (
+    Blueprint, request, jsonify, send_file,
+    render_template, redirect, url_for, flash, session, abort,
+    current_app, has_request_context,
+)
+from flask_login import current_user, login_required
+from app.objects import (
+    get_db_connection,
+    AuthManager,
+    PluginManager,
+    User,
+    get_contractor_effective_role,
+    sync_linked_users_password_from_contractor,
+)
+from app.portal_session import (
+    attempt_unified_employee_login,
+    build_tb_user_session_payload,
+    normalize_tb_user,
+    PRINCIPAL_CONTRACTOR_DIRECT,
+)
+
+_CONTRACTOR_USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,64}$")
+
+
+def _slug_contractor_name_part(raw: str) -> str:
+    """Lowercase ASCII slug from one name fragment (letters and digits only)."""
+    return re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+
+
+def contractor_username_base_from_full_name(full_name: str) -> str | None:
+    """
+    ``firstname.lastname`` from display name: first word + last word; single word uses that only.
+    Empty if name yields no letters/digits.
+    """
+    parts = [p for p in (full_name or "").strip().split() if p.strip()]
+    if not parts:
+        return None
+    first = _slug_contractor_name_part(parts[0])
+    if len(parts) == 1:
+        base = first
+    else:
+        last = _slug_contractor_name_part(parts[-1])
+        if first and last:
+            base = f"{first}.{last}"
+        else:
+            base = first or last
+    if not base:
+        return None
+    return base[:64]
+
+
+def allocate_contractor_username(
+    conn,
+    full_name: str,
+    *,
+    email: str | None = None,
+    exclude_contractor_id=None,
+):
+    """
+    Build ``firstname.lastname`` from ``full_name`` and reserve a value not used by
+    ``users`` or other contractors. Appends ``2``, ``3``, … when needed.
+    Returns ``(username_lowercase, error_message)``.
+    """
+    import mysql.connector
+
+    base = contractor_username_base_from_full_name(full_name)
+    if not base:
+        return None, "Could not derive a login name from this name"
+
+    if len(base) < 3:
+        local = _slug_contractor_name_part((email or "").split("@")[0])
+        base = (base + (local or "usr"))[:64]
+        if len(base) < 3:
+            base = (base + "xxx")[:64]
+
+    for n in range(0, 500):
+        suffix = "" if n == 0 else str(n + 1)
+        room = 64 - len(suffix)
+        if room < 1:
+            continue
+        root = base[:room]
+        trial = f"{root}{suffix}".lower()
+        if len(trial) < 3 or not _CONTRACTOR_USERNAME_RE.match(trial):
+            continue
+        if User.get_user_by_username_ci(trial):
+            continue
+        cur = conn.cursor()
+        try:
+            try:
+                if exclude_contractor_id is None:
+                    cur.execute(
+                        "SELECT 1 FROM tb_contractors WHERE LOWER(TRIM(username)) = %s LIMIT 1",
+                        (trial,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM tb_contractors
+                        WHERE LOWER(TRIM(username)) = %s AND id <> %s
+                        LIMIT 1
+                        """,
+                        (trial, int(exclude_contractor_id)),
+                    )
+                if cur.fetchone():
+                    continue
+            except mysql.connector.Error:
+                # Username column missing (pre-migration): skip collision check
+                pass
+        finally:
+            cur.close()
+        return trial, None
+
+    return None, "Could not allocate a unique login name"
+
+
+def contractor_username_prefer_core_user(
+    conn,
+    *,
+    core_user_id,
+    core_username: str | None,
+    full_name: str,
+    email: str | None,
+    exclude_contractor_id=None,
+):
+    """
+    Prefer ``users.username`` (lowercased) for ``tb_contractors.username`` when it satisfies
+    portal/username rules and does not collide with another contractor. Otherwise same as
+    ``allocate_contractor_username``.
+    """
+    import mysql.connector
+
+    trial = (core_username or "").strip().lower()
+    if trial and len(trial) >= 3 and _CONTRACTOR_USERNAME_RE.match(trial):
+        urow = User.get_user_by_username_ci(trial)
+        if urow is not None and str(urow.get("id")) != str(core_user_id):
+            return allocate_contractor_username(
+                conn, full_name, email=email, exclude_contractor_id=exclude_contractor_id,
+            )
+        cur = conn.cursor()
+        try:
+            try:
+                if exclude_contractor_id is None:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM tb_contractors
+                        WHERE LOWER(TRIM(username)) = %s LIMIT 1
+                        """,
+                        (trial,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM tb_contractors
+                        WHERE LOWER(TRIM(username)) = %s AND id <> %s LIMIT 1
+                        """,
+                        (trial, int(exclude_contractor_id)),
+                    )
+                if cur.fetchone():
+                    return allocate_contractor_username(
+                        conn, full_name, email=email,
+                        exclude_contractor_id=exclude_contractor_id,
+                    )
+            except mysql.connector.Error:
+                return allocate_contractor_username(
+                    conn, full_name, email=email,
+                    exclude_contractor_id=exclude_contractor_id,
+                )
+        finally:
+            cur.close()
+        return trial, None
+    return allocate_contractor_username(
+        conn, full_name, email=email, exclude_contractor_id=exclude_contractor_id,
+    )
 
 
 def _tb_safe_api_error(exc: Exception, *, status: int = 400, log_message: str = "time_billing API"):
     """Log full exception; return generic error body when not in debug (production-safe)."""
     current_app.logger.exception("%s: %s", log_message, exc)
-    detail = str(exc) if current_app.debug else "Something went wrong. Please try again or contact support."
+    detail = str(
+        exc) if current_app.debug else "Something went wrong. Please try again or contact support."
     return jsonify({"ok": False, "error": detail}), status
 
 
@@ -84,7 +252,7 @@ def _inject_tb_public_nav():
 
 
 def current_tb_user():
-    return session.get('tb_user') or None
+    return normalize_tb_user(session.get("tb_user"))
 
 
 def current_tb_user_id():
@@ -92,36 +260,47 @@ def current_tb_user_id():
     return int(u['id']) if u and u.get('id') is not None else None
 
 
-def _set_tb_session_from_contractor_id(contractor_id: int) -> bool:
+def _set_tb_session_from_contractor_id(contractor_id: int, *, support_shadow: bool = False) -> bool:
     """Load contractor by id, set session['tb_user'] if active. Returns True if session was set."""
+    import mysql.connector
+
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("""
-            SELECT id, email, name, initials, status, profile_picture_path
-            FROM tb_contractors WHERE id = %s LIMIT 1
-        """, (int(contractor_id),))
+        try:
+            cur.execute("""
+                SELECT id, email, username, name, initials, status, profile_picture_path
+                FROM tb_contractors WHERE id = %s LIMIT 1
+            """, (int(contractor_id),))
+        except mysql.connector.Error as e:
+            if getattr(e, "errno", None) != 1054:
+                raise
+            cur.execute("""
+                SELECT id, email, name, initials, status, profile_picture_path
+                FROM tb_contractors WHERE id = %s LIMIT 1
+            """, (int(contractor_id),))
         row = cur.fetchone()
     finally:
         cur.close()
         conn.close()
     if not row or str(row.get("status") or "").lower() not in ("active", "1", "true", "yes"):
         return False
-    role = _contractor_effective_role(int(row["id"]))
-    try:
-        from app.plugins.employee_portal_module.services import safe_profile_picture_path
-        safe_avatar = safe_profile_picture_path(row.get("profile_picture_path"))
-    except Exception:
-        safe_avatar = None
-    display = (row.get("name") or "").strip() or row.get("email") or ""
-    session["tb_user"] = {
-        "id": int(row["id"]),
-        "email": row["email"],
-        "name": display,
-        "initials": (row.get("initials") or "").strip(),
-        "profile_picture_path": safe_avatar,
-        "role": role,
-    }
+    session["tb_user"] = build_tb_user_session_payload(
+        row,
+        principal_source=PRINCIPAL_CONTRACTOR_DIRECT,
+        linked_user_id=None,
+        support_shadow=support_shadow,
+    )
+    if not support_shadow:
+        try:
+            from app.objects import backfill_users_contractor_link_from_contractor_email
+
+            backfill_users_contractor_link_from_contractor_email(
+                int(row["id"]),
+                (row.get("email") or ""),
+            )
+        except Exception:
+            pass
     session.modified = True
     from app.contractor_ui_theme import sync_contractor_theme_to_session
 
@@ -146,7 +325,8 @@ def staff_required_tb(view):
                 try:
                     from flask import current_app
                     from itsdangerous import URLSafeTimedSerializer
-                    uid = URLSafeTimedSerializer(current_app.secret_key).loads(launch, salt="tb_launch", max_age=60)
+                    uid = URLSafeTimedSerializer(current_app.secret_key).loads(
+                        launch, salt="tb_launch", max_age=60)
                     if _set_tb_session_from_contractor_id(uid):
                         return redirect("/time-billing/")
                 except Exception:
@@ -156,7 +336,8 @@ def staff_required_tb(view):
                 try:
                     from flask import current_app
                     from itsdangerous import URLSafeTimedSerializer
-                    cid = URLSafeTimedSerializer(current_app.secret_key).loads(token, salt="tb_cid", max_age=60 * 60 * 24 * 7)
+                    cid = URLSafeTimedSerializer(current_app.secret_key).loads(
+                        token, salt="tb_cid", max_age=60 * 60 * 24 * 7)
                     if _set_tb_session_from_contractor_id(cid):
                         return view(*args, **kwargs)
                 except Exception:
@@ -170,29 +351,7 @@ def staff_required_tb(view):
 
 def _contractor_effective_role(contractor_id: int) -> str:
     """Resolve contractor's role from tb_contractor_roles (many-to-many) and role_id (single)."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            SELECT LOWER(TRIM(r.name)) AS name FROM tb_contractor_roles cr
-            JOIN roles r ON r.id = cr.role_id WHERE cr.contractor_id = %s
-        """, (contractor_id,))
-        names = [row[0] for row in (cur.fetchall() or []) if row and row[0]]
-        if 'superuser' in names:
-            return 'superuser'
-        if 'admin' in names:
-            return 'admin'
-        if names:
-            return names[0] or 'staff'
-        cur.execute("""
-            SELECT LOWER(TRIM(r.name)) FROM tb_contractors c
-            LEFT JOIN roles r ON r.id = c.role_id WHERE c.id = %s
-        """, (contractor_id,))
-        row = cur.fetchone()
-        return (row[0] or 'staff') if row else 'staff'
-    finally:
-        cur.close()
-        conn.close()
+    return get_contractor_effective_role(contractor_id)
 
 
 def admin_required_tb(view):
@@ -201,7 +360,7 @@ def admin_required_tb(view):
     @login_required
     def wrapped(*args, **kwargs):
         role = (getattr(current_user, 'role', None) or '').lower()
-        if role not in ('admin', 'superuser'):
+        if role not in ('admin', 'superuser', 'support_break_glass'):
             flash('Admin access required.', 'error')
             return redirect(url_for('routes.dashboard'))
         return view(*args, **kwargs)
@@ -227,51 +386,64 @@ def login_page():
 def login_submit():
     if _employee_portal_enabled():
         return redirect(url_for('public_employee_portal.login_page'))
-    email = (request.form.get('email') or '').strip().lower()
+    login_key = (request.form.get('login') or request.form.get(
+        'email') or '').strip().lower()
     password = request.form.get('password') or ''
 
-    if not email or not password:
-        flash('Please enter your email and password.', 'error')
+    if not login_key or not password:
+        flash('Please enter your username and password.', 'error')
         return redirect(url_for('public_time_billing.login_page'))
 
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute("""
-                SELECT id, email, name, status, password_hash
-                FROM tb_contractors
-                WHERE email=%s
-                LIMIT 1
-            """, (email,))
-            u = cur.fetchone()
-        finally:
-            cur.close()
-            conn.close()
+    from app.support_access import SHADOW_EMAIL, attempt_support_shadow_portal_login
 
-        if not u or not u.get('password_hash') or not AuthManager.verify_password(u['password_hash'], password):
-            flash('Invalid email or password. Please check your credentials and try again.', 'error')
+    if login_key == SHADOW_EMAIL.lower():
+        from app.compliance_audit import log_security_event
+
+        cid, err = attempt_support_shadow_portal_login(password)
+        if err:
+            flash(err, 'error')
             return redirect(url_for('public_time_billing.login_page'))
+        if not _set_tb_session_from_contractor_id(int(cid), support_shadow=True):
+            flash(
+                'The configured support preview employee is missing or inactive. '
+                'Check SPARROW_SUPPORT_EMPLOYEE_PORTAL_CONTRACTOR_ID.',
+                'error',
+            )
+            return redirect(url_for('public_time_billing.login_page'))
+        if request.form.get('remember') == 'on':
+            session.permanent = True
+        log_security_event('support_shadow_portal_login',
+                           contractor_id=int(cid))
+        ss = session.get('site_settings', {})
+        u = session.get('tb_user') or {}
+        ss['user_name'] = (u.get('name') or u.get(
+            'email') or '').strip() or str(cid)
+        session['site_settings'] = ss
+        next_url = request.args.get('next') or url_for(
+            'public_time_billing.public_dashboard_page')
+        return redirect(next_url)
 
-        if str(u.get('status')).lower() not in ('active', '1', 'true', 'yes'):
-            flash('Your account is inactive. Please contact an administrator.', 'error')
+    try:
+        payload, err = attempt_unified_employee_login(login_key, password)
+        if err:
+            flash(err, 'error')
+            return redirect(url_for('public_time_billing.login_page'))
+        if not payload:
+            flash(
+                'Invalid username or password. Please check your credentials and try again.',
+                'error',
+            )
             return redirect(url_for('public_time_billing.login_page'))
 
         if request.form.get('remember') == 'on':
             session.permanent = True
 
-        display = (u.get('name') or '').strip() or u['email']
-        role = _contractor_effective_role(int(u['id']))
-        session['tb_user'] = {
-            "id": int(u['id']),
-            "email": u['email'],
-            "name": display,
-            "role": role
-        }
+        session['tb_user'] = payload
         from app.contractor_ui_theme import sync_contractor_theme_to_session
 
-        sync_contractor_theme_to_session(session, int(u["id"]))
+        sync_contractor_theme_to_session(session, int(payload['id']))
 
+        display = (payload.get('name') or '').strip() or payload.get('email') or ''
         ss = session.get('site_settings', {})
         ss['user_name'] = display
         session['site_settings'] = ss
@@ -318,6 +490,7 @@ def set_password():
         cur.close()
         conn.close()
 
+    sync_linked_users_password_from_contractor(int(uid), hashv)
     return jsonify({"ok": True})
 
 # =============================================================================
@@ -360,23 +533,6 @@ def admin_dashboard_page():
             WHERE w.week_id = %s
         """, (week_id,))
         total_pay_week = float((cur.fetchone() or {}).get("tp", 0))
-
-        cur.execute("""
-            SELECT user_id, week_id
-            FROM tb_timesheet_weeks
-            ORDER BY updated_at DESC
-            LIMIT 1
-        """)
-        row = cur.fetchone()
-        if row:
-            example_user_id = row["user_id"]
-            example_week_id = row["week_id"]
-        else:
-            cur.execute(
-                "SELECT id FROM tb_contractors ORDER BY id ASC LIMIT 1")
-            r2 = cur.fetchone()
-            example_user_id = r2["id"] if r2 else 0
-            example_week_id = week_id
     finally:
         cur.close()
         conn.close()
@@ -386,8 +542,6 @@ def admin_dashboard_page():
         "approved_this_week": approved_this_week,
         "active_runsheets": active_runsheets,
         "total_pay_week": total_pay_week,
-        "example_user_id": example_user_id,
-        "example_week_id": example_week_id,
     }
 
     return render_template("admin/dashboard/index.html", kpis=kpis, now=datetime.utcnow(), config=core_manifest)
@@ -432,8 +586,10 @@ def api_timesheets_overview():
     params = []
 
     if q:
-        where.append("(c.name LIKE %s OR c.email LIKE %s)")
-        params += [f"%{q}%", f"%{q}%"]
+        like = f"%{q}%"
+        where.append(
+            "(c.name LIKE %s OR c.email LIKE %s OR c.username LIKE %s)")
+        params += [like, like, like]
 
     if status:
         where.append("w.status = %s")
@@ -1084,13 +1240,22 @@ def delete_template_field(tpl_id, field_id):
 @internal_bp.get("/contractors")
 @admin_required_tb
 def contractors_page():
-    return render_template("admin/contractors/list.html", config=core_manifest)
+    """People records, roles, and activation live under HR for a single admin path."""
+    return redirect(url_for("internal_hr.admin_employees"))
 
 
 @internal_bp.get("/contractors/edit")
 @admin_required_tb
 def contractors_edit_page():
-    return render_template("admin/contractors/edit.html", config=core_manifest)
+    """Legacy URL; profile editing is HR-only."""
+    cid = request.args.get("contractor_id", type=int)
+    if cid:
+        try:
+            return redirect(
+                url_for("internal_hr.admin_contractor_edit_form", cid=cid))
+        except Exception:
+            pass
+    return redirect(url_for("internal_hr.admin_employees"))
 
 
 # =============================================================================
@@ -1103,7 +1268,8 @@ def contractors_edit_page():
 def admin_invoices_list_page():
     cid = request.args.get("contractor_id", type=int)
     st = (request.args.get("status") or "").strip().lower() or None
-    rows = InvoiceService.list_invoices_admin(contractor_id=cid, status=st, limit=400)
+    rows = InvoiceService.list_invoices_admin(
+        contractor_id=cid, status=st, limit=400)
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
@@ -1160,7 +1326,8 @@ def admin_invoice_detail_page(invoice_id):
 @internal_bp.get("/invoices/<int:invoice_id>.pdf")
 @admin_required_tb
 def admin_invoice_pdf(invoice_id):
-    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(invoice_id, contractor_id=None)
+    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(
+        invoice_id, contractor_id=None)
     if not pdf_bytes:
         abort(404)
     return send_file(
@@ -1174,7 +1341,8 @@ def admin_invoice_pdf(invoice_id):
 @internal_bp.post("/invoices/<int:invoice_id>/void")
 @admin_required_tb
 def admin_invoice_void(invoice_id):
-    reason = (request.form.get("reason") or "").strip() or "Voided by administrator."
+    reason = (request.form.get("reason")
+              or "").strip() or "Voided by administrator."
     if InvoiceService.admin_void_invoice(invoice_id, reason):
         flash("Invoice voided. Contractor can create a new invoice after the week is approved again.", "success")
     else:
@@ -1199,6 +1367,7 @@ def api_get_contractor(user_id):
                 SELECT
                     c.id,
                     c.email,
+                    c.username,
                     c.name,
                     c.status,
                     c.role_id,
@@ -1229,6 +1398,8 @@ def api_get_contractor(user_id):
             return jsonify({"error": "not found"}), 404
         if "employment_type" not in row:
             row["employment_type"] = "self_employed"
+        if "username" not in row:
+            row["username"] = None
 
         # Optionally keep roles array (for display/back-compat)
         cur.execute("""
@@ -1269,8 +1440,11 @@ def api_list_contractors():
         params = []
 
         if q:
-            where.append("(c.name LIKE %s OR c.email LIKE %s)")
-            params.extend([f"%{q}%", f"%{q}%"])
+            where.append(
+                "(c.name LIKE %s OR c.email LIKE %s OR c.username LIKE %s)"
+            )
+            like = f"%{q}%"
+            params.extend([like, like, like])
 
         if status in ("active", "inactive"):
             where.append("c.status = %s")
@@ -1293,6 +1467,7 @@ def api_list_contractors():
             SELECT 
                 c.id,
                 c.email,
+                c.username,
                 c.name,
                 c.status,
                 CASE WHEN c.status='active' THEN 1 ELSE 0 END AS is_active,
@@ -1390,11 +1565,21 @@ def api_create_contractor():
         return jsonify({"ok": False, "error": "Name required"}), 400
     if not role_single:
         return jsonify({"ok": False, "error": "Role required"}), 400
+    if len((password or "").strip()) < 8:
+        return jsonify({"ok": False, "error": "Password is required (minimum 8 characters)."}), 400
 
-    pwd_hash = AuthManager.hash_password(password) if password else None
+    pwd_hash = AuthManager.hash_password((password or "").strip())
 
     conn = get_db_connection()
     try:
+        import mysql.connector
+
+        username_un, ualloc_err = allocate_contractor_username(
+            conn, name, email=email, exclude_contractor_id=None,
+        )
+        if ualloc_err:
+            return jsonify({"ok": False, "error": ualloc_err}), 400
+
         # 1) Unique email check
         cur_check = conn.cursor(dictionary=True)
         cur_check.execute(
@@ -1404,6 +1589,14 @@ def api_create_contractor():
             cur_check.close()
             return jsonify({"ok": False, "error": "Email already exists"}), 409
         cur_check.close()
+
+        from app.seat_limits import seat_check_error_for_new_email
+
+        cur_seat = conn.cursor()
+        seat_err = seat_check_error_for_new_email(email, db_cursor=cur_seat)
+        cur_seat.close()
+        if seat_err:
+            return jsonify({"ok": False, "error": seat_err}), 403
 
         # 2) Resolve role_id (find or create)
         cur_role = conn.cursor()
@@ -1423,10 +1616,11 @@ def api_create_contractor():
         cur_ins.execute(
             """
             INSERT INTO tb_contractors (
-                email, name, status, password_hash, role_id, wage_rate_card_id, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                email, username, name, status, password_hash, role_id, wage_rate_card_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             """,
-            (email, name, status, pwd_hash, role_id, wage_rate_card_id),
+            (email, username_un, name, status,
+             pwd_hash, role_id, wage_rate_card_id),
         )
         contractor_id = cur_ins.lastrowid
 
@@ -1442,7 +1636,7 @@ def api_create_contractor():
         conn.commit()
         cur_ins.close()
 
-        return jsonify({"ok": True, "id": contractor_id})
+        return jsonify({"ok": True, "id": contractor_id, "username": username_un})
 
     finally:
         conn.close()
@@ -1462,7 +1656,8 @@ def api_update_contractor(user_id):
 
     role_id = data.get("role_id")
     wage_rate_card_id = data.get("wage_rate_card_id")
-    employment_type = (data.get("employment_type") or "self_employed").strip().lower()
+    employment_type = (data.get("employment_type")
+                       or "self_employed").strip().lower()
     if employment_type not in ("paye", "self_employed"):
         employment_type = "self_employed"
     # legacy roles support (optional)
@@ -1475,6 +1670,19 @@ def api_update_contractor(user_id):
     conn = get_db_connection()
     try:
         cur = conn.cursor()
+        cur.execute(
+            "SELECT email FROM tb_contractors WHERE id = %s LIMIT 1", (user_id,))
+        em_row = cur.fetchone()
+        existing_email = (
+            (em_row[0] if em_row else None) or "").strip() or None
+        username_to_set, ualloc_err = allocate_contractor_username(
+            conn,
+            name,
+            email=(existing_email or "").strip() or None,
+            exclude_contractor_id=user_id,
+        )
+        if ualloc_err:
+            return jsonify({"ok": False, "error": ualloc_err}), 400
 
         # update base fields (employment_type if column exists)
         try:
@@ -1514,6 +1722,17 @@ def api_update_contractor(user_id):
                 WHERE id = %s
             """, (wage_rate_card_id, user_id))
 
+        try:
+            cur.execute(
+                "UPDATE tb_contractors SET username = %s WHERE id = %s",
+                (username_to_set, user_id),
+            )
+        except mysql.connector.Error:
+            return jsonify({
+                "ok": False,
+                "error": "Could not update login name; run time-billing database migrations.",
+            }), 503
+
         # optional legacy array support (only if role_id not provided)
         if role_id is None and isinstance(roles, list):
             cur.execute(
@@ -1536,7 +1755,7 @@ def api_update_contractor(user_id):
                 cur2.close()
 
         conn.commit()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "username": username_to_set})
     finally:
         cur.close()
         conn.close()
@@ -1900,7 +2119,8 @@ def public_week_invoice_page(week_id):
     if not entries:
         flash("No uninvoiced entries for this week.", "info")
         return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
-    total = sum((e.get("pay") or 0) + (e.get("travel_parking") or 0) for e in entries)
+    total = sum((e.get("pay") or 0) + (e.get("travel_parking") or 0)
+                for e in entries)
     suggested = InvoiceService.get_next_invoice_number(uid)
     invoice_info = InvoiceService.get_week_invoice_info(wk["id"])
     we = wk.get("week_ending")
@@ -1931,10 +2151,12 @@ def api_public_create_invoice(week_id):
     if InvoiceService.get_contractor_employment_type(uid) != "self_employed":
         return jsonify({"ok": False, "message": "Self-employed only"}), 403
     data = request.get_json() or {}
-    invoice_number = (data.get("invoice_number") or "").strip() or InvoiceService.get_next_invoice_number(uid)
+    invoice_number = (data.get("invoice_number") or "").strip(
+    ) or InvoiceService.get_next_invoice_number(uid)
     mark_sent = status == "approved"
     try:
-        inv = InvoiceService.create_invoice(uid, wk["id"], invoice_number, mark_sent=mark_sent)
+        inv = InvoiceService.create_invoice(
+            uid, wk["id"], invoice_number, mark_sent=mark_sent)
         return jsonify({"ok": True, "invoice": inv})
     except ValueError as e:
         return jsonify({"ok": False, "message": str(e)}), 400
@@ -1949,7 +2171,8 @@ def public_week_invoice_finalize(week_id):
     uid = current_tb_user_id()
     wk = TimesheetService._ensure_week(uid, week_id)
     try:
-        out = InvoiceService.finalize_draft_invoice_for_week(uid, int(wk["id"]))
+        out = InvoiceService.finalize_draft_invoice_for_week(
+            uid, int(wk["id"]))
         if out:
             flash(
                 "Invoice #%s finalized and marked sent. This week is now marked invoiced."
@@ -1994,7 +2217,8 @@ def public_invoice_detail_page(invoice_id):
 @staff_required_tb
 def public_invoice_pdf_download(invoice_id):
     uid = current_tb_user_id()
-    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(invoice_id, contractor_id=uid)
+    pdf_bytes, fname = InvoiceService.generate_invoice_pdf(
+        invoice_id, contractor_id=uid)
     if not pdf_bytes:
         abort(404)
     return send_file(
@@ -2285,7 +2509,8 @@ def api_my_runsheets_create():
         RunsheetService.ensure_lead_assignment(rs_id, int(uid))
         return jsonify({"ok": True, "id": rs_id}), 201
     except Exception as e:
-        current_app.logger.warning("api_my_runsheets_create: %s", e, exc_info=True)
+        current_app.logger.warning(
+            "api_my_runsheets_create: %s", e, exc_info=True)
         return jsonify({"ok": False, "error": str(e)}), 400
 
 
@@ -2352,7 +2577,8 @@ def api_my_runsheets_assignment_withdraw(rs_id, ra_id):
     if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
         return jsonify({"error": "Forbidden"}), 403
     try:
-        res = RunsheetService.withdraw_runsheet_assignment(rs_id, ra_id, int(uid))
+        res = RunsheetService.withdraw_runsheet_assignment(
+            rs_id, ra_id, int(uid))
         return jsonify(res), (200 if res.get("ok") else 400)
     except Exception as e:
         return _tb_safe_api_error(e, status=500, log_message="assignment_withdraw")
@@ -2367,7 +2593,8 @@ def api_my_runsheets_assignment_reactivate(rs_id, ra_id):
     if not RunsheetService.contractor_can_access_runsheet(rs_id, int(uid)):
         return jsonify({"error": "Forbidden"}), 403
     try:
-        res = RunsheetService.reactivate_runsheet_assignment(rs_id, ra_id, int(uid))
+        res = RunsheetService.reactivate_runsheet_assignment(
+            rs_id, ra_id, int(uid))
         return jsonify(res), (200 if res.get("ok") else 400)
     except Exception as e:
         return _tb_safe_api_error(e, status=500, log_message="assignment_reactivate")

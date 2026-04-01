@@ -7,13 +7,14 @@
   <div class="card mb-4">
     <div class="card-body">
       <h5 class="card-title">Manage training</h5>
-      <p class="card-text small text-muted">Courses support lessons, quizzes, external certificates, and supervisor sign-off. Compliance policy acknowledgements stay in the Compliance module — link courses to policies for reference only.</p>
+      <p class="card-text small text-muted">Courses support lessons, quizzes, external certificates, and supervisor sign-off. <strong>Skills, qualifications, and clinical grade</strong> for each person live in the Training register (linked from each HR profile). Compliance policy acknowledgements stay in the Compliance module — link courses to policies for reference only.</p>
       <div class="d-flex flex-wrap gap-2 mt-3">
         {% if trn_ready|default(false) %}
         <a href="{{ url_for('internal_training.admin_courses') }}" class="btn btn-primary btn-sm">Courses</a>
         <a href="{{ url_for('internal_training.admin_assignments') }}" class="btn btn-outline-primary btn-sm">Assignments</a>
         <a href="{{ url_for('internal_training.admin_completions') }}" class="btn btn-outline-secondary btn-sm">Completions</a>
         <a href="{{ url_for('internal_training.admin_audit') }}" class="btn btn-outline-secondary btn-sm">Audit log</a>
+        <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary btn-sm">HR — pick employee</a>
         {% else %}
         <a href="{{ url_for('internal_training.admin_items') }}" class="btn btn-primary btn-sm">Training items (legacy)</a>
         <a href="{{ url_for('internal_training.admin_assignments') }}" class="btn btn-outline-primary btn-sm">Assignments</a>

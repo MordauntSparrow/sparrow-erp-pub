@@ -1,0 +1,102 @@
+{% extends "employee_portal_module/base_public.html" %}
+{% block title %}{{ asset.item_name or 'Equipment' }} – My equipment{% endblock %}
+{% block content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+    <div class="alert alert-{% if category == 'error' %}danger{% elif category == 'success' %}success{% elif category == 'warning' %}warning{% else %}secondary{% endif %} py-2 small">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<p class="mb-2"><a href="{{ url_for('public_employee_portal.my_equipment') }}">← All my equipment</a></p>
+<h1 class="h5 mb-1">{{ asset.item_name or 'Equipment' }}</h1>
+<p class="small text-secondary mb-3">{{ asset.sku }} · {{ asset.serial_number }}{% if asset.public_asset_code %} · {{ asset.public_asset_code }}{% endif %}</p>
+
+{% if portal_handoff %}
+<div class="ep-card p-3 mb-4 border border-primary border-2">
+  <div class="fw-semibold mb-2">Confirm for the office</div>
+  <p class="small text-secondary mb-2">An administrator has asked you to record that you have finished with this unit in a specific way. Only complete this after you have actually put the equipment where described.</p>
+  {% if portal_handoff.handoff_kind == 'to_storeroom' %}
+  <p class="small mb-2"><strong>Return to storeroom</strong> — hand this unit in at <strong>{{ portal_handoff.location_label }}</strong>. It will show as back in stock.</p>
+  {% else %}
+  <p class="small mb-2"><strong>Back on a vehicle</strong> — place this unit on vehicle <strong>{{ portal_handoff.vehicle_label }}</strong> (inventory will use location <strong>{{ portal_handoff.location_label }}</strong>).</p>
+  {% endif %}
+  {% if portal_handoff.notes %}
+  <p class="small text-secondary mb-2 fst-italic">Note: {{ portal_handoff.notes }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('public_employee_portal.my_equipment_handoff_complete', asset_id=asset_id, handoff_id=portal_handoff.id) }}" onsubmit="return confirm('Confirm you have put the equipment where the office asked?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary btn-sm">I have completed this</button>
+  </form>
+</div>
+{% endif %}
+
+<p class="small text-secondary mb-4">Update what is <em>physically</em> in this unit. The office sees the same lines in Asset management. Use <strong>Field report</strong> if the app still shows the wrong pads (e.g. after borrowing from another crew) or out-of-date stock nobody updated.</p>
+
+{% for c in consumable_lines %}
+<div class="ep-card p-3 mb-3 {% if c.has_discrepancy %}border border-warning border-2{% endif %}">
+  <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+    <div>
+      <div class="fw-semibold">{{ c.label }}</div>
+      {% if c.inventory_sku %}<div class="small text-secondary">{{ c.inventory_sku }}</div>{% endif %}
+    </div>
+    <span class="badge bg-{{ c.consumable_badge_class }}{% if c.consumable_badge_class == 'light' %} text-dark border{% endif %}">{{ c.consumable_status_label }}</span>
+  </div>
+  <div class="small mt-2">
+    <span class="text-secondary">Batch</span> {{ c.batch_number or '—' }} ·
+    <span class="text-secondary">Lot</span> {{ c.lot_number or '—' }} ·
+    <span class="text-secondary">Expiry</span> {{ c.expiry_date_iso or '—' }} ·
+    <span class="text-secondary">Qty</span> {{ c.quantity }}
+  </div>
+  {% if c.discrepancy_details %}
+  <div class="alert alert-warning py-2 small mt-2 mb-0">Report on file: {{ c.discrepancy_details }}</div>
+  {% endif %}
+
+  {% if not c.depleted and c.quantity > 0 %}
+  <hr class="my-3 opacity-25">
+  <div class="fw-semibold small mb-2">Mark use or loss</div>
+  <form method="post" action="{{ url_for('public_employee_portal.my_equipment_consumable_deplete', asset_id=asset_id, consumable_id=c.id) }}" class="row g-2 align-items-end mb-3" onsubmit="return confirm('Mark this line as used or depleted?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="col-12 col-md-6">
+      <label class="form-label small mb-0">Reason</label>
+      <select class="form-select form-select-sm" name="usage_close_reason">
+        <option value="used_in_call">Used on a call</option>
+        <option value="wastage">Wastage</option>
+        <option value="damaged">Damaged</option>
+        <option value="expired_disposal">Expired — disposed</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-6">
+      <button type="submit" class="btn btn-sm btn-outline-primary w-100 w-md-auto">Submit</button>
+    </div>
+  </form>
+
+  <div class="fw-semibold small mb-2">Correct batch / expiry / qty</div>
+  <p class="small text-secondary mb-2">After a field restock, enter what is actually fitted now.</p>
+  <form method="post" action="{{ url_for('public_employee_portal.my_equipment_consumable_update', asset_id=asset_id, consumable_id=c.id) }}" class="row g-2 mb-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="col-6 col-md-3"><label class="form-label small mb-0">Batch</label><input class="form-control form-control-sm" name="batch_number" value="{{ c.batch_number or '' }}"></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0">Lot</label><input class="form-control form-control-sm" name="lot_number" value="{{ c.lot_number or '' }}"></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0">Expiry</label><input class="form-control form-control-sm" type="date" name="expiry_date" value="{{ c.expiry_date_iso }}"></div>
+    <div class="col-6 col-md-3"><label class="form-label small mb-0">Qty</label><input class="form-control form-control-sm" name="quantity" type="number" step="0.01" value="{{ c.quantity }}" min="0"></div>
+    <div class="col-12"><label class="form-label small mb-0">Notes</label><input class="form-control form-control-sm" name="notes" value="{{ c.notes or '' }}" placeholder="Optional"></div>
+    <div class="col-12"><button type="submit" class="btn btn-sm btn-outline-secondary">Save corrections</button></div>
+  </form>
+
+  <div class="fw-semibold small mb-2">Field report</div>
+  <p class="small text-secondary mb-2">Tell the office the record is wrong or unsafe (e.g. wrong expiry in the bag, missed out-of-date item). They will follow up.</p>
+  <form method="post" action="{{ url_for('public_employee_portal.my_equipment_consumable_report', asset_id=asset_id, consumable_id=c.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <textarea class="form-control form-control-sm mb-2" name="discrepancy_details" rows="3" required placeholder="Describe what you found (minimum a short sentence)."></textarea>
+    <button type="submit" class="btn btn-sm btn-warning">Send field report</button>
+  </form>
+  {% else %}
+  <p class="small text-secondary mb-0 mt-2">This line is closed (used or zero qty). The office can add a new line if you receive fresh stock.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="ep-card p-3 text-secondary small">No consumable lines are set up for this unit yet. Ask the office to add pads and dated items in Asset management.</div>
+{% endfor %}
+{% endblock %}

@@ -1,6 +1,6 @@
 """
 Employee Portal install/upgrade: all table definitions and logic in this file.
-Ensures ep_migrations, ep_messages, ep_todos. No external db/*.sql.
+Ensures ep_migrations, ep_messages, ep_todos, ep_push_subscriptions, ep_notification_prefs. No external db/*.sql.
 Run from repo root: python app/plugins/employee_portal_module/install.py install
 Or from plugin dir: python install.py install
 """
@@ -27,7 +27,41 @@ CREATE TABLE IF NOT EXISTS ep_settings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
-MODULE_TABLES = [MIGRATIONS_TABLE, "ep_messages", "ep_todos", "ep_settings"]
+SQL_CREATE_EP_PUSH_SUBSCRIPTIONS = """
+CREATE TABLE IF NOT EXISTS ep_push_subscriptions (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  contractor_id INT NOT NULL,
+  endpoint VARCHAR(768) NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth_secret VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  user_agent VARCHAR(512) DEFAULT NULL,
+  UNIQUE KEY uq_ep_push_endpoint (endpoint(512)),
+  KEY idx_ep_push_contractor (contractor_id),
+  CONSTRAINT fk_ep_push_contractor FOREIGN KEY (contractor_id)
+    REFERENCES tb_contractors(id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+SQL_CREATE_EP_NOTIFICATION_PREFS = """
+CREATE TABLE IF NOT EXISTS ep_notification_prefs (
+  contractor_id INT NOT NULL PRIMARY KEY,
+  push_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ep_notif_prefs_contractor FOREIGN KEY (contractor_id)
+    REFERENCES tb_contractors(id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+MODULE_TABLES = [
+    MIGRATIONS_TABLE,
+    "ep_messages",
+    "ep_todos",
+    "ep_settings",
+    "ep_push_subscriptions",
+    "ep_notification_prefs",
+]
 
 # Full CREATE TABLE statements (all in this file)
 SQL_CREATE_MIGRATIONS = """
@@ -74,7 +108,14 @@ CREATE TABLE IF NOT EXISTS ep_todos (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
-CREATES = [SQL_CREATE_MIGRATIONS, SQL_CREATE_EP_MESSAGES, SQL_CREATE_EP_TODOS, SQL_CREATE_EP_SETTINGS]
+CREATES = [
+    SQL_CREATE_MIGRATIONS,
+    SQL_CREATE_EP_MESSAGES,
+    SQL_CREATE_EP_TODOS,
+    SQL_CREATE_EP_SETTINGS,
+    SQL_CREATE_EP_PUSH_SUBSCRIPTIONS,
+    SQL_CREATE_EP_NOTIFICATION_PREFS,
+]
 
 
 def _run_sql(conn, sql):
@@ -133,10 +174,68 @@ def _ensure_audit_columns(conn):
         cur.close()
 
 
+def _ensure_users_contractor_id_column(conn):
+    """PRD: nullable link from core users to tb_contractors for unified portal identity."""
+    if not _column_exists(conn, "users", "contractor_id"):
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN contractor_id INT NULL DEFAULT NULL AFTER support_access_enabled"
+            )
+            conn.commit()
+        finally:
+            cur.close()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SHOW INDEX FROM users WHERE Key_name = %s",
+            ("uq_users_contractor_id",),
+        )
+        if not cur.fetchone():
+            try:
+                cur.execute(
+                    "CREATE UNIQUE INDEX uq_users_contractor_id ON users (contractor_id)"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+    finally:
+        cur.close()
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE %s", ("tb_contractors",))
+        if not cur.fetchone():
+            return
+        cur.execute(
+            """
+            SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+              AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = 'fk_users_contractor_id'
+            """
+        )
+        if cur.fetchone():
+            return
+        try:
+            cur.execute(
+                """
+                ALTER TABLE users
+                ADD CONSTRAINT fk_users_contractor_id
+                FOREIGN KEY (contractor_id) REFERENCES tb_contractors(id)
+                ON DELETE SET NULL ON UPDATE CASCADE
+                """
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+    finally:
+        cur.close()
+
+
 def ensure_tables(conn):
     for sql in CREATES:
         _run_sql(conn, sql)
     _ensure_audit_columns(conn)
+    _ensure_users_contractor_id_column(conn)
 
 
 def install():
@@ -171,7 +270,8 @@ def uninstall(drop_data: bool = False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Employee Portal Module Installer")
+    parser = argparse.ArgumentParser(
+        description="Employee Portal Module Installer")
     parser.add_argument("command", choices=["install", "upgrade", "uninstall"])
     parser.add_argument("--drop-data", action="store_true")
     args = parser.parse_args()

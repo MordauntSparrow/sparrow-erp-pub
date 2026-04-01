@@ -1,9 +1,38 @@
+import calendar
 import json
+import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.objects import get_db_connection
+
+logger = logging.getLogger(__name__)
+
+
+def add_calendar_months(from_date: date, months: int) -> date:
+    """Add calendar months to a date (day clamped to month end)."""
+    if months <= 0:
+        return from_date
+    m0 = from_date.month - 1 + int(months)
+    year = from_date.year + m0 // 12
+    month = m0 % 12 + 1
+    last = calendar.monthrange(year, month)[1]
+    return date(year, month, min(from_date.day, last))
+
+
+def normalize_warranty_start_basis(val: Any) -> Optional[str]:
+    if val is None or (isinstance(val, str) and not str(val).strip()):
+        return None
+    s = str(val).strip().lower()
+    if s in ("delivery", "delivered", "receipt", "goods_in"):
+        return "delivery"
+    if s in ("install", "installation", "fitted", "fitment"):
+        return "install"
+    if s in ("custom", "manual", "other"):
+        return "custom"
+    return s[:24] if s else None
+
 
 # DB ENUM: cost_method must be one of these
 COST_METHOD_VALUES = ("FIFO", "LIFO", "AVG")
@@ -154,6 +183,12 @@ def _ensure_inventory_equipment_schema(conn) -> None:
     _alter_add_column(conn, "inventory_transactions", "weight DECIMAL(18, 6) NULL")
     _alter_add_column(conn, "inventory_transactions", "weight_uom VARCHAR(32) NULL")
 
+    _alter_add_column(conn, "inventory_equipment_assets", "next_service_due_date DATE NULL")
+    _alter_add_column(
+        conn,
+        "inventory_equipment_assets",
+        "operational_state ENUM('operational','restricted','unserviceable') NOT NULL DEFAULT 'operational'",
+    )
     _alter_add_column(conn, "inventory_equipment_assets", "make VARCHAR(120) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "model VARCHAR(120) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "purchase_date DATE NULL")
@@ -162,6 +197,167 @@ def _ensure_inventory_equipment_schema(conn) -> None:
     _alter_add_column(conn, "inventory_equipment_assets", "condition VARCHAR(64) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "public_asset_code VARCHAR(64) NULL")
     _alter_add_column(conn, "inventory_equipment_assets", "end_of_life_at DATE NULL")
+    _alter_add_column(
+        conn,
+        "inventory_equipment_assets",
+        "warranty_start_basis VARCHAR(24) NULL COMMENT 'delivery|install|custom'",
+    )
+    _alter_add_column(conn, "inventory_equipment_assets", "warranty_start_date DATE NULL")
+    _alter_add_column(conn, "inventory_equipment_assets", "warranty_months INT NULL")
+
+    cur_cons = conn.cursor()
+    try:
+        cur_cons.execute(
+            """
+            CREATE TABLE IF NOT EXISTS `inventory_equipment_asset_consumables` (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                equipment_asset_id BIGINT NOT NULL,
+                inventory_item_id INT NULL,
+                label VARCHAR(255) NOT NULL,
+                batch_number VARCHAR(128) NULL,
+                lot_number VARCHAR(128) NULL,
+                expiry_date DATE NULL,
+                quantity DECIMAL(18, 4) NOT NULL DEFAULT 1,
+                depleted TINYINT(1) NOT NULL DEFAULT 0,
+                notes TEXT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_inv_equip_cons_asset (equipment_asset_id),
+                INDEX idx_inv_equip_cons_expiry (expiry_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
+        conn.commit()
+    finally:
+        try:
+            cur_cons.close()
+        except Exception:
+            pass
+
+    _alter_add_column(
+        conn,
+        "inventory_equipment_asset_consumables",
+        "usage_close_reason VARCHAR(32) NULL",
+    )
+    _alter_add_column(
+        conn,
+        "inventory_equipment_asset_consumables",
+        "discrepancy_flag TINYINT(1) NOT NULL DEFAULT 0",
+    )
+    _alter_add_column(
+        conn,
+        "inventory_equipment_asset_consumables",
+        "discrepancy_details TEXT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "inventory_equipment_asset_consumables",
+        "discrepancy_reported_at DATETIME NULL",
+    )
+    _alter_add_column(
+        conn,
+        "inventory_equipment_asset_consumables",
+        "discrepancy_reported_by_contractor_id INT NULL",
+    )
+
+    cur_ho = conn.cursor()
+    try:
+        cur_ho.execute(
+            """
+            CREATE TABLE IF NOT EXISTS `inventory_equipment_portal_handoffs` (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                equipment_asset_id BIGINT NOT NULL,
+                contractor_id INT NOT NULL,
+                handoff_kind ENUM('to_vehicle','to_storeroom') NOT NULL,
+                vehicle_id INT NULL,
+                inventory_location_id INT NOT NULL,
+                status ENUM('pending','completed','cancelled') NOT NULL DEFAULT 'pending',
+                initiated_by_user_id VARCHAR(64) NULL,
+                notes TEXT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at DATETIME NULL,
+                cancelled_at DATETIME NULL,
+                INDEX idx_inv_handoff_contractor (contractor_id, status),
+                INDEX idx_inv_handoff_asset (equipment_asset_id, status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
+        conn.commit()
+    finally:
+        try:
+            cur_ho.close()
+        except Exception:
+            pass
+
+
+def _parse_sql_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    s = str(value).strip()[:10]
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def annotate_equipment_consumable_rows(
+    rows: List[Dict[str, Any]],
+    *,
+    today: Optional[date] = None,
+    near_days: int = 30,
+) -> List[Dict[str, Any]]:
+    """Add consumable_status / badge hints for UI (expiry vs depleted)."""
+    t = today or date.today()
+    nd = max(int(near_days or 30), 1)
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        rr = dict(r)
+        qty = float(rr.get("quantity") or 0)
+        dep = bool(int(rr.get("depleted") or 0))
+        ed = _parse_sql_date(rr.get("expiry_date"))
+        if int(rr.get("discrepancy_flag") or 0):
+            rr["has_discrepancy"] = True
+        else:
+            rr["has_discrepancy"] = False
+        if dep or qty <= 0:
+            rr["consumable_status"] = "used_up"
+            ucr = (rr.get("usage_close_reason") or "").strip()
+            if ucr == "wastage":
+                rr["consumable_status_label"] = "Wastage / discarded"
+            elif ucr == "damaged":
+                rr["consumable_status_label"] = "Damaged / depleted"
+            elif ucr == "expired_disposal":
+                rr["consumable_status_label"] = "Expired disposal"
+            elif ucr == "other":
+                rr["consumable_status_label"] = "Closed (other)"
+            else:
+                rr["consumable_status_label"] = "Used / depleted"
+            rr["consumable_badge_class"] = "secondary"
+        elif ed is None:
+            rr["consumable_status"] = "no_expiry"
+            rr["consumable_status_label"] = "No expiry"
+            rr["consumable_badge_class"] = "light"
+        elif ed < t:
+            rr["consumable_status"] = "expired"
+            rr["consumable_status_label"] = "Expired"
+            rr["consumable_badge_class"] = "danger"
+        elif ed <= t + timedelta(days=nd):
+            dd = (ed - t).days
+            rr["consumable_status"] = "near_expiry"
+            rr["consumable_status_label"] = f"Due in {dd}d" if dd >= 0 else "Due"
+            rr["consumable_badge_class"] = "warning"
+        else:
+            rr["consumable_status"] = "ok"
+            rr["consumable_status_label"] = "In date"
+            rr["consumable_badge_class"] = "success"
+        out.append(rr)
+    return out
 
 
 class CostingStrategy:
@@ -572,6 +768,184 @@ class InventoryService:
         finally:
             cur.close()
 
+    def get_location_id_by_code(self, code: str) -> Optional[int]:
+        if not code or not str(code).strip():
+            return None
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT id FROM inventory_locations WHERE code = %s LIMIT 1",
+                (str(code).strip(),),
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row else None
+        finally:
+            cur.close()
+
+    def provision_cura_operational_event_kit_pool(
+        self, operational_event_id: int, event_name: str
+    ) -> Optional[int]:
+        """
+        Auto-create a virtual inventory location used as assignee for kit at a Cura operational event.
+        Code OP-EVT-{id} is stable for the event lifetime.
+        """
+        eid = int(operational_event_id)
+        code = f"OP-EVT-{eid}"
+        existing = self.get_location_id_by_code(code)
+        if existing is not None:
+            return int(existing)
+        safe_name = (event_name or f"Event {eid}").strip()[:200]
+        meta = {
+            "cura_operational_event_id": eid,
+            "auto_event_kit_pool": True,
+            "purpose": (
+                "Temporary kit pool for this Cura operational event. On close or delete, serial kit "
+                "moves to post-event holding (HOLD-IN) for reconciliation."
+            ),
+        }
+        return self.create_location(
+            {
+                "name": f"Event kit pool · {safe_name}",
+                "code": code,
+                "type": "virtual",
+                "parent_location_id": None,
+                "address": None,
+                "metadata": json.dumps(meta),
+            }
+        )
+
+    def list_equipment_held_at_assignee_location(
+        self, assignee_location_id: int
+    ) -> List[Dict[str, Any]]:
+        """Serial assets whose latest out transaction assigns them to this location id."""
+        lid = str(int(assignee_location_id))
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT ea.id, ea.item_id, ea.serial_number, ea.public_asset_code,
+                       i.name AS item_name, i.sku AS sku
+                FROM inventory_equipment_assets ea
+                INNER JOIN inventory_items i ON i.id = ea.item_id
+                INNER JOIN inventory_transactions tl ON tl.equipment_asset_id = ea.id
+                INNER JOIN (
+                    SELECT equipment_asset_id, MAX(id) AS mid
+                    FROM inventory_transactions
+                    WHERE transaction_type = 'out'
+                      AND assignee_type IN ('vehicle','user','contractor','location')
+                      AND equipment_asset_id IS NOT NULL
+                    GROUP BY equipment_asset_id
+                ) x ON x.mid = tl.id AND x.equipment_asset_id = tl.equipment_asset_id
+                WHERE ea.status IN ('assigned','loaned')
+                  AND tl.assignee_type = 'location'
+                  AND tl.assignee_id = %s
+                """,
+                (lid,),
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+
+    def release_cura_operational_event_kit_pool(
+        self,
+        *,
+        pool_location_id: int,
+        operational_event_id: int,
+        performed_by_user_id: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Reassign serial kit from the event pool to HOLD-IN (qty-zero out rows), delete the pool location.
+        Idempotent if the pool location no longer exists.
+        """
+        pool = int(pool_location_id)
+        eid = int(operational_event_id)
+        out: Dict[str, Any] = {"ok": True, "assets_moved": 0, "skipped": False, "error": None}
+        hold_id = self.get_location_id_by_code("HOLD-IN")
+        if not hold_id:
+            out["ok"] = False
+            out["error"] = (
+                "Post-event holding location HOLD-IN is missing — run the inventory plugin install/upgrade."
+            )
+            return out
+        if pool == int(hold_id):
+            out["skipped"] = True
+            return out
+        chk = self._connection()
+        c0 = chk.cursor()
+        try:
+            c0.execute("SELECT id FROM inventory_locations WHERE id = %s", (pool,))
+            if not c0.fetchone():
+                out["skipped"] = True
+                return out
+        finally:
+            c0.close()
+
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT code, name FROM inventory_locations WHERE id = %s",
+                (int(hold_id),),
+            )
+            hrow = cur.fetchone() or {}
+        finally:
+            cur.close()
+        hc = (hrow.get("code") or "").strip()
+        hn = (hrow.get("name") or "").strip()
+        if hc and hn:
+            hold_label = f"{hc} — {hn}"
+        else:
+            hold_label = hn or hc or str(hold_id)
+
+        for r in self.list_equipment_held_at_assignee_location(pool):
+            aid = int(r["id"])
+            iid = int(r["item_id"])
+            try:
+                self.record_transaction(
+                    item_id=iid,
+                    location_id=int(hold_id),
+                    quantity=0.0,
+                    transaction_type="out",
+                    performed_by_user_id=performed_by_user_id,
+                    assignee_type="location",
+                    assignee_id=str(int(hold_id)),
+                    assignee_label=hold_label,
+                    equipment_asset_id=aid,
+                    reference_type="cura_event_kit_pool_release",
+                    reference_id=str(eid),
+                    metadata={
+                        "from_event_pool_location_id": pool,
+                        "cura_operational_event_id": eid,
+                        "assignee_bump": True,
+                    },
+                )
+                out["assets_moved"] += 1
+            except Exception as ex:
+                logger.exception("release_cura_operational_event_kit_pool asset %s", aid)
+                out["ok"] = False
+                out["error"] = str(ex)[:500]
+                return out
+
+        conn = self._connection()
+        cur2 = conn.cursor()
+        try:
+            cur2.execute(
+                "DELETE FROM inventory_stock_levels WHERE location_id = %s",
+                (pool,),
+            )
+            cur2.execute("DELETE FROM inventory_locations WHERE id = %s", (pool,))
+            conn.commit()
+        except Exception as ex:
+            conn.rollback()
+            logger.exception("release_cura_operational_event_kit_pool delete location %s", pool)
+            out["ok"] = False
+            out["error"] = str(ex)[:500]
+        finally:
+            cur2.close()
+        return out
+
     def update_location(self, location_id: int, data: Dict[str, Any]) -> None:
         conn = self._connection()
         cur = conn.cursor()
@@ -691,6 +1065,7 @@ class InventoryService:
         category: Optional[str] = None,
         category_id: Optional[int] = None,
         is_active: Optional[bool] = None,
+        is_equipment: Optional[bool] = None,
     ):
         conn = self._connection()
         cur = conn.cursor(dictionary=True)
@@ -713,6 +1088,10 @@ class InventoryService:
             if is_active is not None:
                 sql += " AND i.is_active = %s"
                 params.append(1 if is_active else 0)
+            if is_equipment is True:
+                sql += " AND i.is_equipment = 1"
+            elif is_equipment is False:
+                sql += " AND (i.is_equipment = 0 OR i.is_equipment IS NULL)"
             sql += " ORDER BY i.name LIMIT %s OFFSET %s"
             params.extend([limit, skip])
             cur.execute(sql, tuple(params))
@@ -832,8 +1211,13 @@ class InventoryService:
         model: Optional[str] = None,
         purchase_date: Optional[str] = None,
         warranty_expiry: Optional[str] = None,
+        warranty_start_basis: Optional[str] = None,
+        warranty_start_date: Optional[str] = None,
+        warranty_months: Optional[int] = None,
         service_interval_days: Optional[int] = None,
+        next_service_due_date: Optional[str] = None,
         condition: Optional[str] = None,
+        public_asset_code: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
         conn = self._connection()
@@ -842,11 +1226,17 @@ class InventoryService:
             sn = (serial_number or "").strip()
             if not sn:
                 raise ValueError("serial_number required")
+            wb = normalize_warranty_start_basis(warranty_start_basis)
+            wm = int(warranty_months) if warranty_months is not None else None
+            pac = (public_asset_code or "").strip() or None
+            nsd = next_service_due_date if next_service_due_date else None
             cur.execute(
                 """
                 INSERT INTO inventory_equipment_assets
-                    (item_id, serial_number, status, make, model, purchase_date, warranty_expiry, service_interval_days, `condition`, metadata)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    (item_id, serial_number, status, make, model, purchase_date, warranty_expiry,
+                     warranty_start_basis, warranty_start_date, warranty_months,
+                     service_interval_days, next_service_due_date, `condition`, public_asset_code, metadata)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
                 (
                     int(item_id),
@@ -856,24 +1246,30 @@ class InventoryService:
                     (model or "").strip() or None,
                     purchase_date if purchase_date else None,
                     warranty_expiry if warranty_expiry else None,
+                    wb,
+                    warranty_start_date if warranty_start_date else None,
+                    wm,
                     int(service_interval_days) if service_interval_days is not None else None,
+                    nsd,
                     (condition or "").strip() or None,
+                    pac,
                     json.dumps(metadata or {}, default=str),
                 ),
             )
             conn.commit()
             new_id = cur.lastrowid
             try:
-                code = f"AST-{int(new_id):06d}"
-                cur.execute(
-                    """
-                    UPDATE inventory_equipment_assets
-                    SET public_asset_code = %s
-                    WHERE id = %s AND (public_asset_code IS NULL OR public_asset_code = '')
-                    """,
-                    (code, int(new_id)),
-                )
-                conn.commit()
+                if not pac:
+                    code = f"AST-{int(new_id):06d}"
+                    cur.execute(
+                        """
+                        UPDATE inventory_equipment_assets
+                        SET public_asset_code = %s
+                        WHERE id = %s AND (public_asset_code IS NULL OR public_asset_code = '')
+                        """,
+                        (code, int(new_id)),
+                    )
+                    conn.commit()
             except Exception:
                 pass
             return int(new_id)
@@ -888,9 +1284,15 @@ class InventoryService:
         model: Optional[str] = None,
         purchase_date: Optional[str] = None,
         warranty_expiry: Optional[str] = None,
+        warranty_start_basis: Any = None,
+        warranty_start_date: Optional[str] = None,
+        warranty_months: Any = None,
         service_interval_days: Optional[int] = None,
+        next_service_due_date: Optional[str] = None,
+        operational_state: Optional[str] = None,
         condition: Optional[str] = None,
         status: Optional[str] = None,
+        public_asset_code: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update equipment asset fields. Omitted kwargs leave existing values unchanged."""
@@ -908,9 +1310,28 @@ class InventoryService:
         if warranty_expiry is not None:
             updates.append("warranty_expiry = %s")
             params.append(warranty_expiry or None)
+        if warranty_start_basis is not None:
+            updates.append("warranty_start_basis = %s")
+            params.append(normalize_warranty_start_basis(warranty_start_basis))
+        if warranty_start_date is not None:
+            updates.append("warranty_start_date = %s")
+            params.append(warranty_start_date or None)
+        if warranty_months is not None:
+            updates.append("warranty_months = %s")
+            wm = warranty_months
+            if wm in ("", None):
+                params.append(None)
+            else:
+                params.append(int(wm))
         if service_interval_days is not None:
             updates.append("service_interval_days = %s")
             params.append(int(service_interval_days) if service_interval_days else None)
+        if next_service_due_date is not None:
+            updates.append("next_service_due_date = %s")
+            params.append(next_service_due_date or None)
+        if operational_state is not None:
+            updates.append("operational_state = %s")
+            params.append(operational_state)
         if condition is not None:
             updates.append("`condition` = %s")
             params.append((condition or "").strip() or None)
@@ -920,6 +1341,9 @@ class InventoryService:
         if metadata is not None:
             updates.append("metadata = %s")
             params.append(json.dumps(metadata if isinstance(metadata, dict) else {}, default=str))
+        if public_asset_code is not None:
+            updates.append("public_asset_code = %s")
+            params.append((public_asset_code or "").strip() or None)
         if not updates:
             return
         params.append(int(asset_id))
@@ -1017,6 +1441,485 @@ class InventoryService:
             conn.commit()
         finally:
             cur.close()
+
+    def list_equipment_asset_consumables(self, equipment_asset_id: int) -> List[Dict[str, Any]]:
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT c.*, i.sku AS inventory_sku, i.name AS inventory_item_name
+                FROM inventory_equipment_asset_consumables c
+                LEFT JOIN inventory_items i ON i.id = c.inventory_item_id
+                WHERE c.equipment_asset_id = %s
+                ORDER BY c.depleted ASC, c.expiry_date IS NULL, c.expiry_date ASC, c.id ASC
+                """,
+                (int(equipment_asset_id),),
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+
+    def add_equipment_asset_consumable(
+        self,
+        *,
+        equipment_asset_id: int,
+        label: str,
+        batch_number: Optional[str] = None,
+        lot_number: Optional[str] = None,
+        expiry_date: Optional[str] = None,
+        quantity: float = 1.0,
+        inventory_item_id: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> int:
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            lab = (label or "").strip()
+            if not lab:
+                raise ValueError("label is required")
+            qty = float(quantity)
+            if qty <= 0:
+                raise ValueError("quantity must be positive")
+            iid = int(inventory_item_id) if inventory_item_id else None
+            cur.execute(
+                """
+                INSERT INTO inventory_equipment_asset_consumables
+                    (equipment_asset_id, inventory_item_id, label, batch_number, lot_number,
+                     expiry_date, quantity, depleted, notes)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,0,%s)
+                """,
+                (
+                    int(equipment_asset_id),
+                    iid,
+                    lab,
+                    (batch_number or "").strip() or None,
+                    (lot_number or "").strip() or None,
+                    (expiry_date or "").strip() or None,
+                    qty,
+                    (notes or "").strip() or None,
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            cur.close()
+
+    def update_equipment_asset_consumable(
+        self,
+        consumable_id: int,
+        *,
+        equipment_asset_id: int,
+        label: Optional[str] = None,
+        batch_number: Any = ...,
+        lot_number: Any = ...,
+        expiry_date: Any = ...,
+        quantity: Optional[float] = None,
+        depleted: Optional[bool] = None,
+        inventory_item_id: Any = ...,
+        notes: Any = ...,
+        usage_close_reason: Any = ...,
+        discrepancy_flag: Any = ...,
+        discrepancy_details: Any = ...,
+        discrepancy_reported_at: Any = ...,
+        discrepancy_reported_by_contractor_id: Any = ...,
+    ) -> None:
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT id FROM inventory_equipment_asset_consumables
+                WHERE id = %s AND equipment_asset_id = %s
+                """,
+                (int(consumable_id), int(equipment_asset_id)),
+            )
+            if not cur.fetchone():
+                raise ValueError("consumable not found for this asset")
+            fields: List[str] = []
+            params: List[Any] = []
+            if label is not None:
+                fields.append("label = %s")
+                params.append((label or "").strip())
+            if batch_number is not ...:
+                v = None if batch_number is None else str(batch_number).strip() or None
+                fields.append("batch_number = %s")
+                params.append(v)
+            if lot_number is not ...:
+                v = None if lot_number is None else str(lot_number).strip() or None
+                fields.append("lot_number = %s")
+                params.append(v)
+            if expiry_date is not ...:
+                v = None if expiry_date is None else (str(expiry_date).strip() or None)
+                fields.append("expiry_date = %s")
+                params.append(v)
+            if quantity is not None:
+                q = float(quantity)
+                if q < 0:
+                    raise ValueError("quantity invalid")
+                fields.append("quantity = %s")
+                params.append(q)
+            if depleted is not None:
+                fields.append("depleted = %s")
+                params.append(1 if depleted else 0)
+            if inventory_item_id is not ...:
+                if inventory_item_id is None or inventory_item_id == "":
+                    fields.append("inventory_item_id = NULL")
+                else:
+                    fields.append("inventory_item_id = %s")
+                    params.append(int(inventory_item_id))
+            if notes is not ...:
+                v = None if notes is None else str(notes).strip() or None
+                fields.append("notes = %s")
+                params.append(v)
+            if usage_close_reason is not ...:
+                v = None if usage_close_reason is None else str(usage_close_reason).strip()[:32] or None
+                fields.append("usage_close_reason = %s")
+                params.append(v)
+            if discrepancy_flag is not ...:
+                fields.append("discrepancy_flag = %s")
+                params.append(1 if discrepancy_flag else 0)
+            if discrepancy_details is not ...:
+                v = None if discrepancy_details is None else str(discrepancy_details).strip() or None
+                fields.append("discrepancy_details = %s")
+                params.append(v)
+            if discrepancy_reported_at is not ...:
+                if discrepancy_reported_at is None:
+                    fields.append("discrepancy_reported_at = NULL")
+                else:
+                    fields.append("discrepancy_reported_at = %s")
+                    params.append(discrepancy_reported_at)
+            if discrepancy_reported_by_contractor_id is not ...:
+                if discrepancy_reported_by_contractor_id is None:
+                    fields.append("discrepancy_reported_by_contractor_id = NULL")
+                else:
+                    fields.append("discrepancy_reported_by_contractor_id = %s")
+                    params.append(int(discrepancy_reported_by_contractor_id))
+            if not fields:
+                return
+            params.extend([int(consumable_id), int(equipment_asset_id)])
+            cur.execute(
+                f"UPDATE inventory_equipment_asset_consumables SET {', '.join(fields)} "
+                "WHERE id = %s AND equipment_asset_id = %s",
+                tuple(params),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+    def delete_equipment_asset_consumable(self, consumable_id: int, equipment_asset_id: int) -> bool:
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                DELETE FROM inventory_equipment_asset_consumables
+                WHERE id = %s AND equipment_asset_id = %s
+                """,
+                (int(consumable_id), int(equipment_asset_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
+
+    def consumable_alert_summary_for_assets(
+        self,
+        equipment_asset_ids: List[int],
+        *,
+        near_days: int = 30,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Per-asset counts for fleet / dashboard badges (expiry vs depleted)."""
+        ids = [int(x) for x in equipment_asset_ids if x is not None]
+        if not ids:
+            return {}
+        t = date.today()
+        nd = max(int(near_days or 30), 1)
+        near_end = t + timedelta(days=nd)
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            placeholders = ",".join(["%s"] * len(ids))
+            cur.execute(
+                f"""
+                SELECT equipment_asset_id, quantity, depleted, expiry_date, discrepancy_flag
+                FROM inventory_equipment_asset_consumables
+                WHERE equipment_asset_id IN ({placeholders})
+                """,
+                tuple(ids),
+            )
+            rows = cur.fetchall() or []
+        finally:
+            cur.close()
+
+        summary: Dict[int, Dict[str, Any]] = {
+            i: {
+                "total_lines": 0,
+                "expired": 0,
+                "near": 0,
+                "in_date": 0,
+                "no_expiry_active": 0,
+                "used_up": 0,
+                "discrepancy": 0,
+            }
+            for i in ids
+        }
+        for r in rows:
+            aid = int(r["equipment_asset_id"])
+            if aid not in summary:
+                continue
+            summary[aid]["total_lines"] += 1
+            if int(r.get("discrepancy_flag") or 0):
+                summary[aid]["discrepancy"] += 1
+            qty = float(r.get("quantity") or 0)
+            dep = bool(int(r.get("depleted") or 0))
+            if dep or qty <= 0:
+                summary[aid]["used_up"] += 1
+                continue
+            ed = _parse_sql_date(r.get("expiry_date"))
+            if ed is None:
+                summary[aid]["no_expiry_active"] += 1
+            elif ed < t:
+                summary[aid]["expired"] += 1
+            elif ed <= near_end:
+                summary[aid]["near"] += 1
+            else:
+                summary[aid]["in_date"] += 1
+        for aid, s in summary.items():
+            active = (
+                s["expired"] + s["near"] + s["in_date"] + s["no_expiry_active"]
+            )
+            if s["expired"] > 0:
+                s["worst"] = "expired"
+            elif s["near"] > 0:
+                s["worst"] = "near"
+            elif active > 0:
+                s["worst"] = "ok"
+            else:
+                s["worst"] = "none"
+        return summary
+
+    def cancel_pending_handoffs_for_asset(self, equipment_asset_id: int) -> None:
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE inventory_equipment_portal_handoffs
+                SET status = 'cancelled', cancelled_at = NOW()
+                WHERE equipment_asset_id = %s AND status = 'pending'
+                """,
+                (int(equipment_asset_id),),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+    def create_equipment_portal_handoff(
+        self,
+        *,
+        equipment_asset_id: int,
+        contractor_id: int,
+        handoff_kind: str,
+        inventory_location_id: int,
+        vehicle_id: Optional[int] = None,
+        initiated_by_user_id: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> int:
+        hk = (handoff_kind or "").strip()
+        if hk not in ("to_vehicle", "to_storeroom"):
+            raise ValueError("handoff_kind must be to_vehicle or to_storeroom")
+        if hk == "to_vehicle" and not vehicle_id:
+            raise ValueError("vehicle_id required for to_vehicle")
+        if hk == "to_storeroom":
+            vehicle_id = None
+        self.cancel_pending_handoffs_for_asset(int(equipment_asset_id))
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO inventory_equipment_portal_handoffs
+                    (equipment_asset_id, contractor_id, handoff_kind, vehicle_id,
+                     inventory_location_id, status, initiated_by_user_id, notes)
+                VALUES (%s,%s,%s,%s,%s,'pending',%s,%s)
+                """,
+                (
+                    int(equipment_asset_id),
+                    int(contractor_id),
+                    hk,
+                    int(vehicle_id) if vehicle_id is not None else None,
+                    int(inventory_location_id),
+                    initiated_by_user_id,
+                    (notes or "").strip() or None,
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            cur.close()
+
+    def list_pending_handoffs_for_contractor(self, contractor_id: int) -> List[Dict[str, Any]]:
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT h.*, ea.serial_number, ea.public_asset_code, ea.item_id
+                FROM inventory_equipment_portal_handoffs h
+                INNER JOIN inventory_equipment_assets ea ON ea.id = h.equipment_asset_id
+                WHERE h.contractor_id = %s AND h.status = 'pending'
+                ORDER BY h.created_at DESC
+                """,
+                (int(contractor_id),),
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+
+    def list_pending_handoffs_for_asset(self, equipment_asset_id: int) -> List[Dict[str, Any]]:
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT * FROM inventory_equipment_portal_handoffs
+                WHERE equipment_asset_id = %s AND status = 'pending'
+                ORDER BY created_at DESC
+                """,
+                (int(equipment_asset_id),),
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+
+    def get_equipment_portal_handoff(self, handoff_id: int) -> Optional[Dict[str, Any]]:
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT * FROM inventory_equipment_portal_handoffs WHERE id = %s",
+                (int(handoff_id),),
+            )
+            return cur.fetchone()
+        finally:
+            cur.close()
+
+    def cancel_equipment_portal_handoff(self, handoff_id: int) -> bool:
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE inventory_equipment_portal_handoffs
+                SET status = 'cancelled', cancelled_at = NOW()
+                WHERE id = %s AND status = 'pending'
+                """,
+                (int(handoff_id),),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
+
+    def complete_equipment_portal_handoff(self, handoff_id: int, *, contractor_id: int) -> Dict[str, Any]:
+        """
+        Contractor confirms an admin-initiated handoff (return to store or place on a vehicle).
+        Uses return + optional immediate out so location stock stays balanced when moving to vehicle.
+        """
+        from app.plugins.inventory_control.asset_service import get_asset_service
+
+        svc = get_asset_service()
+        ho = self.get_equipment_portal_handoff(int(handoff_id))
+        if not ho or str(ho.get("status") or "") != "pending":
+            raise ValueError("Handoff not found or already closed")
+        if int(ho["contractor_id"]) != int(contractor_id):
+            raise ValueError("This task is not assigned to you")
+        aid = int(ho["equipment_asset_id"])
+        if not svc.contractor_holds_asset(int(contractor_id), aid):
+            raise ValueError("This equipment is no longer signed out to you; ask the office to refresh the task")
+        asset = self.get_equipment_asset(aid)
+        if not asset:
+            raise ValueError("Asset missing")
+        item_id = int(asset["item_id"])
+        loc_id = int(ho["inventory_location_id"])
+        kind = str(ho["handoff_kind"] or "")
+        hid = int(handoff_id)
+        meta_base = {
+            "portal_handoff_id": hid,
+            "completed_by_contractor_id": int(contractor_id),
+        }
+        if kind == "to_storeroom":
+            self.record_transaction(
+                item_id=item_id,
+                location_id=loc_id,
+                quantity=1.0,
+                transaction_type="return",
+                performed_by_user_id=None,
+                equipment_asset_id=aid,
+                reference_type="contractor_portal_handoff",
+                reference_id=str(hid),
+                metadata={**meta_base, "handoff_kind": "to_storeroom"},
+            )
+            self.set_equipment_asset_status(aid, "in_stock")
+        elif kind == "to_vehicle":
+            vid = int(ho["vehicle_id"] or 0)
+            if not vid:
+                raise ValueError("Handoff missing vehicle")
+            from app.plugins.fleet_management.objects import get_fleet_service
+
+            fv = get_fleet_service().get_vehicle(vid)
+            if not fv:
+                raise ValueError("Vehicle not found")
+            label = fv.get("registration") or fv.get("internal_code") or str(vid)
+            self.record_transaction(
+                item_id=item_id,
+                location_id=loc_id,
+                quantity=1.0,
+                transaction_type="return",
+                performed_by_user_id=None,
+                equipment_asset_id=aid,
+                reference_type="contractor_portal_handoff_bridge",
+                reference_id=str(hid),
+                metadata={**meta_base, "bridge": "pre_vehicle_out"},
+            )
+            self.record_transaction(
+                item_id=item_id,
+                location_id=loc_id,
+                quantity=1.0,
+                transaction_type="out",
+                performed_by_user_id=None,
+                assignee_type="vehicle",
+                assignee_id=str(vid),
+                assignee_label=label,
+                equipment_asset_id=aid,
+                reference_type="fleet_vehicle_assign",
+                reference_id=str(vid),
+                metadata={
+                    **meta_base,
+                    "fleet_vehicle_id": vid,
+                    "via_contractor_portal_handoff": True,
+                },
+            )
+            self.set_equipment_asset_status(aid, "assigned")
+        else:
+            raise ValueError("Invalid handoff kind")
+        cur = self._connection().cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE inventory_equipment_portal_handoffs
+                SET status = 'completed', completed_at = NOW()
+                WHERE id = %s AND status = 'pending'
+                """,
+                (hid,),
+            )
+            if cur.rowcount == 0:
+                raise ValueError("Handoff could not be completed (already processed?)")
+            self._connection().commit()
+        finally:
+            cur.close()
+        return {"asset_id": aid, "kind": kind}
 
     def list_stock_levels(self, item_id: int):
         conn = self._connection()
@@ -1364,6 +2267,274 @@ class InventoryService:
         finally:
             cur.close()
 
+    def get_contractor_kit_pending_snapshot(self) -> Dict[str, Any]:
+        """Pending portal kit requests — shared by inventory command center and asset hub."""
+        snap: Dict[str, Any] = {
+            "contractor_kit_pending_count": 0,
+            "contractor_kit_pending_rows": [],
+        }
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            try:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM inventory_contractor_kit_requests
+                    WHERE status = 'pending'
+                    """
+                )
+                snap["contractor_kit_pending_count"] = int(
+                    (cur.fetchone() or {}).get("n") or 0
+                )
+            except Exception:
+                logger.exception("contractor_kit_pending_snapshot: count")
+            try:
+                cur.execute(
+                    """
+                    SELECT k.id, k.contractor_id, k.need_from, k.need_until,
+                           k.request_text, k.created_at, c.name AS contractor_name
+                    FROM inventory_contractor_kit_requests k
+                    INNER JOIN tb_contractors c ON c.id = k.contractor_id
+                    WHERE k.status = 'pending'
+                    ORDER BY k.created_at ASC
+                    LIMIT 6
+                    """
+                )
+                kit_rows = cur.fetchall() or []
+                for kr in kit_rows:
+                    for key in ("need_from", "need_until", "created_at"):
+                        v = kr.get(key)
+                        if hasattr(v, "isoformat"):
+                            kr[key] = v.isoformat()
+                    txt = (kr.get("request_text") or "").strip()
+                    kr["request_excerpt"] = (txt[:140] + "…") if len(txt) > 140 else txt
+                snap["contractor_kit_pending_rows"] = kit_rows
+            except Exception:
+                logger.exception("contractor_kit_pending_snapshot: rows")
+        finally:
+            cur.close()
+        return snap
+
+    def get_dashboard_command_center(self) -> Dict[str, Any]:
+        """
+        Rich context for the admin dashboard: where stock sits, lots nearing expiry,
+        low-SKU lines, serialized equipment warranty window, and equipment status counts.
+        Queries are defensive so a partial schema never breaks the dashboard.
+        """
+        out: Dict[str, Any] = {
+            "location_summaries": [],
+            "expiring_lots": [],
+            "expired_lot_rows": [],
+            "low_stock_items": [],
+            "warranty_watch": [],
+            "equipment_by_status": {},
+            "equipment_assigned": 0,
+            "equipment_in_stock": 0,
+            "location_count": 0,
+            "recent_moves": [],
+            "expiring_within_30d_count": 0,
+            "contractor_kit_pending_count": 0,
+            "contractor_kit_pending_rows": [],
+            "holding_pool_equipment": [],
+        }
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            try:
+                cur.execute("SELECT COUNT(*) AS n FROM inventory_locations")
+                out["location_count"] = int((cur.fetchone() or {}).get("n") or 0)
+            except Exception:
+                logger.exception("command_center: location_count")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT l.id, l.code, l.name, l.type,
+                           COUNT(DISTINCT s.item_id) AS sku_count,
+                           COALESCE(SUM(s.quantity_on_hand), 0) AS total_qty
+                    FROM inventory_locations l
+                    INNER JOIN inventory_stock_levels s
+                      ON s.location_id = l.id AND s.quantity_on_hand > 0
+                    GROUP BY l.id, l.code, l.name, l.type
+                    ORDER BY total_qty DESC
+                    LIMIT 14
+                    """
+                )
+                out["location_summaries"] = cur.fetchall() or []
+            except Exception:
+                logger.exception("command_center: location_summaries")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT b.id AS batch_id, b.batch_number, b.lot_number, b.expiry_date,
+                           i.id AS item_id, i.name AS item_name, i.sku,
+                           l.id AS location_id, l.code AS location_code, l.name AS location_name,
+                           SUM(s.quantity_on_hand) AS qty
+                    FROM inventory_batches b
+                    INNER JOIN inventory_items i ON i.id = b.item_id
+                    INNER JOIN inventory_stock_levels s
+                      ON s.batch_id = b.id AND s.quantity_on_hand > 0
+                    INNER JOIN inventory_locations l ON l.id = s.location_id
+                    WHERE b.expiry_date IS NOT NULL
+                      AND b.expiry_date >= CURDATE()
+                      AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+                    GROUP BY b.id, b.batch_number, b.lot_number, b.expiry_date,
+                             i.id, i.name, i.sku, l.id, l.code, l.name
+                    ORDER BY b.expiry_date ASC, l.name ASC
+                    LIMIT 28
+                    """
+                )
+                rows = cur.fetchall() or []
+                today_d = date.today()
+                within30 = 0
+                for r in rows:
+                    ed = r.get("expiry_date")
+                    if hasattr(ed, "isoformat") and ed is not None:
+                        try:
+                            if (ed - today_d).days <= 30:
+                                within30 += 1
+                        except Exception:
+                            pass
+                        r["expiry_date"] = ed.isoformat()
+                out["expiring_lots"] = rows
+                out["expiring_within_30d_count"] = within30
+            except Exception:
+                logger.exception("command_center: expiring_lots")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT b.id AS batch_id, b.batch_number, i.sku, i.name AS item_name,
+                           b.expiry_date, SUM(s.quantity_on_hand) AS qty
+                    FROM inventory_batches b
+                    INNER JOIN inventory_items i ON i.id = b.item_id
+                    INNER JOIN inventory_stock_levels s
+                      ON s.batch_id = b.id AND s.quantity_on_hand > 0
+                    WHERE b.expiry_date IS NOT NULL AND b.expiry_date < CURDATE()
+                    GROUP BY b.id, b.batch_number, i.sku, i.name, b.expiry_date
+                    ORDER BY b.expiry_date DESC
+                    LIMIT 12
+                    """
+                )
+                er = cur.fetchall() or []
+                for r in er:
+                    ed = r.get("expiry_date")
+                    if hasattr(ed, "isoformat"):
+                        r["expiry_date"] = ed.isoformat()
+                out["expired_lot_rows"] = er
+            except Exception:
+                logger.exception("command_center: expired_lot_rows")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT i.id, i.sku, i.name, i.reorder_point,
+                           COALESCE(SUM(s.quantity_on_hand), 0) AS on_hand
+                    FROM inventory_items i
+                    LEFT JOIN inventory_stock_levels s ON s.item_id = i.id
+                    WHERE i.is_active = 1 AND i.reorder_point > 0
+                      AND (i.is_equipment = 0 OR i.is_equipment IS NULL)
+                    GROUP BY i.id, i.sku, i.name, i.reorder_point
+                    HAVING COALESCE(SUM(s.quantity_on_hand), 0) < i.reorder_point
+                    ORDER BY (i.reorder_point - COALESCE(SUM(s.quantity_on_hand), 0)) DESC
+                    LIMIT 14
+                    """
+                )
+                out["low_stock_items"] = cur.fetchall() or []
+            except Exception:
+                logger.exception("command_center: low_stock_items")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT a.id AS asset_id, a.serial_number, a.status,
+                           a.warranty_expiry, a.warranty_start_basis, a.warranty_start_date, a.warranty_months,
+                           i.name AS item_name, i.sku,
+                           DATEDIFF(a.warranty_expiry, CURDATE()) AS days_left
+                    FROM inventory_equipment_assets a
+                    INNER JOIN inventory_items i ON i.id = a.item_id
+                    WHERE a.warranty_expiry IS NOT NULL
+                      AND a.status NOT IN ('retired', 'lost')
+                      AND a.warranty_expiry <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+                    ORDER BY a.warranty_expiry ASC
+                    LIMIT 18
+                    """
+                )
+                wr = cur.fetchall() or []
+                for r in wr:
+                    we = r.get("warranty_expiry")
+                    if hasattr(we, "isoformat"):
+                        r["warranty_expiry"] = we.isoformat()
+                    ws = r.get("warranty_start_date")
+                    if hasattr(ws, "isoformat"):
+                        r["warranty_start_date"] = ws.isoformat()
+                out["warranty_watch"] = wr
+            except Exception:
+                logger.exception("command_center: warranty_watch")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT status, COUNT(*) AS c
+                    FROM inventory_equipment_assets
+                    GROUP BY status
+                    """
+                )
+                for r in cur.fetchall() or []:
+                    st = r.get("status") or ""
+                    out["equipment_by_status"][st] = int(r.get("c") or 0)
+                out["equipment_assigned"] = int(
+                    out["equipment_by_status"].get("assigned", 0)
+                    + out["equipment_by_status"].get("loaned", 0)
+                )
+                out["equipment_in_stock"] = int(
+                    out["equipment_by_status"].get("in_stock", 0)
+                )
+            except Exception:
+                logger.exception("command_center: equipment_by_status")
+
+            try:
+                cur.execute(
+                    """
+                    SELECT t.id, t.transaction_type, t.quantity, t.performed_at,
+                           i.sku, i.name AS item_name,
+                           l.code AS location_code
+                    FROM inventory_transactions t
+                    LEFT JOIN inventory_items i ON i.id = t.item_id
+                    LEFT JOIN inventory_locations l ON l.id = t.location_id
+                    ORDER BY t.performed_at DESC
+                    LIMIT 10
+                    """
+                )
+                mv = cur.fetchall() or []
+                for r in mv:
+                    pa = r.get("performed_at")
+                    if hasattr(pa, "isoformat"):
+                        r["performed_at"] = pa.isoformat()
+                out["recent_moves"] = mv
+            except Exception:
+                logger.exception("command_center: recent_moves")
+
+        finally:
+            cur.close()
+        try:
+            kit_snap = self.get_contractor_kit_pending_snapshot()
+            out["contractor_kit_pending_count"] = kit_snap["contractor_kit_pending_count"]
+            out["contractor_kit_pending_rows"] = kit_snap["contractor_kit_pending_rows"]
+        except Exception:
+            logger.exception("command_center: merge kit snapshot")
+        try:
+            from app.plugins.inventory_control.asset_service import get_asset_service
+
+            out["holding_pool_equipment"] = get_asset_service().list_equipment_in_holding_pool(
+                limit=35
+            )
+        except Exception:
+            logger.exception("command_center: holding_pool_equipment")
+        return out
+
     def get_movement_summary(self, days: int = 7) -> str:
         """Narrative summary of inventory movements for dashboard AI summary block."""
         conn = self._connection()
@@ -1398,9 +2569,9 @@ class InventoryService:
             if ins or outs or transfers or adjs:
                 parts.append(f"In the last {days} days: {ins} receipts, {outs} issues, {transfers} transfers, {adjs} adjustments.")
             if low:
-                parts.append(f"{low} item(s) are below reorder point.")
+                parts.append(f"{low} item(s) are below the reorder point.")
             if expiring:
-                parts.append(f"{expiring} batch(es) expire within 30 days.")
+                parts.append(f"{expiring} batch(es) with expiry within the next 30 days.")
             if not parts:
                 parts.append("No recent movements. Stock levels are stable.")
             return " ".join(parts)

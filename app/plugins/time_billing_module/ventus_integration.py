@@ -2,6 +2,10 @@
 Ventus sign-on/off integration: create/update runsheets and schedule shifts per contractor.
 Call from Ventus after sign-on/sign-off. Uses contractor_ventus_mapping and ventus_integration_defaults.
 
+**HR compliance:** This path does **not** load HR profile expiries (`hr_staff_details`) or document
+library state. Eligibility based on DBS/right-to-work/etc. is a separate product decision; see
+`hr_module/compliance_integration_contract.py`.
+
 **Timesheets / payroll:** Sign-on creates **draft** runsheets; sign-off only updates `actual_end` on
 assignments and `schedule_shifts`. To push (or re-push) those times into contractor timesheets and
 recompute pay, run the same step as the admin UI: `RunsheetService.publish_runsheet(runsheet_id, None)`

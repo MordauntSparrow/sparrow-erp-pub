@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Add employee · HR{% endblock %}
+{% block content %}
+<div class="hr-admin-surface">
+  {% include 'hr_module/admin/_hr_ui_styles.html' %}
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}" class="text-decoration-none">People</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_employees') }}" class="text-decoration-none">Employees</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Add employee</li>
+    </ol>
+  </nav>
+
+  <h1 class="h3 fw-semibold mb-2">Add employee manually</h1>
+  <p class="text-muted mb-4">Creates a portal / Time Billing person record: login username is chosen from their <strong>full name</strong> (firstname.lastname pattern), or from a <strong>core admin user’s username</strong> when a <code>users</code> row already exists with the same work email. HR profile fields start empty. Use this for existing staff who were not hired through recruitment.</p>
+
+  <div class="card shadow-sm" style="max-width: 640px;">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="name">Full name <span class="text-danger">*</span></label>
+          <input class="form-control" id="name" name="name" required maxlength="255" autocomplete="name">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="email">Work email <span class="text-danger">*</span></label>
+          <input class="form-control" id="email" name="email" type="email" required maxlength="255" autocomplete="email">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="phone">Phone</label>
+          <input class="form-control" id="phone" name="phone" type="tel" maxlength="64" autocomplete="tel">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="role_name">Time billing role</label>
+          <select class="form-select" id="role_name" name="role_name">
+            {% if roles %}
+            <option value="">Default role ({{ default_tb_role }})</option>
+            {% for r in roles %}
+            <option value="{{ r.name }}">{{ r.name }}</option>
+            {% endfor %}
+            {% else %}
+            <option value="">Default ({{ default_tb_role }})</option>
+            {% endif %}
+          </select>
+          <p class="form-text">Optional. Leave default to onboard quickly; you can change role later in Time Billing. Controls portal permissions with other modules.</p>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="role_name_new">Or specific / new role name</label>
+          <input class="form-control" id="role_name_new" name="role_name_new" maxlength="64" placeholder="Overrides dropdown; creates role if missing">
+          <p class="form-text">If you fill this, it overrides the dropdown (including default).</p>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label" for="employment_type">Employment type</label>
+            <select class="form-select" id="employment_type" name="employment_type">
+              <option value="self_employed">Self-employed</option>
+              <option value="paye">PAYE</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="status">Status</label>
+            <select class="form-select" id="status" name="status">
+              <option value="active" selected>Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-4">
+          <label class="form-label" for="password">Employee portal password <span class="text-danger">*</span></label>
+          <input class="form-control" id="password" name="password" type="password" autocomplete="new-password" minlength="8" required placeholder="Minimum 8 characters">
+          <p class="form-text">Required. They use this with their login username or work email on the employee portal.</p>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="submit" class="btn btn-primary">Create employee</button>
+          <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

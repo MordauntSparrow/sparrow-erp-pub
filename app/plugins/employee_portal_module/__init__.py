@@ -1,2 +1,3 @@
 # Employee Portal: central hub for staff (contractors).
-# Login uses tb_contractors; session key tb_user is shared with time_billing_module.
+# session["tb_user"] is the shared portal principal (see app.portal_session):
+# contractor id in id/contractor_id, optional linked core users.id in linked_user_id.

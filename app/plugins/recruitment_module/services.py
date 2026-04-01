@@ -1617,7 +1617,14 @@ def set_application_stage(application_id: int, new_stage: str) -> Tuple[bool, st
     conn = get_db_connection()
     cur = conn.cursor()
     err: Optional[str] = None
+    old_stage: str = ""
     try:
+        cur.execute(
+            "SELECT LOWER(COALESCE(stage,'')) FROM rec_applications WHERE id = %s",
+            (application_id,),
+        )
+        row = cur.fetchone()
+        old_stage = (row[0] or "") if row else ""
         cur.execute(
             "UPDATE rec_applications SET stage = %s WHERE id = %s",
             (new_stage, application_id),
@@ -1634,6 +1641,13 @@ def set_application_stage(application_id: int, new_stage: str) -> Tuple[bool, st
     if new_stage == "rejected":
         schedule_recruitment_purge_eligible(application_id)
     apply_auto_tasks_for_stage(application_id)
+    if old_stage != new_stage:
+        try:
+            from . import notifications as _rec_notifications
+
+            _rec_notifications.notify_applicant_stage_change(application_id, new_stage)
+        except Exception as e:
+            logger.warning("recruitment stage notify: %s", e)
     return True, "ok"
 
 
@@ -1762,13 +1776,14 @@ def admin_set_application_interview_details(
                 (application_id,),
             )
             conn.commit()
-            return (True, "ok") if cur.rowcount else (False, "Application not found.")
+            ok = bool(cur.rowcount)
         except Exception as e:
             conn.rollback()
             return False, str(e)
         finally:
             cur.close()
             conn.close()
+        return (True, "ok") if ok else (False, "Application not found.")
 
     conn = get_db_connection()
     cur = conn.cursor()
@@ -1782,13 +1797,21 @@ def admin_set_application_interview_details(
             (fmt, url, loc, application_id),
         )
         conn.commit()
-        return (True, "ok") if cur.rowcount else (False, "Application not found.")
+        ok = bool(cur.rowcount)
     except Exception as e:
         conn.rollback()
         return False, str(e)
     finally:
         cur.close()
         conn.close()
+    if ok and fmt in (INTERVIEW_FORMAT_ONLINE, INTERVIEW_FORMAT_ONSITE):
+        try:
+            from . import notifications as _rec_notifications
+
+            _rec_notifications.notify_interview_details_updated(application_id)
+        except Exception as e:
+            logger.warning("recruitment interview notify: %s", e)
+    return (True, "ok") if ok else (False, "Application not found.")
 
 
 # ---------------------------------------------------------------------------
@@ -2139,6 +2162,8 @@ def admin_recruitment_dashboard_stats() -> Dict[str, Any]:
         "applications_new": 0,
         "applications_in_pipeline": 0,
         "pending_tasks": 0,
+        "stage_counts": {},
+        "multi_application_applicants": 0,
     }
     conn = get_db_connection()
     cur = conn.cursor()
@@ -2168,12 +2193,56 @@ def admin_recruitment_dashboard_stats() -> Dict[str, Any]:
                 "SELECT COUNT(*) FROM rec_application_tasks WHERE status = 'pending'"
             )
             out["pending_tasks"] = int((cur.fetchone() or [0])[0])
+            cur.execute(
+                """
+                SELECT LOWER(COALESCE(stage, '')), COUNT(*) FROM rec_applications
+                GROUP BY LOWER(COALESCE(stage, ''))
+                """
+            )
+            for st_row in cur.fetchall() or []:
+                st = (st_row[0] or "unknown").strip().lower()
+                out["stage_counts"][st] = int(st_row[1])
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT applicant_id FROM rec_applications
+                    WHERE stage NOT IN ('rejected', 'hired')
+                      AND (status IS NULL OR status = 'active')
+                    GROUP BY applicant_id
+                    HAVING COUNT(*) > 1
+                ) x
+                """
+            )
+            out["multi_application_applicants"] = int((cur.fetchone() or [0])[0])
         except Exception:
             pass
         return out
     finally:
         cur.close()
         conn.close()
+
+
+def admin_bulk_set_application_stage(
+    application_ids: List[int], new_stage: str
+) -> Tuple[int, List[str]]:
+    """Move many applications to a stage. Uses set_application_stage (notifications + auto-tasks)."""
+    errs: List[str] = []
+    n_ok = 0
+    seen = set()
+    for raw in application_ids:
+        try:
+            aid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if aid < 1 or aid in seen:
+            continue
+        seen.add(aid)
+        ok, msg = set_application_stage(aid, new_stage)
+        if ok:
+            n_ok += 1
+        else:
+            errs.append(f"#{aid}: {msg}")
+    return n_ok, errs
 
 
 def admin_list_openings_dashboard(
@@ -2695,7 +2764,16 @@ def hire_application_as_contractor(
     if not role_id:
         return False, "Could not resolve time billing role", None
 
+    from app.seat_limits import seat_check_error_for_new_email
+
     conn = get_db_connection()
+    cur_probe = conn.cursor()
+    seat_err = seat_check_error_for_new_email(email, db_cursor=cur_probe)
+    cur_probe.close()
+    if seat_err:
+        conn.close()
+        return False, seat_err, None
+
     cur = conn.cursor(dictionary=True)
     try:
         cur.execute("SELECT id FROM tb_contractors WHERE email = %s LIMIT 1", (email,))

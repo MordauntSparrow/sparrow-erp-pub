@@ -234,6 +234,65 @@ def _column_exists(conn, table: str, column: str) -> bool:
         cur.close()
 
 
+def _backfill_contractor_usernames(conn):
+    """
+    Set tb_contractors.username from name (same rules as allocate_contractor_username)
+    for any row still missing it after migration 013. Idempotent for already-set rows.
+    """
+    if not _column_exists(conn, "tb_contractors", "username"):
+        return
+    # Import here to avoid pulling Flask blueprint graph on module load.
+    from app.plugins.time_billing_module.routes import allocate_contractor_username
+
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, name, email FROM tb_contractors
+            WHERE username IS NULL OR TRIM(username) = ''
+            ORDER BY id ASC
+            """
+        )
+        rows = cur.fetchall() or []
+    finally:
+        cur.close()
+
+    n_ok = 0
+    for row in rows:
+        cid = row["id"]
+        name = row.get("name") or ""
+        email = row.get("email")
+        un, _err = allocate_contractor_username(
+            conn, name, email=email, exclude_contractor_id=cid
+        )
+        if not un:
+            continue
+        ucur = conn.cursor()
+        try:
+            ucur.execute(
+                """
+                UPDATE tb_contractors
+                SET username = %s
+                WHERE id = %s
+                  AND (username IS NULL OR TRIM(username) = '')
+                """,
+                (un, cid),
+            )
+            n_ok += ucur.rowcount
+        finally:
+            ucur.close()
+    conn.commit()
+    if n_ok:
+        print(f"[time_billing] Backfilled username for {n_ok} contractor(s) (migration 014).")
+
+
+def _run_sql_file_then_hooks(conn, fname):
+    """Run one migration file, then any Python follow-up for that filename."""
+    _run_sql_file(conn, os.path.join(SQL_DIR, fname))
+    if fname == "014_contractor_username_backfill.sql":
+        _backfill_contractor_usernames(conn)
+
+
 def _ensure_job_types_colour_hex(conn):
     """
     Code expects job_types.colour_hex (runsheets, week payload, admin API).
@@ -274,9 +333,8 @@ def install(seed_demo: bool = False):
     try:
         _ensure_ledger(conn)
         for fname in _list_sql_files():
-            path = os.path.join(SQL_DIR, fname)
             if not _already_applied(conn, fname):
-                _run_sql_file(conn, path)
+                _run_sql_file_then_hooks(conn, fname)
                 _record_applied(conn, fname)
 
         # Optional demo seed
@@ -302,7 +360,7 @@ def upgrade():
         _ensure_ledger(conn)
         for fname in _list_sql_files():
             if not _already_applied(conn, fname):
-                _run_sql_file(conn, os.path.join(SQL_DIR, fname))
+                _run_sql_file_then_hooks(conn, fname)
                 _record_applied(conn, fname)
 
         _ensure_job_types_colour_hex(conn)

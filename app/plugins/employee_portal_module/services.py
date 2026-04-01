@@ -22,12 +22,20 @@ LIMIT_TODOS_ALL = 35
 # Single source of truth for portal module links (name, url, icon, plugin system_name)
 # use_launch=True: dashboard link goes via /employee-portal/go/<slug> so auth is passed by token (avoids session/cookie issues)
 MODULE_LINKS_CONFIG = [
-    {"name": "Time & Billing", "url": "/time-billing/", "icon": "bi-clock-history", "system_name": "time_billing_module", "launch_slug": "time-billing"},
-    {"name": "Work", "url": "/work/", "icon": "bi-briefcase", "system_name": "work_module", "launch_slug": None},
-    {"name": "HR", "url": "/hr/", "icon": "bi-person-badge", "system_name": "hr_module", "launch_slug": None},
-    {"name": "Compliance & Policies", "url": "/compliance/", "icon": "bi-shield-check", "system_name": "compliance_module", "launch_slug": None},
-    {"name": "Training", "url": "/training/", "icon": "bi-mortarboard", "system_name": "training_module", "launch_slug": None},
-    {"name": "Scheduling & Shifts", "url": "/scheduling/", "icon": "bi-calendar-week", "system_name": "scheduling_module", "launch_slug": None},
+    {"name": "Time & Billing", "url": "/time-billing/", "icon": "bi-clock-history",
+        "system_name": "time_billing_module", "launch_slug": "time-billing"},
+    {"name": "Work", "url": "/work/", "icon": "bi-briefcase",
+        "system_name": "work_module", "launch_slug": None},
+    {"name": "HR", "url": "/hr/", "icon": "bi-person-badge",
+        "system_name": "hr_module", "launch_slug": None},
+    {"name": "Compliance & Policies", "url": "/compliance/", "icon": "bi-shield-check",
+        "system_name": "compliance_module", "launch_slug": None},
+    {"name": "Training", "url": "/training/", "icon": "bi-mortarboard",
+        "system_name": "training_module", "launch_slug": None},
+    {"name": "Scheduling & Shifts", "url": "/scheduling/", "icon": "bi-calendar-week",
+        "system_name": "scheduling_module", "launch_slug": None},
+    {"name": "Fleet", "url": "/fleet/", "icon": "bi-truck-front",
+        "system_name": "fleet_management", "launch_slug": None},
 ]
 
 
@@ -84,7 +92,8 @@ def get_messages(contractor_id):
             cur.close()
             conn.close()
     except Exception as e:
-        logger.warning("Employee portal: messages unavailable for contractor %s (run install if needed): %s", contractor_id, e)
+        logger.warning(
+            "Employee portal: messages unavailable for contractor %s (run install if needed): %s", contractor_id, e)
         return []
 
 
@@ -160,7 +169,8 @@ def get_todos(contractor_id, filter_completed=None, limit=None):
             cur.close()
             conn.close()
     except Exception as e:
-        logger.warning("Employee portal: todos unavailable for contractor %s (run install if needed): %s", contractor_id, e)
+        logger.warning(
+            "Employee portal: todos unavailable for contractor %s (run install if needed): %s", contractor_id, e)
         return []
 
 
@@ -173,7 +183,8 @@ def get_module_links(plugin_manager):
     for mod in MODULE_LINKS_CONFIG:
         item = dict(mod)
         try:
-            item["enabled"] = bool(plugin_manager.is_plugin_enabled(mod["system_name"]))
+            item["enabled"] = bool(
+                plugin_manager.is_plugin_enabled(mod["system_name"]))
         except Exception:
             item["enabled"] = False
         result.append(item)
@@ -188,7 +199,8 @@ def get_pending_counts(contractor_id):
         from app.plugins.compliance_module.services import pending_policies_count
         pending_policies = pending_policies_count(contractor_id)
     except Exception as e:
-        logger.debug("Employee portal: compliance pending count unavailable: %s", e)
+        logger.debug(
+            "Employee portal: compliance pending count unavailable: %s", e)
     try:
         from app.plugins.hr_module.services import pending_requests_count
         pending_hr_requests = pending_requests_count(contractor_id)
@@ -206,7 +218,8 @@ def get_pending_training_count(contractor_id):
 
         return int(TrainingService.count_pending_for_contractor(int(contractor_id)))
     except Exception as e:
-        logger.debug("Employee portal: training pending count unavailable: %s", e)
+        logger.debug(
+            "Employee portal: training pending count unavailable: %s", e)
         return 0
 
 
@@ -218,7 +231,8 @@ def get_dashboard_summary_context(contractor_id: int) -> Dict[str, Any]:
     unread = sum(1 for m in messages if not m.get("read_at"))
     pending_todo_count = count_pending_todos(contractor_id)
     pending_todos = get_todos(contractor_id, filter_completed=False, limit=10)
-    todo_titles = [t.get("title") or "" for t in (pending_todos or []) if t.get("title")]
+    todo_titles = [t.get("title") or "" for t in (
+        pending_todos or []) if t.get("title")]
     out = {
         "pending_policies": pending_policies,
         "pending_hr_requests": pending_hr_requests,
@@ -229,7 +243,8 @@ def get_dashboard_summary_context(contractor_id: int) -> Dict[str, Any]:
     }
     try:
         from app.plugins.scheduling_module.services import ScheduleService
-        out["scheduling_summary"] = ScheduleService.get_contractor_portal_summary(contractor_id)
+        out["scheduling_summary"] = ScheduleService.get_contractor_portal_summary(
+            contractor_id)
     except Exception:
         out["scheduling_summary"] = None
     return out
@@ -241,6 +256,36 @@ def is_scheduling_enabled(plugin_manager):
         return bool(plugin_manager.is_plugin_enabled("scheduling_module"))
     except Exception:
         return False
+
+
+def equipment_portal_enabled(plugin_manager) -> bool:
+    """Serial kit / consumables self-service when inventory (includes serial equipment) is on."""
+    try:
+        return bool(plugin_manager.is_plugin_enabled("inventory_control"))
+    except Exception:
+        return False
+
+
+def inventory_contractor_requests_portal_enabled(plugin_manager) -> bool:
+    """Contractor stock/material requests live under inventory_control (/inventory/...), not the portal module."""
+    try:
+        return bool(plugin_manager.is_plugin_enabled("inventory_control"))
+    except Exception:
+        return False
+
+
+def contractor_assigned_equipment_count(contractor_id: int) -> int:
+    """How many serial assets are signed out to this contractor (for dashboard badge)."""
+    if not contractor_id:
+        return 0
+    try:
+        from app.plugins.inventory_control.asset_service import get_asset_service
+
+        rows = get_asset_service().list_assets_held_by_contractor(int(contractor_id))
+        return len(rows or [])
+    except Exception as e:
+        logger.debug("contractor_assigned_equipment_count: %s", e)
+        return 0
 
 
 # -----------------------------------------------------------------------------
@@ -365,13 +410,25 @@ def admin_send_message(
     cur = conn.cursor()
     try:
         count = 0
+        inserted: List[Tuple[int, int]] = []
         for cid in contractor_ids:
             cur.execute("""
                 INSERT INTO ep_messages (contractor_id, source_module, subject, body, sent_by_user_id)
                 VALUES (%s, %s, %s, %s, %s)
             """, (cid, source_module, (subject or "").strip()[:255], (body or "")[:65535], sent_by_user_id))
             count += cur.rowcount
+            mid = cur.lastrowid
+            if mid:
+                inserted.append((int(cid), int(mid)))
         conn.commit()
+        if inserted:
+            try:
+                from .push_service import schedule_push_for_new_portal_messages
+
+                schedule_push_for_new_portal_messages(inserted)
+            except Exception:
+                logger.debug(
+                    "portal message push schedule skipped", exc_info=True)
         return count
     finally:
         cur.close()
@@ -383,7 +440,8 @@ def admin_soft_delete_message(msg_id: int) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE ep_messages SET deleted_at = NOW() WHERE id = %s", (msg_id,))
+        cur.execute(
+            "UPDATE ep_messages SET deleted_at = NOW() WHERE id = %s", (msg_id,))
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -396,7 +454,8 @@ def admin_restore_message(msg_id: int) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("UPDATE ep_messages SET deleted_at = NULL WHERE id = %s", (msg_id,))
+        cur.execute(
+            "UPDATE ep_messages SET deleted_at = NULL WHERE id = %s", (msg_id,))
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -511,13 +570,26 @@ def admin_create_todo(
         count = 0
         ref_type = (reference_type or "")[:64] or None
         ref_id = (reference_id or "")[:128] or None
+        link_stored = (link_url or "")[:512] or None
+        inserted: List[Tuple[int, int, Optional[str]]] = []
         for cid in contractor_ids:
             cur.execute("""
                 INSERT INTO ep_todos (contractor_id, source_module, title, link_url, due_date, created_by_user_id, reference_type, reference_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (cid, source_module, (title or "").strip()[:255], (link_url or "")[:512] or None, due_date, created_by_user_id, ref_type, ref_id))
+            """, (cid, source_module, (title or "").strip()[:255], link_stored, due_date, created_by_user_id, ref_type, ref_id))
             count += cur.rowcount
+            tid = cur.lastrowid
+            if tid:
+                inserted.append((int(cid), int(tid), link_stored))
         conn.commit()
+        if inserted:
+            try:
+                from .push_service import schedule_push_for_new_portal_todos
+
+                schedule_push_for_new_portal_todos(inserted)
+            except Exception:
+                logger.debug(
+                    "portal todo push schedule skipped", exc_info=True)
         return count
     finally:
         cur.close()
@@ -607,7 +679,8 @@ def upsert_pending_todo_for_reference(
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (contractor_id, source_module, ttl, link, due_date, None, ref_type, ref_id),
+                (contractor_id, source_module, ttl,
+                 link, due_date, None, ref_type, ref_id),
             )
         conn.commit()
     finally:
@@ -656,7 +729,8 @@ def admin_update_todo(
         if not updates:
             return True
         params.append(todo_id)
-        cur.execute("UPDATE ep_todos SET " + ", ".join(updates) + " WHERE id = %s", params)
+        cur.execute("UPDATE ep_todos SET " +
+                    ", ".join(updates) + " WHERE id = %s", params)
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -670,9 +744,11 @@ def admin_set_todo_complete(todo_id: int, complete: bool = True) -> bool:
     cur = conn.cursor()
     try:
         if complete:
-            cur.execute("UPDATE ep_todos SET completed_at = NOW() WHERE id = %s", (todo_id,))
+            cur.execute(
+                "UPDATE ep_todos SET completed_at = NOW() WHERE id = %s", (todo_id,))
         else:
-            cur.execute("UPDATE ep_todos SET completed_at = NULL WHERE id = %s", (todo_id,))
+            cur.execute(
+                "UPDATE ep_todos SET completed_at = NULL WHERE id = %s", (todo_id,))
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -766,7 +842,8 @@ def get_ep_setting(key: str) -> Optional[str]:
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("SELECT setting_value FROM ep_settings WHERE setting_key = %s", (key,))
+        cur.execute(
+            "SELECT setting_value FROM ep_settings WHERE setting_key = %s", (key,))
         row = cur.fetchone()
         return (row.get("setting_value") or "").strip() or None if row else None
     except Exception as e:
@@ -868,7 +945,8 @@ def get_dashboard_data_for_contractor(
         cur.close()
         conn.close()
     user = dict(row)
-    user["profile_picture_path"] = safe_profile_picture_path(user.get("profile_picture_path"))
+    user["profile_picture_path"] = safe_profile_picture_path(
+        user.get("profile_picture_path"))
     user["id"] = int(user["id"])
     messages = get_messages(contractor_id)
     todos = get_todos(contractor_id, filter_completed=False)

@@ -44,7 +44,7 @@
           <tbody>
             {% for r in rows %}
             <tr>
-              <td>{{ r.acknowledged_at.strftime('%Y-%m-%d %H:%M') if r.acknowledged_at else '—' }}</td>
+              <td>{{ r.acknowledged_at.strftime('%d/%m/%Y %H:%M') if r.acknowledged_at else '—' }}</td>
               <td>{{ r.policy_title }} <code class="small">{{ r.policy_slug }}</code></td>
               <td>{{ r.contractor_name }}{% if r.contractor_email %} <span class="text-muted small">({{ r.contractor_email }})</span>{% endif %}</td>
               <td class="small text-muted">{{ r.ip_address or '—' }}{% if r.user_agent %} · {{ (r.user_agent[:40] + '…') if r.user_agent and r.user_agent|length > 40 else (r.user_agent or '') }}{% endif %}</td>

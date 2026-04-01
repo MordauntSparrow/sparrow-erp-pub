@@ -1,8 +1,8 @@
 {
     "system_name": "inventory_control",
     "name": "Inventory Control",
-    "description": "Advanced inventory, costing, and invoice control for Sparrow ERP.",
-    "version": "0.0.4",
+    "description": "Inventory, costing, invoice control, and serial equipment (servicing, assignments, kit consumables).",
+    "version": "0.0.5",
     "icon": "icon.png",
     "settings": {
         "default_cost_method": {
@@ -24,5 +24,20 @@
     "repository_token": "",
     "update_available": false,
     "permission_required": null,
+    "access_permission": "inventory_control.access",
+    "declared_permissions": [
+        {
+            "id": "asset_management.edit",
+            "label": "Serial equipment — full control (assign, return, maintenance, faults)"
+        },
+        {
+            "id": "asset_management.assign",
+            "label": "Serial equipment — sign out / return to stock only"
+        },
+        {
+            "id": "asset_management.records",
+            "label": "Serial equipment — maintenance logs and faults (no assignment)"
+        }
+    ],
     "installed": true
 }

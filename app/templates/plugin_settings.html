@@ -6,18 +6,24 @@
 <h1 class="mb-3">{{ plugin_name }} Settings</h1>
 <a href="{{ url_for('routes.plugins') }}" class="btn btn-secondary btn-sm mb-3">Back to Plugins</a>
 
-<div aria-live="polite" aria-atomic="true" class="mb-3">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% for category, message in messages %}
-            {% if category in ('plugins_page_success', 'plugins_page_danger', 'plugins_page_error') %}
-            <div class="alert alert-{% if category == 'plugins_page_success' %}success{% else %}danger{% endif %} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
-            </div>
-            {% endif %}
-        {% endfor %}
-    {% endwith %}
+{% if settings.get('system_name') == 'hr_module' %}
+<div class="alert alert-info mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div class="mb-0 small">
+      <strong>Onboarding document packs</strong> — Define which document requests are created when you apply a pack from an employee profile.
+    </div>
+    <a class="btn btn-sm btn-primary flex-shrink-0" href="{{ url_for('internal_hr.admin_onboarding_packs_list') }}">Manage onboarding packs</a>
+  </div>
 </div>
+<div class="alert alert-light border mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div class="mb-0 small">
+      <strong>Employee CSV import</strong> — Upload a client spreadsheet, map columns to Sparrow fields (name, email, role, phone, address, etc.), then create or update employees in bulk.
+    </div>
+    <a class="btn btn-sm btn-outline-primary flex-shrink-0" href="{{ url_for('internal_hr.admin_employee_import_csv') }}">Import employees (CSV)</a>
+  </div>
+</div>
+{% endif %}
 
 <form method="POST">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

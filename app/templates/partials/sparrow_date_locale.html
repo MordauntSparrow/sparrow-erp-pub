@@ -1,0 +1,55 @@
+{# Client-side date/time formatting: DD/MM/YYYY (en-GB), 24h clock. Include once in <head>. #}
+<script>
+(function () {
+  var LOCALE = 'en-GB';
+  function toDate(v) {
+    if (v == null || v === '') return null;
+    var d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  window.sparrowFormatDateTime = function (v) {
+    var d = toDate(v);
+    if (!d) return typeof v === 'string' ? v : '';
+    return d.toLocaleString(LOCALE, {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false
+    });
+  };
+  window.sparrowFormatDateTimeShort = function (v) {
+    var d = toDate(v);
+    if (!d) return typeof v === 'string' ? v : '';
+    return d.toLocaleString(LOCALE, {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+      hour12: false
+    });
+  };
+  window.sparrowFormatDate = function (v) {
+    var d = toDate(v);
+    if (!d) return typeof v === 'string' ? v : '';
+    return d.toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+  window.sparrowFormatTime = function (v) {
+    var d = toDate(v);
+    if (!d) return '';
+    return d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+  /** Time then date, 24h: "11:02 28/03/2026" */
+  window.sparrowFormatTimeDate = function (v) {
+    var d = toDate(v);
+    if (!d) return typeof v === 'string' ? v : '';
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' ' +
+      pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear();
+  };
+  window.sparrowFormatDateTimeMedium = function (v) {
+    var d = toDate(v);
+    if (!d) return typeof v === 'string' ? v : '';
+    return d.toLocaleString(LOCALE, {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+  };
+})();
+</script>

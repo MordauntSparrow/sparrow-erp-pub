@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Core settings · Sparrow ERP{% endblock %}
+{% block title %}Core settings · {{ _site.get('company_name') or 'Sparrow ERP' }}{% endblock %}
 
 {% block content %}
 <div class="container mt-4 mb-5">
@@ -8,9 +8,18 @@
     <a href="{{ url_for('routes.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
   </div>
   <p class="text-muted small mb-4">
-    Values in the <strong>Email</strong>, <strong>Integrations</strong>, <strong>LLM</strong>, and <strong>Security</strong> tabs are written to <code>app/config/.env</code> on this server (admin only).
-    Secrets are never shown again after save—only an indicator that a value is set.
+    Administrators can configure Sparrow here. After you save, passwords and API keys are not shown again—you will only see whether a value is set.
   </p>
+  {% set _ps = env_ctx.persistent_storage if env_ctx and env_ctx.persistent_storage is defined else {} %}
+  {% if not _ps.get('configured') %}
+  <div class="alert alert-warning py-2 small mb-3" role="status">
+    <strong>File storage:</strong> persistent storage is not set up for this server. Logos and file uploads may be lost if the application is moved or rebuilt. Your hosting provider can attach persistent storage for Sparrow.
+  </div>
+  {% else %}
+  <div class="alert alert-success py-2 small mb-3" role="status">
+    <strong>File storage:</strong> persistent storage is configured. Logos and uploads should be kept when the application is updated.
+  </div>
+  {% endif %}
 
   <ul class="nav nav-tabs mb-3 flex-wrap" id="coreSettingsTabs" role="tablist">
     <li class="nav-item" role="presentation">
@@ -27,6 +36,12 @@
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link {% if active_tab == 'security' %}active{% endif %}" id="tab-security" data-mdb-toggle="tab" data-mdb-target="#pane-security" type="button" role="tab">Security</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'support_access' %}active{% endif %}" id="tab-support-access" data-mdb-toggle="tab" data-mdb-target="#pane-support-access" type="button" role="tab">Support access</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if active_tab == 'plan' %}active{% endif %}" id="tab-plan" data-mdb-toggle="tab" data-mdb-target="#pane-plan" type="button" role="tab">Plan</button>
     </li>
   </ul>
 
@@ -64,6 +79,52 @@
             <option value="modern" {% if config.theme_settings.theme == 'modern' %}selected{% endif %}>Modern</option>
           </select>
         </div>
+
+        {% set _dbg = config.theme_settings|default({}, true) %}
+        {% set _dbgm = (_dbg.dashboard_background_mode|default('slideshow', true))|lower %}
+        <div class="mb-3">
+          <label class="form-label" for="dashboard_background_mode">Dashboard background</label>
+          <select id="dashboard_background_mode" name="dashboard_background_mode" class="form-select" aria-describedby="dashboard_background_help">
+            <option value="slideshow" {% if _dbgm == 'slideshow' %}selected{% endif %}>Fun rotating photos (default)</option>
+            <option value="solid" {% if _dbgm == 'solid' %}selected{% endif %}>Solid colour (professional)</option>
+            <option value="image" {% if _dbgm == 'image' %}selected{% endif %}>Custom image</option>
+          </select>
+          <div id="dashboard_background_help" class="form-text">Applies to the main dashboard only. Solid and custom image turn off the animated particle effect.</div>
+        </div>
+        <div class="mb-3 dashboard-bg-solid-wrap" id="dashboard_bg_solid_wrap">
+          <label class="form-label" for="dashboard_background_color">Dashboard background colour</label>
+          <input type="color" id="dashboard_background_color" name="dashboard_background_color" class="form-control form-control-color"
+                 value="{{ _dbg.dashboard_background_color|default('#1e293b', true) }}" title="Pick a solid background">
+        </div>
+        <div class="mb-3 dashboard-bg-image-wrap" id="dashboard_bg_image_wrap">
+          <label class="form-label" for="dashboard_background_image">Dashboard background image</label>
+          <input type="file" id="dashboard_background_image" name="dashboard_background_image" class="form-control" accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp">
+          {% if _dbg.dashboard_background_image_path %}
+          <div class="mt-2 d-flex flex-wrap align-items-center gap-3">
+            <img src="{{ url_for('static', filename=_dbg.dashboard_background_image_path) }}" alt="Current dashboard background" class="img-thumbnail" style="max-height: 120px;">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="1" id="clear_dashboard_background_image" name="clear_dashboard_background_image">
+              <label class="form-check-label" for="clear_dashboard_background_image">Remove custom image</label>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        <script>
+        (function () {
+          var mode = document.getElementById('dashboard_background_mode');
+          var wSolid = document.getElementById('dashboard_bg_solid_wrap');
+          var wImage = document.getElementById('dashboard_bg_image_wrap');
+          if (!mode || !wSolid || !wImage) return;
+          function sync() {
+            var v = (mode.value || 'slideshow').toLowerCase();
+            wSolid.style.display = v === 'solid' ? '' : 'none';
+            wImage.style.display = v === 'image' ? '' : 'none';
+          }
+          mode.addEventListener('change', sync);
+          sync();
+        })();
+        </script>
+
         <div class="mb-3">
           <label class="form-label" for="custom_css">Custom CSS</label>
           <input type="file" id="custom_css" name="custom_css" class="form-control" accept=".css">
@@ -74,13 +135,13 @@
 
         <hr class="my-4">
         <h2 class="h6 text-uppercase text-muted">AI assistants (model id)</h2>
-        <p class="small text-muted">Stored in <code>manifest.json</code>, not .env. API keys are on the <strong>LLM / AI keys</strong> tab.</p>
+        <p class="small text-muted">Chat model is saved with your site settings. API keys are on the <strong>LLM / AI keys</strong> tab.</p>
         {% set _ai = config.ai_settings|default({}, true) %}
         {% set _cur_model = (_ai.chat_model or '')|trim %}
         <div class="mb-3">
           <label class="form-label" for="ai_chat_model">Chat model id</label>
           <select id="ai_chat_model" name="ai_chat_model" class="form-select" aria-describedby="ai_chat_model_help">
-            <option value="" {% if not _cur_model %}selected{% endif %}>Use <code>OPENAI_MODEL</code> from .env</option>
+            <option value="" {% if not _cur_model %}selected{% endif %}>Use default from LLM / AI keys</option>
             {% for val, lbl in chat_model_choices %}
             <option value="{{ val }}" {% if _cur_model == val %}selected{% endif %}>{{ lbl }}</option>
             {% endfor %}
@@ -93,7 +154,7 @@
             <label class="form-label small text-muted mb-1" for="ai_chat_model_custom">Custom model id</label>
             <input type="text" id="ai_chat_model_custom" name="ai_chat_model_custom" class="form-control font-monospace small" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. openai/gpt-4o">
           </div>
-          <div id="ai_chat_model_help" class="form-text">Pick a preset or <strong>Other…</strong> for any OpenAI-compatible id. Blank top option uses the default model from the LLM tab / <code>.env</code>.</div>
+          <div id="ai_chat_model_help" class="form-text">Pick a preset or <strong>Other…</strong> for any compatible model id. The first option uses the default from the <strong>LLM / AI keys</strong> tab.</div>
         </div>
         <script>
         (function () {
@@ -121,6 +182,15 @@
       <form method="POST">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="settings_section" value="smtp">
+        {% if env_ctx.smtp.stored_on_volume %}
+        <div class="alert alert-info small mb-3" role="status">
+          Email settings are saved with your hosted storage and are kept across application updates.
+        </div>
+        {% elif not env_ctx.persistent_storage.configured %}
+        <div class="alert alert-warning small mb-3" role="status">
+          Without persistent storage, email settings you save here may be lost if the server is replaced. Use the storage notice at the top of this page, or ask your host to set SMTP in the platform environment if needed.
+        </div>
+        {% endif %}
         <div class="mb-3">
           <label class="form-label" for="smtp_host">SMTP host</label>
           <input type="text" class="form-control" id="smtp_host" name="smtp_host" value="{{ env_ctx.smtp.host }}">
@@ -137,14 +207,32 @@
           <label class="form-label" for="smtp_password">SMTP password</label>
           <input type="password" class="form-control" id="smtp_password" name="smtp_password" value="" autocomplete="new-password"
                  placeholder="{% if env_ctx.smtp.password_set %}Leave blank to keep current password{% else %}Enter password{% endif %}">
-          {% if env_ctx.smtp.password_set %}<div class="form-text">A password is already saved in .env.</div>{% endif %}
+          {% if env_ctx.smtp.password_set %}<div class="form-text">A password is already saved.</div>{% endif %}
         </div>
         <div class="mb-3">
-          <label class="form-label" for="smtp_use_tls">Use TLS</label>
-          <select class="form-select" id="smtp_use_tls" name="smtp_use_tls">
-            <option value="true" {% if env_ctx.smtp.use_tls %}selected{% endif %}>Yes</option>
-            <option value="false" {% if not env_ctx.smtp.use_tls %}selected{% endif %}>No</option>
+          <label class="form-label" for="smtp_connection_mode">Connection security</label>
+          <select class="form-select" id="smtp_connection_mode" name="smtp_connection_mode">
+            <option value="starttls" {% if env_ctx.smtp.connection_mode == 'starttls' %}selected{% endif %}>STARTTLS (typical for port 587 — e.g. IONOS, Microsoft 365)</option>
+            <option value="ssl" {% if env_ctx.smtp.connection_mode == 'ssl' %}selected{% endif %}>Implicit SSL / SMTPS (typical for port 465)</option>
+            <option value="plain" {% if env_ctx.smtp.connection_mode == 'plain' %}selected{% endif %}>None (plain SMTP — not recommended)</option>
           </select>
+          <div class="form-text">Match your provider’s documentation. Wrong mode often causes long hangs or “timed out” instead of a clear auth error.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_timeout">SMTP timeout (seconds)</label>
+          <input type="number" class="form-control" id="smtp_timeout" name="smtp_timeout" min="5" max="300" step="1"
+                 value="{{ env_ctx.smtp.timeout|default('30', true) }}">
+          <div class="form-text">Socket timeout for connect and commands (5–300). Default 30.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_from">From address (optional)</label>
+          <input type="text" class="form-control" id="smtp_from" name="smtp_from" value="{{ env_ctx.smtp.from_email }}"
+                 placeholder="Defaults to SMTP username if empty" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="smtp_from_name">From display name (optional)</label>
+          <input type="text" class="form-control" id="smtp_from_name" name="smtp_from_name" value="{{ env_ctx.smtp.from_name }}"
+                 placeholder="e.g. Sparrow ERP" autocomplete="off">
         </div>
         <button type="submit" class="btn btn-primary">Save email settings</button>
       </form>
@@ -157,52 +245,51 @@
         <input type="hidden" name="settings_section" value="integrations">
 
         <h3 class="h6">GitLab (updates &amp; marketplace)</h3>
-        <p class="small text-muted">Use a <strong>read_api</strong> or project access token if the repository is private. Without this, the Version page cannot check for updates.</p>
+        <p class="small text-muted">If Sparrow is hosted against a <strong>private</strong> GitLab project, add a token with read access to the API so the Updates page can check for new versions.</p>
 
         <div class="mb-3">
-          <label class="form-label" for="gitlab_token">GitLab read token (<code>GITLAB_TOKEN</code>)</label>
+          <label class="form-label" for="gitlab_token">GitLab access token</label>
           <input type="text" class="form-control font-monospace small" id="gitlab_token" name="gitlab_token" autocomplete="off" spellcheck="false"
                  value="{{ env_ctx.gitlab.token_current }}">
           <div class="form-text small">
-            Prefilled from the server environment: <code>GITLAB_TOKEN</code>, or if that is empty, <code>SPARROW_OFFICIAL_REGISTRY_TOKEN</code> (handy for Railway/host-only deploy tokens).
-            Saving writes this value into <code>GITLAB_TOKEN</code> in <code>.env</code> so it persists with the app. Anyone with Settings access can see this field.
+            Required for private repositories. Anyone who can open Core settings can see values saved here.
           </div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_gitlab_token" value="1" id="clear_gitlab_token">
-          <label class="form-check-label text-danger small" for="clear_gitlab_token">Remove <code>GITLAB_TOKEN</code> from <code>.env</code> (host env such as <code>SPARROW_OFFICIAL_REGISTRY_TOKEN</code> may still apply until you unset it on the platform)</label>
+          <label class="form-check-label text-danger small" for="clear_gitlab_token">Remove saved GitLab token</label>
         </div>
 
         <div class="row g-2">
           <div class="col-md-6 mb-3">
-            <label class="form-label" for="gitlab_username">Deploy username (<code>GITLAB_USERNAME</code>)</label>
+            <label class="form-label" for="gitlab_username">GitLab deploy username</label>
             <input type="text" class="form-control" id="gitlab_username" name="gitlab_username" value="{{ env_ctx.gitlab.username }}" autocomplete="off">
           </div>
           <div class="col-md-6 mb-3">
-            <label class="form-label" for="gitlab_password">Deploy password</label>
+            <label class="form-label" for="gitlab_password">GitLab deploy password</label>
             <input type="password" class="form-control" id="gitlab_password" name="gitlab_password" autocomplete="new-password"
                    placeholder="{% if env_ctx.gitlab.password_set %}Leave blank to keep{% else %}Optional if using token{% endif %}">
           </div>
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_gitlab_password" value="1" id="clear_gitlab_password">
-          <label class="form-check-label small" for="clear_gitlab_password">Remove deploy password from .env</label>
+          <label class="form-check-label small" for="clear_gitlab_password">Remove saved deploy password</label>
         </div>
 
         <div class="mb-3">
-          <label class="form-label" for="gitlab_project_id">Project ID (<code>GITLAB_PROJECT_ID</code> / <code>CORE_PROJECT_ID</code>)</label>
+          <label class="form-label" for="gitlab_project_id">GitLab project ID</label>
           <input type="text" class="form-control" id="gitlab_project_id" name="gitlab_project_id" value="{{ env_ctx.gitlab.project_id }}" placeholder="e.g. 65546585">
         </div>
         <div class="mb-3">
           <label class="form-label" for="core_manifest_remote_url">Core manifest URL (optional)</label>
           <input type="url" class="form-control" id="core_manifest_remote_url" name="core_manifest_remote_url" value="{{ env_ctx.gitlab.core_manifest_url }}"
-                 placeholder="Override <code>CORE_MANIFEST_REMOTE_URL</code> if not using default GitLab API path">
+                 placeholder="Only if your host uses a non-default manifest URL">
         </div>
 
         <hr>
         <h3 class="h6">Sessions &amp; cache</h3>
         <div class="mb-3">
-          <label class="form-label" for="redis_url"><code>REDIS_URL</code></label>
+          <label class="form-label" for="redis_url">Redis URL (optional)</label>
           <input type="text" class="form-control font-monospace small" id="redis_url" name="redis_url" value="{{ env_ctx.infra.redis_url }}" placeholder="redis://…">
         </div>
 
@@ -215,36 +302,36 @@
       <form method="POST">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="settings_section" value="llm">
-        <p class="small text-muted">Contractor AI uses the OpenAI-compatible SDK. Keys are stored only in .env.</p>
+        <p class="small text-muted">Keys for OpenAI-compatible and Gemini providers used by in-app AI features.</p>
 
         <div class="mb-3">
-          <label class="form-label" for="openai_api_key"><code>OPENAI_API_KEY</code></label>
+          <label class="form-label" for="openai_api_key">OpenAI API key</label>
           <input type="password" class="form-control" id="openai_api_key" name="openai_api_key" autocomplete="new-password"
                  placeholder="{% if env_ctx.llm.openai_key_set %}Set — leave blank to keep{% else %}sk- or OpenRouter key{% endif %}">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_openai_api_key" value="1" id="clear_openai_api_key">
-          <label class="form-check-label small" for="clear_openai_api_key">Clear <code>OPENAI_API_KEY</code></label>
+          <label class="form-check-label small" for="clear_openai_api_key">Clear OpenAI API key</label>
         </div>
 
         <div class="mb-3">
-          <label class="form-label" for="sparrow_openai_key"><code>SPARROW_OPENAI_API_KEY</code> (alias)</label>
+          <label class="form-label" for="sparrow_openai_key">Alternate OpenAI key (optional)</label>
           <input type="password" class="form-control" id="sparrow_openai_key" name="sparrow_openai_key" autocomplete="new-password"
                  placeholder="{% if env_ctx.llm.sparrow_key_set %}Set — leave blank to keep{% endif %}">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_sparrow_openai_key" value="1" id="clear_sparrow_openai_key">
-          <label class="form-check-label small" for="clear_sparrow_openai_key">Clear alias</label>
+          <label class="form-check-label small" for="clear_sparrow_openai_key">Clear alternate OpenAI key</label>
         </div>
 
         <div class="mb-3">
-          <label class="form-label" for="gemini_api_key"><code>GEMINI_API_KEY</code></label>
+          <label class="form-label" for="gemini_api_key">Google Gemini API key</label>
           <input type="password" class="form-control" id="gemini_api_key" name="gemini_api_key" autocomplete="new-password"
                  placeholder="{% if env_ctx.llm.gemini_key_set %}Set — leave blank to keep{% endif %}">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_gemini_key" value="1" id="clear_gemini_key">
-          <label class="form-check-label small" for="clear_gemini_key">Clear <code>GEMINI_API_KEY</code></label>
+          <label class="form-check-label small" for="clear_gemini_key">Clear Gemini API key</label>
         </div>
 
         <div class="mb-3">
@@ -256,19 +343,19 @@
           </select>
         </div>
         <div class="mb-3">
-          <label class="form-label" for="openai_base_url"><code>OPENAI_BASE_URL</code> (optional override)</label>
+          <label class="form-label" for="openai_base_url">API base URL (optional)</label>
           <input type="text" class="form-control font-monospace small" id="openai_base_url" name="openai_base_url" value="{{ env_ctx.llm.base_url }}">
         </div>
         <div class="mb-3">
-          <label class="form-label" for="openai_model"><code>OPENAI_MODEL</code> (when manifest model is blank)</label>
+          <label class="form-label" for="openai_model">Default chat model (when General &amp; branding model is not set)</label>
           <input type="text" class="form-control" id="openai_model" name="openai_model" value="{{ env_ctx.llm.model }}" placeholder="e.g. gpt-4o-mini">
         </div>
         <div class="mb-3">
-          <label class="form-label" for="openrouter_http_referer">OpenRouter <code>HTTP-Referer</code></label>
+          <label class="form-label" for="openrouter_http_referer">OpenRouter HTTP referer URL</label>
           <input type="url" class="form-control" id="openrouter_http_referer" name="openrouter_http_referer" value="{{ env_ctx.llm.openrouter_referer }}">
         </div>
         <div class="mb-3">
-          <label class="form-label" for="openrouter_site_title">OpenRouter <code>X-Title</code></label>
+          <label class="form-label" for="openrouter_site_title">OpenRouter site title (X-Title)</label>
           <input type="text" class="form-control" id="openrouter_site_title" name="openrouter_site_title" value="{{ env_ctx.llm.openrouter_title }}">
         </div>
 
@@ -282,31 +369,125 @@
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="settings_section" value="security">
         <div class="alert alert-warning small">
-          Rotating <code>SECRET_KEY</code> invalidates existing sessions. Do this in a maintenance window if possible.
+          Changing the application secret signs everyone out. Prefer a short maintenance window if you rotate it.
         </div>
         <div class="mb-3">
-          <label class="form-label" for="secret_key"><code>SECRET_KEY</code></label>
+          <label class="form-label" for="secret_key">Application secret key</label>
           <input type="password" class="form-control font-monospace" id="secret_key" name="secret_key" autocomplete="new-password"
                  placeholder="{% if env_ctx.security.secret_set %}Leave blank to keep{% else %}Required in production{% endif %}">
           {% if env_ctx.security.secret_set %}<div class="form-text">A value is set.</div>{% endif %}
         </div>
         <div class="form-check mb-4">
           <input class="form-check-input" type="checkbox" name="clear_secret_key" value="1" id="clear_secret_key">
-          <label class="form-check-label text-danger small" for="clear_secret_key">Remove SECRET_KEY (not recommended)</label>
+          <label class="form-check-label text-danger small" for="clear_secret_key">Remove application secret (not recommended)</label>
         </div>
 
         <div class="mb-3">
-          <label class="form-label" for="jwt_secret_key"><code>JWT_SECRET_KEY</code> (optional)</label>
+          <label class="form-label" for="jwt_secret_key">JWT signing secret (optional)</label>
           <input type="password" class="form-control font-monospace" id="jwt_secret_key" name="jwt_secret_key" autocomplete="new-password"
-                 placeholder="{% if env_ctx.security.jwt_set %}Leave blank to keep{% else %}Defaults to SECRET_KEY if empty{% endif %}">
+                 placeholder="{% if env_ctx.security.jwt_set %}Leave blank to keep{% else %}Uses application secret if empty{% endif %}">
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" name="clear_jwt_secret_key" value="1" id="clear_jwt_secret_key">
-          <label class="form-check-label small" for="clear_jwt_secret_key">Remove JWT_SECRET_KEY</label>
+          <label class="form-check-label small" for="clear_jwt_secret_key">Remove JWT signing secret</label>
         </div>
 
         <button type="submit" class="btn btn-primary">Save security settings</button>
       </form>
+    </div>
+
+    <!-- Vendor support (time-limited shadow login; customer-initiated) -->
+    <div class="tab-pane fade {% if active_tab == 'support_access' %}show active{% endif %}" id="pane-support-access" role="tabpanel">
+      {% set sas = support_access_status if support_access_status is defined else {} %}
+      <p class="small text-muted mb-3">
+        Create a <strong>time-limited</strong> sign-in for vendor support (for example on a screen share). It does <strong>not</strong> count toward your licensed user seats.
+        In the product it behaves like a superuser except it cannot open Core settings, user management, Updates, or plugin install.
+        The password is shown <strong>once</strong>—copy it before leaving this page. <strong>Revoke</strong> access when the call ends.
+        Default username: <strong>{{ sas.get('shadow_username', 'sparrowsupport') }}</strong>.
+        For the <strong>employee / contractor portal</strong>, use email <code class="small">support-access@invalid.local</code>
+        with the <strong>same</strong> password. Hosting must set <code>SPARROW_SUPPORT_EMPLOYEE_PORTAL_CONTRACTOR_ID</code>
+        to an active contractor id (often a dedicated preview employee) so support sees that person&apos;s data.
+      </p>
+      {% if support_access_otp is defined and support_access_otp %}
+      <div class="alert alert-warning border border-warning">
+        <p class="mb-2 fw-semibold">Copy now — this password cannot be retrieved later.</p>
+        <dl class="row small mb-0">
+          <dt class="col-sm-3">Username</dt><dd class="col-sm-9 font-monospace">{{ support_access_otp.username }}</dd>
+          <dt class="col-sm-3">Password</dt><dd class="col-sm-9 font-monospace user-select-all">{{ support_access_otp.password }}</dd>
+          <dt class="col-sm-3">Expires</dt><dd class="col-sm-9 font-monospace">{{ support_access_otp.expires_at or '—' }}</dd>
+        </dl>
+      </div>
+      {% endif %}
+
+      <div class="mb-3">
+        <span class="fw-semibold">Status:</span>
+        {% if sas.get('state') == 'active' %}
+        <span class="text-success">Active</span> until {{ sas.expires_at }}.
+        {% elif sas.get('state') == 'expired' %}
+        <span class="text-secondary">Expired</span> — generate new credentials if needed.
+        {% elif sas.get('state') == 'revoked' %}
+        <span class="text-secondary">Revoked</span>
+        {% else %}
+        <span class="text-secondary">Inactive</span> (no active window).
+        {% endif %}
+      </div>
+
+      <form method="POST" class="border rounded p-3 mb-4">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="settings_section" value="support_access">
+        <div class="mb-3">
+          <label class="form-label" for="support_access_duration">Session length</label>
+          <select class="form-select" id="support_access_duration" name="support_access_duration">
+            {% for m in [15, 30, 45, 60, 90, 120] %}
+            <option value="{{ m }}" {% if m == (sas.get('duration_default') or 30) %}selected{% endif %}>{{ m }} minutes</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Between {{ sas.get('duration_min', 15) }} and {{ sas.get('duration_max', 120) }} minutes.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="support_access_note">Reference / ticket (optional)</label>
+          <input type="text" class="form-control" id="support_access_note" name="support_access_note" maxlength="500" autocomplete="off" placeholder="e.g. Ticket #12345">
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="submit" name="support_access_action" value="generate" class="btn btn-primary">Generate access</button>
+          <button type="submit" name="support_access_action" value="revoke" class="btn btn-outline-danger" formnovalidate>Revoke access</button>
+        </div>
+      </form>
+
+      <h3 class="h6 text-muted text-uppercase">Activity</h3>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+          <thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Note</th><th>Until</th></tr></thead>
+          <tbody>
+            {% for row in sas.get('history') or [] %}
+            <tr>
+              <td class="small text-nowrap">{{ row.created_at }}</td>
+              <td class="small">{{ row.action }}</td>
+              <td class="small">{{ row.actor_username }}</td>
+              <td class="small">{{ row.note or '—' }}</td>
+              <td class="small">{{ row.expires_at or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted small">No events yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Plan: read-only user entitlement (provisioned by provider; not editable here) -->
+    <div class="tab-pane fade {% if active_tab == 'plan' %}show active{% endif %}" id="pane-plan" role="tabpanel">
+      {% set su = seat_usage if seat_usage is defined else {} %}
+      <p class="small text-muted mb-4">
+        Users are counted once per email across core logins and active employee-portal accounts.
+        Time-limited vendor support logins from <strong>Support access</strong> are excluded from this count.
+      </p>
+      {% if su.get('unlimited') %}
+        <p class="mb-3">Your plan does not set a fixed user limit on this system.</p>
+      {% else %}
+        <p class="mb-3">Your plan is set to allow up to <strong class="fs-5">{{ su.get('limit', 30) }}</strong> users on this system.</p>
+      {% endif %}
+      <p class="mb-0 text-muted small">Users counted toward your plan: <strong>{{ su.get('used', 0) }}</strong></p>
     </div>
   </div>
 </div>

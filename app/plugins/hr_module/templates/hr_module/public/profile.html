@@ -17,11 +17,14 @@
 <section class="card card-body mb-4 bg-dark border-secondary">
   <h2 class="h6 text-secondary">Documents on file</h2>
   <p class="small mb-0">Summary of what we hold. Expiry dates are shown where applicable.</p>
+  {% if compliance_expired_items %}
+  <p class="small text-warning mt-2 mb-0">Some dates below are in the past — please contact HR to renew.</p>
+  {% endif %}
   <ul class="small mb-0 mt-2 list-unstyled">
-    {% if profile.driving_licence_number or profile.driving_licence_expiry %}<li>Driving licence: {{ profile.driving_licence_number or '—' }} · Expires {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}</li>{% endif %}
-    {% if profile.right_to_work_type or profile.right_to_work_expiry %}<li>Right to work: {{ profile.right_to_work_type|hr_profile_field }} · Expires {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}</li>{% endif %}
-    {% if profile.dbs_level or profile.dbs_expiry %}<li>DBS: {{ profile.dbs_level|hr_profile_field }} · Expires {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}</li>{% endif %}
-    {% if profile.contract_type or profile.contract_end %}<li>Contract: {{ profile.contract_type|hr_profile_field }} · End date {{ profile.contract_end|string if profile.contract_end else '—' }}</li>{% endif %}
+    {% if profile.driving_licence_number or profile.driving_licence_expiry %}<li>Driving licence: {{ profile.driving_licence_number or '—' }} · Expires {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}{% if 'driving_licence' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.right_to_work_type or profile.right_to_work_expiry %}<li>Right to work: {{ profile.right_to_work_type|hr_profile_field }} · Expires {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}{% if 'right_to_work' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.dbs_level or profile.dbs_expiry %}<li>DBS: {{ profile.dbs_level|hr_profile_field }} · Expires {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}{% if 'dbs' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.contract_type or profile.contract_end %}<li>Contract: {{ profile.contract_type|hr_profile_field }} · End date {{ profile.contract_end|string if profile.contract_end else '—' }}{% if 'contract_end' in expired_compliance_doc_types %} <span class="badge bg-danger">Ended</span>{% endif %}</li>{% endif %}
   </ul>
 </section>
 {% endif %}

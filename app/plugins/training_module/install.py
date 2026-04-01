@@ -27,6 +27,7 @@ MODULE_TABLES = [
     "training_assignments",
     "training_items",
     "trn_audit_log",
+    "trn_person_competencies",
     "trn_course_assignment_rules",
     "trn_question_options",
     "trn_questions",
@@ -312,6 +313,27 @@ CREATE TABLE IF NOT EXISTS trn_audit_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# HR-linked register: skills, qualification evidence (file + expiry), clinical grade for CAD/dispatch.
+SQL_CREATE_TRN_PERSON_COMPETENCIES = """
+CREATE TABLE IF NOT EXISTS trn_person_competencies (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  contractor_id INT NOT NULL,
+  competency_kind ENUM('skill','qualification','clinical_grade') NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  use_hr_job_title TINYINT(1) NOT NULL DEFAULT 0,
+  file_path VARCHAR(512) DEFAULT NULL,
+  issued_on DATE DEFAULT NULL,
+  expires_on DATE DEFAULT NULL,
+  notes TEXT,
+  created_by_user_id INT DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_trn_pc_contractor (contractor_id),
+  KEY idx_trn_pc_expires (contractor_id, expires_on),
+  CONSTRAINT fk_trn_pc_contractor FOREIGN KEY (contractor_id) REFERENCES tb_contractors(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 LEGACY_MIGRATION_FILENAME = "legacy_training_migrated_to_trn_v1"
 
 CREATES = [
@@ -333,6 +355,7 @@ CREATES = [
     SQL_CREATE_TRN_EXEMPTIONS,
     SQL_CREATE_TRN_COURSE_ASSIGNMENT_RULES,
     SQL_CREATE_TRN_AUDIT,
+    SQL_CREATE_TRN_PERSON_COMPETENCIES,
 ]
 
 

@@ -59,7 +59,8 @@
       tbody.innerHTML = '';
       list.forEach(function(c) {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + (c.name || '') + '</td><td>' + (c.code || '—') + '</td><td>' + (c.description ? (c.description.length > 50 ? c.description.slice(0, 50) + '…' : c.description) : '—') + '</td><td>' + (c.sort_order ?? 0) + '</td><td><button type="button" class="btn btn-sm btn-outline-primary me-1 edit-cat" data-id="' + c.id + '">Edit</button><button type="button" class="btn btn-sm btn-outline-danger delete-cat" data-id="' + c.id + '">Delete</button></td>';
+        var nameCell = '<a href="' + base + '/items?category_id=' + encodeURIComponent(c.id) + '" title="Open items in this category">' + (c.name || '') + '</a>';
+        tr.innerHTML = '<td>' + nameCell + '</td><td>' + (c.code || '—') + '</td><td>' + (c.description ? (c.description.length > 50 ? c.description.slice(0, 50) + '…' : c.description) : '—') + '</td><td>' + (c.sort_order ?? 0) + '</td><td><button type="button" class="btn btn-sm btn-outline-primary me-1 edit-cat" data-id="' + c.id + '">Edit</button><button type="button" class="btn btn-sm btn-outline-danger delete-cat" data-id="' + c.id + '">Delete</button></td>';
         tbody.appendChild(tr);
       });
       document.getElementById('categories-status').textContent = list.length + ' categor' + (list.length === 1 ? 'y' : 'ies');

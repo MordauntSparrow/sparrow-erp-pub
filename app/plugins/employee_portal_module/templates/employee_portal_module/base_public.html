@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0d6efd">
+  <link rel="manifest" href="{{ url_for('public_employee_portal.pwa_manifest') }}">
   <meta name="description" content="{% block meta_description %}Employee portal: sign in to access time billing, HR, compliance, scheduling and more.{% endblock %}">
   <title>{% block title %}{{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Employee Portal' }}{% endblock %}</title>
   {% if ((config or {}).get('site_settings') or {}).get('favicon_path') %}
@@ -208,5 +210,13 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   {% block scripts %}{% endblock %}
   {% block extra_scripts %}{% endblock %}
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register(
+        "{{ url_for('public_employee_portal.pwa_service_worker') }}",
+        { scope: "{{ pwa_scope|default('/employee-portal/') }}" }
+      ).catch(function () {});
+    }
+  </script>
 </body>
 </html>

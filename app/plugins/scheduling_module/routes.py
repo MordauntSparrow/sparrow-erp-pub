@@ -15,6 +15,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from app.objects import PluginManager, get_db_connection
+from app.portal_session import contractor_id_from_tb_user
 from .services import ScheduleService, SlingSyncService
 from .ai_chat import chat as ai_chat, is_ai_available
 
@@ -88,10 +89,7 @@ def _staff_required(view):
 
 
 def _current_contractor_id():
-    u = session.get("tb_user")
-    if not u or u.get("id") is None:
-        return None
-    return int(u["id"])
+    return contractor_id_from_tb_user(session.get("tb_user"))
 
 
 def _admin_required_scheduling(view):
@@ -100,7 +98,7 @@ def _admin_required_scheduling(view):
     @login_required
     def wrapped(*args, **kwargs):
         role = (getattr(current_user, "role", None) or "").lower()
-        if role not in ("admin", "superuser"):
+        if role not in ("admin", "superuser", "support_break_glass"):
             flash("Admin access required.", "error")
             return redirect(url_for("routes.dashboard"))
         return view(*args, **kwargs)

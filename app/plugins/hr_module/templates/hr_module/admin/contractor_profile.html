@@ -20,25 +20,64 @@
       {% endif %}
       <div class="min-w-0">
         <h1 class="mb-1 text-truncate">{{ profile.name or profile.email }}</h1>
-        <p class="text-muted small mb-0">{{ profile.email }} · {{ profile.status|hr_contractor_status }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}{% if profile.department %} · {{ profile.department }}{% endif %} · Ref. {{ profile.id }}</p>
+        <p class="small text-muted mb-1">Login username <code class="user-select-all">{{ profile.username or '—' }}</code></p>
+        <p class="text-muted small mb-0">{{ profile.email }} · {{ profile.status|hr_contractor_status }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}{% if profile.department %} · {{ profile.department }}{% endif %}</p>
       </div>
     </div>
+    {% if hr_can_edit_employees %}
     <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}" class="btn btn-primary btn-sm flex-shrink-0">Edit profile</a>
+    {% endif %}
   </div>
 
   <div class="card mb-4">
     <div class="card-header"><strong>Role &amp; organisation</strong></div>
     <div class="card-body">
-      <p class="mb-1"><strong>Job title / role</strong> {{ profile.job_title or '—' }}</p>
+      <p class="mb-1"><strong>Time Billing role</strong> {{ profile.tb_role_name or '—' }}</p>
+      <p class="mb-1"><strong>Job title (HR)</strong> {{ profile.job_title or '—' }}</p>
       <p class="mb-1"><strong>Department</strong> {{ profile.department or '—' }}</p>
       <p class="mb-0"><strong>Manager</strong>
         {% if profile.manager_contractor_id %}
-        <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.manager_contractor_id) }}">{{ profile.manager_name or profile.manager_email or ('Ref. ' ~ profile.manager_contractor_id) }}</a>
+        <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.manager_contractor_id) }}">{{ profile.manager_name or profile.manager_email or 'Manager profile' }}</a>
         {% if profile.manager_email and profile.manager_name %}<span class="text-muted small"> · {{ profile.manager_email }}</span>{% endif %}
         {% else %}—{% endif %}
       </p>
+      {% if direct_reports %}
+      <p class="mb-0 mt-2"><strong>Direct reports</strong></p>
+      <ul class="small mb-0 mt-1">
+        {% for dr in direct_reports %}
+        <li><a href="{{ url_for('internal_hr.admin_contractor_profile', cid=dr.id) }}">{{ dr.name or dr.email }}</a>{% if dr.email %} <span class="text-muted">· {{ dr.email }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
   </div>
+
+  {% if onboarding_packs and hr_can_document_requests %}
+  <div class="card mb-4">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong class="mb-0">Onboarding document pack</strong>
+      {% if hr_can_configure_onboarding_packs %}
+      <a href="{{ url_for('internal_hr.admin_onboarding_packs_list') }}" class="btn btn-sm btn-outline-secondary">Edit packs</a>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">Send a standard set of HR document requests in one step. Skips any type that already has an open request.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_onboarding_pack', cid=profile.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6">
+          <select class="form-select form-select-sm" name="pack_key" required>
+            {% for p in onboarding_packs %}
+            <option value="{{ p.key }}">{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">Apply pack</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   {% if compliance_gaps %}
   <div class="card border-warning mb-4" id="compliance-gaps">
@@ -56,13 +95,15 @@
                 <div class="small text-muted">{{ gap.hint }}</div>
               </td>
               <td class="text-nowrap text-end">
+                {% if hr_can_library %}
                 <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id, focus_cat=gap.upload_category) }}#documents">Upload</a>
+                {% endif %}
                 {% set req_state = (open_doc_request_button_state|default({})).get(gap.request_type) %}
                 {% if req_state == 'awaiting_review' %}
                 <button type="button" class="btn btn-sm btn-secondary" disabled title="Open Document requests below to approve or reject.">File uploaded — review below</button>
                 {% elif req_state == 'awaiting_upload' %}
                 <button type="button" class="btn btn-sm btn-secondary" disabled title="A request is already open for this item.">Awaiting upload from request</button>
-                {% else %}
+                {% elif hr_can_document_requests %}
                 <form method="post" action="{{ url_for('internal_hr.admin_contractor_quick_request', cid=profile.id) }}" class="d-inline">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="request_type" value="{{ gap.request_type }}">
@@ -78,44 +119,122 @@
       </div>
     </div>
   </div>
-  {% else %}
+  {% elif not compliance_expired_items %}
   <div class="alert alert-success py-2 small mb-4">Core compliance items look complete (expiries, linked files, or document library). Review sections below for detail.</div>
   {% endif %}
 
-  {% if ventus_plugin_available %}
-  <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <strong>Ventus CAD — roles &amp; skills</strong>
-      <a href="{{ url_for('medical_response_internal.landing') }}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener">Open Ventus</a>
+  {% if compliance_expired_items %}
+  <div class="card border-danger mb-4" id="compliance-expired">
+    <div class="card-header bg-danger bg-opacity-10"><strong>Expired on file</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">The following dates are before today. Update the profile or document library and renew as needed.</p>
+      <ul class="small mb-0">
+        {% for it in compliance_expired_items %}
+        <li><span class="badge bg-danger me-1">Expired</span> <strong>{{ it.label }}</strong> — was {{ it.expiry_date|string }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if training_competencies_table_ready %}
+  <div class="card mb-4" id="training-competencies">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Training register — skills, qualifications &amp; clinical grade</strong>
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
+      <a href="{{ url_for('internal_training.admin_person_competencies', contractor_id=profile.id) }}" class="btn btn-sm btn-primary">Manage in Training</a>
+      {% endif %}
     </div>
     <div class="card-body">
-      {% if ventus_crew_profiles %}
-        {% for vp in ventus_crew_profiles %}
-        <div class="{% if not loop.first %}border-top pt-3 mt-3{% endif %}">
-          <div class="fw-semibold">{{ vp.username }}</div>
-          <p class="small text-muted mb-1">Linked for CAD and dispatch.</p>
-          {% if vp.skills %}
-          <div class="small mb-1"><span class="text-muted">Skills:</span>
-            {% for s in vp.skills %}
-              {% if s is mapping %}{{ s.label or s.name or s.grade or s }}{% else %}{{ s }}{% endif %}{% if not loop.last %}, {% endif %}
+      <p class="small text-muted mb-3">Maintained in the Training module and shown on this HR file. Ventus CAD and dispatch use this register together with <strong>HR job title</strong> where configured.</p>
+      {% if training_person_competencies %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Type</th>
+              <th>Detail</th>
+              <th>Dates</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in training_person_competencies %}
+            {% set exp_s = (r.expires_on|string)[:10] if r.expires_on else '' %}
+            <tr class="{% if exp_s and training_competency_today_iso and exp_s < training_competency_today_iso %}table-warning{% endif %}">
+              <td class="text-nowrap small">{{ (r.competency_kind or '')|replace('_', ' ')|title }}</td>
+              <td class="small">
+                {% if r.use_hr_job_title %}<span class="badge bg-secondary me-1">Uses HR job title</span>{% endif %}
+                {{ r.label or '—' }}
+                {% if r.notes %}<div class="text-muted mt-1">{{ r.notes }}</div>{% endif %}
+              </td>
+              <td class="small text-nowrap">
+                {% if r.issued_on %}<div>Issued {{ (r.issued_on|string)[:10] }}</div>{% endif %}
+                {% if r.expires_on %}<div>Expires {{ (r.expires_on|string)[:10] }}</div>{% endif %}
+              </td>
+              <td class="small">
+                {% if r.file_path %}
+                <a href="{{ url_for('internal_training.admin_person_competency_file', contractor_id=profile.id, competency_id=r.id) }}" target="_blank" rel="noopener">Open file</a>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
             {% endfor %}
-          </div>
-          {% endif %}
-          {% if vp.qualifications %}
-          <div class="small mb-0"><span class="text-muted">Qualifications:</span>
-            {% for q in vp.qualifications %}
-              {% if q is mapping %}{{ q.label or q.name or q }}{% else %}{{ q }}{% endif %}{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          </div>
-          {% endif %}
-          {% if not vp.skills and not vp.qualifications %}
-          <p class="small text-muted mb-0">Add skills and qualifications in Ventus (crew profile).</p>
-          {% endif %}
-        </div>
-        {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% else %}
-        <p class="small text-muted mb-2">No Ventus crew profile is linked to this person yet. Link them in Ventus to show skills and qualifications here.</p>
-        <p class="small text-muted mb-0">Manage crew profiles in Ventus (CAD administration).</p>
+      <p class="small text-muted mb-0">No entries yet.{% if current_user.is_authenticated and can_open_org_admin_nav() %} Add them in Training.{% endif %}</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if hr_can_view_staff_activity_log %}
+  <div class="card mb-4" id="admin-activity-audit">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Activity &amp; access log (this person)</strong>
+      <span class="small text-muted">Rolling {{ staff_audit_retention_days|default(90) }}-day window</span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Mutating actions from the <strong>admin app</strong> (core users) and from <strong>contractor portals</strong> (time billing, employee portal, inventory) when this person is the actor or the subject. Clinical patient access stays in Cura audit.</p>
+      {% if staff_admin_audit_logs %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Channel / actor</th>
+              <th scope="col">What</th>
+              <th scope="col" class="text-end">HTTP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in staff_admin_audit_logs %}
+            <tr>
+              <td class="text-nowrap small">{{ row.created_at }}</td>
+              <td class="small">
+                {% if row.actor_channel == 'contractor_portal' %}
+                <span class="badge bg-info text-dark">Contractor</span>
+                {% if row.actor_contractor_id %}<span class="text-muted">#{{ row.actor_contractor_id }}</span>{% endif %}
+                {% else %}
+                <span class="badge bg-secondary">Admin</span>
+                {% endif %}
+                <div>{{ row.actor_username or row.actor_user_id or '—' }}</div>
+                {% if row.inferred_permission %}<div class="text-muted font-monospace small">{{ row.inferred_permission }}</div>{% endif %}
+              </td>
+              <td class="small">
+                <span class="font-monospace">{{ row.http_method }}</span>
+                <span class="text-break">{{ row.path }}</span>
+                {% if row.endpoint %}<div class="text-muted">{{ row.endpoint }}</div>{% endif %}
+              </td>
+              <td class="text-end small">{{ row.http_status }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No recorded actions for this person in the current retention window.</p>
       {% endif %}
     </div>
   </div>
@@ -137,7 +256,7 @@
         <div class="card-header"><strong>Driving licence</strong></div>
         <div class="card-body">
           <p class="mb-1">{{ profile.driving_licence_number or '—' }}</p>
-          <p class="mb-1">Expiry: {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}{% if 'driving_licence' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</p>
           {% if profile.driving_licence_document_path %}
           <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='driving_licence', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
           {% endif %}
@@ -147,7 +266,7 @@
         <div class="card-header"><strong>Right to work</strong></div>
         <div class="card-body">
           <p class="mb-1">Type: {{ profile.right_to_work_type|hr_profile_field }}</p>
-          <p class="mb-1">Expiry: {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}{% if 'right_to_work' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</p>
           {% if profile.right_to_work_document_path %}
           <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='right_to_work', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
           {% endif %}
@@ -156,12 +275,63 @@
     </div>
     <div class="col-lg-6">
       <div class="card mb-4">
-        <div class="card-header"><strong>DBS</strong></div>
+        <div class="card-header">
+          <strong>DBS</strong>
+        </div>
         <div class="card-body">
+          {% if dbs_update_service_enabled and profile.dbs_last_status_code == 'NEW_INFO' %}
+          <div class="alert alert-danger small py-2 mb-3 mb-md-3">Last CRSC result was <strong>NEW_INFO</strong>. Follow your organisation’s DBS / safeguarding process and Umbrella Body guidance.</div>
+          {% endif %}
           <p class="mb-1">Level: {{ profile.dbs_level|hr_profile_field }} · Number: {{ profile.dbs_number or '—' }}</p>
           <p class="mb-1">Expiry: {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}</p>
           {% if profile.dbs_document_path %}
-          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='dbs', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          <p class="mb-1 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='dbs', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+          {% if dbs_update_service_enabled %}
+          <hr class="my-3">
+          <p class="small mb-1"><strong>Update Service</strong>
+            {% if profile.dbs_update_service_subscribed %}<span class="text-success">On</span>{% else %}<span class="text-muted">Off</span>{% endif %}
+            {% if profile.dbs_certificate_ref %} · Ref: {{ profile.dbs_certificate_ref }}{% endif %}
+          </p>
+          <p class="small mb-1 text-muted">Consent recorded: {% if profile.dbs_update_consent_at %}{{ profile.dbs_update_consent_at }}{% else %}—{% endif %}</p>
+          <p class="small mb-0"><strong>Last check</strong>
+            {% if profile.dbs_last_check_at %}{{ profile.dbs_last_check_at }}{% else %}—{% endif %}
+            {% if profile.dbs_last_status_code %} · <span class="font-monospace">{{ profile.dbs_last_status_code }}</span>{% endif %}
+          </p>
+          {% if hr_can_edit_employees %}
+          {% set _dbs_disclosure_ok = ((profile.dbs_certificate_ref or '')|trim) or ((profile.dbs_number or '')|trim) %}
+          {% set dbs_manual_check_ready = profile.dbs_update_service_subscribed and profile.dbs_update_consent_at and profile.date_of_birth and _dbs_disclosure_ok %}
+          <div class="mt-3 pt-2 border-top">
+            <p class="small text-muted mb-2 mb-md-2">Manual check calls the DBS CRSC status endpoint for this person (same as scheduled checks).</p>
+            {% if dbs_manual_check_ready %}
+            <form method="post" action="{{ url_for('internal_hr.admin_contractor_dbs_check_now', cid=profile.id) }}" class="m-0">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-primary">Run manual DBS Update Service check</button>
+            </form>
+            {% else %}
+            <button type="button" class="btn btn-sm btn-primary" disabled>Run manual DBS Update Service check</button>
+            <p class="small text-muted mb-0 mt-2">Enable Update Service and consent on file, add date of birth, and enter a disclosure ref or DBS number in <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}">Edit profile</a> before running a check.</p>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if dbs_check_logs %}
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>When</th><th>Result</th><th>Channel</th><th>By</th><th></th></tr></thead>
+              <tbody>
+                {% for row in dbs_check_logs %}
+                <tr>
+                  <td class="small text-nowrap">{{ row.checked_at }}</td>
+                  <td class="small font-monospace">{{ row.result_type or '—' }}</td>
+                  <td class="small">{{ row.channel or '—' }}</td>
+                  <td class="small">{{ row.checker_label or row.checker_user_id or '—' }}</td>
+                  <td class="small text-muted">{% if row.error_message %}<span title="{{ row.error_message|e }}">Error</span>{% elif row.http_status %}{{ row.http_status }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
           {% endif %}
         </div>
       </div>
@@ -169,7 +339,7 @@
         <div class="card-header"><strong>Contract</strong></div>
         <div class="card-body">
           <p class="mb-1">Type: {{ profile.contract_type|hr_profile_field }}</p>
-          <p class="mb-1">Start: {{ profile.contract_start|string if profile.contract_start else '—' }} · End: {{ profile.contract_end|string if profile.contract_end else '—' }}</p>
+          <p class="mb-1">Start: {{ profile.contract_start|string if profile.contract_start else '—' }} · End: {{ profile.contract_end|string if profile.contract_end else '—' }}{% if 'contract_end' in expired_compliance_doc_types %} <span class="badge bg-danger">Ended</span>{% endif %}</p>
           {% if profile.contract_document_path %}
           <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='contract', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
           {% endif %}
@@ -180,6 +350,7 @@
 
   <h2 class="h5 mt-4" id="documents">Document library</h2>
   <p class="text-muted small">Scanned or uploaded files stored against this employee.</p>
+  {% if hr_can_library %}
   <div class="card mb-4">
     <div class="card-body">
       <form method="post" action="{{ url_for('internal_hr.admin_employee_document_upload', cid=profile.id) }}" enctype="multipart/form-data" class="row g-2 align-items-end">
@@ -210,6 +381,7 @@
       </form>
     </div>
   </div>
+  {% endif %}
   {% if employee_documents %}
   <div class="table-responsive mb-4">
     <table class="table table-sm table-bordered align-middle">
@@ -229,10 +401,12 @@
           <td class="small text-muted">{{ d.created_at|string if d.created_at else '—' }}</td>
           <td class="text-nowrap">
             <a href="{{ url_for('internal_hr.admin_employee_document_file', doc_id=d.id) }}" class="btn btn-sm btn-outline-primary">Download</a>
+            {% if hr_can_library %}
             <form method="post" action="{{ url_for('internal_hr.admin_employee_document_delete', cid=profile.id, doc_id=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this document?');">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -271,6 +445,38 @@
   </div>
   {% else %}
   <p class="text-muted">No document requests.</p>
+  {% endif %}
+
+  {% if hr_can_edit_employees %}
+  <div class="card mb-4 border-primary border-opacity-25">
+    <div class="card-header"><strong>Portal login</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">Portal login accepts this username or their work email. The username was set when the employee was created in HR (from full name, or from a core admin <code>username</code> when a matching email existed). It is not edited from this screen.</p>
+      <p class="mb-3"><strong>Login username</strong> <code class="user-select-all">{{ profile.username or '—' }}</code></p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_portal_password', cid=profile.id) }}" class="row g-2 align-items-end mb-4">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-5">
+          <label class="form-label small mb-1" for="new_password">Set / reset password</label>
+          <input class="form-control form-control-sm" type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="8" required placeholder="New password (min 8 characters)">
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">Update password</button>
+        </div>
+      </form>
+      <hr class="my-3">
+      <p class="small text-danger mb-2"><strong>Delete employee</strong> removes their Sparrow contractor record (time sheets, HR profile data linked to this ID, etc. may be removed per database rules). This cannot be undone.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_delete', cid=profile.id) }}" class="row g-2 align-items-end" onsubmit="return confirm('Delete this employee permanently?');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6">
+          <label class="form-label small mb-1" for="confirm_email">Type work email to confirm</label>
+          <input class="form-control form-control-sm" type="email" id="confirm_email" name="confirm_email" required placeholder="{{ profile.email }}" autocomplete="off">
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-outline-danger">Delete employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
   {% endif %}
 
   <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to employees</a>

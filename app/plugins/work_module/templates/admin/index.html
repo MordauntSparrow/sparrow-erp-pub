@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ module_name }} – Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-3">{{ module_name }}</h1>
+  <p class="text-muted">{{ module_description }}</p>
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-lg-3">
+      <a href="{{ url_for('internal_work.admin_visits') }}" class="card text-decoration-none text-dark h-100 border-dark">
+        <div class="card-body">
+          <h5 class="card-title">Client visits</h5>
+          <p class="card-text small text-muted mb-0">Visit IDs per stop: client, site, times, photos — for billing &amp; evidence.</p>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a href="{{ url_for('internal_work.admin_stops') }}" class="card text-decoration-none text-dark h-100 border-primary">
+        <div class="card-body">
+          <h5 class="card-title">Recorded stops</h5>
+          <p class="card-text small text-muted mb-0">View shifts with times, notes and photo count. Drill to detail.</p>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a href="{{ url_for('internal_work.admin_gaps') }}" class="card text-decoration-none text-dark h-100 border-warning">
+        <div class="card-body">
+          <h5 class="card-title">Gaps report</h5>
+          <p class="card-text small text-muted mb-0">Shifts with no clock-in or clock-out recorded.</p>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a href="{{ url_for('internal_work.admin_photos') }}" class="card text-decoration-none text-dark h-100 border-info">
+        <div class="card-body">
+          <h5 class="card-title">Photo gallery</h5>
+          <p class="card-text small text-muted mb-0">Browse photos by date, contractor or shift.</p>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a href="{{ url_for('internal_work.admin_report') }}" class="card text-decoration-none text-dark h-100 border-success">
+        <div class="card-body">
+          <h5 class="card-title">Hours report</h5>
+          <p class="card-text small text-muted mb-0">Hours worked by contractor/client. Export CSV.</p>
+        </div>
+      </a>
+    </div>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="/plugin/scheduling_module/" class="btn btn-primary btn-sm">Scheduling (shifts)</a>
+    <a href="{{ url_for('routes.plugins') }}" class="btn btn-outline-secondary btn-sm">Plugins</a>
+    <a href="/" class="btn btn-outline-secondary btn-sm">Home</a>
+  </div>
+</div>
+{% endblock %}

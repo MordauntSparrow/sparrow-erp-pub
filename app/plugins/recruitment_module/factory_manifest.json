@@ -7,6 +7,35 @@
   "force_update": false,
   "description": "Job openings on the website, applicant portal, CV upload, and form-based assessments tied to hiring stages.",
   "dashboard_category": "People & HR",
+  "access_permission": "recruitment_module.access",
+  "alternate_access_permissions": [
+    "recruitment_module.read",
+    "recruitment_module.manage_setup",
+    "recruitment_module.manage_applications",
+    "recruitment_module.hire"
+  ],
+  "declared_permissions": [
+    {
+      "id": "recruitment_module.access",
+      "label": "Recruitment — full access (setup, pipeline, hire)"
+    },
+    {
+      "id": "recruitment_module.read",
+      "label": "Recruitment — view roles, openings, applications, CVs (read-only)"
+    },
+    {
+      "id": "recruitment_module.manage_setup",
+      "label": "Recruitment — job roles, openings, form templates, interview presets, retention"
+    },
+    {
+      "id": "recruitment_module.manage_applications",
+      "label": "Recruitment — pipeline, interviews, forms, pre-hire, notes"
+    },
+    {
+      "id": "recruitment_module.hire",
+      "label": "Recruitment — authorise hire and create employee (contractor) records"
+    }
+  ],
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/recruitment_module/icon.png",
   "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Frecruitment_module%2Frecruitment_module_v0.0.2.zip/raw?ref=main",
   "dependencies": [

@@ -15,17 +15,21 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from typing import List, Dict, Any, Optional, Set
 import time
 import hashlib
+import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import Header
 import os
 import mysql.connector
+from mysql.connector import errors as mysql_errors
 import bcrypt
 from flask_login import UserMixin
 
 from functools import wraps
 from flask import flash, redirect, url_for
+
+_logger = logging.getLogger(__name__)
 
 # Official Sparrow registry — used when env vars are unset so deployments work without .env.
 # Override with GITLAB_TOKEN / GITLAB_USERNAME / GITLAB_PASSWORD / CORE_PROJECT_ID (or GITLAB_PROJECT_ID).
@@ -50,17 +54,90 @@ def effective_gitlab_read_token() -> str:
 
 def effective_gitlab_basic_credentials() -> tuple:
     """(username, password) for GitLab HTTP basic auth; env first, then official-registry defaults."""
-    user = (os.environ.get("GITLAB_USERNAME") or "").strip() or _OFFICIAL_REGISTRY_GITLAB_USERNAME
-    password = (os.environ.get("GITLAB_PASSWORD") or "").strip() or _OFFICIAL_REGISTRY_GITLAB_PASSWORD
+    user = (os.environ.get("GITLAB_USERNAME") or "").strip(
+    ) or _OFFICIAL_REGISTRY_GITLAB_USERNAME
+    password = (os.environ.get("GITLAB_PASSWORD")
+                or "").strip() or _OFFICIAL_REGISTRY_GITLAB_PASSWORD
     return (user, password)
 
 
 def effective_core_project_id() -> str:
     """GitLab project id for core/registry API; env first, then official default."""
     return (
-        (os.environ.get("GITLAB_PROJECT_ID") or os.environ.get("CORE_PROJECT_ID") or "").strip()
+        (os.environ.get("GITLAB_PROJECT_ID")
+         or os.environ.get("CORE_PROJECT_ID") or "").strip()
         or _OFFICIAL_REGISTRY_CORE_PROJECT_ID
     )
+
+
+class DatabaseTemporarilyUnavailable(Exception):
+    """
+    Raised when MySQL remains unreachable after connect retries (e.g. Railway
+    cold start). Handled in Flask to show a friendly page instead of a traceback.
+    """
+
+
+def _mysql_connection_kwargs():
+    """Keyword args shared by direct connect and connection pool."""
+    kwargs = {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'user': os.getenv('DB_USER', 'root'),
+        'password': os.getenv('DB_PASSWORD', 'rootpassword'),
+        'database': os.getenv('DB_NAME', 'sparrow_erp'),
+    }
+    timeout_raw = os.getenv('DB_CONNECTION_TIMEOUT_SEC')
+    if timeout_raw:
+        try:
+            kwargs['connection_timeout'] = int(timeout_raw)
+        except ValueError:
+            pass
+    return kwargs
+
+
+def _is_transient_connect_error(exc):
+    """
+    True when the failure is likely a cold start / network race (e.g. Railway
+    services still waking). MySQL client errno 2003 = can't reach server.
+    """
+    if isinstance(exc, mysql_errors.InterfaceError):
+        return True
+    errno = getattr(exc, 'errno', None)
+    if errno == 2003:
+        return True
+    msg = str(exc).lower()
+    if '2003' in msg or "can't connect" in msg or 'connection refused' in msg:
+        return True
+    return False
+
+
+def _connect_mysql_with_retries(connect_callable):
+    """
+    Retry connect_callable() when the DB is temporarily unreachable.
+    Tunable via DB_CONNECT_MAX_ATTEMPTS (default 8) and
+    DB_CONNECT_RETRY_DELAY_SEC (default 0.75 base; scaled per attempt).
+    Set DB_CONNECT_MAX_ATTEMPTS=1 to disable retries.
+    """
+    try:
+        max_attempts = max(1, int(os.getenv('DB_CONNECT_MAX_ATTEMPTS', '8')))
+    except ValueError:
+        max_attempts = 8
+    try:
+        base_delay = float(os.getenv('DB_CONNECT_RETRY_DELAY_SEC', '0.75'))
+    except ValueError:
+        base_delay = 0.75
+
+    for attempt in range(max_attempts):
+        try:
+            return connect_callable()
+        except mysql.connector.Error as e:
+            if not _is_transient_connect_error(e):
+                raise
+            if attempt >= max_attempts - 1:
+                raise DatabaseTemporarilyUnavailable(
+                    "The database could not be reached after several attempts. "
+                    "It may still be starting; please try again in a moment."
+                ) from e
+            time.sleep(base_delay * (attempt + 1))
 
 
 def get_db_connection():
@@ -76,31 +153,961 @@ def get_db_connection():
             if not hasattr(get_db_connection, '_pool') or get_db_connection._pool is None:
                 try:
                     from mysql.connector import pooling
+                    base_kw = _mysql_connection_kwargs()
                     pool_cfg = {
                         'pool_name': 'sparrow_pool',
                         'pool_size': int(pool_size_raw),
-                        'host': os.getenv('DB_HOST', 'localhost'),
-                        'user': os.getenv('DB_USER', 'root'),
-                        'password': os.getenv('DB_PASSWORD', 'rootpassword'),
-                        'database': os.getenv('DB_NAME', 'sparrow_erp'),
+                        **base_kw,
                     }
-                    get_db_connection._pool = pooling.MySQLConnectionPool(
-                        **pool_cfg)
+
+                    def _make_pool():
+                        return pooling.MySQLConnectionPool(**pool_cfg)
+
+                    get_db_connection._pool = _connect_mysql_with_retries(
+                        _make_pool)
+                except DatabaseTemporarilyUnavailable:
+                    raise
                 except Exception:
                     # If pool creation fails, fallback to direct connections
                     get_db_connection._pool = None
             if getattr(get_db_connection, '_pool', None):
-                return get_db_connection._pool.get_connection()
+                return _connect_mysql_with_retries(
+                    get_db_connection._pool.get_connection)
+    except DatabaseTemporarilyUnavailable:
+        raise
     except Exception:
-        # Any error using pooling should fall back to direct connect
+        # Any other error using pooling should fall back to direct connect
         pass
 
-    return mysql.connector.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASSWORD", "rootpassword"),
-        database=os.getenv("DB_NAME", "sparrow_erp")
-    )
+    def _direct():
+        return mysql.connector.connect(**_mysql_connection_kwargs())
+
+    return _connect_mysql_with_retries(_direct)
+
+
+def mysql_connect_with_retry(*, include_database: bool = True, **overrides):
+    """
+    ``mysql.connector.connect`` with the same ``DB_CONNECT_*`` retry policy as
+    ``get_db_connection()``. Use ``include_database=False`` for a server-level
+    connection (e.g. ``CREATE DATABASE``). Overrides are merged after env defaults.
+    """
+    kw = _mysql_connection_kwargs()
+    if not include_database:
+        kw.pop("database", None)
+    kw.update(overrides)
+    return _connect_mysql_with_retries(lambda: mysql.connector.connect(**kw))
+
+
+def get_contractor_effective_role(contractor_id: int) -> str:
+    """Resolve contractor role from tb_contractor_roles and role_id (same rules as employee portal)."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT LOWER(TRIM(r.name)) AS name FROM tb_contractor_roles cr
+            JOIN roles r ON r.id = cr.role_id WHERE cr.contractor_id = %s
+            """,
+            (int(contractor_id),),
+        )
+        names = [row[0] for row in (cur.fetchall() or []) if row and row[0]]
+        if "superuser" in names:
+            return "superuser"
+        if "admin" in names:
+            return "admin"
+        if names:
+            return names[0] or "staff"
+        cur.execute(
+            """
+            SELECT LOWER(TRIM(r.name)) FROM tb_contractors c
+            LEFT JOIN roles r ON r.id = c.role_id WHERE c.id = %s
+            """,
+            (int(contractor_id),),
+        )
+        row = cur.fetchone()
+        return (row[0] or "staff") if row else "staff"
+    finally:
+        cur.close()
+        conn.close()
+
+
+def find_tb_contractors_for_api_login(login_key: str):
+    """
+    Contractor API login: match ``tb_contractors.username`` (case-insensitive); if none,
+    match ``email`` (case-insensitive) so MDT/Cura clients can use the same sign-in as the portal.
+
+    Returns 0–2 dict rows (caller treats >1 as ambiguous). If ``username`` column is missing,
+    falls back to email-only lookup.
+    """
+    if not login_key:
+        return []
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        legacy_no_username_column = False
+        rows = []
+        try:
+            cur.execute(
+                """
+                SELECT id, email, username, name, status, password_hash
+                FROM tb_contractors
+                WHERE username IS NOT NULL AND TRIM(username) <> ''
+                  AND LOWER(TRIM(username)) = %s
+                LIMIT 2
+                """,
+                (login_key,),
+            )
+            rows = cur.fetchall() or []
+        except mysql.connector.Error as exc:
+            code = getattr(exc, "errno", None)
+            msg = str(exc).lower()
+            if code == 1054 and "username" in msg:
+                legacy_no_username_column = True
+            elif code in (1146, 1054):
+                return []
+            else:
+                raise
+
+        if not legacy_no_username_column:
+            if len(rows) >= 2:
+                return rows[:2]
+            if len(rows) == 1:
+                return rows
+
+        try:
+            if legacy_no_username_column:
+                cur.execute(
+                    """
+                    SELECT id, email, name, status, password_hash
+                    FROM tb_contractors
+                    WHERE email IS NOT NULL AND TRIM(email) <> ''
+                      AND LOWER(TRIM(email)) = %s
+                    LIMIT 2
+                    """,
+                    (login_key,),
+                )
+                legacy_rows = cur.fetchall() or []
+                for r in legacy_rows:
+                    r["username"] = None
+                return legacy_rows
+
+            cur.execute(
+                """
+                SELECT id, email, username, name, status, password_hash
+                FROM tb_contractors
+                WHERE email IS NOT NULL AND TRIM(email) <> ''
+                  AND LOWER(TRIM(email)) = %s
+                LIMIT 2
+                """,
+                (login_key,),
+            )
+            return cur.fetchall() or []
+        except mysql.connector.Error as exc:
+            if getattr(exc, "errno", None) in (1146, 1054):
+                return []
+            raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def linked_user_contractor_pair(user_data: dict | None, contractor_row: dict | None) -> bool:
+    """
+    True when a Sparrow ``users`` row and a ``tb_contractors`` row dict are the same person
+    (mirrored login): ``users.contractor_id`` points at the contractor, or both have the same
+    non-empty email. Used to avoid rejecting API login with 409 when both match the same login key.
+    """
+    if not user_data or not contractor_row:
+        return False
+    uid_c = user_data.get("contractor_id")
+    if uid_c is not None and str(uid_c).strip() != "":
+        try:
+            if int(uid_c) == int(contractor_row.get("id")):
+                return True
+        except (TypeError, ValueError):
+            pass
+    ue = (user_data.get("email") or "").strip().lower()
+    ce = (contractor_row.get("email") or "").strip().lower()
+    return bool(ue and ce and ue == ce)
+
+
+def find_tb_contractors_for_portal_login(login_key: str):
+    """
+    Portal login: match contractor ``username`` (if set) or full ``email`` (case-insensitive).
+    Includes columns needed for session setup (initials, profile picture when present).
+    """
+    if not login_key:
+        return []
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, email, username, name, initials, status, password_hash,
+                   profile_picture_path
+            FROM tb_contractors
+            WHERE (
+                (username IS NOT NULL AND TRIM(username) <> ''
+                 AND LOWER(TRIM(username)) = %s)
+                OR LOWER(TRIM(email)) = %s
+            )
+            LIMIT 2
+            """,
+            (login_key, login_key),
+        )
+        return cur.fetchall() or []
+    except mysql.connector.Error as e:
+        if getattr(e, "errno", None) in (1146, 1054):
+            return []
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def find_sparrow_users_for_portal_login(login_key: str):
+    """
+    Match core ``users`` by case-insensitive username or email (portal parity with contractor login).
+    Returns 0–3 rows; callers treat len != 1 as unusable for authentication.
+    """
+    if not login_key:
+        return []
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, email, username, password_hash, billable_exempt, first_name, last_name,
+                   contractor_id
+            FROM users
+            WHERE LOWER(TRIM(username)) = %s OR LOWER(TRIM(email)) = %s
+            LIMIT 3
+            """,
+            (login_key, login_key),
+        )
+        return cur.fetchall() or []
+    except mysql.connector.Error as e:
+        if getattr(e, "errno", None) == 1054:
+            cur.close()
+            conn.close()
+            conn = get_db_connection()
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                """
+                SELECT id, email, username, password_hash, billable_exempt, first_name, last_name
+                FROM users
+                WHERE LOWER(TRIM(username)) = %s OR LOWER(TRIM(email)) = %s
+                LIMIT 3
+                """,
+                (login_key, login_key),
+            )
+            rows = cur.fetchall() or []
+            for r in rows:
+                r["contractor_id"] = None
+            return rows
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_tb_contractor_portal_row(contractor_id: int):
+    """Single contractor row with columns needed for employee portal session (same shape as portal login)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, email, username, name, initials, status, password_hash,
+                   profile_picture_path
+            FROM tb_contractors
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (int(contractor_id),),
+        )
+        return cur.fetchone()
+    except mysql.connector.Error as e:
+        if getattr(e, "errno", None) in (1146, 1054):
+            return None
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def resolve_or_link_contractor_for_portal_user(user_row: dict):
+    """
+    PRD §6.3: from an authenticated core user row, return portal contractor dict or (None, error_message).
+    Creates a minimal stub when no contractor exists for the user's email; fails closed on ambiguous email.
+    """
+    uid = user_row.get("id")
+    email = (user_row.get("email") or "").strip()
+    if not uid or not email or "@" not in email:
+        return None, "Your account is missing a valid email. Contact an administrator."
+
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+
+    def _active_ok(row) -> bool:
+        if not row:
+            return False
+        return str(row.get("status", "")).lower() in (
+            "active", "1", "true", "yes",
+        )
+
+    def _fetch_portal_row(cid: int):
+        cur.execute(
+            """
+            SELECT id, email, username, name, initials, status, password_hash,
+                   profile_picture_path
+            FROM tb_contractors
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (int(cid),),
+        )
+        return cur.fetchone()
+
+    try:
+        conn.autocommit = False
+        cur.execute(
+            """
+            SELECT id, email, contractor_id, password_hash, username
+            FROM users WHERE id = %s FOR UPDATE
+            """,
+            (uid,),
+        )
+        fresh = cur.fetchone()
+        if not fresh:
+            conn.rollback()
+            return None, "Account not found."
+
+        linked = fresh.get("contractor_id")
+        user_hash = fresh.get("password_hash") or user_row.get("password_hash")
+
+        if linked is not None:
+            crow = _fetch_portal_row(int(linked))
+            if not crow:
+                cur.execute(
+                    "UPDATE users SET contractor_id = NULL WHERE id = %s", (uid,)
+                )
+                conn.commit()
+            elif not _active_ok(crow):
+                conn.rollback()
+                return None, (
+                    "Your account is inactive. Please contact an administrator."
+                )
+            else:
+                uname = (fresh.get("username") or user_row.get("username") or "").strip()
+                _maybe_align_contractor_username_with_core_user(
+                    cur, int(linked), uid, uname,
+                )
+                conn.commit()
+                crow = _fetch_portal_row(int(linked))
+                return crow, None
+
+        norm = email.strip().lower()
+        cur.execute(
+            """
+            SELECT id FROM tb_contractors
+            WHERE LOWER(TRIM(email)) = %s
+            ORDER BY id ASC
+            LIMIT 3
+            """,
+            (norm,),
+        )
+        em_rows = cur.fetchall() or []
+        c_ids = [r["id"] for r in em_rows if r and r.get("id") is not None]
+
+        if len(c_ids) >= 2:
+            conn.rollback()
+            return None, (
+                "Multiple employee records share your email. Ask an administrator "
+                "to resolve this before using the portal."
+            )
+
+        if len(c_ids) == 1:
+            cid = int(c_ids[0])
+            crow = _fetch_portal_row(cid)
+            if not crow or not _active_ok(crow):
+                conn.rollback()
+                return None, (
+                    "Your account is inactive. Please contact an administrator."
+                )
+            uname = (fresh.get("username") or user_row.get("username") or "").strip()
+            _maybe_align_contractor_username_with_core_user(cur, cid, uid, uname)
+            cur.execute(
+                "UPDATE users SET contractor_id = %s WHERE id = %s",
+                (cid, uid),
+            )
+            conn.commit()
+            crow = _fetch_portal_row(cid)
+            return crow, None
+
+        from app.plugins.time_billing_module.routes import (
+            contractor_username_prefer_core_user,
+        )
+
+        fn = (user_row.get("first_name") or "").strip()
+        ln = (user_row.get("last_name") or "").strip()
+        display_name = (f"{fn} {ln}").strip() or norm
+
+        username_un, ualloc_err = contractor_username_prefer_core_user(
+            conn,
+            core_user_id=uid,
+            core_username=fresh.get("username") or user_row.get("username"),
+            full_name=display_name,
+            email=norm,
+            exclude_contractor_id=None,
+        )
+        if ualloc_err or not username_un:
+            conn.rollback()
+            return None, ualloc_err or "Could not create portal employee record."
+
+        cur.execute(
+            "SELECT id FROM roles WHERE LOWER(TRIM(name)) = %s LIMIT 1",
+            ("staff",),
+        )
+        role_row = cur.fetchone()
+        if role_row and role_row.get("id") is not None:
+            role_id = int(role_row["id"])
+        else:
+            cur.execute("INSERT INTO roles (name) VALUES (%s)", ("staff",))
+            role_id = int(cur.lastrowid)
+
+        pwd_store = user_hash or ""
+        new_cid = None
+        try:
+            cur.execute(
+                """
+                INSERT INTO tb_contractors (
+                    email, username, name, status, password_hash, role_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """,
+                (
+                    norm,
+                    username_un,
+                    display_name[:255] if display_name else norm,
+                    "active",
+                    pwd_store,
+                    role_id,
+                ),
+            )
+            new_cid = cur.lastrowid
+        except mysql.connector.Error as e:
+            if getattr(e, "errno", None) == 1062:
+                conn.rollback()
+                cur.execute(
+                    """
+                    SELECT id FROM tb_contractors
+                    WHERE LOWER(TRIM(email)) = %s
+                    ORDER BY id ASC
+                    LIMIT 2
+                    """,
+                    (norm,),
+                )
+                dup_rows = cur.fetchall() or []
+                if len(dup_rows) == 1:
+                    cid = int(dup_rows[0]["id"])
+                    crow = _fetch_portal_row(cid)
+                    if crow and _active_ok(crow):
+                        uname = (
+                            (fresh.get("username") or user_row.get("username") or "")
+                            .strip()
+                        )
+                        _maybe_align_contractor_username_with_core_user(
+                            cur, cid, uid, uname,
+                        )
+                        cur.execute(
+                            "UPDATE users SET contractor_id = %s WHERE id = %s",
+                            (cid, uid),
+                        )
+                        conn.commit()
+                        crow = _fetch_portal_row(cid)
+                        return crow, None
+                conn.rollback()
+                return None, (
+                    "Could not create your portal employee record. "
+                    "Please try again or contact an administrator."
+                )
+            raise
+
+        try:
+            cur.execute(
+                """
+                INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)
+                VALUES (%s, %s)
+                """,
+                (int(new_cid), int(role_id)),
+            )
+        except mysql.connector.Error:
+            pass
+
+        cur.execute(
+            "UPDATE users SET contractor_id = %s WHERE id = %s",
+            (int(new_cid), uid),
+        )
+        conn.commit()
+
+        crow = _fetch_portal_row(int(new_cid))
+        return crow, None
+
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _maybe_align_contractor_username_with_core_user(
+    cur, contractor_id: int, core_user_id, core_username,
+) -> None:
+    """
+    Set ``tb_contractors.username`` to the core user's login name when valid and not
+    taken by another contractor (keeps portal sign-in aligned with admin username).
+    """
+    trial = (core_username or "").strip().lower()
+    if not trial or len(trial) < 3:
+        return
+    from app.plugins.time_billing_module.routes import _CONTRACTOR_USERNAME_RE
+
+    if not _CONTRACTOR_USERNAME_RE.match(trial):
+        return
+    umatch = User.get_user_by_username_ci(trial)
+    if umatch is not None and str(umatch.get("id")) != str(core_user_id):
+        return
+    try:
+        cur.execute(
+            """
+            SELECT 1 FROM tb_contractors
+            WHERE LOWER(TRIM(username)) = %s AND id <> %s LIMIT 1
+            """,
+            (trial, int(contractor_id)),
+        )
+        if cur.fetchone():
+            return
+        cur.execute(
+            "UPDATE tb_contractors SET username = %s WHERE id = %s",
+            (trial, int(contractor_id)),
+        )
+    except mysql.connector.Error:
+        pass
+
+
+def backfill_users_contractor_link_from_contractor_email(
+    contractor_id: int, contractor_email: str,
+) -> None:
+    """PRD §6.3: optional back-link when portal login is contractor-direct."""
+    ce = (contractor_email or "").strip()
+    if not ce or "@" not in ce:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id, username FROM users
+            WHERE contractor_id IS NULL
+              AND LOWER(TRIM(email)) = LOWER(TRIM(%s))
+            LIMIT 1
+            """,
+            (ce,),
+        )
+        urow = cur.fetchone()
+        if not urow:
+            return
+        uid, uname = urow[0], urow[1]
+        cur.execute(
+            "UPDATE users SET contractor_id = %s WHERE id = %s",
+            (int(contractor_id), uid),
+        )
+        _maybe_align_contractor_username_with_core_user(
+            cur, int(contractor_id), uid, uname,
+        )
+        conn.commit()
+    except mysql.connector.Error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        conn.close()
+
+
+def sync_core_user_to_portal_contractor(user_id: str) -> None:
+    """
+    Ensure a core (non-vendor) user has a matching ``tb_contractors`` row and ``users.contractor_id``:
+    mirrors email, username (portal rules), password hash, display name, and active status so they can
+    use the employee portal with the same credentials as the admin app.
+
+    Safe to call after any admin create/update of the user row. Logs warnings on conflicts; does not raise.
+    """
+    if not user_id:
+        return
+    conn = get_db_connection()
+    dcur = conn.cursor(dictionary=True)
+    xcur = conn.cursor()
+    try:
+        dcur.execute("SHOW TABLES LIKE %s", ("tb_contractors",))
+        if not dcur.fetchone():
+            return
+        try:
+            dcur.execute(
+                """
+                SELECT id, email, username, password_hash, first_name, last_name, contractor_id,
+                       COALESCE(billable_exempt,0) AS billable_exempt
+                FROM users WHERE id = %s LIMIT 1
+                """,
+                (user_id,),
+            )
+        except mysql.connector.Error as e:
+            if getattr(e, "errno", None) == 1054:
+                return
+            raise
+        u = dcur.fetchone()
+        if not u:
+            return
+        if int(u.get("billable_exempt") or 0):
+            return
+        email = (u.get("email") or "").strip()
+        if not email or "@" not in email:
+            _logger.warning(
+                "sync_core_user_to_portal_contractor: user %s has no usable email; skip",
+                user_id,
+            )
+            return
+        pwd = (u.get("password_hash") or "").strip()
+        if not pwd:
+            _logger.warning(
+                "sync_core_user_to_portal_contractor: user %s has no password hash; skip",
+                user_id,
+            )
+            return
+
+        norm = email.lower()
+        fn = (u.get("first_name") or "").strip()
+        ln = (u.get("last_name") or "").strip()
+        display = (f"{fn} {ln}").strip() or norm
+        uname = (u.get("username") or "").strip()
+        uid = u["id"]
+
+        conn.autocommit = False
+        cid = u.get("contractor_id")
+        if cid is not None:
+            dcur.execute(
+                "SELECT id FROM tb_contractors WHERE id = %s LIMIT 1",
+                (int(cid),),
+            )
+            if not dcur.fetchone():
+                xcur.execute(
+                    "UPDATE users SET contractor_id = NULL WHERE id = %s", (uid,)
+                )
+                conn.commit()
+                cid = None
+
+        if cid is not None:
+            cid_int = int(cid)
+            try:
+                xcur.execute(
+                    """
+                    UPDATE tb_contractors
+                    SET email = %s, name = %s, password_hash = %s, status = 'active'
+                    WHERE id = %s
+                    """,
+                    (norm, display[:255], pwd, cid_int),
+                )
+            except mysql.connector.Error as e:
+                if getattr(e, "errno", None) == 1062:
+                    conn.rollback()
+                    xcur.execute(
+                        """
+                        UPDATE tb_contractors
+                        SET name = %s, password_hash = %s, status = 'active'
+                        WHERE id = %s
+                        """,
+                        (display[:255], pwd, cid_int),
+                    )
+                else:
+                    raise
+            _maybe_align_contractor_username_with_core_user(
+                xcur, cid_int, uid, uname,
+            )
+            conn.commit()
+            return
+
+        dcur.execute(
+            """
+            SELECT id FROM tb_contractors
+            WHERE LOWER(TRIM(email)) = %s
+            ORDER BY id ASC
+            LIMIT 3
+            """,
+            (norm,),
+        )
+        em_rows = dcur.fetchall() or []
+        c_ids = [r["id"] for r in em_rows if r and r.get("id") is not None]
+
+        if len(c_ids) >= 2:
+            _logger.warning(
+                "sync_core_user_to_portal_contractor: ambiguous tb_contractors email=%s user=%s",
+                norm,
+                user_id,
+            )
+            return
+
+        if len(c_ids) == 1:
+            link_cid = int(c_ids[0])
+            xcur.execute(
+                "SELECT id FROM users WHERE contractor_id = %s AND id <> %s LIMIT 1",
+                (link_cid, uid),
+            )
+            if xcur.fetchone():
+                _logger.warning(
+                    "sync_core_user_to_portal_contractor: contractor %s already "
+                    "linked to another user; skip link for %s",
+                    link_cid,
+                    user_id,
+                )
+                return
+            try:
+                xcur.execute(
+                    """
+                    UPDATE tb_contractors
+                    SET email = %s, name = %s, password_hash = %s, status = 'active'
+                    WHERE id = %s
+                    """,
+                    (norm, display[:255], pwd, link_cid),
+                )
+            except mysql.connector.Error as e:
+                if getattr(e, "errno", None) == 1062:
+                    conn.rollback()
+                    xcur.execute(
+                        """
+                        UPDATE tb_contractors
+                        SET name = %s, password_hash = %s, status = 'active'
+                        WHERE id = %s
+                        """,
+                        (display[:255], pwd, link_cid),
+                    )
+                else:
+                    raise
+            _maybe_align_contractor_username_with_core_user(
+                xcur, link_cid, uid, uname,
+            )
+            try:
+                xcur.execute(
+                    "UPDATE users SET contractor_id = %s WHERE id = %s",
+                    (link_cid, uid),
+                )
+                conn.commit()
+            except mysql.connector.Error as le:
+                conn.rollback()
+                if getattr(le, "errno", None) == 1062:
+                    _logger.warning(
+                        "sync_core_user_to_portal_contractor: cannot assign contractor %s "
+                        "to user %s (link in use)",
+                        link_cid,
+                        user_id,
+                    )
+                else:
+                    raise
+            return
+
+        from app.plugins.time_billing_module.routes import (
+            contractor_username_prefer_core_user,
+        )
+
+        username_un, ualloc_err = contractor_username_prefer_core_user(
+            conn,
+            core_user_id=uid,
+            core_username=uname,
+            full_name=display,
+            email=norm,
+            exclude_contractor_id=None,
+        )
+        if ualloc_err or not username_un:
+            conn.rollback()
+            _logger.warning(
+                "sync_core_user_to_portal_contractor: could not allocate username for user %s: %s",
+                user_id,
+                ualloc_err,
+            )
+            return
+
+        dcur.execute(
+            "SELECT id FROM roles WHERE LOWER(TRIM(name)) = %s LIMIT 1",
+            ("staff",),
+        )
+        role_row = dcur.fetchone()
+        if role_row and role_row.get("id") is not None:
+            role_id = int(role_row["id"])
+        else:
+            xcur.execute("INSERT INTO roles (name) VALUES (%s)", ("staff",))
+            role_id = int(xcur.lastrowid)
+
+        xcur.execute(
+            """
+            INSERT INTO tb_contractors (
+                email, username, name, status, password_hash, role_id, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            """,
+            (norm, username_un, display[:255], "active", pwd, role_id),
+        )
+        new_cid = int(xcur.lastrowid)
+        try:
+            xcur.execute(
+                """
+                INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)
+                VALUES (%s, %s)
+                """,
+                (new_cid, role_id),
+            )
+        except mysql.connector.Error:
+            pass
+        try:
+            xcur.execute(
+                "UPDATE users SET contractor_id = %s WHERE id = %s",
+                (new_cid, uid),
+            )
+            conn.commit()
+        except mysql.connector.Error as le:
+            conn.rollback()
+            if getattr(le, "errno", None) == 1062:
+                _logger.warning(
+                    "sync_core_user_to_portal_contractor: cannot assign new contractor %s "
+                    "to user %s",
+                    new_cid,
+                    user_id,
+                )
+            else:
+                raise
+    except mysql.connector.Error as e:
+        _logger.warning("sync_core_user_to_portal_contractor: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    except Exception as e:
+        _logger.warning("sync_core_user_to_portal_contractor: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        try:
+            dcur.close()
+        except Exception:
+            pass
+        try:
+            xcur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def sync_linked_tb_contractor_password_from_user(user_id, new_hash: str) -> None:
+    """PRD §7.4: keep ``tb_contractors.password_hash`` in sync when a linked user password changes."""
+    if not new_hash or not user_id:
+        return
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT email, contractor_id FROM users WHERE id = %s LIMIT 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return
+        cid = row.get("contractor_id")
+        email = (row.get("email") or "").strip()
+        cur2 = conn.cursor()
+        try:
+            if cid:
+                cur2.execute(
+                    "UPDATE tb_contractors SET password_hash = %s WHERE id = %s",
+                    (new_hash, int(cid)),
+                )
+            elif email:
+                cur2.execute(
+                    """
+                    UPDATE tb_contractors
+                    SET password_hash = %s
+                    WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
+                    """,
+                    (new_hash, email),
+                )
+            conn.commit()
+        finally:
+            cur2.close()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def sync_linked_users_password_from_contractor(contractor_id: int, new_hash: str) -> None:
+    """PRD §7.4: when portal/contractor password is set, update matching core ``users`` rows."""
+    if not new_hash:
+        return
+    cid = int(contractor_id)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT email FROM tb_contractors WHERE id = %s LIMIT 1",
+            (cid,),
+        )
+        cr = cur.fetchone()
+        em = (cr.get("email") or "").strip() if cr else ""
+        cur2 = conn.cursor()
+        try:
+            cur2.execute(
+                "UPDATE users SET password_hash = %s WHERE contractor_id = %s",
+                (new_hash, cid),
+            )
+            if em and "@" in em:
+                cur2.execute(
+                    """
+                    UPDATE users SET password_hash = %s
+                    WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
+                      AND (contractor_id IS NULL OR contractor_id = %s)
+                    """,
+                    (new_hash, em, cid),
+                )
+            conn.commit()
+        finally:
+            cur2.close()
+    except mysql.connector.Error:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        cur.close()
+        conn.close()
 
 
 def run_module_script(module_path, action):
@@ -158,6 +1165,20 @@ class User(UserMixin):
         return user_data
 
     @staticmethod
+    def get_user_by_username_ci(username_normalized: str):
+        """Case-insensitive username match; ``username_normalized`` should be lowercased already."""
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM users WHERE LOWER(TRIM(username)) = %s LIMIT 1",
+            (username_normalized,),
+        )
+        user_data = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return user_data
+
+    @staticmethod
     def get_user_by_id(user_id):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -206,6 +1227,7 @@ class User(UserMixin):
         conn.commit()
         cursor.close()
         conn.close()
+        sync_core_user_to_portal_contractor(user_id)
 
     @staticmethod
     def update_permissions(user_id, permissions_list):
@@ -238,7 +1260,7 @@ def has_permission(permission):
     if not getattr(current_user, "is_authenticated", False):
         return False
     role = str(getattr(current_user, "role", "") or "").lower()
-    if role in ("admin", "superuser"):
+    if role in ("admin", "superuser", "clinical_lead", "support_break_glass"):
         return True
     return permission in (current_user.permissions or [])
 
@@ -286,9 +1308,14 @@ class EmailManager:
       - SMTP_PASSWORD
 
     Optional env:
-      - SMTP_USE_TLS (default true)
+      - SMTP_USE_TLS (default true) — STARTTLS after plain SMTP connect (typical for port 587)
+      - SMTP_USE_SSL — force implicit TLS (SMTP_SSL). Default: true if SMTP_PORT is 465
+      - SMTP_TIMEOUT — socket timeout seconds (default 30, min 5, max 300)
       - SMTP_FROM (default SMTP_USERNAME)
       - SMTP_FROM_NAME (default empty)
+
+    Port 465 usually requires implicit SSL (SMTP_SSL), not STARTTLS on a plain connection.
+    A common misconfiguration is port 465 + STARTTLS, which often hangs until timeout.
     """
 
     def __init__(self):
@@ -303,12 +1330,28 @@ class EmailManager:
         if port_raw.isdigit():
             port = int(port_raw)
 
+        timeout_raw = (os.environ.get("SMTP_TIMEOUT") or "30").strip()
+        try:
+            smtp_timeout = max(5, min(int(timeout_raw), 300))
+        except ValueError:
+            smtp_timeout = 30
+
+        ssl_raw = (os.environ.get("SMTP_USE_SSL") or "").strip().lower()
+        if ssl_raw in ("1", "true", "yes"):
+            use_ssl = True
+        elif ssl_raw in ("0", "false", "no"):
+            use_ssl = False
+        else:
+            use_ssl = port == 465
+
+        self.smtp_timeout = smtp_timeout
         self.smtp_config = {
             "host": host,
             "port": port,
             "username": username,
             "password": password,
             "use_tls": use_tls,
+            "use_ssl": use_ssl,
             "from_email": (os.environ.get("SMTP_FROM") or username).strip(),
             "from_name": (os.environ.get("SMTP_FROM_NAME") or "").strip(),
         }
@@ -345,20 +1388,61 @@ class EmailManager:
         if html_body:
             msg.attach(MIMEText(str(html_body), "html", "utf-8"))
 
+        host = self.smtp_config["host"]
+        port = self.smtp_config["port"]
+        timeout = self.smtp_timeout
+        use_ssl = bool(self.smtp_config.get("use_ssl"))
+        use_tls = bool(self.smtp_config["use_tls"])
+        user = self.smtp_config["username"]
+        password = self.smtp_config["password"]
+
+        server = None
+        phase = "connect"
         try:
-            server = smtplib.SMTP(
-                self.smtp_config["host"], self.smtp_config["port"], timeout=10)
-            if self.smtp_config["use_tls"]:
-                server.starttls()
-            server.login(self.smtp_config["username"],
-                         self.smtp_config["password"])
+            if use_ssl:
+                phase = "connect (SMTP_SSL)"
+                server = smtplib.SMTP_SSL(host, port, timeout=timeout)
+            else:
+                phase = "connect (SMTP)"
+                server = smtplib.SMTP(host, port, timeout=timeout)
+                if use_tls:
+                    phase = "STARTTLS"
+                    server.starttls()
+            phase = "AUTH"
+            server.login(user, password)
+            phase = "SEND"
             server.send_message(msg, from_addr=sender_email,
                                 to_addrs=list(recipients))
+            phase = "QUIT"
             server.quit()
+            server = None
             print(f"Email sent successfully to {recipients}")
         except Exception as e:
-            print(f"Failed to send email: {e}")
-            raise
+            if server is not None:
+                try:
+                    server.close()
+                except Exception:
+                    pass
+            et = type(e).__name__
+            em = str(e).strip() or repr(e)
+            hint = ""
+            el = em.lower()
+            if "timed out" in el or et in ("timeout", "TimeoutError", "socket.timeout"):
+                hint = (
+                    " For port 465 use implicit TLS (set SMTP_PORT=465 and leave SMTP_USE_SSL unset, "
+                    "or set SMTP_USE_SSL=true). For port 587 use SMTP_USE_SSL=false and SMTP_USE_TLS=true."
+                    " If host and TLS mode are correct, a timeout usually means outbound SMTP is blocked"
+                    " (common on some cloud hosts) or filtered by the mail provider—try 465 if your host"
+                    " allows SMTP egress, or use a transactional email HTTP API."
+                )
+            elif et == "SMTPAuthenticationError" or "authentication failed" in el:
+                hint = " Check SMTP_USERNAME / SMTP_PASSWORD."
+            elif "ssl" in el or "tls" in el or "certificate" in el:
+                hint = " Check TLS mode vs port (465 SSL vs 587 STARTTLS)."
+            msg = f"SMTP {phase} to {host}:{port} failed ({et}): {em}.{hint}"
+            _logger.warning(msg)
+            print(f"Failed to send email: {msg}")
+            raise RuntimeError(msg) from e
 
     def send_email_html(self, subject, html_body, recipients, sender=None, text_body=None):
         """
@@ -508,6 +1592,19 @@ class UpdateManager:
                 num = ''.join(ch for ch in p if ch.isdigit())
                 parts.append(int(num) if num else 0)
         return tuple(parts)
+
+    def _remote_version_is_strictly_newer(
+        self, local_version: Optional[str], remote_version: Optional[str]
+    ) -> bool:
+        """
+        True only when remote is known and compares strictly greater than local.
+        Used to block no-op redeploys, downgrades, and forced-update flags pointing at older feeds.
+        """
+        r = (remote_version or "").strip()
+        if not r or r.lower() == "unknown":
+            return False
+        l = (local_version or "").strip()
+        return self._version_tuple(r) > self._version_tuple(l)
 
     # ------------- Manifest Fetching -------------
     def get_core_manifest_remote(self):
@@ -743,7 +1840,8 @@ class UpdateManager:
             v = core_manifest.get("core", {}).get("current_version")
             return v if v else None
         except Exception as e:
-            print(f"[WARN] get_latest_version: remote core manifest unavailable: {e}")
+            print(
+                f"[WARN] get_latest_version: remote core manifest unavailable: {e}")
             return None
 
     def get_plugin_latest_version(self, plugin_name):
@@ -946,7 +2044,8 @@ class UpdateManager:
                     continue
                 rel = member
                 if not self._zip_relative_member_is_safe(rel):
-                    raise Exception(f"Unsafe path in backup archive: {member!r}")
+                    raise Exception(
+                        f"Unsafe path in backup archive: {member!r}")
                 dest = os.path.join(abs_restore, rel)
                 if not self._resolved_dest_within_root(abs_restore, dest):
                     raise Exception(f"Zip-slip blocked for member: {member!r}")
@@ -995,8 +2094,8 @@ class UpdateManager:
         """
         On *upgrade* only, avoid overwriting paths that hold deployment-specific data.
 
-        - Plugin upgrades: preserve existing templates/public/, data/, static/uploads/,
-          pages.json, manifest.json (user site + module settings).
+        - Plugin upgrades: preserve existing templates/public/, data/, site_data/,
+          static/uploads/, pages.json, manifest.json (user site + module settings).
         - Core upgrades (strip_leading_app): preserve any existing file under config/
           (secrets, tokens); new config/* members from the zip still extract.
 
@@ -1015,7 +2114,12 @@ class UpdateManager:
         # Plugin package root
         if norm in ("pages.json", "manifest.json"):
             return True
-        for prefix in ("data/", "templates/public/", "static/uploads/"):
+        for prefix in (
+            "data/",
+            "site_data/",
+            "templates/public/",
+            "static/uploads/",
+        ):
             if norm.startswith(prefix):
                 return True
         return False
@@ -1117,7 +2221,8 @@ class UpdateManager:
         }
 
         print("[UPGRADE] ---------- Upgrade scripts run starting ----------")
-        print(f"[UPGRADE] APP_ROOT={self.APP_ROOT!r}, PLUGINS_DIR={self.PLUGINS_DIR!r}")
+        print(
+            f"[UPGRADE] APP_ROOT={self.APP_ROOT!r}, PLUGINS_DIR={self.PLUGINS_DIR!r}")
 
         # Core upgrade script (if present)
         core_script = os.path.join(self.APP_ROOT, "core", "install.py")
@@ -1133,7 +2238,8 @@ class UpdateManager:
                     "ok": True,
                     "message": (result.stdout or "").strip()
                 }
-                print(f"[UPGRADE] Core OK. stdout: {result.stdout or '(none)'}")
+                print(
+                    f"[UPGRADE] Core OK. stdout: {result.stdout or '(none)'}")
                 if result.stderr:
                     print(f"[UPGRADE] Core stderr: {result.stderr}")
             except subprocess.CalledProcessError as e:
@@ -1160,10 +2266,12 @@ class UpdateManager:
                 script_path = os.path.join(path, "install.py")
                 if os.path.isfile(script_path):
                     plugin_names_with_install.append(name)
-        print(f"[UPGRADE] Plugins with install.py ({len(plugin_names_with_install)}): {plugin_names_with_install}")
+        print(
+            f"[UPGRADE] Plugins with install.py ({len(plugin_names_with_install)}): {plugin_names_with_install}")
 
         for plugin_name in plugin_names_with_install:
-            script_path = os.path.join(self.PLUGINS_DIR, plugin_name, "install.py")
+            script_path = os.path.join(
+                self.PLUGINS_DIR, plugin_name, "install.py")
             if not os.path.exists(script_path):
                 report["plugins_skipped"].append(plugin_name)
                 print(f"[UPGRADE] Skip {plugin_name}: install.py missing")
@@ -1176,9 +2284,11 @@ class UpdateManager:
                     check=True, capture_output=True, text=True
                 )
                 report["plugins_ran"].append(plugin_name)
-                print(f"[UPGRADE] Plugin {plugin_name} OK. stdout: {(result.stdout or '').strip() or '(none)'}")
+                print(
+                    f"[UPGRADE] Plugin {plugin_name} OK. stdout: {(result.stdout or '').strip() or '(none)'}")
                 if result.stderr:
-                    print(f"[UPGRADE] Plugin {plugin_name} stderr: {result.stderr}")
+                    print(
+                        f"[UPGRADE] Plugin {plugin_name} stderr: {result.stderr}")
             except subprocess.CalledProcessError as e:
                 err = (e.stderr or e.stdout or str(e)).strip()
                 report["plugins_failed"].append(
@@ -1339,7 +2449,8 @@ class UpdateManager:
         artifact_type = "legacy"
 
         if selected:
-            artifact_type = ((selected.get("artifact_type") or "complete").strip().lower() or "complete")
+            artifact_type = ((selected.get("artifact_type")
+                             or "complete").strip().lower() or "complete")
             selected_url = _release_url(selected)
 
             if artifact_type == "partial":
@@ -1376,7 +2487,8 @@ class UpdateManager:
             raise Exception("No resolvable artifact URL in manifest.")
 
         initial_url = self.convert_to_api_endpoint(initial_url)
-        latest_url = self.convert_to_api_endpoint(latest_url) if latest_url else None
+        latest_url = self.convert_to_api_endpoint(
+            latest_url) if latest_url else None
 
         return {
             "initial_download_url": initial_url,
@@ -1441,6 +2553,35 @@ class UpdateManager:
                 old_version = _get_factory_version_local(plugin_name)
             else:
                 raise Exception("Invalid update type.")
+
+            # ----------------------------
+            # Version gate (before backup / any download)
+            # Ignore remote force_update flags — only strict semver upgrade.
+            # ----------------------------
+            if update_type == "core":
+                remote_core = self.get_core_manifest_remote()
+                remote_ver = (remote_core.get("core") or {}).get(
+                    "current_version"
+                )
+                if not self._remote_version_is_strictly_newer(
+                    old_version, remote_ver
+                ):
+                    raise Exception(
+                        "Core update not applied: the repository version "
+                        f"({remote_ver!r}) is not newer than this installation "
+                        f"({old_version!r}). Forced-update flags are ignored."
+                    )
+            elif update_type == "plugin" and plugin_name:
+                remote_pm = self.get_plugin_manifest_remote(plugin_name) or {}
+                remote_ver = remote_pm.get("current_version")
+                if not self._remote_version_is_strictly_newer(
+                    old_version, remote_ver
+                ):
+                    raise Exception(
+                        f"Plugin {plugin_name!r} update not applied: repository "
+                        f"version ({remote_ver!r}) is not newer than local "
+                        f"({old_version!r}). Forced-update flags are ignored."
+                    )
 
             # ----------------------------
             # Backup
@@ -1558,7 +2699,8 @@ class UpdateManager:
                 initial_download_url = plan["initial_download_url"]
                 latest_download_url = plan["latest_download_url"]
 
-                print(f"Downloading plugin update for {plugin_name} (base artifact)...")
+                print(
+                    f"Downloading plugin update for {plugin_name} (base artifact)...")
                 url_name = unquote(os.path.basename(
                     urlparse(initial_download_url).path))
                 if not url_name.lower().endswith(".zip"):
@@ -1577,7 +2719,8 @@ class UpdateManager:
                         urlparse(latest_download_url).path))
                     if not overlay_name.lower().endswith(".zip"):
                         overlay_name = f"{plugin_name}_update_overlay.zip"
-                    zip_path_overlay = os.path.join(self.UPDATE_DIR, overlay_name)
+                    zip_path_overlay = os.path.join(
+                        self.UPDATE_DIR, overlay_name)
                     self.download_update(latest_download_url, zip_path_overlay)
                     print(f"Applying plugin overlay for {plugin_name}...")
                     self.apply_zip(
@@ -1825,7 +2968,8 @@ class UpdateManager:
                 f"Latest download URL not from configured GitLab project for '{plugin_name}': {latest_download_url}")
 
         # --- Compute local zip path (initial complete artifact) ---
-        url_name = unquote(os.path.basename(urlparse(initial_download_url).path))
+        url_name = unquote(os.path.basename(
+            urlparse(initial_download_url).path))
         if not url_name.lower().endswith(".zip"):
             url_name = f"{plugin_name}_complete.zip"
         zip_path_initial = os.path.join(self.UPDATE_DIR, url_name)
@@ -1836,7 +2980,8 @@ class UpdateManager:
             print(
                 f"[DEBUG] Downloaded zip for '{plugin_name}' to: {zip_path_initial} (exists={os.path.exists(zip_path_initial)})")
         except Exception as e:
-            raise Exception(f"Failed to download '{plugin_name}' initial zip: {e}")
+            raise Exception(
+                f"Failed to download '{plugin_name}' initial zip: {e}")
 
         # --- Prepare target plugin path ---
         plugin_target = os.path.join(self.PLUGINS_DIR, plugin_name)
@@ -1854,14 +2999,16 @@ class UpdateManager:
             except Exception as le:
                 print(f"[DEBUG] Could not list {plugin_target}: {le}")
         except Exception as e:
-            raise Exception(f"Failed to extract '{plugin_name}' initial zip: {e}")
+            raise Exception(
+                f"Failed to extract '{plugin_name}' initial zip: {e}")
 
         # --- Overlay latest partial artifact (optional) ---
         zip_path_latest = None
         overlay_applied = False
         if latest_download_url and latest_download_url != initial_download_url:
             try:
-                latest_name = unquote(os.path.basename(urlparse(latest_download_url).path))
+                latest_name = unquote(os.path.basename(
+                    urlparse(latest_download_url).path))
                 if not latest_name.lower().endswith(".zip"):
                     latest_name = f"{plugin_name}_latest.zip"
                 zip_path_latest = os.path.join(self.UPDATE_DIR, latest_name)
@@ -2056,62 +3203,54 @@ class UpdateManager:
             else:
                 print(f"Plugin {plugin_name} is already installed.")
 
-    # --- Forced Update Check for Core ---
+    # --- Legacy forced-update jobs (remote force_update flags are ignored) ---
     def check_for_forced_updates(self):
+        """Remove any scheduled forced core job; we no longer honour manifest force_update."""
         try:
-            core_manifest = self.get_core_manifest_remote()
-            force_update = core_manifest.get(
-                'core', {}).get('force_update', False)
-            if force_update:
-                if not self.scheduler.get_job("forced_core_update"):
-                    now = datetime.now()
-                    next_3am = now.replace(
-                        hour=3, minute=0, second=0, microsecond=0)
-                    if next_3am <= now:
-                        next_3am += timedelta(days=1)
-                    print(
-                        f"Force update flag detected in core manifest. Scheduling core update at {next_3am}")
-                    self.scheduler.add_job(
-                        self.apply_update, 'date', run_date=next_3am, args=['core', None, "forced"],
-                        id="forced_core_update", name="Forced Core Update"
-                    )
-            else:
-                if self.scheduler.get_job("forced_core_update"):
-                    self.scheduler.remove_job("forced_core_update")
+            if self.scheduler.get_job("forced_core_update"):
+                self.scheduler.remove_job("forced_core_update")
         except Exception as e:
-            print(f"Error checking forced updates: {e}")
+            print(f"[INFO] Forced core update job cleanup: {e}")
 
-    # --- Forced Update Check for Plugins ---
     def check_for_forced_plugin_updates(self):
+        """Remove forced plugin jobs; manifest force_update is ignored."""
         try:
-            installed_plugins = [plugin["system_name"]
-                                 for plugin in self.plugin_manager.get_all_plugins()]
-            for plugin_name in installed_plugins:
-                try:
-                    data = self.get_plugin_manifest_remote(plugin_name)
-                    force_update = data.get('force_update', False)
-                    job_id = f"forced_plugin_update_{plugin_name}"
-                    if force_update:
-                        if not self.scheduler.get_job(job_id):
-                            now = datetime.now()
-                            next_3am = now.replace(
-                                hour=3, minute=0, second=0, microsecond=0)
-                            if next_3am <= now:
-                                next_3am += timedelta(days=1)
-                            print(
-                                f"Force update flag detected for plugin {plugin_name}. Scheduling update at {next_3am}")
-                            self.scheduler.add_job(
-                                self.apply_update, 'date', run_date=next_3am, args=['plugin', plugin_name, "forced"],
-                                id=job_id, name=f"Forced Plugin Update {plugin_name}"
-                            )
-                    else:
-                        if self.scheduler.get_job(job_id):
-                            self.scheduler.remove_job(job_id)
-                except Exception as e:
-                    print(
-                        f"Error checking forced update for plugin {plugin_name}: {e}")
+            for job in list(self.scheduler.get_jobs()):
+                jid = getattr(job, "id", "") or ""
+                if jid.startswith("forced_plugin_update_"):
+                    self.scheduler.remove_job(jid)
         except Exception as e:
-            print(f"Error checking forced plugin updates: {e}")
+            print(f"[INFO] Forced plugin update job cleanup: {e}")
+
+
+def run_plugin_database_install(system_name: str) -> tuple:
+    """
+    Import app.plugins.<system_name>.install and run install() (or upgrade() if no install).
+    Idempotent for typical DDL. Skips cleanly when there is no install submodule.
+
+    Returns:
+        (True, message) on success or intentional skip
+        (False, error_message) if install()/upgrade() raised
+    """
+    module_name = f"app.plugins.{system_name}.install"
+    try:
+        mod = importlib.import_module(module_name)
+    except ImportError as e:
+        return True, f"[plugins] No DB install for '{system_name}' ({e})"
+
+    installer = getattr(mod, "install", None)
+    if not callable(installer):
+        installer = getattr(mod, "upgrade", None)
+    if not callable(installer):
+        return True, f"[plugins] No install()/upgrade() in '{system_name}.install'"
+
+    try:
+        installer()
+        return True, f"[plugins] Database schema OK for '{system_name}'"
+    except Exception as e:
+        msg = str(e)
+        print(f"[ERROR] Plugin '{system_name}' database install failed: {msg}")
+        return False, msg
 
 
 class Plugin:
@@ -2227,6 +3366,14 @@ class Plugin:
 
         # Save the plugin manifest.
         self.save_manifest()
+
+        ok, db_msg = run_plugin_database_install(self.system_name)
+        print(f"[DEBUG] {db_msg}")
+        if not ok:
+            err = f"Database install failed for '{self.system_name}': {db_msg}"
+            print(f"[ERROR] {err}")
+            return False, err
+
         print(f"[DEBUG] Plugin '{self.system_name}' installed successfully.")
         return True, f"{self.system_name} installed successfully."
 
@@ -2340,6 +3487,15 @@ class Plugin:
 
 
 class PluginManager:
+    """
+    Discovers plugins under ``app/plugins/<folder>/`` and registers routes with the Flask app.
+
+    **Module agents / JSON APIs:** URLs are ``/plugin/<system_name>/…``. Stateless JSON for Bearer
+    clients should live under ``/plugin/<system_name>/api/…``; ``create_app`` lists those prefixes in
+    ``_PLUGIN_ROUTE_LEVEL_JSON_API_PREFIXES`` so anonymous requests are not redirected to the login
+    page. Use session JWTs from ``POST /api/login``; required claims are defined in ``app.auth_jwt``.
+    """
+
     def __init__(self, plugins_dir='plugins'):
         """
         plugins_dir can be:
@@ -2592,7 +3748,8 @@ class PluginManager:
             16,
         )
         if not glyph:
-            glyph = self._DASHBOARD_TILE_GLYPHS[h % len(self._DASHBOARD_TILE_GLYPHS)]
+            glyph = self._DASHBOARD_TILE_GLYPHS[h % len(
+                self._DASHBOARD_TILE_GLYPHS)]
         hue = h % 360
         return {"tile_glyph": glyph, "tile_hue": hue}
 
@@ -2616,7 +3773,8 @@ class PluginManager:
                 manifest.get("system_name") or plugin_folder or ""
             ).strip() or plugin_folder
             extras = self._dashboard_tile_style(sys_name, manifest)
-            category = (manifest.get("dashboard_category") or "Modules").strip()
+            category = (manifest.get("dashboard_category")
+                        or "Modules").strip()
             if not category:
                 category = "Modules"
             try:
@@ -2625,7 +3783,8 @@ class PluginManager:
                 acc_perm = plugin_access_permission_id(manifest, sys_name)
             except Exception:
                 acc_perm = (
-                    (manifest.get("access_permission") or manifest.get("permission_required") or "").strip()
+                    (manifest.get("access_permission") or manifest.get(
+                        "permission_required") or "").strip()
                     or f"{sys_name}.access"
                 )
             plugins.append(
@@ -2645,7 +3804,8 @@ class PluginManager:
         plugins.sort(
             key=lambda p: (p["dashboard_category"].lower(), p["name"].lower())
         )
-        print(f"[DEBUG] Enabled plugins: {[p['system_name'] for p in plugins]}")
+        print(
+            f"[DEBUG] Enabled plugins: {[p['system_name'] for p in plugins]}")
         return plugins
 
     def is_plugin_enabled(self, system_name):
@@ -2673,10 +3833,15 @@ class PluginManager:
         manifest_path = os.path.join(plugin_folder, 'manifest.json')
         if os.path.exists(manifest_path):
             print(
-                f"[DEBUG] Plugin '{plugin_name}' is already installed; skipping installation.")
+                f"[DEBUG] Plugin '{plugin_name}' is already installed; running database install if present.")
+            ok, db_msg = run_plugin_database_install(plugin_name)
+            print(f"[DEBUG] {db_msg}")
+            if not ok:
+                raise Exception(
+                    f"Plugin database install failed for '{plugin_name}': {db_msg}")
         else:
             from app.objects import Plugin  # Adjust the import path as needed.
-            plugin = Plugin(plugin_name)
+            plugin = Plugin(plugin_name, plugins_dir=self.plugins_dir)
             install_status, install_message = plugin.install()
             if not install_status:
                 raise Exception(
@@ -2963,6 +4128,18 @@ class PluginManager:
 
         factory_data = _load_factory_manifest_dict(factory_path)
         merge_plugin_dashboard_fields_from_factory(manifest, factory_data)
+
+        already_enabled = bool(manifest.get("enabled", False))
+        ok, db_msg = run_plugin_database_install(system_name)
+        print(f"[DEBUG] {db_msg}")
+        if not ok:
+            if already_enabled:
+                print(
+                    f"[WARN] Database install failed for already-enabled plugin '{system_name}'; "
+                    "fix the database and use Repair or re-enable after fixing."
+                )
+            else:
+                return False, f"Database setup failed for {system_name}: {db_msg}"
 
         # Already enabled? Persist manifest so dashboard_category / dashboard_icon stay synced from factory.
         if manifest.get('enabled', False):

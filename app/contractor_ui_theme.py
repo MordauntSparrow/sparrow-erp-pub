@@ -141,7 +141,9 @@ def contractor_set_theme_response():
     preference = "dark" if raw == "dark" else ("auto" if raw == "auto" else "light")
     flask_session["portal_theme"] = preference
     flask_session.modified = True
-    cid = (flask_session.get("tb_user") or {}).get("id")
+    from app.portal_session import contractor_id_from_tb_user
+
+    cid = contractor_id_from_tb_user(flask_session.get("tb_user"))
     if cid:
         set_contractor_ui_theme_column(int(cid), preference)
     return redirect(_safe_same_site_redirect_target(), code=303)

@@ -18,7 +18,16 @@ for p in (str(PROJECT_ROOT), str(APP_ROOT), str(PLUGIN_DIR)):
 from app.objects import get_db_connection  # noqa: E402
 
 MIGRATIONS_TABLE = "hr_migrations"
-MODULE_TABLES = [MIGRATIONS_TABLE, "hr_staff_details", "hr_employee_documents", "hr_document_requests", "hr_document_uploads"]
+MODULE_TABLES = [
+    MIGRATIONS_TABLE,
+    "hr_staff_details",
+    "hr_employee_documents",
+    "hr_document_requests",
+    "hr_document_uploads",
+    "hr_onboarding_pack_items",
+    "hr_onboarding_packs",
+    "dbs_status_check_log",
+]
 
 SQL_CREATE_MIGRATIONS = """
 CREATE TABLE IF NOT EXISTS hr_migrations (
@@ -87,12 +96,57 @@ CREATE TABLE IF NOT EXISTS hr_document_uploads (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+SQL_CREATE_HR_ONBOARDING_PACKS = """
+CREATE TABLE IF NOT EXISTS hr_onboarding_packs (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  pack_key VARCHAR(64) NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_hop_key (pack_key),
+  KEY idx_hop_sort (sort_order, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+SQL_CREATE_HR_ONBOARDING_PACK_ITEMS = """
+CREATE TABLE IF NOT EXISTS hr_onboarding_pack_items (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  pack_id INT NOT NULL,
+  request_type VARCHAR(32) NOT NULL DEFAULT 'other',
+  title VARCHAR(255) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  KEY idx_hopi_pack (pack_id, sort_order),
+  CONSTRAINT fk_hopi_pack FOREIGN KEY (pack_id) REFERENCES hr_onboarding_packs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+SQL_CREATE_DBS_STATUS_CHECK_LOG = """
+CREATE TABLE IF NOT EXISTS dbs_status_check_log (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  contractor_id INT NOT NULL,
+  checked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status_code VARCHAR(64) DEFAULT NULL,
+  result_type VARCHAR(64) DEFAULT NULL,
+  channel ENUM('manual','scheduled') NOT NULL DEFAULT 'manual',
+  checker_user_id CHAR(36) DEFAULT NULL,
+  checker_label VARCHAR(255) DEFAULT NULL,
+  http_status SMALLINT DEFAULT NULL,
+  error_message TEXT,
+  KEY idx_dscl_contractor (contractor_id, checked_at),
+  CONSTRAINT fk_dscl_contractor FOREIGN KEY (contractor_id) REFERENCES tb_contractors(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 CREATES = [
     SQL_CREATE_MIGRATIONS,
     SQL_CREATE_HR_STAFF_DETAILS,
     SQL_CREATE_HR_EMPLOYEE_DOCUMENTS,
     SQL_CREATE_HR_DOCUMENT_REQUESTS,
     SQL_CREATE_HR_DOCUMENT_UPLOADS,
+    SQL_CREATE_HR_ONBOARDING_PACKS,
+    SQL_CREATE_HR_ONBOARDING_PACK_ITEMS,
+    SQL_CREATE_DBS_STATUS_CHECK_LOG,
 ]
 
 
@@ -148,9 +202,25 @@ def _ensure_hr_columns(conn):
         ]:
             if not _column_exists(conn, "hr_staff_details", col):
                 cur.execute("ALTER TABLE hr_staff_details ADD COLUMN {} {}".format(col, defn))
-        # contract
+        # DBS Update Service (CRSC status check — read-only; see PRD)
         for col, defn in [
-            ("contract_type", "VARCHAR(64) DEFAULT NULL AFTER dbs_document_path"),
+            ("dbs_update_service_subscribed", "TINYINT(1) NOT NULL DEFAULT 0 AFTER dbs_document_path"),
+            ("dbs_certificate_ref", "VARCHAR(64) DEFAULT NULL AFTER dbs_update_service_subscribed"),
+            ("dbs_update_consent_at", "DATETIME DEFAULT NULL AFTER dbs_certificate_ref"),
+            ("dbs_last_check_at", "DATETIME DEFAULT NULL AFTER dbs_update_consent_at"),
+            ("dbs_last_status_code", "VARCHAR(64) DEFAULT NULL AFTER dbs_last_check_at"),
+            ("dbs_last_response_hash", "CHAR(64) DEFAULT NULL AFTER dbs_last_status_code"),
+        ]:
+            if not _column_exists(conn, "hr_staff_details", col):
+                cur.execute("ALTER TABLE hr_staff_details ADD COLUMN {} {}".format(col, defn))
+        # contract (after DBS document path / Update Service columns when present)
+        contract_after = (
+            "dbs_last_response_hash"
+            if _column_exists(conn, "hr_staff_details", "dbs_last_response_hash")
+            else "dbs_document_path"
+        )
+        for col, defn in [
+            ("contract_type", "VARCHAR(64) DEFAULT NULL AFTER {}".format(contract_after)),
             ("contract_start", "DATE DEFAULT NULL AFTER contract_type"),
             ("contract_end", "DATE DEFAULT NULL AFTER contract_start"),
             ("contract_document_path", "VARCHAR(512) DEFAULT NULL AFTER contract_end"),
@@ -255,6 +325,70 @@ def _migrate_user_id_columns_to_char36(conn):
         cur.close()
 
 
+def _seed_hr_onboarding_packs_if_empty(conn):
+    """First-time seed of onboarding packs from built-in defaults (idempotent)."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM hr_onboarding_packs")
+        row = cur.fetchone()
+        if row and int(row[0] or 0) > 0:
+            return
+        # Mirror app.plugins.hr_module.services.HR_ONBOARDING_PACKS + labels
+        builtin = {
+            "office_standard": (
+                "Office / standard",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("dbs", "DBS certificate"),
+                    ("profile_picture", "Profile photo for ID and systems"),
+                ],
+            ),
+            "field_based": (
+                "Field / mobile",
+                [
+                    ("driving_licence", "Driving licence"),
+                    ("right_to_work", "Right to work evidence"),
+                    ("dbs", "DBS certificate"),
+                ],
+            ),
+            "minimal": (
+                "Minimal (right to work + contract)",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("contract", "Signed contract or written terms"),
+                ],
+            ),
+        }
+        sort_main = 0
+        for pack_key, (label, items) in builtin.items():
+            cur.execute(
+                """
+                INSERT INTO hr_onboarding_packs (pack_key, label, sort_order, active)
+                VALUES (%s, %s, %s, 1)
+                """,
+                (pack_key, label[:255], sort_main),
+            )
+            pid = cur.lastrowid
+            sort_main += 10
+            for i, (rt, title) in enumerate(items):
+                cur.execute(
+                    """
+                    INSERT INTO hr_onboarding_pack_items (pack_id, request_type, title, sort_order)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (int(pid), (rt or "other")[:32], (title or "")[:255], i * 10),
+                )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        cur.close()
+
+
 def _backfill_hr_staff_shell_rows(conn):
     """Ensure each tb_contractors row has an hr_staff_details shell (same person, extended HR fields)."""
     cur = conn.cursor()
@@ -284,6 +418,7 @@ def ensure_tables(conn):
     _ensure_hr_staff_manager_fk(conn)
     _migrate_user_id_columns_to_char36(conn)
     _backfill_hr_staff_shell_rows(conn)
+    _seed_hr_onboarding_packs_if_empty(conn)
 
 
 def install():

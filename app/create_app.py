@@ -1,3 +1,4 @@
+import logging
 import os
 import json
 import subprocess
@@ -10,7 +11,7 @@ from flask_cors import CORS
 
 from dotenv import load_dotenv, set_key
 
-from app.objects import User  # Your user model with get_user_by_id
+from app.objects import DatabaseTemporarilyUnavailable, User
 
 from flask_session import Session as FlaskSession
 import redis as _redis
@@ -42,16 +43,111 @@ except Exception:
 # ---------------------------------------------------------------------
 
 ENV_PATH = os.path.join(os.path.dirname(__file__), "config", ".env")
+# Non-empty SMTP_* before loading app .env (e.g. Railway Variables) must not be overwritten by
+# the volume file. Keys that exist but are empty must NOT block the volume—otherwise placeholder
+# vars in the dashboard hide saved settings after redeploy.
+_PLATFORM_SMTP_KEYS_NONEMPTY_AT_BOOT = frozenset(
+    k
+    for k in os.environ
+    if k.startswith("SMTP_") and str(os.environ.get(k, "") or "").strip()
+)
 load_dotenv(dotenv_path=ENV_PATH)
+
+from app.storage_paths import load_volume_smtp_into_os_environ
+
+load_volume_smtp_into_os_environ(skip_keys=_PLATFORM_SMTP_KEYS_NONEMPTY_AT_BOOT)
+
+
+def _railway_or_stdout_access_logs() -> bool:
+    """
+    Railway UI treats stderr as “errors” (red). Werkzeug’s HTTP access log defaults to stderr,
+    which inflates error-rate metrics. Opt out with SPARROW_ACCESS_LOG_STDOUT=0/false.
+    Opt in on any host with SPARROW_ACCESS_LOG_STDOUT=1/true.
+    """
+    v = (os.environ.get("SPARROW_ACCESS_LOG_STDOUT") or "").strip().lower()
+    if v in ("0", "false", "no"):
+        return False
+    if v in ("1", "true", "yes"):
+        return True
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+
+
+def _configure_werkzeug_access_log_stdout() -> None:
+    """Send Werkzeug request lines (GET … 200) to stdout instead of stderr."""
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    log = logging.getLogger("werkzeug")
+    log.handlers.clear()
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    log.propagate = False
+
+
+def _resolve_socketio_async_mode() -> str:
+    """
+    Default was eventlet, but eventlet is not in requirements.txt — that caused
+    “Invalid async_mode specified”. Prefer installed libs, else threading (works with socketio.run).
+    """
+    import importlib.util
+
+    def _has(mod: str) -> bool:
+        try:
+            return importlib.util.find_spec(mod) is not None
+        except Exception:
+            return False
+
+    raw = (os.environ.get("SOCKETIO_ASYNC_MODE") or "").strip().lower()
+    if raw == "threading":
+        return "threading"
+    if raw == "eventlet":
+        return "eventlet" if _has("eventlet") else "threading"
+    if raw == "gevent":
+        return "gevent" if _has("gevent") else "threading"
+    if _has("eventlet"):
+        return "eventlet"
+    if _has("gevent"):
+        return "gevent"
+    return "threading"
 
 
 def update_env_var(key, value):
     """
-    Updates the given key in .env and reloads environment variables
-    so that os.environ reflects the change in this process.
+    Persist ``key`` to disk and mirror it into ``os.environ`` for this process.
+
+    ``SMTP_*`` keys are written to ``{persistent_volume}/config/.env.smtp`` when a persistent
+    data root is configured (Railway volume, etc.), so email settings survive redeploys;
+    otherwise they go to ``app/config/.env`` like other keys.
+
+    Only the given key is updated in the environment. Do **not** call
+    ``load_dotenv(..., override=True)`` here: that reapplies every entry in ``.env`` and
+    overwrites platform-injected variables (e.g. Railway's ``DB_HOST``) with stale values
+    such as ``localhost`` left in the file from local dev—saving SMTP or any other setting
+    would then break the database until restart (and can persist broken values on disk).
     """
-    set_key(str(ENV_PATH), key, value)
-    load_dotenv(ENV_PATH, override=True)
+    from app.storage_paths import get_persistent_smtp_env_path
+
+    k = str(key)
+    if k.startswith("SMTP_"):
+        smtp_path = get_persistent_smtp_env_path()
+        target = smtp_path if smtp_path else str(ENV_PATH)
+        os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+        set_key(target, k, "" if value is None else str(value))
+        if value is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = str(value)
+        return
+
+    set_key(str(ENV_PATH), k, value)
+    if value is None:
+        os.environ.pop(k, None)
+    else:
+        os.environ[k] = str(value)
 
 
 def restart_application():
@@ -81,7 +177,10 @@ def _ensure_core_manifest(config_dir: str) -> str:
             "version": "1.0.0",
             "theme_settings": {
                 "theme": "default",
-                "custom_css_path": ""
+                "custom_css_path": "",
+                "dashboard_background_mode": "slideshow",
+                "dashboard_background_color": "#1e293b",
+                "dashboard_background_image_path": "",
             },
             "site_settings": {
                 "company_name": "Sparrow ERP",
@@ -166,6 +265,48 @@ def _register_jinja_filters(app: Flask) -> None:
     def regex_replace(value, pattern, repl):
         return re.sub(pattern, repl, value)
 
+    def unique_flashes(messages):
+        """Collapse duplicate (category, message) pairs from the flash queue."""
+        if not messages:
+            return []
+        seen = set()
+        out = []
+        for item in messages:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            cat, msg = item[0], item[1]
+            key = (str(cat), str(msg))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((cat, msg))
+        return out
+
+    def admin_visible_flashes(messages):
+        """Same as unique_flashes but drops success toasts (green banners) on the main admin shell."""
+        skip = frozenset(("success", "plugins_page_success"))
+        return [
+            (cat, msg)
+            for cat, msg in unique_flashes(messages)
+            if str(cat or "").lower() not in skip
+        ]
+
+    def fleet_vdi_suppress_flash(msg) -> bool:
+        """Hide global/admin flashes on the crew VDI layout (standalone page)."""
+        if msg is None:
+            return True
+        m = str(msg)
+        needles = (
+            "Upgrade scripts completed",
+            "Upgrade run completed",
+            "Upgrade run failed",
+            "Welcome back",
+            "VDI form saved",
+            "VDI form restored",
+            "default template",
+        )
+        return any(n in m for n in needles)
+
     @app.template_filter('fromjson')
     def fromjson_filter(s):
         return json.loads(s)
@@ -173,6 +314,9 @@ def _register_jinja_filters(app: Flask) -> None:
     app.jinja_env.filters['sort_keys'] = sort_keys
     app.jinja_env.filters['format_timestamp'] = format_timestamp
     app.jinja_env.filters['regex_replace'] = regex_replace
+    app.jinja_env.filters['unique_flashes'] = unique_flashes
+    app.jinja_env.filters['admin_visible_flashes'] = admin_visible_flashes
+    app.jinja_env.filters['fleet_vdi_suppress_flash'] = fleet_vdi_suppress_flash
 
 
 # ---------------------------------------------------------------------
@@ -209,9 +353,28 @@ def create_app():
         bind_persistent_directories(app.root_path)
     except Exception as e:
         print(f"[WARN] Persistent storage bind failed: {e}")
+    try:
+        from app.storage_paths import load_volume_smtp_into_os_environ
+
+        # Same skip set as at module import; re-apply after bind (no-op if no volume file).
+        load_volume_smtp_into_os_environ(skip_keys=_PLATFORM_SMTP_KEYS_NONEMPTY_AT_BOOT)
+    except Exception as e:
+        print(f"[WARN] Volume SMTP re-load failed: {e}")
 
     # Jinja filters
     _register_jinja_filters(app)
+
+    @app.context_processor
+    def inject_user_management_nav():
+        from app.permissions_registry import (
+            user_can_open_org_admin_nav,
+            user_can_open_user_management,
+        )
+
+        return {
+            "can_open_user_management": user_can_open_user_management,
+            "can_open_org_admin_nav": user_can_open_org_admin_nav,
+        }
 
     # Config
     _default_secret = "defaultsecretkey"
@@ -244,6 +407,16 @@ def create_app():
     app.config["REMEMBER_COOKIE_HTTPONLY"] = True
     app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
     app.config["REMEMBER_COOKIE_SECURE"] = app.config["SESSION_COOKIE_SECURE"]
+
+    try:
+        app.config["ADMIN_STAFF_AUDIT_RETENTION_DAYS"] = int(
+            os.environ.get("ADMIN_STAFF_AUDIT_RETENTION_DAYS", "90")
+        )
+    except ValueError:
+        app.config["ADMIN_STAFF_AUDIT_RETENTION_DAYS"] = 90
+    app.config["ADMIN_STAFF_AUDIT_RETENTION_DAYS"] = max(
+        1, min(int(app.config["ADMIN_STAFF_AUDIT_RETENTION_DAYS"]), 3650)
+    )
 
     # Flask-Login
     login_manager = LoginManager()
@@ -356,9 +529,41 @@ def create_app():
 
     # Plugins
     plugin_manager = PluginManager(plugins_dir=plugins_dir)
+
+    # Admin/partials (e.g. sparrow_admin_nav_styles.html) use config.theme_settings; Jinja's
+    # `config` is Flask app.config, not the core manifest dict passed to some core routes.
+    try:
+        _core_m = plugin_manager.get_core_manifest() or {}
+        _ts = _core_m.get("theme_settings")
+        if not isinstance(_ts, dict):
+            _ts = {}
+        _ts = dict(_ts)
+        _ts.setdefault("theme", "default")
+        _ts.setdefault("custom_css_path", "")
+        _ts.setdefault("dashboard_background_mode", "slideshow")
+        _ts.setdefault("dashboard_background_color", "#1e293b")
+        _ts.setdefault("dashboard_background_image_path", "")
+        app.config["theme_settings"] = _ts
+    except Exception as _theme_err:
+        print(f"[WARN] Could not set app.config['theme_settings']: {_theme_err}")
+        app.config["theme_settings"] = {
+            "theme": "default",
+            "custom_css_path": "",
+            "dashboard_background_mode": "slideshow",
+            "dashboard_background_color": "#1e293b",
+            "dashboard_background_image_path": "",
+        }
+
     plugin_manager.register_admin_routes(app)
     # Public plugin blueprints (e.g. recruitment /vacancies, employee portal paths) — required for url_for from admin templates
     plugin_manager.register_public_routes(app)
+
+    try:
+        from app.plugins.hr_module.dbs_scheduler import init_dbs_status_scheduler
+
+        init_dbs_status_scheduler(app)
+    except Exception as _dbs_sched_err:
+        print(f"[WARN] DBS Update Service scheduler not started: {_dbs_sched_err}")
 
     _PLUGIN_URL_ACCESS_EXEMPT = frozenset(
         {"settings", "enable", "disable", "install", "uninstall", "install-remote"}
@@ -366,6 +571,10 @@ def create_app():
     # JSON APIs under these prefixes authenticate inside the plugin (Bearer JWT, API tokens, etc.);
     # Flask-Login session is often absent. Redirecting anonymous /plugin/… requests to /login causes
     # 302 on health checks, OPTIONS (CORS), and login/token POSTs — breaking mobile/SPA clients.
+    #
+    # When adding a plugin with agent/JSON endpoints, append ``/plugin/<system_name>/api/`` here and
+    # align CORS (``r"/plugin/[^/]+/api.*"``) / CSRF exempt patterns in this file. Session JWTs from
+    # ``POST /api/login`` must carry non-empty ``username`` and ``role`` (``app.auth_jwt``).
     _PLUGIN_ROUTE_LEVEL_JSON_API_PREFIXES = (
         "/plugin/medical_records_module/api/",
         "/plugin/inventory_control/api/",
@@ -433,6 +642,9 @@ def create_app():
         "Authorization",
         "Accept",
         "X-Requested-With",
+        # SeaSurf / sparrow_csrf_head.html: credentialed or cross-origin preflights may need these.
+        "X-CSRFToken",
+        "X-CSRF-Token",
         # Cura case create/update/close uses this header for idempotent writes.
         "Idempotency-Key",
     ]
@@ -492,10 +704,12 @@ def create_app():
             resources=_cors_resource_api_only,
             supports_credentials=False,
         )
-        app.logger.warning(
-            "CORS_ALLOWED_ORIGINS is unset in production: using permissive CORS (*, no credentials) "
-            "only for /api* and /plugin/*/api* so SPAs can complete preflight (POST /api/login, Cura token, etc.). "
-            "Set CORS_ALLOWED_ORIGINS to explicit origins when you can (tighter than *)."
+        # Use stdout so hosted dashboards (e.g. Railway) do not count this as stderr “errors”.
+        print(
+            "INFO (create_app): CORS_ALLOWED_ORIGINS is unset in production: permissive CORS (*, no "
+            "credentials) for /api* and /plugin/*/api* only. Set CORS_ALLOWED_ORIGINS to explicit "
+            "origins when you can.",
+            flush=True,
         )
 
     # ------------------------------------------------------------------
@@ -524,6 +738,16 @@ def create_app():
     # ------------------------------------------------------------------
     if SeaSurf:
         try:
+            # SeaSurf defaults to strict Referer validation on HTTPS. That runs before token checks and
+            # breaks common cases: reverse proxies where url_root/host differs from the public URL,
+            # browsers or extensions stripping Referer, and some fetch/form flows without Referer.
+            # Token + session validation still protects against CSRF. Opt in to referer checks with
+            # CSRF_CHECK_REFERER=1 when your deployment needs that extra constraint.
+            _csrf_ref = (os.environ.get("CSRF_CHECK_REFERER") or "").strip().lower()
+            if _csrf_ref in ("1", "true", "yes", "on"):
+                app.config["CSRF_CHECK_REFERER"] = True
+            else:
+                app.config["CSRF_CHECK_REFERER"] = False
             csrf = SeaSurf(app)
             # Core JSON auth: no CSRF cookie/header from mobile or scripted clients.
             for endpoint in ("api.api_login", "api.api_logout"):
@@ -539,6 +763,14 @@ def create_app():
                 re.compile(r"^/api/mdt(?:/.*)?$"),
                 re.compile(r"^/api/messages(?:/.*)?$"),
                 re.compile(r"^/api/ping$"),
+                # Medical Records: EPCR Caldicott flows use fetch() + JSON + session cookie (no CSRF
+                # header). Without exempt, SeaSurf returns HTML and the client sees "not valid JSON".
+                re.compile(
+                    r"^/plugin/medical_records_module/(?:"
+                    r"admin/(?:request_epcr_access_code|unlock_epcr_case|withdraw_epcr_access_request)|"
+                    r"clinical/(?:review_epcr_access_request|epcr/delete/<int:case_id>)"
+                    r")$"
+                ),
             )
             _csrf_state_changing = frozenset(
                 {"POST", "PUT", "PATCH", "DELETE"}
@@ -564,9 +796,16 @@ def create_app():
     # Basic rate limiting + stricter caps on authentication surfaces
     if Limiter:
         try:
-            _rl_storage = os.environ.get("RATELIMIT_STORAGE_URI") or os.environ.get(
-                "REDIS_URL"
-            )
+            _rl_storage = (
+                os.environ.get("RATELIMIT_STORAGE_URI")
+                or os.environ.get("REDIS_URL")
+                or ""
+            ).strip()
+            # Explicit storage avoids Flask-Limiter UserWarning (“in-memory… not recommended”)
+            # when None is passed. Use Redis when REDIS_URL is set (Railway plugin / same as sessions).
+            # memory:// is fine for single-instance; multi-instance needs Redis.
+            if not _rl_storage:
+                _rl_storage = "memory://"
             limiter = Limiter(
                 key_func=get_remote_address,
                 default_limits=[
@@ -610,6 +849,56 @@ def create_app():
             )
             if _v_tb_adm:
                 limiter.limit(_tb_cs_admin_lim, methods=["GET"])(_v_tb_adm)
+
+            def _epcr_rate_key():
+                from flask_login import current_user as _cu
+
+                if getattr(_cu, "is_authenticated", False):
+                    _uid = getattr(_cu, "id", None)
+                    return f"epcr:{_uid}:{get_remote_address()}"
+                return f"epcr:anon:{get_remote_address()}"
+
+            _epcr_unlock_lim = os.environ.get("EPCR_UNLOCK_RATE_LIMIT", "15 per minute")
+            _v_epcr_unlock = app.view_functions.get(
+                "medical_records_internal.unlock_epcr_case"
+            )
+            if _v_epcr_unlock:
+                limiter.limit(_epcr_unlock_lim, methods=["POST"], key_func=_epcr_rate_key)(
+                    _v_epcr_unlock
+                )
+            _epcr_req_lim = os.environ.get(
+                "EPCR_ACCESS_REQUEST_RATE_LIMIT", "20 per minute"
+            )
+            _v_epcr_req = app.view_functions.get(
+                "medical_records_internal.request_epcr_access_code"
+            )
+            if _v_epcr_req:
+                limiter.limit(_epcr_req_lim, methods=["POST"], key_func=_epcr_rate_key)(
+                    _v_epcr_req
+                )
+            _v_epcr_wd = app.view_functions.get(
+                "medical_records_internal.withdraw_epcr_access_request"
+            )
+            if _v_epcr_wd:
+                limiter.limit(_epcr_req_lim, methods=["POST"], key_func=_epcr_rate_key)(
+                    _v_epcr_wd
+                )
+            _epcr_rev_lim = os.environ.get(
+                "EPCR_ACCESS_REVIEW_RATE_LIMIT", "40 per minute"
+            )
+            _v_epcr_rev = app.view_functions.get(
+                "medical_records_internal.review_epcr_access_request"
+            )
+            if _v_epcr_rev:
+                limiter.limit(_epcr_rev_lim, methods=["POST"], key_func=_epcr_rate_key)(
+                    _v_epcr_rev
+                )
+            _core_set_lim = (
+                os.environ.get("CORE_SETTINGS_POST_RATE_LIMIT") or "40 per minute"
+            ).strip()
+            _v_core_set = app.view_functions.get("routes.core_module_settings")
+            if _v_core_set and _core_set_lim:
+                limiter.limit(_core_set_lim, methods=["POST"])(_v_core_set)
         except Exception as e:
             print(f"[WARN] Limiter init failed: {e}")
 
@@ -670,6 +959,9 @@ def create_app():
         app.audit_logger = audit_logger
     except Exception as e:
         print(f"[WARN] Audit logging setup failed: {e}")
+        app.audit_logger = None
+    # Plugins: ``getattr(current_app, "audit_logger", None)`` — log with ``.info(..., extra={"extra": {...}})``
+    # only when non-None; there is no separate registration API.
     # ------------------------------------------------------------------
     # Socket.IO initialization (optional Redis message queue)
     # ------------------------------------------------------------------
@@ -681,8 +973,7 @@ def create_app():
         # scale across processes/instances.
         if redis_url:
             socketio_opts['message_queue'] = redis_url
-        # Preferred async mode may be set via env var (default to eventlet)
-        async_mode = os.environ.get('SOCKETIO_ASYNC_MODE', 'eventlet')
+        async_mode = _resolve_socketio_async_mode()
         _sio = (os.environ.get("SOCKETIO_CORS_ORIGINS") or "").strip()
         if not _sio:
             _sio = (os.environ.get("CORS_ALLOWED_ORIGINS") or "").strip()
@@ -711,14 +1002,59 @@ def create_app():
                     return None
 
             @socketio.on('connect')
-            def _on_connect():
+            def _on_connect(auth=None):
+                """
+                CAD: Flask-Login session joins panel_user_<id> for targeted panel sync.
+                MDT / API clients: same JWT as /api/mdt/* via Socket.IO `auth` or query
+                (?token= / ?jwt=) so they receive mdt_event (e.g. callsign_changed).
+                Optional callSign/callsign on auth or query joins room mdt_callsign_<CS>
+                for dispatch-initiated session updates.
+                """
                 try:
-                    if not getattr(current_user, 'is_authenticated', False):
-                        disconnect()
+                    import re as _re
+                    from flask import request as _flask_request
+
+                    if getattr(current_user, 'is_authenticated', False):
+                        room = _panel_user_room()
+                        if room:
+                            join_room(room)
                         return
-                    room = _panel_user_room()
-                    if room:
-                        join_room(room)
+                    auth_d = auth if isinstance(auth, dict) else {}
+                    token = (
+                        (auth_d.get('token') or auth_d.get('jwt') or auth_d.get('bearer') or '')
+                        if auth_d
+                        else ''
+                    )
+                    token = str(token or '').strip()
+                    if not token:
+                        token = (
+                            (_flask_request.args.get('token') or _flask_request.args.get('jwt') or '')
+                            .strip()
+                        )
+                    if token:
+                        try:
+                            from app.auth_jwt import decode_session_token as _decode_socket_jwt
+                            payload = _decode_socket_jwt(token)
+                        except Exception:
+                            payload = None
+                        if payload:
+                            uid = payload.get('sub')
+                            if uid is not None:
+                                join_room(f"mdt_user_{uid}")
+                            raw_cs = (
+                                auth_d.get('callSign')
+                                or auth_d.get('callsign')
+                                or _flask_request.args.get('callSign')
+                                or _flask_request.args.get('callsign')
+                                or ''
+                            )
+                            cs_clean = _re.sub(
+                                r'[^A-Za-z0-9_-]', '', str(raw_cs or '').strip()
+                            ).upper()[:64]
+                            if cs_clean:
+                                join_room(f"mdt_callsign_{cs_clean}")
+                            return
+                    disconnect()
                 except Exception:
                     disconnect()
 
@@ -768,5 +1104,54 @@ def create_app():
             print("[OK] Email sent.")
         elif not out.get("lines"):
             print("[OK] Nothing to send.")
+
+    try:
+        from app import admin_staff_audit as _admin_staff_audit
+
+        @app.after_request
+        def _admin_staff_audit_after(response):
+            return _admin_staff_audit.after_request_record(response)
+    except Exception as _asa_err:
+        app.logger.warning("admin_staff_audit hook not registered: %s", _asa_err)
+
+    @app.errorhandler(DatabaseTemporarilyUnavailable)
+    def _database_temporarily_unavailable(exc):
+        """Cold start / DB still waking (e.g. Railway): avoid raw MySQL tracebacks."""
+        from flask import jsonify, render_template, request
+
+        path = request.path or ""
+        if path.startswith("/api/") or "/api/" in path:
+            return jsonify(
+                {
+                    "error": "service_unavailable",
+                    "message": (
+                        "The database is starting up. Please retry in a few seconds."
+                    ),
+                }
+            ), 503
+        accept = (request.headers.get("Accept") or "").lower()
+        if "application/json" in accept and "text/html" not in accept:
+            return jsonify(
+                {
+                    "error": "service_unavailable",
+                    "message": (
+                        "The database is starting up. Please retry in a few seconds."
+                    ),
+                }
+            ), 503
+        return render_template(
+            "database_warming.html",
+            detail=(str(exc) if app.debug else None),
+        ), 503
+
+    if _railway_or_stdout_access_logs():
+        _configure_werkzeug_access_log_stdout()
+
+    try:
+        from app.support_access import ensure_support_access_schema
+
+        ensure_support_access_schema()
+    except Exception as _sa_exc:
+        print(f"[WARN] support_access schema ensure failed (will retry on use): {_sa_exc}")
 
     return app

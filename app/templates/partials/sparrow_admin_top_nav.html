@@ -18,17 +18,21 @@
             <i class="bi bi-speedometer2 me-1"></i> Dashboard
           </a>
         </li>
-        {% if current_user.is_authenticated and (current_user.role or '')|lower in ['admin', 'superuser'] %}
+        {% if current_user.is_authenticated and can_open_org_admin_nav() %}
         <li class="nav-item">
           <a class="nav-link py-2 px-3 {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}" {% if request.path.startswith('/core/settings') %}aria-current="page"{% endif %}>
             <i class="bi bi-sliders me-1"></i> Settings
           </a>
         </li>
+        {% endif %}
+        {% if current_user.is_authenticated and can_open_user_management() %}
         <li class="nav-item">
           <a class="nav-link py-2 px-3 {% if request.path.startswith('/users') %}active{% endif %}" href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>
             <i class="bi bi-people me-1"></i> Users
           </a>
         </li>
+        {% endif %}
+        {% if current_user.is_authenticated and can_open_org_admin_nav() %}
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
             <i class="bi bi-wrench-adjustable me-1"></i> System
@@ -47,8 +51,8 @@
             </li>
             <li><hr class="dropdown-divider"></li>
             <li>
-              <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings', tab='integrations') }}">
-                <i class="bi bi-key me-2 text-secondary"></i> GitLab &amp; .env
+              <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}">
+                <i class="bi bi-gear me-2 text-secondary"></i> Core settings
               </a>
             </li>
           </ul>

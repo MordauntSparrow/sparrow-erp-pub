@@ -21,6 +21,9 @@ Sections:
   5. Core Module Settings (Admin Only)
       - /core/settings   -> Tabbed: manifest (branding, theme, AI model id) + .env (SMTP, GitLab, LLM, security)
   6. SMTP/Email Configuration (Admin Only)
+      - Core settings Email tab persists SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
+        SMTP_USE_SSL, SMTP_USE_TLS (via connection mode: STARTTLS / implicit SSL / plain),
+        SMTP_TIMEOUT, SMTP_FROM, SMTP_FROM_NAME to app/config/.env (same keys as EmailManager).
       - /smtp-config     -> Legacy; redirects to /core/settings?tab=email
   7. Plugin Management (Admin Only)
       - /plugins         -> Manage plugins (listing, enabling/disabling, etc.)
@@ -32,7 +35,9 @@ Sections:
   8. Static File Serving for Plugins
       - /plugins/<plugin_name>/<filename>
 
-All admin-only routes are protected using the helper function admin_only().
+Most privileged routes use admin_only() (includes time-limited vendor support role).
+Customer-only surfaces (users, core settings, version, plugin install) use customer_super_admin_only()
+(admin or superuser, including time-limited vendor support when logged in as the shadow superuser).
 The core manifest is passed as "config" to all templates.
 """
 
@@ -42,6 +47,7 @@ from app.ai_config import (
     sanitize_chat_model_id,
 )
 from app.create_app import update_env_var
+from app.storage_paths import get_persistent_data_root, get_persistent_smtp_env_path
 from app.auth_jwt import encode_session_token
 from app.compliance_audit import log_security_event, pseudonymous_username_hint
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
@@ -49,7 +55,7 @@ from flask_login import login_user, logout_user, current_user, login_required
 from app.objects import *
 from werkzeug.utils import secure_filename
 from flask import (
-    Blueprint, render_template, request, redirect, url_for,
+    Blueprint, current_app, render_template, request, redirect, url_for,
     session, flash, jsonify, send_from_directory, abort
 )
 import re
@@ -67,29 +73,80 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Constants and folder paths
 _APP_PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 PLUGINS_FOLDER = os.path.join(_APP_PKG_DIR, "plugins")
-# Under Docker/Railway this path is symlinked to the volume when SPARROW_DATA_ROOT / RAILWAY_VOLUME_MOUNT_PATH is set.
+# Under Docker/Railway this path is symlinked to the volume — see
+# app.storage_paths.get_persistent_data_root() (RAILWAY_VOLUME_MOUNT_PATH=/volume, etc.).
 STATIC_UPLOAD_FOLDER = os.path.join(_APP_PKG_DIR, "static", "uploads")
 ALLOWED_LOGO_EXTENSIONS = {'png', 'jpg', 'jpeg', 'svg'}
+ALLOWED_DASHBOARD_BG_EXTENSIONS = ALLOWED_LOGO_EXTENSIONS | {'webp'}
 ALLOWED_CSS_EXTENSIONS = {'css'}
 
 os.makedirs(STATIC_UPLOAD_FOLDER, exist_ok=True)
+
+_DASH_BG_MODE_OK = frozenset({"slideshow", "solid", "image"})
+
+
+def _sanitize_dashboard_background_mode(raw) -> str:
+    v = (raw or "slideshow").strip().lower()
+    return v if v in _DASH_BG_MODE_OK else "slideshow"
+
+
+def _sanitize_dashboard_background_color(raw, fallback: str) -> str:
+    s = (raw or "").strip()
+    if re.match(r"^#[0-9A-Fa-f]{3}$", s) or re.match(
+        r"^#[0-9A-Fa-f]{6}$", s
+    ) or re.match(r"^#[0-9A-Fa-f]{8}$", s):
+        return s
+    fb = (fallback or "").strip()
+    if re.match(r"^#[0-9A-Fa-f]{3}$", fb) or re.match(
+        r"^#[0-9A-Fa-f]{6}$", fb
+    ) or re.match(r"^#[0-9A-Fa-f]{8}$", fb):
+        return fb
+    return "#1e293b"
 
 
 def _env_nonempty(key: str) -> bool:
     return bool((os.environ.get(key) or "").strip())
 
 
+def _smtp_connection_mode_for_ui() -> str:
+    """
+    Values: starttls | ssl | plain — aligned with EmailManager (objects.py) defaults.
+    """
+    ssl_raw = (os.environ.get("SMTP_USE_SSL") or "").strip().lower()
+    if ssl_raw in ("1", "true", "yes"):
+        return "ssl"
+    if ssl_raw in ("0", "false", "no"):
+        use_tls = (os.environ.get("SMTP_USE_TLS", "true")
+                   or "true").lower() == "true"
+        return "starttls" if use_tls else "plain"
+    try:
+        p = int((os.environ.get("SMTP_PORT") or "587").strip() or "587")
+        if p == 465:
+            return "ssl"
+    except ValueError:
+        pass
+    use_tls = (os.environ.get("SMTP_USE_TLS", "true")
+               or "true").lower() == "true"
+    return "starttls" if use_tls else "plain"
+
+
 def _settings_env_context():
     """Snapshot for Core Settings UI. GitLab read token is included for admin prefill (see integrations tab)."""
     _g_user, _g_pass = effective_gitlab_basic_credentials()
+    _mode = _smtp_connection_mode_for_ui()
+    _use_tls = _mode == "starttls"
     return {
         "smtp": {
             "host": os.environ.get("SMTP_HOST", "") or "",
             "port": os.environ.get("SMTP_PORT", "") or "",
             "username": os.environ.get("SMTP_USERNAME", "") or "",
             "password_set": _env_nonempty("SMTP_PASSWORD"),
-            "use_tls": (os.environ.get("SMTP_USE_TLS", "true") or "true").lower()
-            == "true",
+            "use_tls": _use_tls,
+            "connection_mode": _mode,
+            "timeout": (os.environ.get("SMTP_TIMEOUT") or "30").strip() or "30",
+            "from_email": (os.environ.get("SMTP_FROM") or "").strip(),
+            "from_name": (os.environ.get("SMTP_FROM_NAME") or "").strip(),
+            "stored_on_volume": bool(get_persistent_smtp_env_path()),
         },
         "gitlab": {
             "token_set": bool(
@@ -123,6 +180,9 @@ def _settings_env_context():
             "secret_set": _env_nonempty("SECRET_KEY"),
             "jwt_set": _env_nonempty("JWT_SECRET_KEY"),
         },
+        "persistent_storage": {
+            "configured": bool(get_persistent_data_root()),
+        },
     }
 
 
@@ -148,9 +208,32 @@ def _save_smtp_from_form(form) -> None:
     pw = _g("smtp_password", "password")
     if pw:
         update_env_var("SMTP_PASSWORD", pw)
-    ut = (form.get("smtp_use_tls") or form.get("use_tls") or "true").lower()
-    use_tls = ut == "true"
-    update_env_var("SMTP_USE_TLS", "true" if use_tls else "false")
+
+    mode = (form.get("smtp_connection_mode") or "").strip().lower()
+    if mode not in ("starttls", "ssl", "plain"):
+        # Legacy single checkbox from older forms
+        ut = (form.get("smtp_use_tls") or form.get("use_tls") or "true").lower()
+        mode = "starttls" if ut == "true" else "plain"
+    if mode == "ssl":
+        update_env_var("SMTP_USE_SSL", "true")
+        update_env_var("SMTP_USE_TLS", "false")
+    elif mode == "plain":
+        update_env_var("SMTP_USE_SSL", "false")
+        update_env_var("SMTP_USE_TLS", "false")
+    else:
+        update_env_var("SMTP_USE_SSL", "false")
+        update_env_var("SMTP_USE_TLS", "true")
+
+    try:
+        to = int((form.get("smtp_timeout") or "30").strip() or "30")
+        to = max(5, min(to, 300))
+    except ValueError:
+        to = 30
+    update_env_var("SMTP_TIMEOUT", str(to))
+
+    update_env_var("SMTP_FROM", (form.get("smtp_from") or "").strip())
+    update_env_var("SMTP_FROM_NAME",
+                   (form.get("smtp_from_name") or "").strip())
 
 
 # Create blueprint for core routes
@@ -394,6 +477,17 @@ def login():
 
             user_data = User.get_user_by_username_raw(username)
             if user_data and AuthManager.verify_password(user_data["password_hash"], password):
+                from app.support_access import support_login_blocked_reason
+
+                _sup_err = support_login_blocked_reason(user_data)
+                if _sup_err:
+                    flash(_sup_err, "error")
+                    return render_template(
+                        "login.html",
+                        site_settings=site_settings,
+                        config=core_manifest,
+                        login_next=login_next_value,
+                    )
                 permissions = []
                 if user_data.get('permissions'):
                     try:
@@ -416,6 +510,15 @@ def login():
                     user_id=user_data.get("id"),
                     role=user_data.get("role"),
                 )
+                if int(user_data.get("billable_exempt") or 0):
+                    session["support_shadow"] = True
+                    log_security_event(
+                        "support_shadow_session_login",
+                        user_id=user_data.get("id"),
+                        username=user_data.get("username"),
+                    )
+                else:
+                    session.pop("support_shadow", None)
 
                 session['first_name'] = user_data.get('first_name', '')
                 session['last_name'] = user_data.get('last_name', '')
@@ -439,7 +542,7 @@ def login():
                 flash(
                     f"Welcome back, {user_data.get('first_name', user_data['username'])}!", 'success')
 
-                if user_data['role'] == "crew":
+                if (user_data.get("role") or "").lower() == "crew":
                     return redirect('/plugin/ventus_response_module/response')
 
                 if login_next_value:
@@ -505,7 +608,7 @@ def reset_password_request():
         flash("If an account exists for that email, a password reset link has been sent.", "info")
 
         user_data = User.get_user_by_email(email)
-        if user_data:
+        if user_data and not int(user_data.get("billable_exempt") or 0):
             try:
                 token = generate_reset_token(email)
                 reset_link = url_for(
@@ -557,6 +660,11 @@ def reset_password(token):
         flash("The password reset link is invalid or has expired.", "danger")
         return redirect(url_for('routes.reset_password_request'))
 
+    _pw_user = User.get_user_by_email(email)
+    if _pw_user and int(_pw_user.get("billable_exempt") or 0):
+        flash("The password reset link is invalid or has expired.", "danger")
+        return redirect(url_for('routes.reset_password_request'))
+
     if request.method == 'POST':
         new_password = request.form.get('password', '')
         confirm_password = request.form.get('confirm_password', '')
@@ -566,6 +674,9 @@ def reset_password(token):
             return render_template('reset_password.html', token=token, config=core_manifest)
 
         user_data = User.get_user_by_email(email)
+        if user_data and int(user_data.get("billable_exempt") or 0):
+            flash("The password reset link is invalid or has expired.", "danger")
+            return redirect(url_for('routes.reset_password_request'))
         if user_data:
             new_hash = AuthManager.hash_password(new_password)
             User.update_password(user_data['id'], new_hash)
@@ -614,7 +725,8 @@ def dashboard():
         p
         for p in plugins
         if user_can_access_plugin(
-            current_user, _manifest_for_system(p.get("system_name", "")), p.get("system_name", "")
+            current_user, _manifest_for_system(
+                p.get("system_name", "")), p.get("system_name", "")
         )
     ]
 
@@ -640,7 +752,12 @@ def dashboard():
 @login_required
 def logout():
     try:
-        log_security_event("session_logout", user_id=getattr(current_user, "id", None))
+        log_security_event("session_logout", user_id=getattr(
+            current_user, "id", None))
+    except Exception:
+        pass
+    try:
+        session.pop("support_shadow", None)
     except Exception:
         pass
     logout_user()
@@ -649,13 +766,34 @@ def logout():
 
 
 ##############################################################################
-# SECTION 3: User Management (Admin Only)
+# SECTION 3: User Management (superuser > admin / clinical lead; delegated staff via core.manage_users)
 ##############################################################################
+
+
+def _user_management_access_denied_redirect():
+    flash(
+        "User management is available to organisation administrators, clinical leads, "
+        "or accounts granted “Core — manage administrator accounts”.",
+        "danger",
+    )
+    return redirect(url_for("routes.dashboard"))
+
+
+def _require_user_management():
+    from app.permissions_registry import user_can_open_user_management
+
+    if user_can_open_user_management():
+        return None
+    return _user_management_access_denied_redirect()
+
 
 @routes.route('/users/search', methods=['GET'])
 @login_required
 def search_users():
-    if not admin_only():
+    from app.permissions_registry import serialize_user_row_for_management_api
+
+    _g = _require_user_management()
+    if _g is not None:
         return jsonify({"error": "Access denied"}), 403
 
     query = request.args.get('q', '').strip()
@@ -668,46 +806,63 @@ def search_users():
         cursor.execute("""
             SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
             FROM users
-            WHERE username LIKE %s OR email LIKE %s
+            WHERE (username LIKE %s OR email LIKE %s) AND COALESCE(billable_exempt, 0) = 0
         """, (search_param, search_param))
     else:
         cursor.execute("""
             SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
             FROM users
+            WHERE COALESCE(billable_exempt, 0) = 0
         """)
 
     users_list = cursor.fetchall()
     cursor.close()
     conn.close()
-    return jsonify(users_list)
+    er = (getattr(current_user, "role", None) or "").lower()
+    return jsonify(
+        [serialize_user_row_for_management_api(dict(row), er) for row in users_list]
+    )
 
 
 @routes.route('/users', methods=['GET'])
 @login_required
 def users():
-    if not admin_only():
-        return redirect(url_for('routes.dashboard'))
+    from app.permissions_registry import (
+        collect_permission_catalog,
+        default_permission_ids_for_role,
+        editor_may_edit_target_user,
+        normalize_stored_permissions,
+    )
+
+    _g = _require_user_management()
+    if _g is not None:
+        return _g
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
       SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
       FROM users
+      WHERE COALESCE(billable_exempt, 0) = 0
     """)
     users_list = cursor.fetchall()
     cursor.close()
     conn.close()
 
+    er = (getattr(current_user, "role", None) or "").lower()
+    for u in users_list:
+        u["permissions"] = normalize_stored_permissions(u.get("permissions"))
+        u["may_edit"] = editor_may_edit_target_user(er, u.get("role"))
+        u["may_delete"] = u["may_edit"]
+
     plugin_manager = PluginManager(PLUGINS_FOLDER)
     available_permissions = plugin_manager.get_available_permissions()
     core_manifest = plugin_manager.get_core_manifest() or {}
 
-    try:
-        from app.permissions_registry import (
-            collect_permission_catalog,
-            default_permission_ids_for_role,
-        )
+    editor_is_superuser = er in ("superuser", "support_break_glass")
+    editor_may_assign_elevated = editor_is_superuser or has_permission("core.manage_users")
 
+    try:
         permission_catalog = collect_permission_catalog(plugin_manager)
         role_default_permissions = {
             r: default_permission_ids_for_role(r, permission_catalog)
@@ -717,11 +872,13 @@ def users():
                 "staff",
                 "crew",
                 "clinical_lead",
+                "support_break_glass",
             )
         }
     except Exception as exc:
         print(f"[WARN] permission catalog: {exc}")
-        permission_catalog = [{"id": p, "label": p, "kind": "module_access", "plugin": ""} for p in available_permissions]
+        permission_catalog = [
+            {"id": p, "label": p, "kind": "module_access", "plugin": ""} for p in available_permissions]
         role_default_permissions = {}
 
     return render_template(
@@ -731,19 +888,25 @@ def users():
         available_permissions=available_permissions,
         permission_catalog=permission_catalog,
         role_default_permissions=role_default_permissions,
-        config=core_manifest
+        config=core_manifest,
+        editor_is_superuser=editor_is_superuser,
+        editor_may_assign_elevated=editor_may_assign_elevated,
     )
 
 
 @routes.route('/users/add', methods=['POST'])
 @login_required
 def add_user():
-    if not admin_only():
-        return redirect(url_for('routes.dashboard'))
+    _g = _require_user_management()
+    if _g is not None:
+        return _g
 
     username = request.form.get('username')
     email = request.form.get('email')
-    role = request.form.get('role')
+    role = (request.form.get('role') or '').strip() or 'user'
+    if str(role or "").strip().lower() == "support_break_glass":
+        flash("The vendor support role cannot be assigned manually.", "danger")
+        return redirect(url_for("routes.users"))
     password = request.form.get('password')
     confirm_password = request.form.get('confirm_password')
     first_name = request.form.get('first_name')
@@ -758,27 +921,32 @@ def add_user():
         flash("Username already exists.", "danger")
         return redirect(url_for("routes.users"))
 
+    from app.support_access import shadow_username as _shadow_uname
+
+    if (username or "").strip().lower() == _shadow_uname().lower():
+        flash("This username is reserved for vendor support access.", "danger")
+        return redirect(url_for("routes.users"))
+
     if User.get_user_by_email(email):
         flash("Email already exists.", "danger")
         return redirect(url_for("routes.users"))
 
     try:
-        from app.permissions_registry import (
-            editor_may_assign_superuser_role,
-            is_superuser_username_allowed,
-        )
-
         if str(role or "").lower() == "superuser":
-            if not editor_may_assign_superuser_role(current_user):
-                flash("Only a superuser can assign the superuser role.", "danger")
-                return redirect(url_for("routes.users"))
-            if not is_superuser_username_allowed(username):
-                flash(
-                    "This username is not allowed to hold the superuser role. "
-                    "Set SPARROW_SUPERUSER_USERNAMES if appropriate, or choose another role.",
-                    "danger",
-                )
-                return redirect(url_for("routes.users"))
+            flash(
+                "Superuser accounts are created or promoted in the database only—not through Add user.",
+                "danger",
+            )
+            return redirect(url_for("routes.users"))
+        from app.permissions_registry import editor_may_assign_elevated_core_role
+
+        if not editor_may_assign_elevated_core_role(role):
+            flash(
+                "Only a superuser or an account with “Core — manage administrator accounts” "
+                "may assign Admin or Clinical lead roles.",
+                "danger",
+            )
+            return redirect(url_for("routes.users"))
     except Exception as exc:
         print(f"[WARN] superuser validation: {exc}")
 
@@ -791,8 +959,17 @@ def add_user():
     if personal_pin and personal_pin.strip():
         personal_pin_hash = AuthManager.hash_password(personal_pin.strip())
 
+    from app.seat_limits import seat_check_error_for_new_email
+
     conn = get_db_connection()
     cursor = conn.cursor()
+    seat_err = seat_check_error_for_new_email(email, db_cursor=cursor)
+    if seat_err:
+        cursor.close()
+        conn.close()
+        flash(seat_err, "danger")
+        return redirect(url_for("routes.users"))
+
     cursor.execute("""
         INSERT INTO users (id, username, email, password_hash, role, permissions, first_name, last_name, personal_pin_hash)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -801,6 +978,7 @@ def add_user():
     cursor.close()
     conn.close()
 
+    sync_core_user_to_portal_contractor(user_id)
     flash("New user added successfully.", "success")
     return redirect(url_for("routes.users"))
 
@@ -808,39 +986,72 @@ def add_user():
 @routes.route('/users/edit/<user_id>', methods=['POST'])
 @login_required
 def edit_user(user_id):
-    if not admin_only():
-        return redirect(url_for('routes.dashboard'))
+    _g = _require_user_management()
+    if _g is not None:
+        return _g
+
+    from app.permissions_registry import (
+        editor_may_assign_elevated_core_role,
+        editor_may_edit_target_user,
+    )
+
+    conn_chk = get_db_connection()
+    cur_chk = conn_chk.cursor(dictionary=True)
+    cur_chk.execute(
+        """
+        SELECT username, role, COALESCE(billable_exempt,0) AS billable_exempt
+        FROM users WHERE id = %s LIMIT 1
+        """,
+        (user_id,),
+    )
+    row_u = cur_chk.fetchone()
+    cur_chk.close()
+    conn_chk.close()
+    if not row_u:
+        flash("User not found.", "danger")
+        return redirect(url_for("routes.users"))
+    if int((row_u or {}).get("billable_exempt") or 0):
+        flash(
+            "This account is reserved for vendor support — manage it under Core settings → Support access.",
+            "danger",
+        )
+        return redirect(url_for("routes.users"))
+
+    er = (getattr(current_user, "role", None) or "").lower()
+    if not editor_may_edit_target_user(er, row_u.get("role")):
+        flash("You do not have permission to modify this account.", "danger")
+        return redirect(url_for("routes.users"))
 
     new_email = request.form.get("email")
-    new_role = request.form.get("role")
+    new_role = (request.form.get("role") or "").strip()
+    # Disabled <select name="role"> is not submitted; keep current role.
+    if not new_role:
+        new_role = (row_u.get("role") or "").strip() or "staff"
     new_permissions = request.form.getlist("permissions")
 
+    prev_role = (row_u.get("role") or "").strip().lower()
     try:
-        from app.permissions_registry import (
-            editor_may_assign_superuser_role,
-            is_superuser_username_allowed,
-        )
+        if not editor_may_assign_elevated_core_role(new_role):
+            flash(
+                "Only a superuser or an account with “Core — manage administrator accounts” "
+                "may assign Admin or Clinical lead roles.",
+                "danger",
+            )
+            return redirect(url_for("routes.users"))
 
-        conn_chk = get_db_connection()
-        cur_chk = conn_chk.cursor(dictionary=True)
-        cur_chk.execute(
-            "SELECT username FROM users WHERE id = %s LIMIT 1", (user_id,)
-        )
-        row_u = cur_chk.fetchone()
-        cur_chk.close()
-        conn_chk.close()
-        target_username = (row_u or {}).get("username") or ""
+        if (
+            str(new_role or "").lower() == "support_break_glass"
+            and not int(row_u.get("billable_exempt") or 0)
+        ):
+            flash("The vendor support role cannot be assigned manually.", "danger")
+            return redirect(url_for("routes.users"))
 
-        if str(new_role or "").lower() == "superuser":
-            if not editor_may_assign_superuser_role(current_user):
-                flash("Only a superuser can assign the superuser role.", "danger")
-                return redirect(url_for("routes.users"))
-            if not is_superuser_username_allowed(target_username):
-                flash(
-                    "This user cannot be set to superuser. Allowed names are configured via SPARROW_SUPERUSER_USERNAMES.",
-                    "danger",
-                )
-                return redirect(url_for("routes.users"))
+        if str(new_role or "").lower() == "superuser" and prev_role != "superuser":
+            flash(
+                "Superuser role is assigned in the database only.",
+                "danger",
+            )
+            return redirect(url_for("routes.users"))
     except Exception as exc:
         print(f"[WARN] edit superuser validation: {exc}")
     new_first_name = request.form.get("first_name")
@@ -853,6 +1064,7 @@ def edit_user(user_id):
 
     conn = get_db_connection()
     cursor = conn.cursor()
+    new_hash = None
 
     if new_password:
         if new_password != confirm_new_password:
@@ -894,6 +1106,7 @@ def edit_user(user_id):
     conn.commit()
     cursor.close()
     conn.close()
+    sync_core_user_to_portal_contractor(user_id)
     flash("User updated successfully.", "success")
     return redirect(url_for("routes.users"))
 
@@ -901,11 +1114,41 @@ def edit_user(user_id):
 @routes.route('/users/delete/<user_id>', methods=['POST'])
 @login_required
 def delete_user(user_id):
-    if not admin_only():
-        return redirect(url_for('routes.dashboard'))
+    from app.permissions_registry import editor_may_edit_target_user
+
+    _g = _require_user_management()
+    if _g is not None:
+        return _g
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT role, COALESCE(billable_exempt,0) AS billable_exempt
+        FROM users WHERE id = %s LIMIT 1
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        conn.close()
+        flash("User not found.", "danger")
+        return redirect(url_for("routes.users"))
+    if int(row.get("billable_exempt") or 0):
+        flash(
+            "Cannot delete the vendor support account — revoke access from Core settings instead.",
+            "danger",
+        )
+        cursor.close()
+        conn.close()
+        return redirect(url_for("routes.users"))
+    er = (getattr(current_user, "role", None) or "").lower()
+    if not editor_may_edit_target_user(er, row.get("role")):
+        flash("You do not have permission to delete this account.", "danger")
+        cursor.close()
+        conn.close()
+        return redirect(url_for("routes.users"))
     cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     conn.commit()
     cursor.close()
@@ -916,10 +1159,21 @@ def delete_user(user_id):
 
 
 def admin_only():
-    if current_user.role != 'admin' and current_user.role != 'superuser':
-        flash("Access denied: Admins only.", "danger")
-        return False
-    return True
+    """Dashboard-wide admin or superuser (includes vendor support shadow for module UIs)."""
+    r = (getattr(current_user, "role", None) or "").lower()
+    if r in ("admin", "superuser", "support_break_glass"):
+        return True
+    flash("Access denied: Admins only.", "danger")
+    return False
+
+
+def customer_super_admin_only():
+    """Organisation admins: admin / superuser / legacy vendor shadow role (support_break_glass)."""
+    r = (getattr(current_user, "role", None) or "").lower()
+    if r in ("admin", "superuser", "support_break_glass"):
+        return True
+    flash("Access denied: customer administrators only.", "danger")
+    return False
 
 
 ##############################################################################
@@ -929,7 +1183,7 @@ def admin_only():
 @routes.route('/version', methods=['GET', 'POST'])
 @login_required
 def version():
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     update_manager = UpdateManager()
@@ -939,8 +1193,34 @@ def version():
         update_type = request.form['update_type']  # 'core' or 'plugin'
         plugin_name = request.form.get('plugin_name')
         scheduled_time = request.form.get('scheduled_time')
+        update_status = update_manager.get_update_status()
 
         if scheduled_time:
+            if update_type == "core":
+                if not update_status["core"]["update_available"]:
+                    flash(
+                        "Core update was not scheduled: this installation is already "
+                        "at or ahead of the repository version (or the latest version could not be determined).",
+                        "danger",
+                    )
+                    return redirect(url_for("routes.version"))
+            elif update_type == "plugin":
+                pn = (plugin_name or "").strip()
+                row = next(
+                    (
+                        p
+                        for p in update_status["plugins"]
+                        if p.get("plugin_name") == pn
+                    ),
+                    None,
+                )
+                if not row or not row.get("update_available"):
+                    flash(
+                        f"Plugin update was not scheduled: {pn or 'plugin'} has no newer "
+                        "version on the repository (or the feed could not be read).",
+                        "danger",
+                    )
+                    return redirect(url_for("routes.version"))
             update_manager.schedule_update(
                 update_type, scheduled_time, plugin_name)
             flash(
@@ -988,7 +1268,7 @@ def version():
 @routes.route('/version/run-upgrades', methods=['POST'])
 @login_required
 def run_version_upgrades():
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     update_manager = UpdateManager()
@@ -1034,7 +1314,7 @@ def run_version_upgrades():
 @routes.route('/core/settings', methods=['GET', 'POST'])
 @login_required
 def core_module_settings():
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1043,7 +1323,10 @@ def core_module_settings():
     default_config = {
         "theme_settings": {
             "theme": "default",
-            "custom_css_path": ""
+            "custom_css_path": "",
+            "dashboard_background_mode": "slideshow",
+            "dashboard_background_color": "#1e293b",
+            "dashboard_background_image_path": "",
         },
         "site_settings": {
             "company_name": "Sparrow ERP",
@@ -1077,20 +1360,57 @@ def core_module_settings():
 
     redirect_tab = "general"
     if request.method == 'POST':
-        section = (request.form.get("settings_section") or "general").strip().lower()
+        section = (request.form.get("settings_section")
+                   or "general").strip().lower()
 
         if section == "general":
             redirect_tab = "general"
             config_data['site_settings']['company_name'] = request.form.get(
                 'company_name')
-            config_data['site_settings']['branding'] = request.form.get('branding')
+            config_data['site_settings']['branding'] = request.form.get(
+                'branding')
             config_data['theme_settings']['theme'] = request.form.get('theme')
+
+            _ts = config_data.get("theme_settings")
+            if not isinstance(_ts, dict):
+                _ts = {}
+                config_data["theme_settings"] = _ts
+            _prev_color = _ts.get("dashboard_background_color") or "#1e293b"
+            _ts["dashboard_background_mode"] = _sanitize_dashboard_background_mode(
+                request.form.get("dashboard_background_mode")
+            )
+            _ts["dashboard_background_color"] = _sanitize_dashboard_background_color(
+                request.form.get("dashboard_background_color"),
+                _prev_color,
+            )
+            if request.form.get("clear_dashboard_background_image"):
+                _ts["dashboard_background_image_path"] = ""
+            else:
+                dbg_file = request.files.get("dashboard_background_image")
+                if dbg_file and dbg_file.filename:
+                    ext = dbg_file.filename.rsplit(".", 1)[-1].lower()
+                    if ext in ALLOWED_DASHBOARD_BG_EXTENSIONS:
+                        dbg_name = secure_filename(dbg_file.filename)
+                        if not dbg_name.lower().startswith("dashboard_bg_"):
+                            dbg_name = f"dashboard_bg_{dbg_name}"
+                        dbg_disk = os.path.join(STATIC_UPLOAD_FOLDER, dbg_name)
+                        dbg_file.save(dbg_disk)
+                        _ts["dashboard_background_image_path"] = (
+                            f"uploads/{dbg_name}"
+                        )
+                    else:
+                        flash(
+                            "Invalid file type for dashboard background. "
+                            "Allowed: png, jpg, jpeg, svg, webp",
+                            "danger",
+                        )
 
             logo_file = request.files.get('logo')
             if logo_file and logo_file.filename:
                 if '.' in logo_file.filename and logo_file.filename.rsplit('.', 1)[1].lower() in ALLOWED_LOGO_EXTENSIONS:
                     logo_filename = secure_filename(logo_file.filename)
-                    logo_path = os.path.join(STATIC_UPLOAD_FOLDER, logo_filename)
+                    logo_path = os.path.join(
+                        STATIC_UPLOAD_FOLDER, logo_filename)
                     logo_file.save(logo_path)
                     config_data['site_settings']['logo_path'] = f"uploads/{logo_filename}"
                 else:
@@ -1112,7 +1432,8 @@ def core_module_settings():
             raw_sel = (request.form.get("ai_chat_model") or "").strip()
             skip_ai_model_update = False
             if raw_sel == "__custom__":
-                raw_ai_model = (request.form.get("ai_chat_model_custom") or "").strip()
+                raw_ai_model = (request.form.get(
+                    "ai_chat_model_custom") or "").strip()
                 if not raw_ai_model:
                     flash(
                         "Custom model id was empty; chat model was not changed.",
@@ -1140,6 +1461,17 @@ def core_module_settings():
             with open(manifest_path, 'w', encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
 
+            _ts = config_data.get("theme_settings")
+            if not isinstance(_ts, dict):
+                _ts = {"theme": "default", "custom_css_path": ""}
+            _ts = dict(_ts)
+            _ts.setdefault("theme", "default")
+            _ts.setdefault("custom_css_path", "")
+            _ts.setdefault("dashboard_background_mode", "slideshow")
+            _ts.setdefault("dashboard_background_color", "#1e293b")
+            _ts.setdefault("dashboard_background_image_path", "")
+            current_app.config["theme_settings"] = _ts
+
             core_manifest = plugin_manager.get_core_manifest() or {}
             session['site_settings'] = core_manifest.get('site_settings', {
                 'company_name': 'Sparrow ERP',
@@ -1151,7 +1483,17 @@ def core_module_settings():
         elif section == "smtp":
             redirect_tab = "email"
             _save_smtp_from_form(request.form)
-            flash("Email (SMTP) settings saved to .env.", "success")
+            if get_persistent_smtp_env_path():
+                flash(
+                    "Email (SMTP) settings saved on the persistent volume (config/.env.smtp).",
+                    "success",
+                )
+            else:
+                flash(
+                    "Email (SMTP) settings saved to app config on this instance; "
+                    "attach a volume or set RAILWAY_VOLUME_MOUNT_PATH so they survive redeploy.",
+                    "warning",
+                )
 
         elif section == "integrations":
             redirect_tab = "integrations"
@@ -1178,7 +1520,8 @@ def core_module_settings():
                 "CORE_MANIFEST_REMOTE_URL",
                 (request.form.get("core_manifest_remote_url") or "").strip(),
             )
-            update_env_var("REDIS_URL", (request.form.get("redis_url") or "").strip())
+            update_env_var(
+                "REDIS_URL", (request.form.get("redis_url") or "").strip())
             flash("Integrations saved to .env.", "success")
 
         elif section == "llm":
@@ -1203,7 +1546,8 @@ def core_module_settings():
                 "OPENAI_BASE_URL",
                 (request.form.get("openai_base_url") or "").strip(),
             )
-            preset = (request.form.get("openai_base_url_preset") or "").strip().lower()
+            preset = (request.form.get("openai_base_url_preset")
+                      or "").strip().lower()
             if preset in ("", "none", "clear"):
                 update_env_var("OPENAI_BASE_URL_PRESET", "")
             elif preset in ("openrouter", "gemini"):
@@ -1243,6 +1587,59 @@ def core_module_settings():
                 _sec_lvl = "warning"
             flash(_sec_msg, _sec_lvl)
 
+        elif section == "support_access":
+            redirect_tab = "support_access"
+            from app.compliance_audit import log_security_event
+            from app.support_access import (
+                generate_support_access,
+                revoke_support_access,
+                shadow_username,
+            )
+
+            action = (request.form.get("support_access_action")
+                      or "").strip().lower()
+            note = (request.form.get("support_access_note")
+                    or "").strip() or None
+            if action == "generate":
+                try:
+                    dm = int(request.form.get("support_access_duration") or 30)
+                except (TypeError, ValueError):
+                    dm = 30
+                plain, err, exp_at = generate_support_access(
+                    dm, current_user.username, note
+                )
+                if err:
+                    flash(err, "danger")
+                elif plain:
+                    session["_support_access_otp"] = {
+                        "username": shadow_username(),
+                        "password": plain,
+                        "expires_at": exp_at.isoformat() if exp_at else "",
+                    }
+                    log_security_event(
+                        "support_access_generated",
+                        actor_username=current_user.username,
+                        shadow_username=shadow_username(),
+                        duration_minutes=dm,
+                    )
+                    flash(
+                        "Vendor support password generated. Copy it now — it cannot be shown again.",
+                        "warning",
+                    )
+            elif action == "revoke":
+                ok, err = revoke_support_access(current_user.username, note)
+                if err:
+                    flash(err, "danger")
+                elif ok:
+                    session.pop("_support_access_otp", None)
+                    log_security_event(
+                        "support_access_revoked",
+                        actor_username=current_user.username,
+                    )
+                    flash("Vendor support access has been revoked.", "success")
+            else:
+                flash("Unknown support access action.", "danger")
+
         else:
             flash("Unknown settings section.", "danger")
             redirect_tab = "general"
@@ -1254,10 +1651,23 @@ def core_module_settings():
 
     core_manifest = plugin_manager.get_core_manifest() or {}
     active_tab = (request.args.get("tab") or "general").strip().lower()
+    if active_tab == "licensing":
+        return redirect(url_for("routes.core_module_settings", tab="plan"))
     if active_tab not in (
-        "general", "email", "integrations", "llm", "security",
+        "general",
+        "email",
+        "integrations",
+        "llm",
+        "security",
+        "plan",
+        "support_access",
     ):
         active_tab = "general"
+    from app.seat_limits import get_seat_usage_snapshot
+    from app.support_access import get_support_access_status
+
+    otp_flash = session.pop("_support_access_otp", None)
+
     return render_template(
         "core_module_settings.html",
         config=core_manifest,
@@ -1265,6 +1675,9 @@ def core_module_settings():
         active_tab=active_tab,
         chat_model_choices=CHAT_MODEL_DROPDOWN_CHOICES,
         chat_model_choice_values=chat_model_dropdown_value_set(),
+        seat_usage=get_seat_usage_snapshot(),
+        support_access_status=get_support_access_status(),
+        support_access_otp=otp_flash,
     )
 
 
@@ -1276,7 +1689,7 @@ def core_module_settings():
 @login_required
 def email_config():
     """Legacy URL: email / SMTP is configured under Core Settings → Email tab."""
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     if request.method == 'POST':
@@ -1290,6 +1703,7 @@ def email_config():
 # SECTION 7: Plugin Management (Admin Only)
 ##############################################################################
 
+
 # Flash categories shown on /plugins only (avoids stacking login/core/version messages).
 PLUGIN_PAGE_FLASH_SUCCESS = "plugins_page_success"
 PLUGIN_PAGE_DANGER = "plugins_page_danger"
@@ -1299,7 +1713,7 @@ PLUGIN_PAGE_ERROR = "plugins_page_error"
 @routes.route('/plugins', methods=['GET'])
 @login_required
 def plugins():
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     pm = PluginManager(PLUGINS_FOLDER)
@@ -1325,7 +1739,7 @@ def plugins():
 @routes.route('/plugin/<plugin_system_name>/install-remote', methods=['POST'])
 @login_required
 def install_plugin_remote(plugin_system_name):
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     pm = PluginManager(PLUGINS_FOLDER)
@@ -1342,7 +1756,8 @@ def install_plugin_remote(plugin_system_name):
         schedule_restart_flag(
             pm.config_dir, reason=f"remote install {plugin_system_name}")
     except Exception as e:
-        flash(f'Failed to install {plugin_system_name}: {e}', PLUGIN_PAGE_DANGER)
+        flash(
+            f'Failed to install {plugin_system_name}: {e}', PLUGIN_PAGE_DANGER)
 
     return redirect(url_for('routes.plugins'))
 
@@ -1354,7 +1769,7 @@ def plugin_settings(plugin_system_name):
     Manage settings for a specific plugin (Admin Only).
     IMPORTANT: settings updates should NOT restart the app.
     """
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1389,7 +1804,7 @@ def enable_plugin(plugin_system_name):
     Enable a plugin (Admin Only).
     Schedules a restart on success (routes/blueprints may change).
     """
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1426,7 +1841,7 @@ def disable_plugin(plugin_system_name):
     Disable a plugin (Admin Only).
     Schedules a restart on success (routes/blueprints may change).
     """
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1460,7 +1875,7 @@ def install_plugin(plugin_system_name):
     Install a plugin (Admin Only).
     Schedules a restart on success (routes/blueprints may change).
     """
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1494,7 +1909,7 @@ def uninstall_plugin(plugin_system_name):
     Uninstall a plugin (Admin Only).
     Schedules a restart on success (routes/blueprints may change).
     """
-    if not admin_only():
+    if not customer_super_admin_only():
         return redirect(url_for('routes.dashboard'))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
@@ -1534,7 +1949,11 @@ def serve_plugin_icon(plugin_name, filename):
     """
     Serve static plugin assets (e.g. icons). Admin-only; path-safe plugin and file names.
     """
-    if getattr(current_user, "role", None) not in ("admin", "superuser"):
+    if getattr(current_user, "role", None) not in (
+        "admin",
+        "superuser",
+        "support_break_glass",
+    ):
         abort(403)
     if not _PLUGIN_NAME_SAFE.match(plugin_name or ""):
         abort(404)
@@ -1550,81 +1969,182 @@ def serve_plugin_icon(plugin_name, filename):
 ##############################################################################
 
 
+def _api_jwt_role_from_contractor_role(tb_role: str) -> str:
+    r = (tb_role or "").strip().lower()
+    if r in ("superuser", "admin", "clinical_lead", "support_break_glass"):
+        return r
+    return "crew"
+
+
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 
 @api_bp.route('/login', methods=['POST'])
 def api_login():
     """
-    API login: JWT-only, no session or cookies. For mobile, MDT, and other API clients.
+    API login: JWT-only, no session or cookies. For mobile, MDT, module agents, and other API clients.
     Send JSON: {"username": "...", "password": "..."}. Use the returned token as Authorization: Bearer <token>.
+
+    Accepts Sparrow ``users.username`` (case-insensitive) or contractor ``tb_contractors`` by
+    **username** (case-insensitive), or **email** if no username row matches (same habit as the
+    employee portal; MDT/Cura often send email). If one login string matches both a Sparrow user and
+    a contractor, login is rejected **unless** they are the same person (``users.contractor_id`` set
+    to that contractor, or same non-empty email); then a **Sparrow user** JWT is issued after
+    verifying the **user** password.
+
+    The JWT always includes stable claims ``sub``, ``username``, ``role``, ``iat``, and ``exp``
+    (see ``app.auth_jwt``). Module JSON APIs should decode with ``decode_session_token`` and must
+    not assume extra custom claims unless the issuer adds them separately. Contractor tokens use
+    ``sub`` of the form ``c:<contractor_id>`` so IDs do not collide with ``users.id``.
     """
     data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
+    login_key = (data.get("username") or "").strip().lower()
     password = data.get("password") or ""
 
-    if not username or not password:
+    if not login_key or not password:
         return jsonify({"status": "error", "message": "Username and password required."}), 400
 
-    user_data = User.get_user_by_username_raw(username)
-    if not (user_data and AuthManager.verify_password(user_data["password_hash"], password)):
+    user_data = User.get_user_by_username_ci(login_key)
+    contractor_rows = find_tb_contractors_for_api_login(login_key)
+
+    if len(contractor_rows) > 1:
         return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
-    token = encode_session_token(
-        user_data["id"],
-        user_data["username"],
-        user_data["role"],
-    )
-    if not token:
-        return jsonify({
-            "status": "error",
-            "message": "JWT not available. Install PyJWT on the server for API login.",
-        }), 503
+    if user_data and contractor_rows:
+        if not linked_user_contractor_pair(user_data, contractor_rows[0]):
+            return jsonify({
+                "status": "error",
+                "message": (
+                    "This login matches both a Sparrow user and a contractor. "
+                    "Change one of the accounts so the login name is unique, or link the user to "
+                    "the contractor (users.contractor_id / matching email), then try again."
+                ),
+            }), 409
 
-    # Update last login timestamp (audit only; no session)
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET last_login = %s WHERE id = %s",
-            (datetime.now(), user_data['id'])
+    if user_data:
+        if not AuthManager.verify_password(user_data["password_hash"], password):
+            return jsonify({"status": "error", "message": "Invalid credentials."}), 401
+
+        from app.support_access import support_login_blocked_reason
+
+        _api_sup = support_login_blocked_reason(user_data)
+        if _api_sup:
+            return jsonify({"status": "error", "message": _api_sup}), 403
+
+        token = encode_session_token(
+            user_data["id"],
+            user_data["username"],
+            user_data["role"],
         )
-        conn.commit()
-    finally:
+        if not token:
+            return jsonify({
+                "status": "error",
+                "message": "JWT not available. Install PyJWT on the server for API login.",
+            }), 503
+
+        conn = get_db_connection()
         try:
-            cursor.close()
-        except Exception:
-            pass
-        conn.close()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET last_login = %s WHERE id = %s",
+                (datetime.now(), user_data['id'])
+            )
+            conn.commit()
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            conn.close()
 
-    log_security_event(
-        "api_login_success",
-        user_id=user_data.get("id"),
-        role=user_data.get("role"),
-    )
+        log_security_event(
+            "api_login_success",
+            user_id=user_data.get("id"),
+            role=user_data.get("role"),
+        )
+        if int(user_data.get("billable_exempt") or 0):
+            log_security_event(
+                "support_shadow_api_login",
+                user_id=user_data.get("id"),
+                username=user_data.get("username"),
+            )
 
-    permissions = []
-    if user_data.get('permissions'):
+        permissions = []
+        if user_data.get('permissions'):
+            try:
+                permissions = json.loads(user_data['permissions'])
+            except Exception:
+                permissions = []
+
+        return jsonify({
+            "status": "success",
+            "message": f"Welcome back, {user_data.get('first_name', user_data['username'])}!",
+            "token": token,
+            "user": {
+                "id": user_data['id'],
+                "username": user_data['username'],
+                "email": user_data['email'],
+                "role": user_data['role'],
+                "first_name": user_data.get('first_name', ''),
+                "last_name": user_data.get('last_name', ''),
+                "theme": user_data.get('theme', 'default'),
+                "permissions": permissions,
+            },
+        }), 200
+
+    if contractor_rows:
+        c = contractor_rows[0]
+        cid = int(c["id"])
+        ph = c.get("password_hash")
         try:
-            permissions = json.loads(user_data['permissions'])
-        except Exception:
-            permissions = []
+            pw_ok = bool(ph) and AuthManager.verify_password(ph, password)
+        except (ValueError, TypeError, AttributeError):
+            pw_ok = False
+        if not pw_ok:
+            return jsonify({"status": "error", "message": "Invalid credentials."}), 401
+        if str(c.get("status") or "").lower() not in ("active", "1", "true", "yes"):
+            return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
-    return jsonify({
-        "status": "success",
-        "message": f"Welcome back, {user_data.get('first_name', user_data['username'])}!",
-        "token": token,
-        "user": {
-            "id": user_data['id'],
-            "username": user_data['username'],
-            "email": user_data['email'],
-            "role": user_data['role'],
-            "first_name": user_data.get('first_name', ''),
-            "last_name": user_data.get('last_name', ''),
-            "theme": user_data.get('theme', 'default'),
-            "permissions": permissions,
-        },
-    }), 200
+        tb_role = get_contractor_effective_role(cid)
+        jwt_role = _api_jwt_role_from_contractor_role(tb_role)
+        email = (c.get("email") or "").strip()
+        canonical_username = (
+            c.get("username") or "").strip().lower() or login_key
+        token = encode_session_token(f"c:{cid}", canonical_username, jwt_role)
+        if not token:
+            return jsonify({
+                "status": "error",
+                "message": "JWT not available. Install PyJWT on the server for API login.",
+            }), 503
+
+        log_security_event(
+            "api_login_success",
+            contractor_id=cid,
+            role=jwt_role,
+        )
+        display_name = (c.get("name") or "").strip()
+        parts = display_name.split(None, 1) if display_name else []
+        first_name = parts[0] if parts else ""
+        last_name = parts[1] if len(parts) > 1 else ""
+        greet = first_name or display_name or canonical_username
+
+        return jsonify({
+            "status": "success",
+            "message": f"Welcome back, {greet}!",
+            "token": token,
+            "user": {
+                "id": cid,
+                "username": (c.get("username") or "").strip() or canonical_username,
+                "email": email,
+                "role": jwt_role,
+                "first_name": first_name,
+                "last_name": last_name,
+                "theme": "default",
+                "permissions": [],
+            },
+        }), 200
+
+    return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
 
 @api_bp.route('/logout', methods=['POST'])

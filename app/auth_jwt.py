@@ -1,7 +1,20 @@
 """
-Session JWT for API clients (mobile, MDT, integrations) using Authorization: Bearer.
-Uses JWT_SECRET_KEY or SECRET_KEY; tokens are short-lived.
-Requires PyJWT (pip install PyJWT), not python-jwt.
+Session JWT for API clients (mobile, MDT, module agents) using ``Authorization: Bearer``.
+Uses ``JWT_SECRET_KEY`` or ``SECRET_KEY``; tokens are short-lived.
+Requires PyJWT (``pip install PyJWT``), not python-jwt.
+
+**Stable payload contract** (issued by ``encode_session_token`` / ``POST /api/login``; validated by
+``decode_session_token``):
+
+- ``sub`` — user id (int or str, e.g. UUID)
+- ``username`` — non-empty string, stripped and lowercased (canonical login identity for APIs)
+- ``role`` — non-empty string, stripped (Sparrow role slug, e.g. ``crew``, ``admin``); authorisation
+  for specific JSON APIs is enforced in the plugin (do not rely on omitting claims)
+- ``iat``, ``exp`` — standard JWT times
+
+Tokens missing or empty ``username`` / ``role`` after normalisation are rejected (decode returns
+``None``). Plugins that reuse this stack (e.g. EPCR/Cura ``_require_epcr_json_api``) should read
+these keys from the decoded payload only.
 """
 import os
 from datetime import datetime, timedelta, timezone
@@ -39,10 +52,15 @@ def _get_expiry_hours():
 
 def encode_session_token(user_id, username: str, role: str, expiry_hours: int = None) -> str:
     """
-    Encode a short-lived JWT for API use. Payload: sub=user_id, username, role, exp, iat.
-    user_id can be int or str (e.g. UUID). Returns the token string, or empty string if JWT not available.
+    Encode a short-lived JWT for API use. Payload: sub, username, role, iat, exp (see module docstring).
+    user_id can be int or str (e.g. UUID). Returns the token string, or empty string if JWT is
+    unavailable or ``username`` / ``role`` are blank after normalisation.
     """
     if not pyjwt:
+        return ""
+    uname = str(username or "").strip().lower()
+    r = str(role or "").strip()
+    if not uname or not r:
         return ""
     try:
         expiry = expiry_hours if expiry_hours is not None else _get_expiry_hours()
@@ -50,8 +68,8 @@ def encode_session_token(user_id, username: str, role: str, expiry_hours: int = 
         exp = now + timedelta(hours=expiry)
         payload = {
             "sub": user_id if isinstance(user_id, (int, str)) else str(user_id),
-            "username": str(username),
-            "role": str(role),
+            "username": uname,
+            "role": r,
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
         }
@@ -69,8 +87,8 @@ def encode_session_token(user_id, username: str, role: str, expiry_hours: int = 
 
 def decode_session_token(token: str):
     """
-    Decode and validate a session JWT. Returns payload dict (with sub, username, role)
-    or None if invalid/expired/missing JWT lib.
+    Decode and validate a session JWT. Returns payload dict with normalised ``username`` and ``role``,
+    or ``None`` if invalid, expired, missing JWT lib, or claims fail the stable contract.
     """
     if not pyjwt or not token or not token.strip():
         return None
@@ -85,11 +103,16 @@ def decode_session_token(token: str):
             algorithms=["HS256"],
         )
         sub = payload.get("sub")
-        if sub is not None and payload.get("username") and payload.get("role"):
-            # Keep sub as-is (int or str e.g. UUID)
-            if isinstance(sub, float) and sub == int(sub):
-                payload["sub"] = int(sub)
-            return payload
+        uname = str(payload.get("username") or "").strip().lower()
+        role = str(payload.get("role") or "").strip()
+        if sub is None or not uname or not role:
+            return None
+        payload["username"] = uname
+        payload["role"] = role
+        # Keep sub as-is (int or str e.g. UUID)
+        if isinstance(sub, float) and sub == int(sub):
+            payload["sub"] = int(sub)
+        return payload
     except Exception:
         pass
     return None

@@ -19,7 +19,9 @@
       <h1 class="h3 fw-bold text-dark mb-1">{{ module_name }}</h1>
       <p class="text-muted mb-0 small">{{ module_description }}</p>
     </div>
+    {% if rec_can_manage_setup %}
     <a class="rec-btn-new" href="{{ url_for('internal_recruitment.admin_opening_new') }}"><i class="bi bi-plus-lg"></i> New job position</a>
+    {% endif %}
   </div>
 
   <div class="row g-3 mb-4">
@@ -62,17 +64,47 @@
   </div>
 
   <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <h2 class="h6 fw-semibold mb-3">Pipeline by stage</h2>
+      <p class="small text-muted mb-3">Counts include all applications in the database (all statuses). Use the applications list to filter active pipeline work.</p>
+      <div class="row g-2 align-items-center">
+        {% for s in stages %}
+        {% set cnt = (stats.stage_counts or {}).get(s, 0) %}
+        <div class="col-6 col-md-4 col-lg-2">
+          <div class="small text-muted">{{ stage_labels.get(s, s) }}</div>
+          <div class="progress mt-1" style="height: 1.35rem;">
+            {% set mx = (stats.applications_total or 1) %}
+            <div class="progress-bar bg-secondary" role="progressbar" style="width: {{ (100 * cnt / mx)|round(1) }}%;" aria-valuenow="{{ cnt }}" aria-valuemin="0" aria-valuemax="{{ mx }}">{{ cnt }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if stats.multi_application_applicants %}
+      <p class="small text-warning mb-0 mt-3"><strong>Note:</strong> {{ stats.multi_application_applicants }} applicant account(s) hold multiple active pipeline applications.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body small">
+      <h2 class="h6 fw-semibold">Emails &amp; realtime alerts</h2>
+      <p class="text-muted mb-2">Applicants receive email when they apply, when the stage changes, when interview details are set, when pre-hire items are approved or rejected, when a form is assigned, and when hired. Outgoing email and public links in those messages depend on your server configuration. <strong>Internal</strong> copies go to users who have any <strong>Recruitment</strong> permission (not every administrator); superuser accounts are included by default. The recruitment panel can show live updates for the same internal audience.</p>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
     <div class="card-body small">
       <h2 class="h6 fw-semibold">Applicant data retention</h2>
       <p class="text-muted mb-2">
-        After <strong>{{ applicant_retention_days }}</strong> days (override with <code>RECRUITMENT_APPLICANT_RETENTION_DAYS</code>),
-        hired or rejected applications are purged from the recruitment portal; copies already moved to HR / the employee record are kept.
+        After <strong>{{ applicant_retention_days }}</strong> days, hired or rejected applications are purged from the recruitment portal; copies already moved to HR or the employee record are kept.
       </p>
+      {% if rec_can_manage_setup %}
       <form method="post" action="{{ url_for('internal_recruitment.admin_run_applicant_retention') }}" class="d-inline"
             onsubmit="return confirm('Run retention purge now? Eligible recruitment rows and files will be deleted or anonymised.');">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-sm btn-outline-secondary">Run retention purge now</button>
       </form>
+      {% endif %}
     </div>
   </div>
 
@@ -95,7 +127,7 @@
           <a class="btn btn-sm btn-primary w-100 rounded-3" href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}">Applications</a>
         </div>
         <div class="rec-footer-mini py-2">
-          <a class="small text-decoration-none" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}">Edit</a>
+          {% if rec_can_manage_setup %}<a class="small text-decoration-none" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}">Edit</a>{% else %}<span class="small text-muted">View only</span>{% endif %}
           {% if o.status == 'open' %}
           · <a class="small text-decoration-none" href="{{ url_for('public_recruitment_site.vacancy_detail', slug=o.slug) }}" target="_blank" rel="noopener">Public page</a>
           {% endif %}
@@ -104,7 +136,7 @@
     </div>
     {% else %}
     <div class="col-12">
-      <div class="alert alert-light border rounded-3 mb-0">No positions yet. <a href="{{ url_for('internal_recruitment.admin_opening_new') }}">Create your first job position</a>.</div>
+      <div class="alert alert-light border rounded-3 mb-0">No positions yet.{% if rec_can_manage_setup %} <a href="{{ url_for('internal_recruitment.admin_opening_new') }}">Create your first job position</a>.{% endif %}</div>
     </div>
     {% endfor %}
   </div>

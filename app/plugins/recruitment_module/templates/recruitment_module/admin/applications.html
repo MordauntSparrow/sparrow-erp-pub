@@ -6,6 +6,11 @@
   {% include 'recruitment_module/admin/_recruitment_nav.html' %}
 
   <h1 class="h4 mb-3 fw-semibold">Applications</h1>
+  {% if multi_pipeline_applicants %}
+  <div class="alert alert-info py-2 small mb-3">
+    <strong>Tip:</strong> {{ multi_pipeline_applicants }} applicant account(s) have more than one active pipeline application — review for cross-posting or genuine multi-role interest.
+  </div>
+  {% endif %}
   <form class="row g-2 mb-4 align-items-end" method="get">
     <div class="col-auto">
       <select class="form-select form-select-sm" name="opening_id" onchange="this.form.submit()">
@@ -22,22 +27,68 @@
       <button type="submit" class="btn btn-sm btn-outline-primary">Filter</button>
     </div>
   </form>
+
+  {% if rec_can_manage_applications %}
+  <form method="post" action="{{ url_for('internal_recruitment.admin_applications_bulk_stage') }}" id="bulk-stage-form"
+        class="card border-0 shadow-sm mb-3" onsubmit="return confirm('Update stage for all selected applications?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_opening_id" value="{{ filter_opening_id or '' }}">
+    <input type="hidden" name="return_q" value="{{ q }}">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+      <span class="small text-muted me-1">Bulk:</span>
+      <select class="form-select form-select-sm" name="bulk_stage" style="max-width: 200px;" required>
+        {% for s in stages %}
+        <option value="{{ s }}">{{ stage_labels.get(s, s) }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn btn-sm btn-primary">Set stage on selected</button>
+      <span class="small text-muted">Select rows below first.</span>
+    </div>
+  </form>
+  {% endif %}
+
   <div class="table-responsive border rounded-3 bg-white shadow-sm">
     <table class="table table-hover mb-0 small">
-      <thead class="table-light"><tr><th>Applicant</th><th>Opening</th><th>Stage</th><th>Updated</th></tr></thead>
+      <thead class="table-light">
+        <tr>
+          <th style="width:2.5rem;">
+            {% if rec_can_manage_applications %}
+            <input type="checkbox" class="form-check-input" id="chk-all" title="Select all" aria-label="Select all">
+            {% endif %}
+          </th>
+          <th>Applicant</th>
+          <th>Opening</th>
+          <th>Stage</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
       <tbody>
         {% for a in applications %}
         <tr>
+          <td>
+            {% if rec_can_manage_applications %}
+            <input type="checkbox" class="form-check-input app-chk" name="app_ids" value="{{ a.id }}" form="bulk-stage-form">
+            {% endif %}
+          </td>
           <td><a href="{{ url_for('internal_recruitment.admin_application_detail', application_id=a.id) }}">{{ a.name }}</a><br><span class="text-muted">{{ a.email }}</span></td>
           <td>{{ a.opening_title }}</td>
           <td><span class="badge bg-secondary">{{ a.stage }}</span></td>
           <td>{{ a.updated_at }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="4" class="text-muted">No applications.</td></tr>
+        <tr><td colspan="5" class="text-muted">No applications.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <script>
+  (function(){
+    var all = document.getElementById('chk-all');
+    if (!all) return;
+    all.addEventListener('change', function(){
+      document.querySelectorAll('.app-chk').forEach(function(c){ c.checked = all.checked; });
+    });
+  })();
+  </script>
 </div>
 {% endblock %}

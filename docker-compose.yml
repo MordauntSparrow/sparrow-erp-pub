@@ -10,4 +10,8 @@ services:
     environment:
       - TZ=Europe/London
       - APP_ROOT=/app/app
+      # Ventus MDT PWA push (optional): set in app/config/.env instead, or pass through here — never commit real keys.
+      # - VENTUS_MDT_VAPID_PUBLIC_KEY=
+      # - VENTUS_MDT_VAPID_PRIVATE_KEY=
+      # - VENTUS_MDT_VAPID_SUBJECT=mailto:mdt@yourdomain.example
     restart: unless-stopped

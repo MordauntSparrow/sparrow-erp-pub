@@ -1,12 +1,120 @@
 import json
 import logging
+import os
+import re
+import secrets
 from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.objects import get_db_connection
+from app.public_base import EMPLOYEE_PORTAL_PUBLIC_PATH, resolve_public_base_url
 
 logger = logging.getLogger(__name__)
+
+# Cross-plugin expectations: see compliance_integration_contract.py
+
+
+def _coerce_profile_date(val: Any) -> Optional[date]:
+    """Normalize DB date/datetime/str to date for expiry comparisons."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        s = val.strip()
+        if len(s) >= 10:
+            try:
+                return date.fromisoformat(s[:10])
+            except ValueError:
+                return None
+    return None
+
+
+def profile_expired_compliance_items(profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Fields on the staff profile whose stored end/expiry date is strictly before today.
+    Used for admin and portal detail views (badges / callouts).
+    """
+    today = date.today()
+    out: List[Dict[str, Any]] = []
+    checks = (
+        ("driving_licence", "driving_licence_expiry", "Driving licence"),
+        ("right_to_work", "right_to_work_expiry", "Right to work"),
+        ("dbs", "dbs_expiry", "DBS"),
+        ("contract_end", "contract_end", "Contract end"),
+    )
+    for doc_type, field, label in checks:
+        d = _coerce_profile_date(profile.get(field))
+        if d is not None and d < today:
+            out.append({"doc_type": doc_type, "field": field,
+                       "label": label, "expiry_date": d})
+    return out
+
+
+def default_employee_tb_role_name() -> str:
+    """Time Billing role for new employees when none is supplied (CSV or manual add)."""
+    raw = (os.environ.get("HR_DEFAULT_EMPLOYEE_ROLE")
+           or "staff").strip().lower()
+    return raw if raw else "staff"
+
+
+def generate_hr_portal_password(length: int = 14) -> str:
+    """Cryptographically random password for portal login (avoids ambiguous 0/O, 1/l/I)."""
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+    n = max(10, min(int(length), 24))
+    return "".join(secrets.choice(alphabet) for _ in range(n))
+
+
+def send_hr_import_portal_credentials_email(
+    to_email: str,
+    display_name: str,
+    password_plain: str,
+) -> Tuple[bool, str]:
+    """
+    Email a one-time welcome with portal URL + temporary password (CSV import path).
+    Set HR_IMPORT_WELCOME_EMAIL_DISABLED=1 to skip. Requires core SMTP_* env vars.
+    """
+    if (os.environ.get("HR_IMPORT_WELCOME_EMAIL_DISABLED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return False, "Welcome emails disabled (HR_IMPORT_WELCOME_EMAIL_DISABLED)."
+    try:
+        from app.objects import EmailManager
+
+        em = EmailManager()
+    except Exception as e:
+        logger.warning("HR import welcome email: SMTP not available: %s", e)
+        return False, "SMTP not configured."
+    base = resolve_public_base_url()
+    portal_url = (
+        f"{base}{EMPLOYEE_PORTAL_PUBLIC_PATH}"
+        if base
+        else f"{EMPLOYEE_PORTAL_PUBLIC_PATH} (on this site)"
+    )
+    name = (display_name or "").strip() or "there"
+    subject = "Your employee portal login"
+    body = (
+        f"Hello {name},\n\n"
+        "An account has been created for you on our employee portal.\n\n"
+        f"Employee portal: {portal_url}\n"
+        f"Email (login): {to_email.strip().lower()}\n"
+        f"Temporary password: {password_plain}\n\n"
+        "Sign in with the details above. Change your password after login if your organisation asks you to.\n\n"
+        "If you were not expecting this message, contact your manager or HR.\n"
+    )
+    try:
+        em.send_email(subject=subject, body=body,
+                      recipients=[to_email.strip().lower()])
+        return True, "ok"
+    except Exception as e:
+        logger.warning("HR import welcome email send failed: %s", e)
+        return False, str(e) or "Send failed."
 
 
 def _normalize_stored_relative_upload_path(path: Optional[Any]) -> Optional[str]:
@@ -52,6 +160,7 @@ def hr_safe_profile_picture_path(path: Optional[str]) -> Optional[str]:
     except Exception:
         return None
 
+
 # Employee portal ep_todos reference (source_module must match upsert/complete calls)
 _EP_HR_SOURCE = "hr_module"
 _EP_HR_REF_TYPE = "hr_document_request"
@@ -87,16 +196,19 @@ def _hr_ep_upsert_request_todo(
             due_date=due_date,
         )
     except Exception as e:
-        logger.warning("HR: could not upsert employee-portal todo for request %s: %s", request_id, e)
+        logger.warning(
+            "HR: could not upsert employee-portal todo for request %s: %s", request_id, e)
 
 
 def _hr_ep_complete_request_todo(request_id: int) -> None:
     try:
         from app.plugins.employee_portal_module.services import complete_todo_by_reference
 
-        complete_todo_by_reference(_EP_HR_SOURCE, _EP_HR_REF_TYPE, str(int(request_id)))
+        complete_todo_by_reference(
+            _EP_HR_SOURCE, _EP_HR_REF_TYPE, str(int(request_id)))
     except Exception as e:
-        logger.warning("HR: could not complete employee-portal todo for request %s: %s", request_id, e)
+        logger.warning(
+            "HR: could not complete employee-portal todo for request %s: %s", request_id, e)
 
 
 def _hr_ep_message_approved(contractor_id: int, request_id: int, title: str) -> None:
@@ -112,7 +224,8 @@ def _hr_ep_message_approved(contractor_id: int, request_id: int, title: str) -> 
             sent_by_user_id=None,
         )
     except Exception as e:
-        logger.warning("HR: could not send approval message for request %s: %s", request_id, e)
+        logger.warning(
+            "HR: could not send approval message for request %s: %s", request_id, e)
 
 
 def _hr_ep_message_rejected(
@@ -133,10 +246,13 @@ def _hr_ep_message_rejected(
             sent_by_user_id=None,
         )
     except Exception as e:
-        logger.warning("HR: could not send rejection message for request %s: %s", request_id, e)
+        logger.warning(
+            "HR: could not send rejection message for request %s: %s", request_id, e)
+
 
 # Request types for document requests
-REQUEST_TYPES = ["right_to_work", "driving_licence", "dbs", "contract", "profile_picture", "other"]
+REQUEST_TYPES = ["right_to_work", "driving_licence",
+                 "dbs", "contract", "profile_picture", "other"]
 
 # Map document-request type → hr_staff_details column for the linked file path
 REQUEST_TYPE_TO_STAFF_DOCUMENT_COLUMN = {
@@ -167,7 +283,8 @@ def _snake_to_title_words(code: str) -> str:
     """Fallback: unknown_code -> 'Unknown Code'."""
     if not code:
         return "—"
-    parts = [p for p in str(code).strip().lower().replace("-", "_").split("_") if p]
+    parts = [p for p in str(code).strip().lower().replace(
+        "-", "_").split("_") if p]
     if not parts:
         return str(code)
     return " ".join(p.capitalize() for p in parts)
@@ -383,6 +500,567 @@ def admin_list_contractors_for_select(limit: int = 500) -> List[Dict[str, Any]]:
         conn.close()
 
 
+def admin_list_time_billing_roles_for_select(limit: int = 200) -> List[Dict[str, Any]]:
+    """Time billing `roles` table — used when adding a new employee from HR."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, name FROM roles ORDER BY name LIMIT %s",
+            (limit,),
+        )
+        return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_list_wage_rate_cards_for_select(limit: int = 250) -> List[Dict[str, Any]]:
+    """Time Billing wage_rate_cards for HR edit form (optional module)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SHOW TABLES LIKE 'wage_rate_cards'")
+        if not cur.fetchone():
+            return []
+        lim = max(1, min(int(limit or 250), 500))
+        cur.execute(
+            """
+            SELECT wrc.id, wrc.name, wrc.active, wrc.role_id, r.name AS role_name
+            FROM wage_rate_cards wrc
+            LEFT JOIN roles r ON r.id = wrc.role_id
+            ORDER BY wrc.name, wrc.id
+            LIMIT %s
+            """,
+            (lim,),
+        )
+        return cur.fetchall() or []
+    except Exception:
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_hr_update_contractor_core(
+    contractor_id: int,
+    *,
+    name: str,
+    email: str,
+    status: str,
+    employment_type: Optional[str] = None,
+    role_id_raw: Optional[str] = None,
+    wage_rate_card_id_raw: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Update tb_contractors identity + primary Time Billing role / wage card from HR.
+    Login ``username`` is fixed after employee creation; this path preserves it. Rows missing
+    a username (legacy) get one allocated from the current ``name``.
+    """
+    import mysql.connector
+
+    from app.plugins.time_billing_module.routes import (
+        allocate_contractor_username,
+        contractor_username_prefer_core_user,
+    )
+
+    cid = int(contractor_id)
+    name = (name or "").strip()
+    email = (email or "").strip().lower()
+    st = (status or "active").strip().lower()
+    if st not in ("active", "inactive"):
+        st = "active"
+    if not name:
+        return False, "Name is required."
+    if not email or "@" not in email:
+        return False, "Valid work email is required."
+
+    et = (employment_type or "").strip().lower()
+    if et not in ("paye", "self_employed", ""):
+        et = ""
+
+    role_id: Optional[int] = None
+    if role_id_raw is not None and str(role_id_raw).strip() != "":
+        try:
+            role_id = int(role_id_raw)
+        except (TypeError, ValueError):
+            return False, "Invalid role selection."
+
+    wage_id: Optional[int] = None
+    wage_clear = False
+    if wage_rate_card_id_raw is not None:
+        wr = str(wage_rate_card_id_raw).strip()
+        if wr == "":
+            wage_clear = True
+        else:
+            try:
+                wage_id = int(wr)
+            except (TypeError, ValueError):
+                return False, "Invalid wage rate card selection."
+
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        try:
+            cur.execute(
+                "SELECT id, name, email, username FROM tb_contractors WHERE id = %s LIMIT 1",
+                (cid,),
+            )
+        except mysql.connector.Error:
+            cur.execute(
+                "SELECT id, name, email FROM tb_contractors WHERE id = %s LIMIT 1",
+                (cid,),
+            )
+        row = cur.fetchone()
+        if not row:
+            return False, "Employee not found."
+
+        cur.execute(
+            "SELECT id FROM tb_contractors WHERE LOWER(TRIM(email)) = %s AND id <> %s LIMIT 1",
+            (email, cid),
+        )
+        if cur.fetchone():
+            return False, "Another person already uses this email."
+
+        existing_un = (row.get("username") or "").strip()
+        if existing_un:
+            username_un = existing_un
+        else:
+            core_u = None
+            ucur = conn.cursor(dictionary=True)
+            try:
+                ucur.execute(
+                    "SELECT id, username FROM users WHERE LOWER(TRIM(email)) = %s LIMIT 1",
+                    (email,),
+                )
+                core_u = ucur.fetchone()
+            finally:
+                ucur.close()
+            if core_u:
+                username_un, uerr = contractor_username_prefer_core_user(
+                    conn,
+                    core_user_id=core_u.get("id"),
+                    core_username=core_u.get("username"),
+                    full_name=name,
+                    email=email,
+                    exclude_contractor_id=cid,
+                )
+            else:
+                username_un, uerr = allocate_contractor_username(
+                    conn, name, email=email, exclude_contractor_id=cid,
+                )
+            if uerr:
+                return False, uerr
+
+        if role_id is not None:
+            cur.execute("SELECT id FROM roles WHERE id = %s LIMIT 1", (role_id,))
+            if not cur.fetchone():
+                return False, "Selected role does not exist."
+
+        if wage_id is not None:
+            cur.execute("SHOW TABLES LIKE 'wage_rate_cards'")
+            if cur.fetchone():
+                cur.execute(
+                    "SELECT id FROM wage_rate_cards WHERE id = %s LIMIT 1",
+                    (wage_id,),
+                )
+                if not cur.fetchone():
+                    return False, "Selected wage rate card does not exist."
+
+        cur2 = conn.cursor()
+        try:
+            try:
+                cur2.execute(
+                    """
+                    UPDATE tb_contractors
+                    SET name = %s, email = %s, status = %s, username = %s
+                    WHERE id = %s
+                    """,
+                    (name, email, st, username_un, cid),
+                )
+            except mysql.connector.Error:
+                cur2.execute(
+                    """
+                    UPDATE tb_contractors
+                    SET name = %s, email = %s, status = %s
+                    WHERE id = %s
+                    """,
+                    (name, email, st, cid),
+                )
+
+            if et in ("paye", "self_employed"):
+                try:
+                    cur2.execute(
+                        "UPDATE tb_contractors SET employment_type = %s WHERE id = %s",
+                        (et, cid),
+                    )
+                except mysql.connector.Error:
+                    pass
+
+            if role_id is not None:
+                cur2.execute(
+                    "UPDATE tb_contractors SET role_id = %s WHERE id = %s",
+                    (role_id, cid),
+                )
+                cur2.execute(
+                    "DELETE FROM tb_contractor_roles WHERE contractor_id = %s", (cid,))
+                cur2.execute(
+                    """
+                    INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)
+                    VALUES (%s, %s)
+                    """,
+                    (cid, role_id),
+                )
+
+            if wage_clear:
+                try:
+                    cur2.execute(
+                        "UPDATE tb_contractors SET wage_rate_card_id = NULL WHERE id = %s",
+                        (cid,),
+                    )
+                except mysql.connector.Error:
+                    pass
+            elif wage_id is not None:
+                try:
+                    cur2.execute(
+                        """
+                        UPDATE tb_contractors SET wage_rate_card_id = %s WHERE id = %s
+                        """,
+                        (wage_id, cid),
+                    )
+                except mysql.connector.Error:
+                    pass
+
+            conn.commit()
+        finally:
+            cur2.close()
+        return True, "ok"
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("admin_hr_update_contractor_core: %s", e)
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_create_contractor_employee(
+    name: str,
+    email: str,
+    *,
+    role_name: Optional[str] = None,
+    password: Optional[str] = None,
+    phone: Optional[str] = None,
+    status: str = "active",
+    employment_type: Optional[str] = None,
+) -> Tuple[bool, str, Optional[int]]:
+    """
+    Create a new row in tb_contractors plus HR shell (existing staff not hired via recruitment).
+    Behaviour aligned with Time Billing contractor creation.
+    If role_name is empty, uses default_employee_tb_role_name() (env HR_DEFAULT_EMPLOYEE_ROLE, else staff).
+    """
+    from app.objects import AuthManager
+
+    name = (name or "").strip()
+    email = (email or "").strip().lower()
+    rn = (role_name or "").strip().lower()
+    if not rn:
+        rn = default_employee_tb_role_name()
+    if not name:
+        return False, "Name is required.", None
+    if not email or "@" not in email:
+        return False, "Valid email is required.", None
+    role_name = rn
+
+    st = (status or "active").strip().lower()
+    if st not in ("active", "inactive"):
+        st = "active"
+
+    pwd_plain = (password or "").strip()
+    if len(pwd_plain) < 8:
+        return False, "Password is required (minimum 8 characters).", None
+    pwd_hash = AuthManager.hash_password(pwd_plain)
+
+    from app.seat_limits import seat_check_error_for_new_email
+    from app.plugins.time_billing_module.routes import (
+        allocate_contractor_username,
+        contractor_username_prefer_core_user,
+    )
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        seat_err = seat_check_error_for_new_email(email, db_cursor=cur)
+        if seat_err:
+            return False, seat_err, None
+
+        cur.execute(
+            "SELECT 1 FROM tb_contractors WHERE email=%s LIMIT 1", (email,))
+        if cur.fetchone():
+            return False, "A person with this email already exists.", None
+
+        core_u = None
+        dcur = conn.cursor(dictionary=True)
+        try:
+            dcur.execute(
+                "SELECT * FROM users WHERE LOWER(TRIM(email)) = %s LIMIT 1",
+                (email,),
+            )
+            core_u = dcur.fetchone()
+        finally:
+            dcur.close()
+
+        if core_u:
+            username_un, uerr = contractor_username_prefer_core_user(
+                conn,
+                core_user_id=core_u.get("id"),
+                core_username=core_u.get("username"),
+                full_name=name,
+                email=email,
+                exclude_contractor_id=None,
+            )
+        else:
+            username_un, uerr = allocate_contractor_username(
+                conn, name, email=email, exclude_contractor_id=None,
+            )
+        if uerr:
+            return False, uerr, None
+
+        cur.execute("SELECT id FROM roles WHERE name=%s LIMIT 1", (role_name,))
+        row = cur.fetchone()
+        if row:
+            role_id = row[0]
+        else:
+            cur.execute("INSERT INTO roles (name) VALUES (%s)", (role_name,))
+            role_id = cur.lastrowid
+
+        try:
+            cur.execute(
+                """
+                INSERT INTO tb_contractors (
+                    email, username, name, status, password_hash, role_id, wage_rate_card_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                """,
+                (email, username_un, name, st, pwd_hash, role_id, None),
+            )
+        except Exception:
+            cur.execute(
+                """
+                INSERT INTO tb_contractors (
+                    email, name, status, password_hash, role_id, wage_rate_card_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """,
+                (email, name, st, pwd_hash, role_id, None),
+            )
+        contractor_id = int(cur.lastrowid)
+
+        try:
+            cur.execute(
+                "UPDATE tb_contractors SET username = %s WHERE id = %s",
+                (username_un, contractor_id),
+            )
+        except Exception:
+            pass
+
+        cur.execute(
+            """
+            INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)
+            VALUES (%s, %s)
+            """,
+            (contractor_id, role_id),
+        )
+
+        et = (employment_type or "").strip(
+        ).lower() if employment_type else None
+        if et in ("paye", "self_employed"):
+            try:
+                cur.execute(
+                    "UPDATE tb_contractors SET employment_type = %s WHERE id = %s",
+                    (et, contractor_id),
+                )
+            except Exception:
+                pass
+
+        cur.execute(
+            "INSERT IGNORE INTO hr_staff_details (contractor_id) VALUES (%s)",
+            (contractor_id,),
+        )
+        ph = _truncate_str(phone, 64)
+        if ph:
+            cur.execute(
+                "UPDATE hr_staff_details SET phone = %s WHERE contractor_id = %s",
+                (ph, contractor_id),
+            )
+
+        conn.commit()
+        return True, "ok", contractor_id
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("admin_create_contractor_employee: %s", e)
+        return False, str(e), None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_set_contractor_portal_password(contractor_id: int, new_password: str) -> Tuple[bool, str]:
+    """Set ``tb_contractors.password_hash`` (employee portal / API login)."""
+    from app.objects import AuthManager
+
+    pw = (new_password or "").strip()
+    if len(pw) < 8:
+        return False, "Password must be at least 8 characters."
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM tb_contractors WHERE id = %s",
+                    (int(contractor_id),))
+        if not cur.fetchone():
+            return False, "Employee not found."
+        h = AuthManager.hash_password(pw)
+        cur.execute(
+            "UPDATE tb_contractors SET password_hash = %s WHERE id = %s",
+            (h, int(contractor_id)),
+        )
+        conn.commit()
+        try:
+            from app.objects import sync_linked_users_password_from_contractor
+
+            sync_linked_users_password_from_contractor(int(contractor_id), h)
+        except Exception:
+            pass
+        return True, "ok"
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("admin_set_contractor_portal_password: %s", e)
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_delete_contractor_employee(contractor_id: int, *, confirm_email: str) -> Tuple[bool, str]:
+    """
+    Remove ``tb_contractors`` row (cascades to time billing / HR links per schema).
+    ``confirm_email`` must match the contractor email (case-insensitive).
+    """
+    cid = int(contractor_id)
+    ce = (confirm_email or "").strip().lower()
+    if not ce or "@" not in ce:
+        return False, "Type the employee work email to confirm deletion."
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, email FROM tb_contractors WHERE id = %s", (cid,))
+        row = cur.fetchone()
+        if not row:
+            return False, "Employee not found."
+        if (row.get("email") or "").strip().lower() != ce:
+            return False, "Confirmation email does not match this employee."
+        cur.execute("DELETE FROM tb_contractors WHERE id = %s", (cid,))
+        conn.commit()
+        return True, "ok"
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("admin_delete_contractor_employee: %s", e)
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_get_contractor_id_by_email(email: str) -> Optional[int]:
+    e = (email or "").strip().lower()
+    if not e or "@" not in e:
+        return None
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id FROM tb_contractors WHERE LOWER(TRIM(email)) = %s LIMIT 1",
+            (e,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_update_contractor_basic(
+    contractor_id: int,
+    *,
+    name: Optional[str] = None,
+    status: Optional[str] = None,
+    role_name: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """Patch core contractor fields used by CSV import / bulk update."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM tb_contractors WHERE id = %s",
+                    (int(contractor_id),))
+        if not cur.fetchone():
+            return False, "Contractor not found."
+        if name is not None and str(name).strip():
+            cur.execute(
+                "UPDATE tb_contractors SET name = %s WHERE id = %s",
+                (str(name).strip()[:255], int(contractor_id)),
+            )
+        if status is not None:
+            st = str(status).strip().lower()
+            if st in ("active", "inactive"):
+                cur.execute(
+                    "UPDATE tb_contractors SET status = %s WHERE id = %s",
+                    (st, int(contractor_id)),
+                )
+        if role_name is not None and str(role_name).strip():
+            rn = str(role_name).strip().lower()
+            cur.execute("SELECT id FROM roles WHERE name = %s LIMIT 1", (rn,))
+            row = cur.fetchone()
+            if row:
+                role_id = int(row[0])
+            else:
+                cur.execute("INSERT INTO roles (name) VALUES (%s)", (rn,))
+                role_id = int(cur.lastrowid)
+            cur.execute(
+                "UPDATE tb_contractors SET role_id = %s WHERE id = %s",
+                (role_id, int(contractor_id)),
+            )
+            cur.execute(
+                """
+                INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)
+                VALUES (%s, %s)
+                """,
+                (int(contractor_id), role_id),
+            )
+        conn.commit()
+        return True, "ok"
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("admin_update_contractor_basic: %s", e)
+        return False, str(e) or "Update failed."
+    finally:
+        cur.close()
+        conn.close()
+
+
 def admin_search_contractors(q: str, limit: int = 50) -> List[Dict[str, Any]]:
     """Search contractors by name, email; optionally join phone from hr_staff_details."""
     if not q or not q.strip():
@@ -400,6 +1078,29 @@ def admin_search_contractors(q: str, limit: int = 50) -> List[Dict[str, Any]]:
             LIMIT %s
         """, (term, term, limit))
         return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_list_direct_reports(manager_contractor_id: int) -> List[Dict[str, Any]]:
+    """Employees who list this contractor as manager (hr_staff_details.manager_contractor_id)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT c.id, c.name, c.email, c.status
+            FROM hr_staff_details h
+            JOIN tb_contractors c ON c.id = h.contractor_id
+            WHERE h.manager_contractor_id = %s
+            ORDER BY c.name
+            """,
+            (int(manager_contractor_id),),
+        )
+        return cur.fetchall() or []
+    except Exception:
+        return []
     finally:
         cur.close()
         conn.close()
@@ -482,9 +1183,13 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
         try:
             cur.execute(
                 """
-                SELECT id, name, email, initials, status, profile_picture_path,
-                       COALESCE(employment_type, 'self_employed') AS employment_type
-                FROM tb_contractors WHERE id = %s
+                SELECT c.id, c.name, c.email, c.username, c.initials, c.status, c.profile_picture_path,
+                       COALESCE(c.employment_type, 'self_employed') AS employment_type,
+                       c.role_id AS tb_role_id, c.wage_rate_card_id AS tb_wage_rate_card_id,
+                       r.name AS tb_role_name
+                FROM tb_contractors c
+                LEFT JOIN roles r ON r.id = c.role_id
+                WHERE c.id = %s
                 """,
                 (contractor_id,),
             )
@@ -495,14 +1200,27 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                 pass
             try:
                 cur.execute(
-                    "SELECT id, name, email, initials, status, profile_picture_path FROM tb_contractors WHERE id = %s",
+                    """
+                    SELECT c.id, c.name, c.email, c.initials, c.status, c.profile_picture_path,
+                           c.role_id AS tb_role_id, c.wage_rate_card_id AS tb_wage_rate_card_id,
+                           r.name AS tb_role_name
+                    FROM tb_contractors c
+                    LEFT JOIN roles r ON r.id = c.role_id
+                    WHERE c.id = %s
+                    """,
                     (contractor_id,),
                 )
             except Exception:
-                cur.execute(
-                    "SELECT id, name, email, initials, status FROM tb_contractors WHERE id = %s",
-                    (contractor_id,),
-                )
+                try:
+                    cur.execute(
+                        "SELECT id, name, email, initials, status, profile_picture_path FROM tb_contractors WHERE id = %s",
+                        (contractor_id,),
+                    )
+                except Exception:
+                    cur.execute(
+                        "SELECT id, name, email, initials, status FROM tb_contractors WHERE id = %s",
+                        (contractor_id,),
+                    )
         row = cur.fetchone()
         if not row:
             return None
@@ -514,6 +1232,8 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                        h.driving_licence_number, h.driving_licence_expiry, h.driving_licence_document_path,
                        h.right_to_work_type, h.right_to_work_expiry, h.right_to_work_document_path,
                        h.dbs_level, h.dbs_number, h.dbs_expiry, h.dbs_document_path,
+                       h.dbs_update_service_subscribed, h.dbs_certificate_ref, h.dbs_update_consent_at,
+                       h.dbs_last_check_at, h.dbs_last_status_code,
                        h.contract_type, h.contract_start, h.contract_end, h.contract_document_path, h.updated_at,
                        h.job_title, h.department, h.manager_contractor_id,
                        m.name AS manager_name, m.email AS manager_email
@@ -531,6 +1251,8 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                            driving_licence_number, driving_licence_expiry, driving_licence_document_path,
                            right_to_work_type, right_to_work_expiry, right_to_work_document_path,
                            dbs_level, dbs_number, dbs_expiry, dbs_document_path,
+                           dbs_update_service_subscribed, dbs_certificate_ref, dbs_update_consent_at,
+                           dbs_last_check_at, dbs_last_status_code,
                            contract_type, contract_start, contract_end, contract_document_path, updated_at
                     FROM hr_staff_details WHERE contractor_id = %s
                 """, (contractor_id,))
@@ -543,6 +1265,28 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
         extra = cur.fetchone()
         if extra:
             row.update(extra)
+        if "username" not in row:
+            row["username"] = None
+        for _k in ("tb_role_name", "tb_role_id", "tb_wage_rate_card_id"):
+            if _k not in row:
+                row[_k] = None
+        if row.get("tb_role_name") is None and row.get("tb_role_id") is None:
+            try:
+                cur.execute(
+                    """
+                    SELECT c.role_id AS tb_role_id, c.wage_rate_card_id AS tb_wage_rate_card_id,
+                           r.name AS tb_role_name
+                    FROM tb_contractors c
+                    LEFT JOIN roles r ON r.id = c.role_id
+                    WHERE c.id = %s
+                    """,
+                    (contractor_id,),
+                )
+                patch = cur.fetchone() or {}
+                for _k, _v in patch.items():
+                    row[_k] = _v
+            except Exception:
+                pass
         return row
     finally:
         cur.close()
@@ -551,50 +1295,36 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
 
 def admin_update_staff_profile(contractor_id: int, data: Dict[str, Any]) -> bool:
     """Update all admin-editable HR fields. Returns True if contractor exists."""
+    import mysql.connector
+
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id FROM tb_contractors WHERE id = %s", (contractor_id,))
+        cur.execute("SELECT id FROM tb_contractors WHERE id = %s",
+                    (contractor_id,))
         if not cur.fetchone():
             return False
-        dl_path = _normalize_stored_relative_upload_path(data.get("driving_licence_document_path"))
-        rtw_path = _normalize_stored_relative_upload_path(data.get("right_to_work_document_path"))
-        dbs_path = _normalize_stored_relative_upload_path(data.get("dbs_document_path"))
-        contract_path = _normalize_stored_relative_upload_path(data.get("contract_document_path"))
+        dl_path = _normalize_stored_relative_upload_path(
+            data.get("driving_licence_document_path"))
+        rtw_path = _normalize_stored_relative_upload_path(
+            data.get("right_to_work_document_path"))
+        dbs_path = _normalize_stored_relative_upload_path(
+            data.get("dbs_document_path"))
+        contract_path = _normalize_stored_relative_upload_path(
+            data.get("contract_document_path"))
         job_title = _truncate_str(data.get("job_title"), 128)
         department = _truncate_str(data.get("department"), 128)
-        manager_id = _optional_manager_contractor_id(data.get("manager_contractor_id"), contractor_id)
+        manager_id = _optional_manager_contractor_id(
+            data.get("manager_contractor_id"), contractor_id)
         if manager_id is not None:
-            cur.execute("SELECT id FROM tb_contractors WHERE id = %s", (manager_id,))
+            cur.execute(
+                "SELECT id FROM tb_contractors WHERE id = %s", (manager_id,))
             if not cur.fetchone():
                 manager_id = None
-        cur.execute("""
-            INSERT INTO hr_staff_details (
-                contractor_id, phone, address_line1, address_line2, postcode,
-                emergency_contact_name, emergency_contact_phone, date_of_birth,
-                driving_licence_number, driving_licence_expiry, driving_licence_document_path,
-                right_to_work_type, right_to_work_expiry, right_to_work_document_path,
-                dbs_level, dbs_number, dbs_expiry, dbs_document_path,
-                contract_type, contract_start, contract_end, contract_document_path,
-                job_title, department, manager_contractor_id
-            ) VALUES (
-                %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
-            )
-            ON DUPLICATE KEY UPDATE
-            phone = VALUES(phone), address_line1 = VALUES(address_line1), address_line2 = VALUES(address_line2),
-            postcode = VALUES(postcode), emergency_contact_name = VALUES(emergency_contact_name),
-            emergency_contact_phone = VALUES(emergency_contact_phone),
-            date_of_birth = VALUES(date_of_birth),
-            driving_licence_number = VALUES(driving_licence_number), driving_licence_expiry = VALUES(driving_licence_expiry),
-            driving_licence_document_path = VALUES(driving_licence_document_path),
-            right_to_work_type = VALUES(right_to_work_type), right_to_work_expiry = VALUES(right_to_work_expiry),
-            right_to_work_document_path = VALUES(right_to_work_document_path),
-            dbs_level = VALUES(dbs_level), dbs_number = VALUES(dbs_number), dbs_expiry = VALUES(dbs_expiry),
-            dbs_document_path = VALUES(dbs_document_path),
-            contract_type = VALUES(contract_type), contract_start = VALUES(contract_start),
-            contract_end = VALUES(contract_end), contract_document_path = VALUES(contract_document_path),
-            job_title = VALUES(job_title), department = VALUES(department), manager_contractor_id = VALUES(manager_contractor_id)
-        """, (
+        dbs_sub = 1 if data.get("dbs_update_service_subscribed") else 0
+        dbs_cert_ref = _truncate_str(data.get("dbs_certificate_ref"), 64)
+        dbs_consent = data.get("dbs_update_consent_at")
+        row_common = (
             contractor_id,
             data.get("phone"),
             data.get("address_line1"),
@@ -620,11 +1350,141 @@ def admin_update_staff_profile(contractor_id: int, data: Dict[str, Any]) -> bool
             job_title,
             department,
             manager_id,
-        ))
-        conn.commit()
-        return True
-    except Exception:
+        )
+        try:
+            cur.execute("""
+                INSERT INTO hr_staff_details (
+                    contractor_id, phone, address_line1, address_line2, postcode,
+                    emergency_contact_name, emergency_contact_phone, date_of_birth,
+                    driving_licence_number, driving_licence_expiry, driving_licence_document_path,
+                    right_to_work_type, right_to_work_expiry, right_to_work_document_path,
+                    dbs_level, dbs_number, dbs_expiry, dbs_document_path,
+                    dbs_update_service_subscribed, dbs_certificate_ref, dbs_update_consent_at,
+                    contract_type, contract_start, contract_end, contract_document_path,
+                    job_title, department, manager_contractor_id
+                ) VALUES (
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                )
+                ON DUPLICATE KEY UPDATE
+                phone = VALUES(phone), address_line1 = VALUES(address_line1), address_line2 = VALUES(address_line2),
+                postcode = VALUES(postcode), emergency_contact_name = VALUES(emergency_contact_name),
+                emergency_contact_phone = VALUES(emergency_contact_phone),
+                date_of_birth = VALUES(date_of_birth),
+                driving_licence_number = VALUES(driving_licence_number), driving_licence_expiry = VALUES(driving_licence_expiry),
+                driving_licence_document_path = VALUES(driving_licence_document_path),
+                right_to_work_type = VALUES(right_to_work_type), right_to_work_expiry = VALUES(right_to_work_expiry),
+                right_to_work_document_path = VALUES(right_to_work_document_path),
+                dbs_level = VALUES(dbs_level), dbs_number = VALUES(dbs_number), dbs_expiry = VALUES(dbs_expiry),
+                dbs_document_path = VALUES(dbs_document_path),
+                dbs_update_service_subscribed = VALUES(dbs_update_service_subscribed),
+                dbs_certificate_ref = VALUES(dbs_certificate_ref),
+                dbs_update_consent_at = VALUES(dbs_update_consent_at),
+                contract_type = VALUES(contract_type), contract_start = VALUES(contract_start),
+                contract_end = VALUES(contract_end), contract_document_path = VALUES(contract_document_path),
+                job_title = VALUES(job_title), department = VALUES(department), manager_contractor_id = VALUES(manager_contractor_id)
+            """, row_common[:18] + (dbs_sub, dbs_cert_ref, dbs_consent) + row_common[18:])
+            conn.commit()
+            return True
+        except mysql.connector.Error as exc:
+            if getattr(exc, "errno", None) != 1054:
+                logger.warning("admin_update_staff_profile: %s", exc)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                return False
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                cur.execute("""
+                    INSERT INTO hr_staff_details (
+                        contractor_id, phone, address_line1, address_line2, postcode,
+                        emergency_contact_name, emergency_contact_phone, date_of_birth,
+                        driving_licence_number, driving_licence_expiry, driving_licence_document_path,
+                        right_to_work_type, right_to_work_expiry, right_to_work_document_path,
+                        dbs_level, dbs_number, dbs_expiry, dbs_document_path,
+                        contract_type, contract_start, contract_end, contract_document_path,
+                        job_title, department, manager_contractor_id
+                    ) VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    )
+                    ON DUPLICATE KEY UPDATE
+                    phone = VALUES(phone), address_line1 = VALUES(address_line1), address_line2 = VALUES(address_line2),
+                    postcode = VALUES(postcode), emergency_contact_name = VALUES(emergency_contact_name),
+                    emergency_contact_phone = VALUES(emergency_contact_phone),
+                    date_of_birth = VALUES(date_of_birth),
+                    driving_licence_number = VALUES(driving_licence_number), driving_licence_expiry = VALUES(driving_licence_expiry),
+                    driving_licence_document_path = VALUES(driving_licence_document_path),
+                    right_to_work_type = VALUES(right_to_work_type), right_to_work_expiry = VALUES(right_to_work_expiry),
+                    right_to_work_document_path = VALUES(right_to_work_document_path),
+                    dbs_level = VALUES(dbs_level), dbs_number = VALUES(dbs_number), dbs_expiry = VALUES(dbs_expiry),
+                    dbs_document_path = VALUES(dbs_document_path),
+                    contract_type = VALUES(contract_type), contract_start = VALUES(contract_start),
+                    contract_end = VALUES(contract_end), contract_document_path = VALUES(contract_document_path),
+                    job_title = VALUES(job_title), department = VALUES(department), manager_contractor_id = VALUES(manager_contractor_id)
+                """, row_common)
+                conn.commit()
+                logger.warning(
+                    "admin_update_staff_profile: hr_staff_details missing DBS Update Service "
+                    "columns; saved without them. Run: python app/plugins/hr_module/install.py install"
+                )
+                return True
+            except Exception as exc2:
+                logger.warning("admin_update_staff_profile (legacy): %s", exc2)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                return False
+    except Exception as exc:
+        logger.warning("admin_update_staff_profile: %s", exc)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def list_dbs_status_check_logs(contractor_id: int, limit: int = 50):
+    """History rows for DBS Update Service checks (empty if table missing)."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SHOW TABLES LIKE 'dbs_status_check_log'")
+        if not cur.fetchone():
+            return []
+        cur.execute(
+            """
+            SELECT id, checked_at, status_code, result_type, channel, checker_user_id,
+                   checker_label, http_status, error_message
+            FROM dbs_status_check_log
+            WHERE contractor_id = %s
+            ORDER BY checked_at DESC
+            LIMIT %s
+            """,
+            (int(contractor_id), int(limit)),
+        )
+        rows = cur.fetchall()
+        colnames = [
+            "id",
+            "checked_at",
+            "status_code",
+            "result_type",
+            "channel",
+            "checker_user_id",
+            "checker_label",
+            "http_status",
+            "error_message",
+        ]
+        return [dict(zip(colnames, r)) for r in rows]
+    except Exception:
+        return []
     finally:
         cur.close()
         conn.close()
@@ -640,7 +1500,8 @@ def admin_update_contractor_profile_picture(contractor_id: int, path: Optional[s
     try:
         if not _contractors_has_profile_picture_column(cur):
             return False
-        cur.execute("SELECT id FROM tb_contractors WHERE id = %s", (contractor_id,))
+        cur.execute("SELECT id FROM tb_contractors WHERE id = %s",
+                    (contractor_id,))
         if not cur.fetchone():
             return False
         norm = _normalize_stored_relative_upload_path(path) if path else None
@@ -820,7 +1681,8 @@ def admin_create_document_request(
                 created.append((int(cid), int(rid)))
         conn.commit()
         for cid, rid in created:
-            _hr_ep_upsert_request_todo(cid, rid, ttl, rejected=False, due_date=required_by_date)
+            _hr_ep_upsert_request_todo(
+                cid, rid, ttl, rejected=False, due_date=required_by_date)
         return count
     finally:
         cur.close()
@@ -829,7 +1691,8 @@ def admin_create_document_request(
 
 def _contractors_has_profile_picture_column(cur) -> bool:
     try:
-        cur.execute("SHOW COLUMNS FROM tb_contractors LIKE 'profile_picture_path'")
+        cur.execute(
+            "SHOW COLUMNS FROM tb_contractors LIKE 'profile_picture_path'")
         return bool(cur.fetchone())
     except Exception:
         return False
@@ -881,7 +1744,8 @@ def _reconcile_profile_picture_to_contractor(cur, cid: int) -> None:
         pu = _select_preferred_upload_row(ups)
         if pu:
             raw = (pu.get("file_path") or "").strip()
-            req_path = _normalize_stored_relative_upload_path(raw) if raw else None
+            req_path = _normalize_stored_relative_upload_path(
+                raw) if raw else None
             req_ts = pu.get("uploaded_at")
 
     lib_path: Optional[str] = None
@@ -901,7 +1765,8 @@ def _reconcile_profile_picture_to_contractor(cur, cid: int) -> None:
             lib = cur.fetchone()
             if lib and (lib.get("file_path") or "").strip():
                 raw = (lib.get("file_path") or "").strip()
-                lib_path = _normalize_stored_relative_upload_path(raw) if raw else None
+                lib_path = _normalize_stored_relative_upload_path(
+                    raw) if raw else None
                 lib_ts = lib.get("created_at")
     except Exception:
         pass
@@ -996,13 +1861,15 @@ def reconcile_staff_details_from_approved_requests(contractor_id: int) -> None:
             if not path:
                 continue
             cur.execute(
-                "UPDATE hr_staff_details SET `{}` = %s WHERE contractor_id = %s".format(col),
+                "UPDATE hr_staff_details SET `{}` = %s WHERE contractor_id = %s".format(
+                    col),
                 (path, cid),
             )
         _reconcile_profile_picture_to_contractor(cur, cid)
         conn.commit()
     except Exception as e:
-        logger.warning("HR: reconcile_staff_details_from_approved_requests(%s): %s", cid, e)
+        logger.warning(
+            "HR: reconcile_staff_details_from_approved_requests(%s): %s", cid, e)
         try:
             conn.rollback()
         except Exception:
@@ -1066,6 +1933,295 @@ def admin_active_request_id_for_type(contractor_id: int, request_type: str) -> O
     finally:
         cur.close()
         conn.close()
+
+
+# Preset onboarding: pack id -> (request_type, title) — skips types that already have an open request.
+HR_ONBOARDING_PACKS: Dict[str, List[Tuple[str, str]]] = {
+    "office_standard": [
+        ("right_to_work", "Right to work evidence"),
+        ("dbs", "DBS certificate"),
+        ("profile_picture", "Profile photo for ID and systems"),
+    ],
+    "field_based": [
+        ("driving_licence", "Driving licence"),
+        ("right_to_work", "Right to work evidence"),
+        ("dbs", "DBS certificate"),
+    ],
+    "minimal": [
+        ("right_to_work", "Right to work evidence"),
+        ("contract", "Signed contract or written terms"),
+    ],
+}
+
+
+_ONBOARDING_PACK_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def ensure_hr_onboarding_packs_schema() -> None:
+    """Create onboarding pack tables and seed defaults if missing (safe for live sites)."""
+    try:
+        from app.plugins.hr_module import install as hr_install
+    except ImportError:
+        return
+    conn = get_db_connection()
+    try:
+        hr_install._run_sql(conn, hr_install.SQL_CREATE_HR_ONBOARDING_PACKS)
+        hr_install._run_sql(
+            conn, hr_install.SQL_CREATE_HR_ONBOARDING_PACK_ITEMS)
+        hr_install._seed_hr_onboarding_packs_if_empty(conn)
+    finally:
+        conn.close()
+
+
+def _resolve_onboarding_pack_items(pack_key: str) -> Optional[List[Tuple[str, str]]]:
+    """Load pack lines from DB, or fall back to built-in HR_ONBOARDING_PACKS."""
+    key = (pack_key or "").strip().lower()
+    if not key:
+        return None
+    ensure_hr_onboarding_packs_schema()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT i.request_type, i.title
+            FROM hr_onboarding_packs p
+            JOIN hr_onboarding_pack_items i ON i.pack_id = p.id
+            WHERE LOWER(p.pack_key) = %s AND p.active = 1
+            ORDER BY i.sort_order ASC, i.id ASC
+            """,
+            (key,),
+        )
+        rows = cur.fetchall() or []
+        if rows:
+            return [(str(r[0] or "other").strip().lower(), str(r[1] or "").strip()) for r in rows]
+    finally:
+        cur.close()
+        conn.close()
+    builtin = HR_ONBOARDING_PACKS.get(key)
+    return list(builtin) if builtin else None
+
+
+def hr_onboarding_pack_choices() -> List[Dict[str, str]]:
+    """Active packs for dropdowns (from database, seeded from built-ins)."""
+    ensure_hr_onboarding_packs_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT pack_key AS `key`, label
+            FROM hr_onboarding_packs
+            WHERE active = 1
+            ORDER BY sort_order ASC, id ASC
+            """
+        )
+        rows = cur.fetchall() or []
+        if rows:
+            return [
+                {"key": str(r["key"]), "label": str(
+                    r.get("label") or r["key"])}
+                for r in rows
+            ]
+    finally:
+        cur.close()
+        conn.close()
+    labels = {
+        "office_standard": "Office / standard",
+        "field_based": "Field / mobile",
+        "minimal": "Minimal (right to work + contract)",
+    }
+    return [
+        {"key": k, "label": labels.get(k, k.replace("_", " ").title())}
+        for k in HR_ONBOARDING_PACKS
+    ]
+
+
+def admin_list_onboarding_packs_for_settings(include_inactive: bool = True) -> List[Dict[str, Any]]:
+    """All packs for admin settings (with item counts)."""
+    ensure_hr_onboarding_packs_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        q = """
+            SELECT p.id, p.pack_key, p.label, p.sort_order, p.active,
+                   (SELECT COUNT(*) FROM hr_onboarding_pack_items i WHERE i.pack_id = p.id) AS item_count
+            FROM hr_onboarding_packs p
+        """
+        if not include_inactive:
+            q += " WHERE p.active = 1"
+        q += " ORDER BY p.sort_order ASC, p.id ASC"
+        cur.execute(q)
+        return list(cur.fetchall() or [])
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_get_onboarding_pack_for_edit(pack_id: int) -> Optional[Dict[str, Any]]:
+    ensure_hr_onboarding_packs_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT id, pack_key, label, sort_order, active
+            FROM hr_onboarding_packs WHERE id = %s LIMIT 1
+            """,
+            (int(pack_id),),
+        )
+        pack = cur.fetchone()
+        if not pack:
+            return None
+        cur.execute(
+            """
+            SELECT request_type, title, sort_order
+            FROM hr_onboarding_pack_items
+            WHERE pack_id = %s
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (int(pack_id),),
+        )
+        pack["items"] = list(cur.fetchall() or [])
+        return pack
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_delete_onboarding_pack(pack_id: int) -> Tuple[bool, str]:
+    ensure_hr_onboarding_packs_schema()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM hr_onboarding_packs WHERE id = %s",
+                    (int(pack_id),))
+        conn.commit()
+        if cur.rowcount:
+            return True, "Pack deleted."
+        return False, "Pack not found."
+    except Exception as e:
+        conn.rollback()
+        logger.warning("delete onboarding pack %s: %s", pack_id, e)
+        return False, str(e) or "Could not delete pack."
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_save_onboarding_pack(
+    pack_id: Optional[int],
+    pack_key: str,
+    label: str,
+    sort_order: int,
+    active: bool,
+    item_pairs: List[Tuple[str, str]],
+) -> Tuple[bool, str, Optional[int]]:
+    """
+    Create or replace a pack and its items. item_pairs: (request_type, title).
+    """
+    ensure_hr_onboarding_packs_schema()
+    key = (pack_key or "").strip().lower()
+    if not _ONBOARDING_PACK_KEY_RE.match(key):
+        return False, "Pack key must start with a letter and use only lowercase letters, digits, and underscores (max 64 chars).", None
+    lab = (label or "").strip()
+    if not lab:
+        return False, "Display name is required.", None
+    cleaned: List[Tuple[str, str]] = []
+    for rt, title in item_pairs:
+        t = (title or "").strip()
+        if not t:
+            continue
+        rtype = (rt or "other").strip().lower()
+        if rtype not in REQUEST_TYPES:
+            rtype = "other"
+        cleaned.append((rtype, t[:255]))
+    if not cleaned:
+        return False, "Add at least one document line with a title.", None
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        if pack_id:
+            cur.execute(
+                "SELECT id FROM hr_onboarding_packs WHERE id = %s LIMIT 1",
+                (int(pack_id),),
+            )
+            if not cur.fetchone():
+                return False, "Pack not found.", None
+            cur.execute(
+                "SELECT id FROM hr_onboarding_packs WHERE LOWER(pack_key) = %s AND id <> %s LIMIT 1",
+                (key, int(pack_id)),
+            )
+            if cur.fetchone():
+                return False, "Another pack already uses this key.", None
+            cur.execute(
+                """
+                UPDATE hr_onboarding_packs
+                SET label = %s, sort_order = %s, active = %s
+                WHERE id = %s
+                """,
+                (lab[:255], int(sort_order), 1 if active else 0, int(pack_id)),
+            )
+            pid = int(pack_id)
+        else:
+            cur.execute(
+                "SELECT id FROM hr_onboarding_packs WHERE LOWER(pack_key) = %s LIMIT 1",
+                (key,),
+            )
+            if cur.fetchone():
+                return False, "A pack with this key already exists.", None
+            cur.execute(
+                """
+                INSERT INTO hr_onboarding_packs (pack_key, label, sort_order, active)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (key, lab[:255], int(sort_order), 1 if active else 0),
+            )
+            pid = int(cur.lastrowid)
+
+        cur.execute(
+            "DELETE FROM hr_onboarding_pack_items WHERE pack_id = %s", (pid,))
+        for i, (rtype, t) in enumerate(cleaned):
+            cur.execute(
+                """
+                INSERT INTO hr_onboarding_pack_items (pack_id, request_type, title, sort_order)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (pid, rtype[:32], t, i * 10),
+            )
+        conn.commit()
+        return True, "Pack saved.", pid
+    except Exception as e:
+        conn.rollback()
+        logger.warning("save onboarding pack: %s", e)
+        return False, str(e) or "Could not save pack.", None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_apply_onboarding_pack(contractor_id: int, pack_key: str) -> Tuple[int, int, str]:
+    """
+    Create document requests from a preset pack. Returns (created_count, skipped_count, message).
+    """
+    pack = _resolve_onboarding_pack_items(pack_key)
+    if not pack:
+        return 0, 0, "Unknown onboarding pack."
+    if not admin_get_staff_profile(contractor_id):
+        return 0, 0, "Employee not found."
+    created = 0
+    skipped = 0
+    for rt, title in pack:
+        rtype = rt if rt in REQUEST_TYPES else "other"
+        if admin_active_request_id_for_type(contractor_id, rtype):
+            skipped += 1
+            continue
+        n = admin_create_document_request(
+            [int(contractor_id)], title, request_type=rtype
+        )
+        created += int(n or 0)
+    return created, skipped, f"Created {created} request(s). Skipped {skipped} (already open for that type)."
 
 
 def contractor_open_request_button_state_by_type(contractor_id: int) -> Dict[str, str]:
@@ -1210,7 +2366,8 @@ def admin_approve_request(
         if not meta:
             return False
         contractor_id = int(meta["contractor_id"])
-        req_title = (meta.get("title") or "Document request").strip() or "Document request"
+        req_title = (meta.get("title")
+                     or "Document request").strip() or "Document request"
         cur2 = conn.cursor()
         cur2.execute("""
             UPDATE hr_document_requests
@@ -1249,7 +2406,8 @@ def admin_reject_request(request_id: int, user_id: Optional[str], admin_notes: O
         if not meta:
             return False
         contractor_id = int(meta["contractor_id"])
-        req_title = (meta.get("title") or "Document request").strip() or "Document request"
+        req_title = (meta.get("title")
+                     or "Document request").strip() or "Document request"
         cur2 = conn.cursor()
         cur2.execute("""
             UPDATE hr_document_requests
@@ -1267,19 +2425,22 @@ def admin_reject_request(request_id: int, user_id: Optional[str], admin_notes: O
         _hr_ep_upsert_request_todo(
             contractor_id, request_id, req_title, rejected=True, due_date=None
         )
-        _hr_ep_message_rejected(contractor_id, request_id, req_title, admin_notes)
+        _hr_ep_message_rejected(
+            contractor_id, request_id, req_title, admin_notes)
     return ok
 
 
 def get_expiring_documents(days: int = 30) -> List[Dict[str, Any]]:
-    """List staff with documents expiring within the next N days (licence, right to work, DBS, contract end)."""
+    """List staff with documents expiring within the next N days (today .. today+N inclusive)."""
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
         from datetime import timedelta
+
         today = date.today()
         end = today + timedelta(days=days)
-        cur.execute("""
+        cur.execute(
+            """
             SELECT contractor_id AS id, 'driving_licence' AS doc_type, driving_licence_expiry AS expiry_date
             FROM hr_staff_details WHERE driving_licence_expiry IS NOT NULL AND driving_licence_expiry BETWEEN %s AND %s
             UNION ALL
@@ -1292,17 +2453,89 @@ def get_expiring_documents(days: int = 30) -> List[Dict[str, Any]]:
             SELECT contractor_id, 'contract_end', contract_end FROM hr_staff_details
             WHERE contract_end IS NOT NULL AND contract_end BETWEEN %s AND %s
             ORDER BY expiry_date
-        """, (today, end, today, end, today, end, today, end))
+            """,
+            (today, end, today, end, today, end, today, end),
+        )
         rows = cur.fetchall() or []
-        # Attach names
         for r in rows:
-            cur.execute("SELECT name, email FROM tb_contractors WHERE id = %s", (r["id"],))
+            cur.execute(
+                "SELECT name, email FROM tb_contractors WHERE id = %s", (r["id"],))
             c = cur.fetchone()
             r["contractor_name"] = c.get("name") if c else ""
             r["contractor_email"] = c.get("email") if c else ""
+            r["row_kind"] = "expiring_soon"
         return rows
     except Exception:
         return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_expired_compliance_documents() -> List[Dict[str, Any]]:
+    """Licence, right to work, DBS, or contract end dates strictly before today (already expired)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        today = date.today()
+        cur.execute(
+            """
+            SELECT contractor_id AS id, 'driving_licence' AS doc_type, driving_licence_expiry AS expiry_date
+            FROM hr_staff_details WHERE driving_licence_expiry IS NOT NULL AND driving_licence_expiry < %s
+            UNION ALL
+            SELECT contractor_id, 'right_to_work', right_to_work_expiry FROM hr_staff_details
+            WHERE right_to_work_expiry IS NOT NULL AND right_to_work_expiry < %s
+            UNION ALL
+            SELECT contractor_id, 'dbs', dbs_expiry FROM hr_staff_details
+            WHERE dbs_expiry IS NOT NULL AND dbs_expiry < %s
+            UNION ALL
+            SELECT contractor_id, 'contract_end', contract_end FROM hr_staff_details
+            WHERE contract_end IS NOT NULL AND contract_end < %s
+            ORDER BY expiry_date
+            """,
+            (today, today, today, today),
+        )
+        rows = cur.fetchall() or []
+        for r in rows:
+            cur.execute(
+                "SELECT name, email FROM tb_contractors WHERE id = %s", (r["id"],))
+            c = cur.fetchone()
+            r["contractor_name"] = c.get("name") if c else ""
+            r["contractor_email"] = c.get("email") if c else ""
+            r["row_kind"] = "expired"
+        return rows
+    except Exception:
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def contractor_ids_with_expired_hr_dates(contractor_ids: List[int]) -> Set[int]:
+    """Subset of contractor IDs that have at least one compliance end date before today."""
+    ids = [int(x) for x in contractor_ids if x is not None]
+    if not ids:
+        return set()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        ph = ",".join(["%s"] * len(ids))
+        cur.execute(
+            f"""
+            SELECT DISTINCT contractor_id FROM hr_staff_details
+            WHERE contractor_id IN ({ph})
+              AND (
+                (driving_licence_expiry IS NOT NULL AND driving_licence_expiry < CURDATE())
+                OR (right_to_work_expiry IS NOT NULL AND right_to_work_expiry < CURDATE())
+                OR (dbs_expiry IS NOT NULL AND dbs_expiry < CURDATE())
+                OR (contract_end IS NOT NULL AND contract_end < CURDATE())
+              )
+            """,
+            tuple(ids),
+        )
+        return {int(r[0]) for r in cur.fetchall() if r and r[0] is not None}
+    except Exception:
+        return set()
     finally:
         cur.close()
         conn.close()
@@ -1390,6 +2623,17 @@ def hr_compliance_overview() -> Dict[str, Any]:
             "SELECT COUNT(DISTINCT contractor_id) AS n FROM hr_staff_details WHERE contract_end IS NOT NULL AND contract_end >= CURDATE()"
         )
         with_contract = (cur.fetchone() or {}).get("n") or 0
+        cur.execute(
+            """
+            SELECT COUNT(DISTINCT contractor_id) AS n FROM hr_staff_details
+            WHERE (driving_licence_expiry IS NOT NULL AND driving_licence_expiry < CURDATE())
+               OR (right_to_work_expiry IS NOT NULL AND right_to_work_expiry < CURDATE())
+               OR (dbs_expiry IS NOT NULL AND dbs_expiry < CURDATE())
+               OR (contract_end IS NOT NULL AND contract_end < CURDATE())
+            """
+        )
+        contractors_with_expired_compliance = (
+            cur.fetchone() or {}).get("n") or 0
         return {
             "total_contractors": total_contractors,
             "active_contractors": active_contractors,
@@ -1398,65 +2642,13 @@ def hr_compliance_overview() -> Dict[str, Any]:
             "with_right_to_work": with_rtw,
             "with_dbs": with_dbs,
             "with_contract": with_contract,
+            "contractors_with_expired_compliance": contractors_with_expired_compliance,
             # backwards compat for templates that still reference this key
             "staff_with_hr_record": hr_shell_rows,
         }
     finally:
         cur.close()
         conn.close()
-
-
-def get_ventus_crew_profiles_for_contractor(contractor_id: int) -> List[Dict[str, Any]]:
-    """Linked Ventus CAD crew profiles (skills / qualifications), keyed by contractor_id when set."""
-    conn = get_db_connection()
-    cur = conn.cursor(dictionary=True)
-    rows: List[Dict[str, Any]] = []
-    try:
-        cur.execute("SHOW TABLES LIKE 'mdt_crew_profiles'")
-        if not cur.fetchone():
-            return []
-        cur.execute(
-            """
-            SELECT username, contractor_id, gender, skills_json, qualifications_json, profile_picture_path, updated_at
-            FROM mdt_crew_profiles
-            WHERE contractor_id = %s
-            ORDER BY username
-            """,
-            (int(contractor_id),),
-        )
-        rows = cur.fetchall() or []
-    except Exception as e:
-        logger.debug("HR: Ventus crew profile lookup skipped: %s", e)
-        return []
-    finally:
-        cur.close()
-        conn.close()
-
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        skills: List[Any] = []
-        quals: List[Any] = []
-        try:
-            sj = r.get("skills_json")
-            if sj:
-                skills = json.loads(sj) if isinstance(sj, str) else (sj or [])
-            qj = r.get("qualifications_json")
-            if qj:
-                quals = json.loads(qj) if isinstance(qj, str) else (qj or [])
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-        out.append(
-            {
-                "username": r.get("username"),
-                "contractor_id": r.get("contractor_id"),
-                "gender": r.get("gender"),
-                "skills": skills if isinstance(skills, list) else [],
-                "qualifications": quals if isinstance(quals, list) else [],
-                "profile_picture_path": r.get("profile_picture_path"),
-                "updated_at": r.get("updated_at"),
-            }
-        )
-    return out
 
 
 def _employee_docs_has_category(documents: List[Dict[str, Any]], category: str) -> bool:
@@ -1479,7 +2671,8 @@ def admin_profile_compliance_gaps(
     docs = employee_documents or []
     gaps: List[Dict[str, Any]] = []
     cid = int(profile.get("id") or 0)
-    approved_with_upload: Set[str] = contractor_approved_request_types_with_upload(cid) if cid else set()
+    approved_with_upload: Set[str] = contractor_approved_request_types_with_upload(
+        cid) if cid else set()
 
     def _nonempty(x: Any) -> bool:
         return x is not None and str(x).strip() != ""
@@ -1686,13 +2879,15 @@ def delete_employee_document_and_file(doc_id: int, static_root: str) -> bool:
         cur.execute("SHOW TABLES LIKE 'hr_employee_documents'")
         if not cur.fetchone():
             return False
-        cur.execute("SELECT file_path FROM hr_employee_documents WHERE id = %s", (doc_id,))
+        cur.execute(
+            "SELECT file_path FROM hr_employee_documents WHERE id = %s", (doc_id,))
         row = cur.fetchone()
         if not row:
             return False
         rel = (row.get("file_path") or "").replace("\\", "/").lstrip("/")
         cur2 = conn.cursor()
-        cur2.execute("DELETE FROM hr_employee_documents WHERE id = %s", (doc_id,))
+        cur2.execute(
+            "DELETE FROM hr_employee_documents WHERE id = %s", (doc_id,))
         ok = cur2.rowcount > 0
         conn.commit()
         cur2.close()
@@ -1740,9 +2935,11 @@ def admin_list_employees(
             cur.execute(
                 f"""
                 SELECT c.id, c.name, c.email, c.initials, c.status, c.profile_picture_path,
-                       h.phone, h.date_of_birth, h.job_title, h.department
+                       h.phone, h.date_of_birth, h.job_title, h.department,
+                       c.role_id AS tb_role_id, r.name AS tb_role_name
                 FROM tb_contractors c
                 LEFT JOIN hr_staff_details h ON h.contractor_id = c.id
+                LEFT JOIN roles r ON r.id = c.role_id
                 WHERE {" AND ".join(where)}
                 ORDER BY c.name
                 LIMIT %s OFFSET %s
@@ -1754,9 +2951,11 @@ def admin_list_employees(
                 cur.execute(
                     f"""
                     SELECT c.id, c.name, c.email, c.initials, c.status, c.profile_picture_path,
-                           h.phone, h.date_of_birth
+                           h.phone, h.date_of_birth,
+                           c.role_id AS tb_role_id, r.name AS tb_role_name
                     FROM tb_contractors c
                     LEFT JOIN hr_staff_details h ON h.contractor_id = c.id
+                    LEFT JOIN roles r ON r.id = c.role_id
                     WHERE {" AND ".join(where)}
                     ORDER BY c.name
                     LIMIT %s OFFSET %s

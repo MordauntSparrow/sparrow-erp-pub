@@ -10,7 +10,7 @@
     </ol>
   </nav>
   <h1 class="mb-2">Compliance overview</h1>
-  <p class="text-muted mb-4">Summary of staff with key documents on file. <a href="{{ url_for('internal_hr.admin_reports_export') }}">Export CSV</a></p>
+  <p class="text-muted mb-4">Summary of staff with key documents on file. <a href="{{ url_for('internal_hr.admin_reports_export') }}">Export CSV</a>. Dates here are informational for HR — Ventus/Cura do not use them for automatic eligibility gating (see <code>hr_module/compliance_integration_contract.py</code> in the repo).</p>
 
   <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -42,6 +42,18 @@
         <div class="card-body">
           <div class="small text-muted">With contract (current)</div>
           <div class="fw-bold">{{ overview.with_contract or 0 }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <div class="card border-danger border-opacity-25">
+        <div class="card-body">
+          <div class="small text-muted">People with any expired HR date on file</div>
+          <div class="fw-bold text-danger">{{ overview.contractors_with_expired_compliance or 0 }}</div>
+          <a href="{{ url_for('internal_hr.admin_expiry', scope='expired') }}" class="small">Open expiry dashboard (expired)</a>
         </div>
       </div>
     </div>

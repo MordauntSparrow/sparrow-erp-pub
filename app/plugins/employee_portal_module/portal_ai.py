@@ -31,11 +31,14 @@ def get_ai_dashboard_summary(contractor_id: int, context: Dict[str, Any]) -> Opt
         client = build_openai_client()
         parts = []
         if context.get("pending_policies"):
-            parts.append(f"{context['pending_policies']} policy/policies to sign")
+            parts.append(
+                f"{context['pending_policies']} policy/policies to sign")
         if context.get("pending_training"):
-            parts.append(f"{context['pending_training']} training item(s) to complete")
+            parts.append(
+                f"{context['pending_training']} training item(s) to complete")
         if context.get("pending_hr_requests"):
-            parts.append(f"{context['pending_hr_requests']} HR document request(s)")
+            parts.append(
+                f"{context['pending_hr_requests']} HR document request(s)")
         if context.get("pending_todo_count"):
             parts.append(f"{context['pending_todo_count']} to-do(s)")
         if context.get("unread_messages"):
@@ -120,10 +123,13 @@ def assistant_chat(contractor_id: int, messages: List[Dict[str, str]]) -> Option
             msg = choice.message
             if getattr(msg, "tool_calls", None):
                 for tc in msg.tool_calls:
-                    name = getattr(tc.function, "name", None) or getattr(tc, "name", "")
-                    args_str = getattr(tc.function, "arguments", None) or getattr(tc, "arguments", "{}")
+                    name = getattr(tc.function, "name",
+                                   None) or getattr(tc, "name", "")
+                    args_str = getattr(tc.function, "arguments", None) or getattr(
+                        tc, "arguments", "{}")
                     try:
-                        args = json.loads(args_str) if isinstance(args_str, str) else (args_str or {})
+                        args = json.loads(args_str) if isinstance(
+                            args_str, str) else (args_str or {})
                     except json.JSONDecodeError:
                         args = {}
                     result = _execute_tool(contractor_id, name, args)

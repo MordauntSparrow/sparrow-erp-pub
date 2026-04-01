@@ -88,22 +88,6 @@
     <a href="/" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
 </div>
 
-{# Only show plugin admin actions; consume all queued flashes so login/core/version noise does not stack here. #}
-<div aria-live="polite" aria-atomic="true">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                {% if category in ('plugins_page_success', 'plugins_page_danger', 'plugins_page_error') %}
-                <div class="alert alert-{% if category == 'plugins_page_success' %}success{% else %}danger{% endif %} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
-                </div>
-                {% endif %}
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-</div>
-
 <ul class="nav nav-tabs" id="pluginsTabs" role="tablist">
     <li class="nav-item" role="presentation">
         <a class="nav-link {% if installed_active %}active{% endif %}" id="installed-tab"

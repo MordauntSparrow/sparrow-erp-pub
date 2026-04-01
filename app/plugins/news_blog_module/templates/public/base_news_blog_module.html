@@ -105,7 +105,10 @@
     }
     .btn-secondary {background-color: #6c757d !important;color: #ffffff !important;}
     .btn:hover {opacity: 0.9 !important;}
-    input, textarea, select, .form-control {
+    input:not([type="checkbox"]):not([type="radio"]),
+    textarea,
+    select,
+    .form-control:not([type="checkbox"]):not([type="radio"]) {
       {% if config.theme_settings.theme == 'dark' %}background-color: #1f1f1f !important;color: #ffffff !important;border: 1px solid #444444 !important;
       {% else %}background-color: #ffffff !important;color: #212529 !important;border: 1px solid #ced4da !important;{% endif %}
     }
@@ -142,12 +145,16 @@
   <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-light bg-light sticky-top">
       <div class="container">
-        {% if config.branding == 'logo' and config.logo_path %}
+        {% set _site = (config.site_settings if config and config.site_settings is defined else (config.site_settings if config and config.site_settings else {})) %}
+        {% set _company = (_site.company_name if _site and _site.company_name is defined else None) or (config.company_name if config and config.company_name is defined else None) or 'Sparrow ERP' %}
+        {% set _branding = (_site.branding if _site and _site.branding is defined else None) or (config.branding if config and config.branding is defined else None) %}
+        {% set _logo_path = (_site.logo_path if _site and _site.logo_path is defined else None) or (config.logo_path if config and config.logo_path is defined else None) %}
+        {% if _branding == 'logo' and _logo_path %}
             <a class="navbar-brand" href="/">
-                <img src="{{ url_for('static', filename=config.logo_path) }}" alt="Logo" height="40">
+                <img src="{{ url_for('static', filename=_logo_path) }}" alt="{{ _company }}" height="40">
             </a>
         {% else %}
-            <a class="navbar-brand" href="/">{{ config.company_name or 'Sparrow ERP' }}</a>
+            <a class="navbar-brand" href="/">{{ _company }}</a>
         {% endif %}
         <button
           class="navbar-toggler"

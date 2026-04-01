@@ -16,6 +16,7 @@
       <div class="card h-100">
         <div class="card-header fw-semibold">Pipeline</div>
         <div class="card-body">
+          {% if rec_can_manage_applications %}
           <form method="post" class="mb-0">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="stage">
@@ -30,6 +31,9 @@
             </div>
             <div class="form-text">Updating stage runs auto-assign rules for that stage.</div>
           </form>
+          {% else %}
+          <p class="small text-muted mb-0">Current stage: <strong>{{ stage_labels.get(application.stage, application.stage) }}</strong></p>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -38,7 +42,12 @@
         <div class="card-header fw-semibold">Hire → employee (contractor)</div>
         <div class="card-body small">
           {% if application.contractor_id %}
-          <p class="text-success mb-0">Linked contractor ID: <strong>{{ application.contractor_id }}</strong></p>
+          <p class="text-success mb-2">Linked employee (contractor) ID: <strong>{{ application.contractor_id }}</strong></p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=application.contractor_id) }}" class="btn btn-sm btn-success">Open in HR</a>
+            <a href="{{ url_for('internal_hr.admin_request_new_form', contractor_id=application.contractor_id) }}" class="btn btn-sm btn-outline-primary">Send document request</a>
+          </div>
+          <p class="text-muted small mt-2 mb-0">Use HR to finish onboarding, compliance, and document library. The applicant was emailed and received an employee-portal message where configured.</p>
           {% else %}
           <p class="text-muted mb-2">Applicants stay <strong>out of the contractor table</strong> until pre-hire documents are HR-approved, HR authorises hire, and the applicant has confirmed policies on the portal. Then create the contractor — approved files and CV are copied into HR.</p>
           {% if hire_precheck_ok %}
@@ -50,12 +59,16 @@
             <li>HR authorisation: {% if application.hr_conversion_authorized %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
             <li>Policies acknowledged (applicant): {% if application.policies_acknowledged_at %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
           </ul>
+          {% if rec_can_hire %}
           <form method="post" class="mb-3 pb-3 border-bottom">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="authorize_hire">
             <button type="submit" class="btn btn-sm btn-outline-primary" {% if not prehire_requests %}title="No pre-hire rows — authorisation still allowed"{% endif %}>Authorise contractor creation (HR)</button>
             <div class="form-text">Only after every pre-hire item below is <strong>approved</strong>.</div>
           </form>
+          {% else %}
+          <p class="small text-muted mb-3 pb-3 border-bottom">Hire authorisation and contractor creation require the <strong>Recruitment — hire</strong> permission (or full module access).</p>
+          {% endif %}
           {% if hire_preview and hire_preview.ok %}
           <div class="alert alert-light border py-2 mb-2 small">
             <strong>Time billing (default from job role):</strong>
@@ -66,6 +79,7 @@
           {% elif hire_preview and not hire_preview.ok %}
           <div class="alert alert-secondary py-2 mb-2 small">{{ hire_preview.message }}</div>
           {% endif %}
+          {% if rec_can_hire %}
           <form method="post" id="hire-contractor-form">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="hire">
@@ -99,6 +113,7 @@
             </div>
             <button type="submit" class="btn btn-sm btn-success" {% if not hire_precheck_ok %}disabled{% endif %} onclick="return confirm('Create contractor, copy documents to HR, and mark hired?');">Create contractor &amp; mark hired</button>
           </form>
+          {% endif %}
           <script>
           (function(){
             var tb = document.getElementById('tb_role_id');
@@ -133,6 +148,7 @@
     <div class="card-header fw-semibold">Interview arrangements</div>
     <div class="card-body small">
       <p class="text-muted mb-2">Applicants see this on their portal when the application is in the <strong>Interview</strong> stage (or later until hired). Choose <strong>Online</strong> for a video link or <strong>On-site</strong> with a location — use saved presets to fill typical offices quickly.</p>
+      {% if rec_can_manage_applications %}
       <form method="post" class="rec-interview-details-form">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="interview_details">
@@ -167,7 +183,7 @@
           <textarea class="form-control form-control-sm" name="interview_location" id="interview_location" rows="3" placeholder="e.g. Unit 4, Example Park…">{{ application.interview_location or '' }}</textarea>
         </div>
         <button type="submit" class="btn btn-sm btn-primary">Save interview details</button>
-        <a href="{{ url_for('internal_recruitment.admin_interview_presets') }}" class="btn btn-sm btn-link">Manage office presets</a>
+        {% if rec_can_manage_setup %}<a href="{{ url_for('internal_recruitment.admin_interview_presets') }}" class="btn btn-sm btn-link">Manage office presets</a>{% endif %}
       </form>
       <script>
       (function () {
@@ -204,6 +220,12 @@
         syncPanels();
       })();
       </script>
+      {% else %}
+      <p class="small text-muted mb-0">Interview format: <strong>{{ application.interview_format or '—' }}</strong>
+        {% if application.interview_meeting_url %}· <a href="{{ application.interview_meeting_url }}" target="_blank" rel="noopener">Meeting link</a>{% endif %}
+      </p>
+      {% if application.interview_location %}<p class="small mb-0 mt-2">{{ application.interview_location }}</p>{% endif %}
+      {% endif %}
     </div>
   </div>
 
@@ -211,6 +233,7 @@
     <div class="card-header fw-semibold">Pre-hire compliance (applicant portal)</div>
     <div class="card-body small">
       <p class="text-muted">Request right-to-work, DBS, contract, policy confirmation, etc. The applicant uploads on <strong>their</strong> login — not the employee portal. After you <strong>approve</strong> each row, use <em>Authorise contractor creation</em> above.</p>
+      {% if rec_can_manage_applications %}
       <form method="post" class="row g-2 align-items-end border-bottom pb-3 mb-3">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="prehire_add">
@@ -234,6 +257,7 @@
           <button type="submit" class="btn btn-sm btn-primary w-100">Add request</button>
         </div>
       </form>
+      {% endif %}
       {% if prehire_requests %}
       <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
@@ -246,6 +270,7 @@
               <td><span class="badge bg-secondary">{{ r.status }}</span></td>
               <td><code class="small">{% if r.latest_file_path %}{{ r.latest_file_path }}{% else %}—{% endif %}</code></td>
               <td class="text-end text-nowrap">
+                {% if rec_can_manage_applications %}
                 <form method="post" class="d-inline">
                   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                   <input type="hidden" name="action" value="prehire_approve">
@@ -258,6 +283,9 @@
                   <input type="hidden" name="request_id" value="{{ r.id }}">
                   <button type="submit" class="btn btn-sm btn-outline-danger" {% if r.status == 'approved' %}disabled{% endif %}>Reject</button>
                 </form>
+                {% else %}
+                <span class="small text-muted">—</span>
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -273,6 +301,7 @@
   <div class="card mt-3">
     <div class="card-header fw-semibold">Assign form</div>
     <div class="card-body">
+      {% if rec_can_manage_applications %}
       <form method="post" class="row g-2 align-items-end">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="assign">
@@ -291,6 +320,9 @@
           <button type="submit" class="btn btn-sm btn-outline-primary">Send form</button>
         </div>
       </form>
+      {% else %}
+      <p class="small text-muted mb-0">You have read-only access — form assignment is disabled.</p>
+      {% endif %}
     </div>
   </div>
 
@@ -332,12 +364,16 @@
   <div class="card mt-3">
     <div class="card-header fw-semibold">Admin notes</div>
     <div class="card-body">
+      {% if rec_can_manage_applications %}
       <form method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="action" value="notes">
         <textarea class="form-control mb-2" name="admin_notes" rows="3">{{ application.admin_notes or '' }}</textarea>
         <button type="submit" class="btn btn-sm btn-secondary">Save notes</button>
       </form>
+      {% else %}
+      <p class="small text-muted mb-0">{{ application.admin_notes or 'No notes.' }}</p>
+      {% endif %}
     </div>
   </div>
 

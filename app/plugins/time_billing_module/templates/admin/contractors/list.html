@@ -22,7 +22,7 @@
     <div class="col-12 col-md-4">
       <input class="form-control form-control-sm"
              name="q"
-             placeholder="Search name/email">
+             placeholder="Search name, username, or email">
     </div>
 
     <div class="col-6 col-md-2">
@@ -56,8 +56,8 @@
         <table class="table table-sm align-middle">
           <thead>
             <tr>
-              <th>ID</th>
               <th>Name</th>
+              <th>Username</th>
               <th>Email</th>
               <th>Roles</th>
               <th>Status</th>
@@ -106,17 +106,19 @@
                    id="nu-name"
                    required
                    placeholder="Full name">
+            <div class="form-text">Login username is generated as <strong>firstname.lastname</strong> (lowercased), with a number suffix if needed.</div>
           </div>
 
           <div class="col-12 col-md-6">
-            <label class="form-label">Initial Password</label>
+            <label class="form-label">Initial password <span class="text-danger">*</span></label>
             <input type="password"
                    class="form-control"
                    id="nu-password"
                    minlength="8"
+                   required
                    placeholder="Min 8 characters">
             <div class="form-text">
-              If left blank, user will exist without a password until set.
+              Required for portal sign-in. Name, username, and role are managed under <strong>HR → Employees</strong> after creation.
             </div>
           </div>
 
@@ -205,7 +207,7 @@
                         .replace(/0\/set-password$/, "");
   const API_TOGGLE = "{{ url_for('internal_time_billing.api_contractor_toggle', user_id=0) }}"
                         .replace(/0\/toggle$/, "");
-  const PAGE_EDIT  = "{{ url_for('internal_time_billing.contractors_edit_page') }}";
+  const HR_EDIT_TMPL = {{ url_for('internal_hr.admin_contractor_edit_form', cid=999001) | tojson }}.replace("999001", "__ID__");
   const ROLES_URL  = "{{ url_for('internal_time_billing.api_list_roles') }}";
   const WAGE_CARDS_URL = "{{ url_for('internal_time_billing.get_wage_cards') }}";
 
@@ -225,7 +227,7 @@
   async function load() {
     const r = await fetch(`${API_LIST}?${params()}`);
     if (!r.ok) {
-      body.innerHTML = '<tr><td colspan="7" class="text-danger">Load failed</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="text-danger">Load failed</td></tr>';
       return;
     }
 
@@ -235,7 +237,7 @@
     body.innerHTML = "";
 
     if (!items.length) {
-      body.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No contractors</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No contractors</td></tr>';
       document.getElementById("prevPage").disabled = page <= 1;
       document.getElementById("nextPage").disabled = !hasMore;
       return;
@@ -251,7 +253,6 @@
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${c.id}</td>
         <td>${c.name || ""}</td>
         <td>${c.email || ""}</td>
         <td>${rolesTxt}</td>
@@ -347,8 +348,8 @@
       nuHint.classList.add("text-danger");
       return;
     }
-    if (password && password.length < 8) {
-      nuHint.textContent = "Password must be at least 8 characters.";
+    if (!password || password.length < 8) {
+      nuHint.textContent = "Password is required (minimum 8 characters).";
       nuHint.classList.remove("text-muted");
       nuHint.classList.add("text-danger");
       return;

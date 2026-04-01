@@ -1,7 +1,5 @@
-from app.objects import get_db_connection, AuthManager
+from app.objects import AuthManager, get_db_connection, mysql_connect_with_retry
 import os
-import sys
-import mysql.connector
 import uuid
 
 # Only load dotenv for local/dev
@@ -15,22 +13,16 @@ if not os.environ.get("RAILWAY_ENVIRONMENT"):
 
 
 def create_database_and_tables():
-    db_host = os.environ.get("DB_HOST", "localhost")
-    db_user = os.environ.get("DB_USER", "root")
-    db_password = os.environ.get("DB_PASSWORD", "rootpassword")
     db_name = os.environ.get("DB_NAME", "sparrow_erp")
 
-
-    conn = mysql.connector.connect(
-        host=db_host, user=db_user, password=db_password)
+    conn = mysql_connect_with_retry(include_database=False)
     cursor = conn.cursor()
     cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
     print(f"Database '{db_name}' ensured.")
     cursor.close()
     conn.close()
 
-    conn = mysql.connector.connect(
-        host=db_host, user=db_user, password=db_password, database=db_name)
+    conn = mysql_connect_with_retry(database=db_name)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -45,12 +37,32 @@ def create_database_and_tables():
             first_name varchar(45) DEFAULT NULL,
             last_name varchar(45) DEFAULT NULL,
             personal_pin_hash varchar(255) DEFAULT NULL,
+            billable_exempt tinyint(1) NOT NULL DEFAULT 0,
+            support_access_expires_at datetime DEFAULT NULL,
+            support_access_enabled tinyint(1) NOT NULL DEFAULT 0,
+            contractor_id INT NULL DEFAULT NULL,
             PRIMARY KEY (id),
             UNIQUE KEY username (username),
-            UNIQUE KEY email (email)
+            UNIQUE KEY email (email),
+            UNIQUE KEY uq_users_contractor_id (contractor_id)
         )
     """)
     print("Users table ensured.")
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sparrow_seat_limit (
+          id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+          max_billable_seats INT NOT NULL DEFAULT 30,
+          updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+    cursor.execute(
+        """
+        INSERT IGNORE INTO sparrow_seat_limit (id, max_billable_seats) VALUES (1, 30)
+        """
+    )
+    print("sparrow_seat_limit table ensured.")
     conn.commit()
     cursor.close()
     conn.close()

@@ -12,7 +12,7 @@
         </a>
     </div>
 
-    <p class="text-muted mb-4">All settings for this module: job types, wage rates, policies, runsheet templates, and contractors.</p>
+    <p class="text-muted mb-4">Job types, wage rates, policies, and runsheet templates. Staff records: <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Employees</a>.</p>
 
     <div class="row g-3">
 
@@ -74,22 +74,6 @@
                 <div class="card-footer bg-transparent border-0 d-flex justify-content-end gap-2">
                     <a href="{{ url_for('internal_time_billing.templates_list_page') }}" class="btn btn-outline-primary btn-sm">List</a>
                     <a href="{{ url_for('internal_time_billing.templates_edit_page') }}" class="btn btn-outline-secondary btn-sm">Edit</a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Contractors -->
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title d-flex align-items-center">
-                        <i class="bi bi-people me-2"></i> Contractors
-                    </h5>
-                    <p class="card-text text-muted small">Create and manage staff who use timesheets and the work app. Passwords, roles, and activation.</p>
-                </div>
-                <div class="card-footer bg-transparent border-0 d-flex justify-content-end gap-2">
-                    <a href="{{ url_for('internal_time_billing.contractors_page') }}" class="btn btn-outline-primary btn-sm">List</a>
-                    <a href="{{ url_for('internal_time_billing.contractors_edit_page') }}" class="btn btn-outline-secondary btn-sm">Edit</a>
                 </div>
             </div>
         </div>

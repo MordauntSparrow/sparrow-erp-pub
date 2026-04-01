@@ -8,6 +8,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <link rel="manifest" href="/manifest.webmanifest">
     <title>{{ config.site_settings.company_name }}</title>
+    {% include 'partials/sparrow_date_locale.html' %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
@@ -169,13 +170,21 @@
         border-color: #475569 !important;
       }
       /* ----- Forms ----- */
-      body.portal-theme-dark input, body.portal-theme-dark textarea, body.portal-theme-dark select, body.portal-theme-dark .form-control, body.portal-theme-dark .form-select {
+      body.portal-theme-dark input:not([type="checkbox"]):not([type="radio"]),
+      body.portal-theme-dark textarea,
+      body.portal-theme-dark select,
+      body.portal-theme-dark .form-control:not([type="checkbox"]):not([type="radio"]),
+      body.portal-theme-dark .form-select {
         background-color: #0f172a !important;
         color: #e2e8f0 !important;
         border-color: rgba(255,255,255,0.2) !important;
       }
       body.portal-theme-dark input::placeholder, body.portal-theme-dark textarea::placeholder { color: #64748b !important; }
-      body.portal-theme-light input, body.portal-theme-light textarea, body.portal-theme-light select, body.portal-theme-light .form-control {
+      body.portal-theme-light input:not([type="checkbox"]):not([type="radio"]),
+      body.portal-theme-light textarea,
+      body.portal-theme-light select,
+      body.portal-theme-light .form-control:not([type="checkbox"]):not([type="radio"]),
+      body.portal-theme-light .form-select {
         background-color: #fff !important; color: #0f172a !important; border-color: #ced4da !important;
       }
       /* ----- Modal / alert / toast ----- */

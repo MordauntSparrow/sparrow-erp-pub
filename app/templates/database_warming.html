@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Starting up — Sparrow ERP</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+  <style>
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #f0f4f8 0%, #e2e8f0 100%);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #1e293b;
+    }
+    .card-wrap {
+      max-width: 28rem;
+      width: 100%;
+      padding: 1rem;
+    }
+    .warm-card {
+      border-radius: 0.75rem;
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: #fff;
+    }
+    .warm-icon {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 50%;
+      background: rgba(13, 110, 253, 0.12);
+      color: #0d6efd;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      margin-bottom: 1rem;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      letter-spacing: -0.02em;
+    }
+    p {
+      margin: 0 0 1rem;
+      font-size: 0.95rem;
+      line-height: 1.55;
+      color: #475569;
+    }
+    .detail {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-bottom: 1.25rem;
+      line-height: 1.45;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card-wrap">
+    <div class="warm-card p-4 p-md-5">
+      <div class="warm-icon" aria-hidden="true">
+        <span class="spinner-border spinner-border-sm" role="status"></span>
+      </div>
+      <h1>Almost ready</h1>
+      <p>
+        The application is still connecting to the database. This often happens
+        right after the server wakes from idle. Wait a few seconds, then try again.
+      </p>
+      {% if detail %}
+      <p class="detail">{{ detail }}</p>
+      {% endif %}
+      <div class="actions">
+        <button type="button" class="btn btn-primary" onclick="location.reload()">
+          Try again
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

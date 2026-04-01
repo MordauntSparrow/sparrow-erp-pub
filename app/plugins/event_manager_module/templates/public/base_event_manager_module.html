@@ -51,7 +51,10 @@
       }
       .btn-secondary {background-color: #6c757d !important;color: #ffffff !important;}
       .btn:hover {opacity: 0.9 !important;}
-      input, textarea, select, .form-control {
+      input:not([type="checkbox"]):not([type="radio"]),
+      textarea,
+      select,
+      .form-control:not([type="checkbox"]):not([type="radio"]) {
           {% if config.theme_settings.theme == 'dark' %}background-color: #1f1f1f !important;color: #ffffff !important;border: 1px solid #444444 !important;
           {% else %}background-color: #ffffff !important;color: #212529 !important;border: 1px solid #ced4da !important;{% endif %}
       }

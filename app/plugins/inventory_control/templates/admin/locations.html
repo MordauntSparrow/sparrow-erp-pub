@@ -32,7 +32,7 @@
           <input type="hidden" id="locId" name="id">
           <div class="mb-2"><label class="form-label">Code *</label><input type="text" class="form-control" id="locCode" name="code" required placeholder="e.g. WH-A"></div>
           <div class="mb-2"><label class="form-label">Name *</label><input type="text" class="form-control" id="locName" name="name" required></div>
-          <div class="mb-2"><label class="form-label">Type</label><select class="form-select" id="locType" name="type"><option value="warehouse">Warehouse</option><option value="store">Store</option><option value="bin">Bin</option><option value="virtual">Virtual</option></select></div>
+          <div class="mb-2"><label class="form-label">Type</label><select class="form-select" id="locType" name="type"><option value="warehouse">Warehouse</option><option value="store">Store</option><option value="bin">Bin</option><option value="holding">Holding (reconciliation / post-event)</option><option value="virtual">Virtual (site / logical)</option></select></div>
           <div class="mb-2"><label class="form-label">Parent location</label><select class="form-select" id="locParent" name="parent_location_id"><option value="">— None —</option></select></div>
           <div class="mb-0"><label class="form-label">Address</label><textarea class="form-control" id="locAddress" name="address" rows="2"></textarea></div>
         </form>

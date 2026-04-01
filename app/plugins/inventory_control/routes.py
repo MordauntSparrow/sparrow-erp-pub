@@ -6,14 +6,27 @@ import os
 import secrets
 import uuid
 from datetime import datetime, date
+import tempfile
+from typing import Any, Dict, Optional
 from functools import wraps
 from io import StringIO
 import csv as csv_module
 
-from flask import Blueprint, request, jsonify, render_template, current_app, g, redirect, url_for, flash
+from flask import (
+    Blueprint,
+    request,
+    jsonify,
+    render_template,
+    current_app,
+    g,
+    redirect,
+    url_for,
+    flash,
+    session,
+)
 from flask_login import login_required, current_user
 
-from app.objects import get_db_connection
+from app.objects import get_db_connection, has_permission
 try:
     from app import socketio
 except ImportError:
@@ -36,8 +49,14 @@ def decode_session_token(token):
 
 from app.openapi_utils import register_path
 
-from .objects import get_inventory_service
+from .objects import add_calendar_months, get_inventory_service
 from .ocr import InventoryInvoiceService, TesseractOCRProvider, AmazonInvoiceParser
+
+
+def _get_asset_service():
+    from .asset_service import get_asset_service
+
+    return get_asset_service()
 
 BLUEPRINT_NAME = "inventory_control_internal"
 BASE_PATH = "/plugin/inventory_control"
@@ -52,6 +71,75 @@ internal = Blueprint(
     url_prefix="/plugin/inventory_control",
     template_folder="templates",
 )
+
+from .equipment_asset_routes import register_equipment_asset_routes
+
+register_equipment_asset_routes(internal)
+
+from .equipment_display import (
+    equipment_asset_status_label,
+    equipment_issue_severity_label,
+    equipment_issue_status_label,
+    equipment_holder_type_label,
+    inventory_location_type_label,
+    inventory_transaction_type_label,
+    contractor_kit_request_status_label,
+)
+
+
+@internal.app_template_filter("equipment_status_label")
+def _filter_equipment_status_label(code):
+    return equipment_asset_status_label(code)
+
+
+@internal.app_template_filter("equipment_issue_status_label")
+def _filter_equipment_issue_status_label(code):
+    return equipment_issue_status_label(code)
+
+
+@internal.app_template_filter("equipment_issue_severity_label")
+def _filter_equipment_issue_severity_label(code):
+    return equipment_issue_severity_label(code)
+
+
+@internal.app_template_filter("equipment_holder_type_label")
+def _filter_equipment_holder_type_label(code):
+    return equipment_holder_type_label(code)
+
+
+@internal.app_template_filter("inventory_tx_type_label")
+def _filter_inventory_tx_type_label(code):
+    return inventory_transaction_type_label(code)
+
+
+@internal.app_template_filter("inventory_location_type_label")
+def _filter_inventory_location_type_label(code):
+    return inventory_location_type_label(code)
+
+
+@internal.app_template_filter("contractor_kit_status_label")
+def _filter_contractor_kit_status_label(code):
+    return contractor_kit_request_status_label(code)
+
+
+@internal.context_processor
+def _inventory_serial_equipment_template_ctx():
+    """Cross-module nav flags for serial-equipment pages (merged asset UI)."""
+    try:
+        b = current_app.blueprints
+        return {
+            "inventory_bp_available": True,
+            "asset_links_available": True,
+            "ventus_bp_available": "medical_response_internal" in b,
+            "cura_bp_available": "medical_records_internal" in b,
+        }
+    except Exception:
+        return {
+            "inventory_bp_available": True,
+            "asset_links_available": True,
+            "ventus_bp_available": False,
+            "cura_bp_available": False,
+        }
 
 
 @internal.before_request
@@ -237,22 +325,90 @@ def log_audit(
         logger.exception("Audit logging failed")
 
 
+PERM_INV_ACCESS = "inventory_control.access"
+PERM_INV_EDIT = "inventory_control.edit"
+PERM_INV_TRANSACT = "inventory_control.transactions"
+
+
 def _is_admin():
     """True if current user or Bearer token user has admin role (session or g.token_user)."""
     token_user = getattr(g, "token_user", None)
-    if token_user and token_user.get("role") in ("admin", "superuser"):
+    if token_user and token_user.get("role") in ("admin", "superuser", "support_break_glass"):
         return True
-    return getattr(current_user, "role", None) in ("admin", "superuser")
+    return getattr(current_user, "role", None) in ("admin", "superuser", "support_break_glass")
+
+
+def _session_has_any_inventory_perm() -> bool:
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    return (
+        has_permission(PERM_INV_ACCESS)
+        or has_permission(PERM_INV_TRANSACT)
+        or has_permission(PERM_INV_EDIT)
+    )
+
+
+def _session_inventory_transact() -> bool:
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    return has_permission(PERM_INV_TRANSACT) or has_permission(PERM_INV_EDIT)
+
+
+def _session_inventory_edit() -> bool:
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    return has_permission(PERM_INV_EDIT)
+
+
+def _csv_import_safe_path(path: Optional[str]) -> bool:
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        base = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+        real = os.path.normcase(os.path.realpath(path))
+        return (
+            (real.startswith(base + os.sep) or real == base)
+            and os.path.basename(real).lower().startswith("invimp_")
+        )
+    except OSError:
+        return False
 
 
 def _permission_inventory():
-    """Allow access to inventory module (admin role only for now)."""
-    return _is_admin()
+    """Session user may open inventory UI (browse) with access, transactions, or edit."""
+    return _session_has_any_inventory_perm()
 
 
-def _require_admin():
-    """Require admin role for write operations."""
-    return _is_admin()
+def _bearer_jwt_admin_inventory() -> bool:
+    token_user = getattr(g, "token_user", None)
+    return bool(token_user and token_user.get("role") in ("admin", "superuser", "support_break_glass"))
+
+
+def _api_allow_inventory(min_level: str) -> bool:
+    """
+    API auth: admin/superuser session JWT unchanged; session cookie uses plugin permissions.
+    Long-lived inventory_api_user Bearer tokens are not granted general inventory JSON API access here.
+    """
+    if _bearer_jwt_admin_inventory():
+        return True
+    if getattr(g, "inventory_api_user", None):
+        return False
+    if min_level == "access":
+        return _session_has_any_inventory_perm()
+    if min_level == "transact":
+        return _session_inventory_transact()
+    if min_level == "edit":
+        return _session_inventory_edit()
+    return False
 
 
 def _allow_token_role(role: str) -> bool:
@@ -264,11 +420,11 @@ def _allow_token_role(role: str) -> bool:
 
 
 def admin_required(f):
-    """Decorator: require admin role (aligns with core admin_only)."""
+    """Decorator: inventory module UI (any of access / transactions / edit, or admin role)."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if not _is_admin():
-            flash("Access denied: Admins only.", "danger")
+        if not _session_has_any_inventory_perm():
+            flash("Access denied: You do not have permission to access Inventory Control.", "danger")
             return redirect(url_for("routes.dashboard"))
         return f(*args, **kwargs)
     return wrapper
@@ -298,14 +454,31 @@ def api_authenticated_required(f):
     return wrapper
 
 
-def api_admin_required(f):
-    """Decorator for /api/* routes: allow Bearer token (admin/superuser) or session (admin). Return 401 JSON when unauthenticated."""
+def api_inventory_access_required(f):
+    """Read APIs: session with inventory access (or admin JWT)."""
     @wraps(f)
     def wrapper(*args, **kwargs):
-        token_user = getattr(g, "token_user", None)
-        if token_user and token_user.get("role") in ("admin", "superuser"):
+        if _api_allow_inventory("access"):
             return f(*args, **kwargs)
-        if getattr(current_user, "is_authenticated", False) and _is_admin():
+        return _jsonify_safe(_api_401_payload(), 401)
+    return wrapper
+
+
+def api_inventory_transact_required(f):
+    """Stock movements: session with transactions or edit (or admin JWT)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if _api_allow_inventory("transact"):
+            return f(*args, **kwargs)
+        return _jsonify_safe(_api_401_payload(), 401)
+    return wrapper
+
+
+def api_inventory_edit_required(f):
+    """Master data / invoices / equipment create: session with edit (or admin JWT)."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if _api_allow_inventory("edit"):
             return f(*args, **kwargs)
         return _jsonify_safe(_api_401_payload(), 401)
     return wrapper
@@ -333,6 +506,32 @@ def _effective_user_id():
 # Dashboard & UI pages
 # ---------------------------------------------------------------------------
 
+def _app_blueprint_registered(name: str) -> bool:
+    try:
+        return name in current_app.blueprints
+    except Exception:
+        return False
+
+
+def _user_asset_can_assign() -> bool:
+    """Matches asset_management._can_assign for cross-module UI (sign back in, etc.)."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    return has_permission("asset_management.edit") or has_permission("asset_management.assign")
+
+
+def _user_asset_can_edit() -> bool:
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    role = str(getattr(current_user, "role", "") or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    return has_permission("asset_management.edit")
+
+
 @internal.route("/")
 @internal.route("/index")
 @login_required
@@ -344,10 +543,15 @@ def dashboard():
     svc = get_inventory_service()
     health = svc.health_check()
     metrics = svc.get_dashboard_metrics()
+    command_center = svc.get_dashboard_command_center()
     return render_template(
         "admin/inventory_dashboard.html",
         health=health,
         metrics=metrics,
+        command_center=command_center,
+        fleet_links_available=_app_blueprint_registered("fleet_management"),
+        ventus_links_available=_app_blueprint_registered("medical_response_internal"),
+        medical_links_available=_app_blueprint_registered("medical_records_internal"),
     )
 
 
@@ -355,6 +559,7 @@ def dashboard():
 @login_required
 @admin_required
 def items_page():
+    """Consumables catalog (bulk / small stock). Serial equipment uses equipment routes."""
     return render_template("admin/items.html")
 
 
@@ -367,6 +572,12 @@ def item_overview_page(item_id: int):
     if not item:
         flash("Item not found.", "danger")
         return redirect(url_for("inventory_control_internal.items_page"))
+    if _inventory_row_is_equipment(item):
+        flash("Serial equipment product lines are managed under Equipment, not Consumables.", "info")
+        q = (item.get("sku") or item.get("name") or "").strip()
+        return redirect(
+            url_for("inventory_control_internal.equipment_desk_page", **({"q": q} if q else {}))
+        )
     return render_template("admin/item_overview.html", item=item)
 
 
@@ -419,6 +630,340 @@ def analytics_page():
     return render_template("admin/analytics.html")
 
 
+@internal.route("/equipment")
+@login_required
+@admin_required
+def equipment_desk_page():
+    """Serialised equipment across all items: assignments, servicing, issues."""
+    svc = _get_asset_service()
+    q = (request.args.get("q") or "").strip() or None
+    st = (request.args.get("status") or "").strip() or None
+    assigned_only = (request.args.get("assigned") or "").strip() == "1"
+    rows = svc.list_equipment_desk_rows(
+        search=q,
+        status=st,
+        assigned_only=assigned_only,
+        limit=500,
+    )
+    locations = []
+    asset_can_assign = _user_asset_can_assign()
+    asset_can_edit = _user_asset_can_edit()
+    if asset_can_assign:
+        try:
+            locations = get_inventory_service().list_locations() or []
+        except Exception:
+            logger.exception("equipment_desk_page list_locations")
+    return render_template(
+        "admin/equipment_desk.html",
+        rows=rows,
+        q=q or "",
+        status=st or "",
+        assigned_only=assigned_only,
+        asset_can_assign=asset_can_assign,
+        asset_can_edit=asset_can_edit,
+        asset_return_locations=locations,
+    )
+
+
+@internal.route("/equipment/at-assignee-location/<int:location_id>")
+@login_required
+@admin_required
+def equipment_at_assignee_location_page(location_id: int):
+    """Serial kit whose latest out transaction assigns to this location (e.g. Cura OP-EVT-* pool)."""
+    inv = get_inventory_service()
+    loc = inv.get_location(int(location_id))
+    if not loc:
+        flash("Location not found.", "danger")
+        return redirect(url_for("inventory_control_internal.locations_page"))
+    try:
+        rows = inv.list_equipment_held_at_assignee_location(int(location_id))
+    except Exception:
+        logger.exception("equipment_at_assignee_location_page")
+        rows = []
+    return render_template(
+        "admin/equipment_at_assignee_location.html",
+        location=loc,
+        rows=rows or [],
+    )
+
+
+@internal.route("/data-import", methods=["GET", "POST"])
+@login_required
+@admin_required
+def data_import_wizard():
+    """CSV import: upload → map columns → preview → run (inventory edit only)."""
+    if not _session_inventory_edit():
+        flash("CSV import needs inventory edit permission.", "danger")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+
+    from .csv_import_wizard import (
+        SESSION_KEY,
+        IMPORT_FIELD_SPECS,
+        allowed_entities,
+        sniff_read_headers_and_sample,
+        run_import,
+        clear_session,
+        validate_mapping,
+        row_from_mapping,
+    )
+
+    if request.args.get("reset"):
+        st = session.get(SESSION_KEY) or {}
+        p = st.get("path")
+        if p and _csv_import_safe_path(p):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        clear_session(session)
+        flash("Import cancelled.", "info")
+        return redirect(url_for("inventory_control_internal.data_import_wizard"))
+
+    if request.method == "POST":
+        act = (request.form.get("action") or "").strip().lower()
+        if act == "upload":
+            f = request.files.get("csv_file")
+            ent = (request.form.get("entity") or "").strip()
+            if not f or not f.filename:
+                flash("Choose a CSV file.", "danger")
+                return redirect(request.url)
+            if ent not in allowed_entities():
+                flash("Choose what you are importing.", "danger")
+                return redirect(request.url)
+            if request.content_length and request.content_length > 6 * 1024 * 1024:
+                flash("File too large (max 6 MB).", "danger")
+                return redirect(request.url)
+            try:
+                raw = f.read()
+                headers, sample, _enc = sniff_read_headers_and_sample(raw)
+                if not headers:
+                    flash("Could not read CSV headers.", "danger")
+                    return redirect(request.url)
+                fd, path = tempfile.mkstemp(prefix="invimp_", suffix=".csv")
+                os.write(fd, raw)
+                os.close(fd)
+            except Exception as ex:
+                logger.exception("data_import upload")
+                flash(str(ex), "danger")
+                return redirect(request.url)
+            session[SESSION_KEY] = {
+                "path": path,
+                "entity": ent,
+                "headers": headers,
+                "sample": sample,
+                "mapping": None,
+            }
+            return redirect(url_for("inventory_control_internal.data_import_wizard"))
+
+        if act == "save_map":
+            st = session.get(SESSION_KEY) or {}
+            path = st.get("path")
+            entity = st.get("entity")
+            if not _csv_import_safe_path(path) or entity not in allowed_entities():
+                clear_session(session)
+                flash("Session expired. Upload again.", "warning")
+                return redirect(url_for("inventory_control_internal.data_import_wizard"))
+            mapping: Dict[str, str] = {}
+            for spec in IMPORT_FIELD_SPECS.get(entity, []):
+                key = spec["key"]
+                col = (request.form.get(f"map_{key}") or "").strip()
+                mapping[key] = col
+            errs = validate_mapping(entity, mapping)
+            if errs:
+                for e in errs[:5]:
+                    flash(e, "danger")
+                session[SESSION_KEY] = {**st, "mapping": None}
+                return redirect(url_for("inventory_control_internal.data_import_wizard"))
+            session[SESSION_KEY] = {**st, "mapping": mapping}
+            return redirect(url_for("inventory_control_internal.data_import_wizard", step="preview"))
+
+        if act == "run":
+            st = session.get(SESSION_KEY) or {}
+            path = st.get("path")
+            entity = st.get("entity")
+            mapping = st.get("mapping") or {}
+            if not _csv_import_safe_path(path) or entity not in allowed_entities():
+                clear_session(session)
+                flash("Session expired. Upload again.", "warning")
+                return redirect(url_for("inventory_control_internal.data_import_wizard"))
+            errs = validate_mapping(entity, mapping)
+            if errs:
+                for e in errs[:5]:
+                    flash(e, "danger")
+                return redirect(url_for("inventory_control_internal.data_import_wizard"))
+            inv = get_inventory_service()
+            try:
+                result = run_import(inv, entity=entity, file_path=path, mapping=mapping)
+            except Exception as ex:
+                logger.exception("data_import run")
+                flash(str(ex), "danger")
+                return redirect(url_for("inventory_control_internal.data_import_wizard"))
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            clear_session(session)
+            flash(
+                f"Import finished: {result.get('created', 0)} created, "
+                f"{result.get('updated', 0)} updated, {result.get('skipped', 0)} skipped.",
+                "success",
+            )
+            for err in (result.get("errors") or [])[:25]:
+                flash(err, "warning")
+            if len(result.get("errors") or []) > 25:
+                flash("More errors were logged; check the first messages above.", "warning")
+            return redirect(url_for("inventory_control_internal.data_import_wizard"))
+
+    st = session.get(SESSION_KEY) or {}
+    step = (request.args.get("step") or "").strip()
+    path = st.get("path")
+    entity = st.get("entity")
+    headers = st.get("headers") or []
+    sample = st.get("sample") or []
+    mapping = st.get("mapping") or {}
+    fields = IMPORT_FIELD_SPECS.get(entity or "", [])
+
+    preview_rows = []
+    if step == "preview" and mapping and entity and _csv_import_safe_path(path):
+        try:
+            raw = open(path, "rb").read()
+            _, rows, _ = sniff_read_headers_and_sample(raw, max_sample_rows=5)
+            for r in rows:
+                preview_rows.append(row_from_mapping(r, mapping, entity))
+        except Exception:
+            preview_rows = []
+
+    return render_template(
+        "admin/data_import_wizard.html",
+        session_state=st,
+        entity=entity,
+        headers=headers,
+        sample=sample,
+        fields=fields,
+        mapping=mapping or {},
+        step_preview=step == "preview" and bool(mapping),
+        preview_rows=preview_rows,
+        entities_meta=[
+            ("items", "Items (SKUs, equipment models, consumables)"),
+            ("equipment_assets", "Serial equipment (needs model SKU to exist)"),
+            ("locations", "Warehouse / store / bin / holding locations"),
+        ],
+    )
+
+
+@internal.route("/operations/fit-part-to-vehicle", methods=["GET", "POST"])
+@login_required
+@admin_required
+def fit_part_to_vehicle_page():
+    """Wizard: pick storeroom stock + vehicle, log fleet installed part (optional inventory deduction)."""
+    if not _app_blueprint_registered("fleet_management"):
+        flash("Enable the Fleet module to record parts fitted to vehicles.", "warning")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+    from app.plugins.fleet_management.objects import get_fleet_service
+
+    inv = get_inventory_service()
+    fleet = get_fleet_service()
+    locations = inv.list_locations() or []
+    vehicles = fleet.list_vehicles(limit=500) or []
+
+    if request.method == "POST":
+        try:
+            vehicle_id = int(request.form.get("vehicle_id") or 0)
+            if not vehicle_id:
+                flash("Choose a vehicle.", "danger")
+                return redirect(request.url)
+            v = fleet.get_vehicle(vehicle_id)
+            if not v:
+                flash("Vehicle not found.", "danger")
+                return redirect(request.url)
+
+            installed_date = (request.form.get("installed_date") or "").strip()
+            if not installed_date:
+                flash("Installed date is required.", "danger")
+                return redirect(request.url)
+
+            item_raw = (request.form.get("inventory_item_id") or "").strip()
+            item_id = int(item_raw) if item_raw.isdigit() else None
+            if not item_id:
+                flash("Choose an inventory item (from stock at the selected location).", "danger")
+                return redirect(request.url)
+
+            qty = float(request.form.get("quantity") or 1) or 1.0
+            deduct = request.form.get("deduct_stock") == "1"
+            loc_id = int(request.form.get("stock_location_id") or 0) if deduct else None
+            if deduct and not loc_id:
+                flash("Choose the storeroom to deduct stock from.", "danger")
+                return redirect(request.url)
+
+            odo_raw = (request.form.get("odometer_at_install") or "").strip()
+            try:
+                odometer_at_install = int(odo_raw) if odo_raw else None
+            except ValueError:
+                odometer_at_install = None
+
+            warranty_end = (request.form.get("warranty_expires_date") or "").strip() or None
+            w_start = (request.form.get("warranty_start_date") or "").strip() or None
+            w_months_s = (request.form.get("warranty_months") or "").strip()
+            w_months = int(w_months_s) if w_months_s.isdigit() else None
+            if request.form.get("apply_part_warranty_months") == "1" and w_start and w_months and w_months > 0:
+                warranty_end = add_calendar_months(
+                    date.fromisoformat(w_start[:10]), w_months
+                ).isoformat()
+
+            w_terms_parts = []
+            if (request.form.get("warranty_start_basis") or "").strip():
+                w_terms_parts.append(
+                    "Warranty start: "
+                    + (request.form.get("warranty_start_basis") or "").strip()
+                )
+            if w_start:
+                w_terms_parts.append("Start date: " + w_start[:10])
+            if w_months:
+                w_terms_parts.append(f"Duration: {w_months} mo")
+            user_terms = (request.form.get("warranty_terms") or "").strip()
+            if user_terms:
+                w_terms_parts.append(user_terms)
+            warranty_terms = " · ".join(w_terms_parts) if w_terms_parts else None
+
+            uid = _effective_user_id()
+            fleet.install_part_from_workshop(
+                vehicle_id,
+                installed_date=installed_date,
+                inventory_item_id=item_id,
+                quantity=qty,
+                deduct_stock=deduct,
+                stock_location_id=loc_id,
+                part_number=(request.form.get("part_number") or "").strip() or None,
+                part_description=(request.form.get("part_description") or "").strip() or None,
+                odometer_at_install=odometer_at_install,
+                warranty_expires_date=warranty_end,
+                warranty_terms=warranty_terms,
+                invoice_reference=(request.form.get("invoice_reference") or "").strip() or None,
+                notes=(request.form.get("notes") or "").strip() or None,
+                created_by=str(uid) if uid is not None else None,
+                performed_by_user_id=uid,
+            )
+            flash(
+                "Part recorded on the vehicle. Open the vehicle in Fleet to review or adjust.",
+                "success",
+            )
+            return redirect(
+                url_for("fleet_management.vehicle_detail", vehicle_id=vehicle_id)
+            )
+        except Exception as e:
+            logger.exception("fit_part_to_vehicle_page")
+            flash(str(e), "danger")
+            return redirect(request.url)
+
+    today_iso = date.today().isoformat()
+    return render_template(
+        "admin/fit_part_to_vehicle.html",
+        locations=locations,
+        vehicles=vehicles,
+        today_iso=today_iso,
+    )
+
+
 # ---------------------------------------------------------------------------
 # API: health & dashboard
 # ---------------------------------------------------------------------------
@@ -439,7 +984,7 @@ def api_health():
 
 
 @internal.route("/api/dashboard")
-@api_admin_required
+@api_inventory_access_required
 def api_dashboard():
     svc = get_inventory_service()
     metrics = svc.get_dashboard_metrics()
@@ -452,7 +997,7 @@ def api_dashboard():
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/categories", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_categories_list():
     svc = get_inventory_service()
     parent_id = request.args.get("parent_id", type=int)
@@ -461,10 +1006,8 @@ def api_categories_list():
 
 
 @internal.route("/api/categories", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_categories_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     if not data.get("name"):
         return _jsonify_safe({"error": "name required"}, 400)
@@ -477,7 +1020,7 @@ def api_categories_create():
 
 
 @internal.route("/api/categories/<int:category_id>", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_categories_get(category_id):
     svc = get_inventory_service()
     cat = svc.get_category(category_id)
@@ -487,10 +1030,8 @@ def api_categories_get(category_id):
 
 
 @internal.route("/api/categories/<int:category_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_categories_update(category_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     svc = get_inventory_service()
     if not svc.get_category(category_id):
@@ -503,10 +1044,8 @@ def api_categories_update(category_id):
 
 
 @internal.route("/api/categories/<int:category_id>", methods=["DELETE"])
-@api_admin_required
+@api_inventory_edit_required
 def api_categories_delete(category_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     svc = get_inventory_service()
     if not svc.get_category(category_id):
         return _jsonify_safe({"error": "Not found"}, 404)
@@ -518,8 +1057,34 @@ def api_categories_delete(category_id):
 # API: items CRUD
 # ---------------------------------------------------------------------------
 
+_MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API = (
+    "Equipment product lines are not managed through the consumables API. "
+    "Use Inventory → Equipment (Add equipment / desk)."
+)
+
+
+def _inventory_row_is_equipment(row: Optional[dict]) -> bool:
+    if not row:
+        return False
+    try:
+        return bool(int(row.get("is_equipment") or 0))
+    except (TypeError, ValueError):
+        return False
+
+
+def _json_declares_equipment_product_line(data: dict) -> bool:
+    def _truthy(val) -> bool:
+        if val is True or val == 1:
+            return True
+        if isinstance(val, str) and val.strip().lower() in ("1", "true", "yes", "on"):
+            return True
+        return False
+
+    return _truthy(data.get("is_equipment")) or _truthy(data.get("requires_serial"))
+
+
 @internal.route("/api/items", methods=["GET"])
-@api_authenticated_required
+@api_inventory_access_required
 def api_items_list():
     svc = get_inventory_service()
     skip = request.args.get("skip", type=int) or 0
@@ -530,18 +1095,35 @@ def api_items_list():
     is_active = request.args.get("is_active")
     if is_active is not None:
         is_active = str(is_active).lower() in ("1", "true", "yes")
-    items = svc.list_items(skip=skip, limit=limit, search=search, category=category, category_id=category_id, is_active=is_active)
+    ex = (request.args.get("exclude_equipment") or "").strip().lower()
+    eq_only = (request.args.get("equipment_only") or "").strip().lower()
+    is_equipment_filter: Optional[bool] = None
+    if ex in ("1", "true", "yes"):
+        is_equipment_filter = False
+    elif eq_only in ("1", "true", "yes"):
+        is_equipment_filter = True
+    items = svc.list_items(
+        skip=skip,
+        limit=limit,
+        search=search,
+        category=category,
+        category_id=category_id,
+        is_active=is_active,
+        is_equipment=is_equipment_filter,
+    )
     return _jsonify_safe({"items": items})
 
 
 @internal.route("/api/items", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_items_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
-    data = request.get_json() or {}
+    data = dict(request.get_json() or {})
     if not data.get("sku") or not data.get("name"):
         return _jsonify_safe({"error": "sku and name required"}, 400)
+    if _json_declares_equipment_product_line(data):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 400)
+    data["is_equipment"] = False
+    data["requires_serial"] = False
     svc = get_inventory_service()
     try:
         item_id = svc.create_item(data)
@@ -553,7 +1135,7 @@ def api_items_create():
 
 
 @internal.route("/api/items/<int:item_id>", methods=["GET"])
-@api_authenticated_required
+@api_inventory_access_required
 def api_items_get(item_id):
     svc = get_inventory_service()
     item = svc.get_item(item_id)
@@ -563,12 +1145,14 @@ def api_items_get(item_id):
 
 
 @internal.route("/api/items/<int:item_id>/overview", methods=["GET"])
-@api_authenticated_required
+@api_inventory_access_required
 def api_item_overview(item_id: int):
     svc = get_inventory_service()
     item = svc.get_item(item_id)
     if not item:
         return _jsonify_safe({"error": "Not found"}, 404)
+    if _inventory_row_is_equipment(item):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 404)
 
     range_days = request.args.get("range_days", type=int) or 30
     bucket = (request.args.get("bucket") or "auto").strip().lower()
@@ -611,7 +1195,7 @@ def api_item_overview(item_id: int):
 
 
 @internal.route("/api/items/<int:item_id>/usage_by_person", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_item_usage_by_person(item_id: int):
     """
     Consumables usage trend by assignee. Excludes loaned transactions.
@@ -619,8 +1203,11 @@ def api_item_usage_by_person(item_id: int):
     """
     months = min(request.args.get("months", type=int) or 6, 36)
     svc = get_inventory_service()
-    if not svc.get_item(int(item_id)):
+    item = svc.get_item(int(item_id))
+    if not item:
         return _jsonify_safe({"error": "Not found"}, 404)
+    if _inventory_row_is_equipment(item):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 404)
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
@@ -662,7 +1249,7 @@ def api_item_usage_by_person(item_id: int):
 
 
 @internal.route("/api/items/<int:item_id>/usage_by_person_monthly", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_item_usage_by_person_monthly(item_id: int):
     """
     Monthly usage per assignee for charting. Excludes loaned.
@@ -670,8 +1257,11 @@ def api_item_usage_by_person_monthly(item_id: int):
     """
     months = min(request.args.get("months", type=int) or 12, 36)
     svc = get_inventory_service()
-    if not svc.get_item(int(item_id)):
+    item = svc.get_item(int(item_id))
+    if not item:
         return _jsonify_safe({"error": "Not found"}, 404)
+    if _inventory_row_is_equipment(item):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 404)
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
@@ -736,14 +1326,19 @@ def api_item_usage_by_person_monthly(item_id: int):
 
 
 @internal.route("/api/items/<int:item_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_items_update(item_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
-    data = request.get_json() or {}
+    data = dict(request.get_json() or {})
     svc = get_inventory_service()
-    if not svc.get_item(item_id):
+    existing = svc.get_item(item_id)
+    if not existing:
         return _jsonify_safe({"error": "Not found"}, 404)
+    if _inventory_row_is_equipment(existing):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 400)
+    if _json_declares_equipment_product_line(data):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 400)
+    data.pop("is_equipment", None)
+    data.pop("requires_serial", None)
     try:
         svc.update_item(item_id, data)
         log_audit(_effective_user_id(), "inventory_item_update", item_id=item_id, details=data)
@@ -753,13 +1348,14 @@ def api_items_update(item_id):
 
 
 @internal.route("/api/items/<int:item_id>", methods=["DELETE"])
-@api_admin_required
+@api_inventory_edit_required
 def api_items_archive(item_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     svc = get_inventory_service()
-    if not svc.get_item(item_id):
+    existing = svc.get_item(item_id)
+    if not existing:
         return _jsonify_safe({"error": "Not found"}, 404)
+    if _inventory_row_is_equipment(existing):
+        return _jsonify_safe({"error": _MSG_EQUIPMENT_NOT_VIA_CONSUMABLES_API}, 400)
     svc.archive_item(item_id)
     log_audit(_effective_user_id(), "inventory_item_archive", item_id=item_id)
     return _jsonify_safe({"ok": True})
@@ -770,7 +1366,7 @@ def api_items_archive(item_id):
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/locations", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_locations_list():
     svc = get_inventory_service()
     parent_id = request.args.get("parent_id", type=int)
@@ -779,10 +1375,8 @@ def api_locations_list():
 
 
 @internal.route("/api/locations", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_locations_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     if not data.get("name") or not data.get("code"):
         return _jsonify_safe({"error": "name and code required"}, 400)
@@ -796,7 +1390,7 @@ def api_locations_create():
 
 
 @internal.route("/api/locations/<int:location_id>", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_locations_get(location_id):
     svc = get_inventory_service()
     loc = svc.get_location(location_id)
@@ -806,10 +1400,8 @@ def api_locations_get(location_id):
 
 
 @internal.route("/api/locations/<int:location_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_locations_update(location_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     svc = get_inventory_service()
     if not svc.get_location(location_id):
@@ -824,7 +1416,7 @@ def api_locations_update(location_id):
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/batches", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_batches_list():
     svc = get_inventory_service()
     item_id = request.args.get("item_id", type=int)
@@ -834,10 +1426,8 @@ def api_batches_list():
 
 
 @internal.route("/api/batches", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_batches_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     if not data.get("item_id"):
         return _jsonify_safe({"error": "item_id required"}, 400)
@@ -851,7 +1441,7 @@ def api_batches_create():
 
 
 @internal.route("/api/batches/<int:batch_id>", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_batches_get(batch_id):
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
@@ -867,10 +1457,8 @@ def api_batches_get(batch_id):
 
 
 @internal.route("/api/batches/<int:batch_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_batches_update(batch_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     svc = get_inventory_service()
     try:
@@ -886,7 +1474,7 @@ def api_batches_update(batch_id):
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/transactions", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_transactions_list():
     svc = get_inventory_service()
     item_id = request.args.get("item_id", type=int)
@@ -909,10 +1497,8 @@ def api_transactions_list():
 
 
 @internal.route("/api/transactions", methods=["POST"])
-@api_admin_required
+@api_inventory_transact_required
 def api_transactions_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     item_id = data.get("item_id")
     location_id = data.get("location_id")
@@ -1010,10 +1596,8 @@ def api_transactions_create():
 
 
 @internal.route("/api/repack", methods=["POST"])
-@api_admin_required
+@api_inventory_transact_required
 def api_repack():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     source_batch_id = data.get("source_batch_id")
     location_id = data.get("location_id")
@@ -1045,7 +1629,7 @@ def api_repack():
 
 
 @internal.route("/api/picking/suggest")
-@api_admin_required
+@api_inventory_transact_required
 def api_picking_suggest():
     """FEFO: suggest batches to pick for outbound, ordered by expiry soonest first."""
     item_id = request.args.get("item_id", type=int)
@@ -1059,10 +1643,8 @@ def api_picking_suggest():
 
 
 @internal.route("/api/transactions/<int:tx_id>/rollback", methods=["POST"])
-@api_admin_required
+@api_inventory_transact_required
 def api_transactions_rollback(tx_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     svc = get_inventory_service()
     try:
         svc.rollback_transaction(tx_id)
@@ -1078,7 +1660,7 @@ def api_transactions_rollback(tx_id):
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/analytics/stock_levels")
-@api_admin_required
+@api_inventory_access_required
 def api_analytics_stock_levels():
     """Stock levels report with item/location names. Optional item_id, location_id, limit."""
     item_id = request.args.get("item_id", type=int)
@@ -1091,7 +1673,7 @@ def api_analytics_stock_levels():
 
 
 @internal.route("/api/analytics/movers")
-@api_admin_required
+@api_inventory_access_required
 def api_analytics_movers():
     """Fast and slow movers by transaction count and quantity in the last N days."""
     days = min(request.args.get("days", type=int) or 30, 365)
@@ -1102,7 +1684,7 @@ def api_analytics_movers():
 
 
 @internal.route("/api/analytics/activity")
-@api_admin_required
+@api_inventory_access_required
 def api_analytics_activity():
     """Recent transaction activity with item and location names."""
     days = min(request.args.get("days", type=int) or 7, 90)
@@ -1113,7 +1695,7 @@ def api_analytics_activity():
 
 
 @internal.route("/api/analytics/suppliers")
-@api_admin_required
+@api_inventory_access_required
 def api_analytics_suppliers():
     """Supplier list for reporting (optional performance metrics later)."""
     svc = get_inventory_service()
@@ -1133,10 +1715,8 @@ def _invoice_upload_dir():
 
 
 @internal.route("/api/invoices/upload", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_invoices_upload():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     f = request.files.get("file")
     if not f:
         return _jsonify_safe({"error": "file required"}, 400)
@@ -1191,7 +1771,7 @@ def api_invoices_upload():
 
 
 @internal.route("/api/invoices", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_invoices_list():
     """List invoices for admin UI."""
     svc = get_inventory_service()
@@ -1203,7 +1783,7 @@ def api_invoices_list():
 
 
 @internal.route("/api/invoices/<int:invoice_id>", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_invoices_get(invoice_id):
     svc = get_inventory_service()
     inv = svc.get_invoice(invoice_id)
@@ -1220,10 +1800,8 @@ def api_invoices_get(invoice_id):
 
 
 @internal.route("/api/invoices/<int:invoice_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_invoices_update(invoice_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     svc = get_inventory_service()
     if not svc.get_invoice(invoice_id):
@@ -1238,10 +1816,8 @@ def api_invoices_update(invoice_id):
 
 
 @internal.route("/api/invoices/<int:invoice_id>/lines/<int:line_id>", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_invoices_line_update(invoice_id, line_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     svc = get_inventory_service()
     lines = svc.get_invoice_lines(invoice_id)
@@ -1257,10 +1833,8 @@ def api_invoices_line_update(invoice_id, line_id):
 
 
 @internal.route("/api/invoices/<int:invoice_id>/lines/<int:line_id>/match", methods=["PUT", "PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_invoices_line_match(invoice_id, line_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     item_id = data.get("item_id")
     svc = get_inventory_service()
@@ -1269,10 +1843,8 @@ def api_invoices_line_match(invoice_id, line_id):
 
 
 @internal.route("/api/invoices/<int:invoice_id>/apply", methods=["POST"])
-@api_admin_required
+@api_inventory_transact_required
 def api_invoices_apply(invoice_id):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     location_id = data.get("location_id")
     if not location_id:
@@ -1295,7 +1867,7 @@ def api_invoices_apply(invoice_id):
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/mobile/scan/in", methods=["POST"])
-@api_authenticated_required
+@api_inventory_transact_required
 def api_mobile_scan_in():
     data = request.get_json() or {}
     barcode_or_sku = data.get("barcode") or data.get("sku")
@@ -1326,7 +1898,7 @@ def api_mobile_scan_in():
 
 
 @internal.route("/api/mobile/scan/out", methods=["POST"])
-@api_authenticated_required
+@api_inventory_transact_required
 def api_mobile_scan_out():
     data = request.get_json() or {}
     barcode_or_sku = data.get("barcode") or data.get("sku")
@@ -1357,10 +1929,8 @@ def api_mobile_scan_out():
 
 
 @internal.route("/api/mobile/scan/adjust", methods=["POST"])
-@api_authenticated_required
+@api_inventory_transact_required
 def api_mobile_scan_adjust():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     data = request.get_json() or {}
     barcode_or_sku = data.get("barcode") or data.get("sku")
     location_id = data.get("location_id")
@@ -1390,7 +1960,7 @@ def api_mobile_scan_adjust():
 
 
 @internal.route("/api/mobile/items/search")
-@api_authenticated_required
+@api_inventory_access_required
 def api_mobile_items_search():
     q = request.args.get("q", "").strip()
     if not q:
@@ -1401,7 +1971,7 @@ def api_mobile_items_search():
 
 
 @internal.route("/api/mobile/items/<int:item_id>/stock")
-@api_authenticated_required
+@api_inventory_access_required
 def api_mobile_items_stock(item_id):
     svc = get_inventory_service()
     levels = svc.list_stock_levels(item_id)
@@ -1409,7 +1979,7 @@ def api_mobile_items_stock(item_id):
 
 
 @internal.route("/api/mobile/bulk/actions", methods=["POST"])
-@api_authenticated_required
+@api_inventory_transact_required
 def api_mobile_bulk_actions():
     data = request.get_json() or {}
     actions = data.get("actions") or []
@@ -1465,7 +2035,7 @@ def api_mobile_bulk_actions():
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/tokens", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_tokens_create():
     """Create an API token for external supplier access. Raw token returned only once."""
     data = request.get_json() or {}
@@ -1509,7 +2079,7 @@ def api_tokens_create():
 
 
 @internal.route("/api/tokens", methods=["GET"])
-@api_admin_required
+@api_inventory_edit_required
 def api_tokens_list():
     """List API tokens (no secret value)."""
     conn = get_db_connection()
@@ -1535,7 +2105,7 @@ def api_tokens_list():
 
 
 @internal.route("/api/tokens/<int:token_id>", methods=["DELETE"])
-@api_admin_required
+@api_inventory_edit_required
 def api_tokens_revoke(token_id):
     """Revoke an API token."""
     conn = get_db_connection()
@@ -1627,7 +2197,7 @@ def api_supplier_receipts_confirm():
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/people/search", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_people_search():
     q = (request.args.get("q") or "").strip()
     limit = min(request.args.get("limit", type=int) or 20, 50)
@@ -1706,7 +2276,7 @@ def api_people_search():
 # ---------------------------------------------------------------------------
 
 @internal.route("/api/equipment/assets", methods=["GET"])
-@api_admin_required
+@api_inventory_access_required
 def api_equipment_assets_list():
     svc = get_inventory_service()
     item_id = request.args.get("item_id", type=int)
@@ -1716,11 +2286,28 @@ def api_equipment_assets_list():
     return _jsonify_safe({"assets": assets})
 
 
+@internal.route("/api/equipment/desk", methods=["GET"])
+@api_inventory_access_required
+def api_equipment_desk():
+    """Equipment rows with holder, issues count, last service (for item overview / desk)."""
+    item_id = request.args.get("item_id", type=int)
+    status = (request.args.get("status") or "").strip() or None
+    search = (request.args.get("search") or "").strip() or None
+    assigned_only = request.args.get("assigned_only", type=int) == 1
+    limit = min(request.args.get("limit", type=int) or 200, 500)
+    rows = _get_asset_service().list_equipment_desk_rows(
+        item_id=item_id,
+        status=status,
+        search=search,
+        assigned_only=assigned_only,
+        limit=limit,
+    )
+    return _jsonify_safe({"assets": rows})
+
+
 @internal.route("/api/equipment/assets", methods=["POST"])
-@api_admin_required
+@api_inventory_edit_required
 def api_equipment_assets_create():
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     svc = get_inventory_service()
     data = request.get_json() or {}
     item_id = data.get("item_id")
@@ -1739,6 +2326,9 @@ def api_equipment_assets_create():
             model=data.get("model"),
             purchase_date=data.get("purchase_date"),
             warranty_expiry=data.get("warranty_expiry"),
+            warranty_start_basis=data.get("warranty_start_basis"),
+            warranty_start_date=data.get("warranty_start_date"),
+            warranty_months=data.get("warranty_months"),
             service_interval_days=data.get("service_interval_days"),
             condition=data.get("condition"),
             metadata=data.get("metadata") or {},
@@ -1750,24 +2340,33 @@ def api_equipment_assets_create():
 
 
 @internal.route("/api/equipment/assets/<int:asset_id>", methods=["PATCH"])
-@api_admin_required
+@api_inventory_edit_required
 def api_equipment_asset_update(asset_id: int):
-    if not _require_admin():
-        return _jsonify_safe({"error": "Forbidden"}, 403)
     svc = get_inventory_service()
     data = request.get_json() or {}
     try:
-        svc.update_equipment_asset(
-            asset_id,
-            make=data.get("make"),
-            model=data.get("model"),
-            purchase_date=data.get("purchase_date"),
-            warranty_expiry=data.get("warranty_expiry"),
-            service_interval_days=data.get("service_interval_days"),
-            condition=data.get("condition"),
-            status=data.get("status"),
-            metadata=data.get("metadata") if "metadata" in data else None,
-        )
+        patch: Dict[str, Any] = {}
+        for key in (
+            "make",
+            "model",
+            "purchase_date",
+            "warranty_expiry",
+            "warranty_start_basis",
+            "warranty_start_date",
+            "warranty_months",
+            "service_interval_days",
+            "condition",
+            "status",
+        ):
+            if key in data:
+                patch[key] = data.get(key)
+        if "next_service_due_date" in data:
+            patch["next_service_due_date"] = (data.get("next_service_due_date") or "") or None
+        if "operational_state" in data:
+            patch["operational_state"] = data.get("operational_state")
+        if "metadata" in data:
+            patch["metadata"] = data.get("metadata")
+        svc.update_equipment_asset(asset_id, **patch)
         return _jsonify_safe({"ok": True})
     except ValueError as e:
         return _jsonify_safe({"error": str(e)}, 404)
@@ -1987,8 +2586,118 @@ def openapi_spec():
     return jsonify(spec)
 
 
-def get_blueprint():
-    return internal
+def get_blueprints():
+    from .legacy_asset_management_redirects import legacy_asset_management_bp
+
+    return [internal, legacy_asset_management_bp]
+
+
+def get_public_blueprint():
+    from .contractor_portal import public_inventory_bp
+
+    return public_inventory_bp
+
+
+@internal.get("/contractor-kit-requests")
+@login_required
+def inventory_contractor_kit_requests_admin():
+    if not has_permission(PERM_INV_ACCESS):
+        flash("You do not have access to inventory.", "danger")
+        return redirect(url_for("routes.dashboard"))
+    from .contractor_portal import (
+        KIT_STATUS_DECLINED,
+        KIT_STATUS_FULFILLED,
+        KIT_STATUS_PENDING,
+    )
+
+    rows = []
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT k.id, k.contractor_id, k.need_from, k.need_until, k.request_text,
+                   k.status, k.office_notes, k.created_at, k.resolved_at, k.resolved_by,
+                   c.name AS contractor_name, c.email AS contractor_email
+            FROM inventory_contractor_kit_requests k
+            INNER JOIN tb_contractors c ON c.id = k.contractor_id
+            ORDER BY (k.status = %s) DESC, k.created_at DESC
+            LIMIT 250
+            """,
+            (KIT_STATUS_PENDING,),
+        )
+        rows = cur.fetchall() or []
+    except Exception as e:
+        logger.exception("inventory_contractor_kit_requests_admin: %s", e)
+        flash(
+            "Could not load requests. Run the inventory install/upgrade if the table is missing.",
+            "danger",
+        )
+    finally:
+        cur.close()
+        conn.close()
+    return render_template(
+        "admin/contractor_kit_requests.html",
+        rows=rows,
+        status_pending=KIT_STATUS_PENDING,
+        status_fulfilled=KIT_STATUS_FULFILLED,
+        status_declined=KIT_STATUS_DECLINED,
+    )
+
+
+@internal.post("/contractor-kit-requests/<int:rid>/resolve")
+@login_required
+def inventory_contractor_kit_request_resolve(rid):
+    if not has_permission(PERM_INV_ACCESS):
+        flash("You do not have access to inventory.", "danger")
+        return redirect(url_for("routes.dashboard"))
+    from .contractor_portal import (
+        KIT_STATUS_DECLINED,
+        KIT_STATUS_FULFILLED,
+        KIT_STATUS_PENDING,
+    )
+
+    status = (request.form.get("status") or "").strip()
+    if status not in (KIT_STATUS_FULFILLED, KIT_STATUS_DECLINED):
+        flash("Invalid status.", "danger")
+        return redirect(url_for("inventory_control_internal.inventory_contractor_kit_requests_admin"))
+    notes = (request.form.get("office_notes") or "").strip()[:8000] or None
+    actor = getattr(current_user, "username", "") or ""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT status FROM inventory_contractor_kit_requests WHERE id = %s",
+            (int(rid),),
+        )
+        row = cur.fetchone()
+        if not row:
+            flash("Request not found.", "warning")
+            return redirect(url_for("inventory_control_internal.inventory_contractor_kit_requests_admin"))
+        if (row[0] or "") != KIT_STATUS_PENDING:
+            flash("That request is already closed.", "warning")
+            return redirect(url_for("inventory_control_internal.inventory_contractor_kit_requests_admin"))
+        cur.execute(
+            """
+            UPDATE inventory_contractor_kit_requests
+            SET status = %s, office_notes = %s, resolved_at = NOW(), resolved_by = %s
+            WHERE id = %s AND status = %s
+            """,
+            (status, notes, actor or None, int(rid), KIT_STATUS_PENDING),
+        )
+        conn.commit()
+        if cur.rowcount:
+            flash("Request updated.", "success")
+        else:
+            flash("Could not update request.", "warning")
+    except Exception as e:
+        conn.rollback()
+        logger.exception("inventory_contractor_kit_request_resolve: %s", e)
+        flash("Database error.", "danger")
+    finally:
+        cur.close()
+        conn.close()
+    return redirect(url_for("inventory_control_internal.inventory_contractor_kit_requests_admin"))
 
 
 # --- OpenAPI registration (for AI/docs integration) ---

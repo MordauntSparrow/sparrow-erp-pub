@@ -20,6 +20,7 @@ from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 
 from app.objects import PluginManager
+from app.portal_session import contractor_id_from_tb_user
 
 from . import services as training_services
 from .services import DELIVERY_TYPES, TrainingService
@@ -42,6 +43,7 @@ public_bp = Blueprint(
 )
 
 ALLOWED_LESSON_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+ALLOWED_COMPETENCY_EXT = ALLOWED_LESSON_EXT
 
 
 def _staff_required(view):
@@ -55,8 +57,7 @@ def _staff_required(view):
 
 
 def _current_contractor_id():
-    u = session.get("tb_user")
-    return int(u["id"]) if u and u.get("id") is not None else None
+    return contractor_id_from_tb_user(session.get("tb_user"))
 
 
 def _admin_required_training(view):
@@ -65,7 +66,7 @@ def _admin_required_training(view):
         if not current_user.is_authenticated:
             return redirect(url_for("routes.login"))
         role = (getattr(current_user, "role", None) or "").lower()
-        if role not in ("admin", "superuser"):
+        if role not in ("admin", "superuser", "support_break_glass"):
             flash("Admin access required.", "error")
             return redirect(url_for("routes.dashboard"))
         return view(*args, **kwargs)
@@ -106,6 +107,44 @@ def _save_training_file(file_storage) -> Optional[str]:
     rel = os.path.join("uploads", "training_lessons", safe_name).replace("\\", "/")
     file_storage.save(os.path.join(_app_static_dir(), rel.replace("/", os.sep)))
     return rel
+
+
+def _save_person_competency_file(file_storage) -> Optional[str]:
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ALLOWED_COMPETENCY_EXT:
+        return None
+    upload_dir = os.path.join(_app_static_dir(), "uploads", "training_competencies")
+    os.makedirs(upload_dir, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    rel = os.path.join("uploads", "training_competencies", safe_name).replace("\\", "/")
+    file_storage.save(os.path.join(_app_static_dir(), rel.replace("/", os.sep)))
+    return rel
+
+
+def _training_created_by_user_id():
+    uid = getattr(current_user, "id", None)
+    if uid is None:
+        return None
+    try:
+        return int(uid)
+    except (TypeError, ValueError):
+        return None
+
+
+def _may_access_competency_file_download():
+    if not current_user.is_authenticated:
+        return False
+    role = (getattr(current_user, "role", None) or "").lower()
+    if role in ("admin", "superuser", "support_break_glass"):
+        return True
+    try:
+        from app.plugins.hr_module.routes import _hr_may_view
+
+        return _hr_may_view(current_user)
+    except Exception:
+        return False
 
 
 # ---------- Public (contractor) ----------
@@ -548,6 +587,89 @@ def admin_exempt(assignment_id):
     )
     flash("Exemption granted.", "success")
     return redirect(request.referrer or url_for("internal_training.admin_assignments"))
+
+
+@internal_bp.route("/person-competencies/<int:contractor_id>", methods=["GET", "POST"])
+@login_required
+@_admin_required_training
+def admin_person_competencies(contractor_id):
+    if not TrainingService.person_competencies_table_exists():
+        flash("Run training module install/upgrade to enable the person competency register.", "warning")
+        return redirect(url_for("internal_training.admin_index"))
+    cid = int(contractor_id)
+    contractors = TrainingService.list_contractors()
+    person = next((c for c in contractors if int(c.get("id") or 0) == cid), None)
+    if not person:
+        flash("Contractor not found.", "error")
+        return redirect(url_for("internal_training.admin_index"))
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        if action == "delete":
+            comp_id = request.form.get("competency_id", type=int)
+            if comp_id and TrainingService.delete_person_competency(comp_id, cid):
+                flash("Entry removed.", "success")
+            else:
+                flash("Could not remove entry.", "error")
+        elif action == "add":
+            kind = (request.form.get("competency_kind") or "").strip().lower()
+            label = (request.form.get("label") or "").strip()
+            use_hr = request.form.get("use_hr_job_title") == "1"
+            notes = (request.form.get("notes") or "").strip() or None
+            issued_s = (request.form.get("issued_on") or "").strip()
+            exp_s = (request.form.get("expires_on") or "").strip()
+            issued = date.fromisoformat(issued_s) if issued_s else None
+            exp = date.fromisoformat(exp_s) if exp_s else None
+            f = request.files.get("file")
+            file_rel = _save_person_competency_file(f)
+            new_id = TrainingService.add_person_competency(
+                cid,
+                kind,
+                label,
+                use_hr_job_title=use_hr,
+                file_path=file_rel,
+                issued_on=issued,
+                expires_on=exp,
+                notes=notes,
+                created_by_user_id=_training_created_by_user_id(),
+            )
+            if new_id:
+                flash("Competency recorded.", "success")
+            else:
+                flash("Could not save — check kind, label, and clinical grade options.", "error")
+        return redirect(url_for("internal_training.admin_person_competencies", contractor_id=cid))
+    rows = TrainingService.list_person_competencies(cid)
+    return render_template(
+        "training_module/admin/person_competencies.html",
+        person=person,
+        rows=rows,
+        competency_kinds=sorted(TrainingService.COMPETENCY_KINDS),
+        today_iso=date.today().isoformat(),
+        config=_core_manifest,
+    )
+
+
+@internal_bp.get("/person-competencies/<int:contractor_id>/file/<int:competency_id>")
+@login_required
+def admin_person_competency_file(contractor_id, competency_id):
+    if not _may_access_competency_file_download():
+        abort(403)
+    if not TrainingService.person_competencies_table_exists():
+        abort(404)
+    cid = int(contractor_id)
+    comp_id = int(competency_id)
+    rows = TrainingService.list_person_competencies(cid)
+    row = next((r for r in rows if int(r.get("id") or 0) == comp_id), None)
+    if not row or not row.get("file_path"):
+        abort(404)
+    rel = str(row["file_path"]).replace("\\", "/").lstrip("/")
+    if ".." in rel.split("/"):
+        abort(404)
+    full = os.path.abspath(os.path.join(_app_static_dir(), *rel.split("/")))
+    root = os.path.abspath(_app_static_dir())
+    if not full.startswith(root) or not os.path.isfile(full):
+        abort(404)
+    disp = (request.args.get("disposition") or "").strip().lower()
+    return send_file(full, as_attachment=(disp == "attachment"))
 
 
 @internal_bp.get("/audit")

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -2055,3 +2056,292 @@ class TrainingService:
         finally:
             cur.close()
             conn.close()
+
+    # ------------------------------------------------------------------
+    # Person competencies (HR-linked: skills, qualifications + files, clinical grade)
+    # ------------------------------------------------------------------
+
+    COMPETENCY_KINDS = frozenset({"skill", "qualification", "clinical_grade"})
+
+    @staticmethod
+    def person_competencies_table_exists() -> bool:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SHOW TABLES LIKE 'trn_person_competencies'")
+            return bool(cur.fetchone())
+        except Exception:
+            return False
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def list_person_competencies(contractor_id: int) -> List[Dict[str, Any]]:
+        if not contractor_id or not TrainingService.person_competencies_table_exists():
+            return []
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, contractor_id, competency_kind, label, use_hr_job_title,
+                       file_path, issued_on, expires_on, notes, created_by_user_id,
+                       created_at, updated_at
+                FROM trn_person_competencies
+                WHERE contractor_id = %s
+                ORDER BY competency_kind ASC, label ASC, id ASC
+                """,
+                (int(contractor_id),),
+            )
+            return list(cur.fetchall() or [])
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def _row_expired(row: Dict[str, Any]) -> bool:
+        exp = row.get("expires_on")
+        if exp is None:
+            return False
+        try:
+            if isinstance(exp, datetime):
+                exp_d = exp.date()
+            elif isinstance(exp, date):
+                exp_d = exp
+            else:
+                exp_d = date.fromisoformat(str(exp)[:10])
+        except Exception:
+            return False
+        return exp_d < date.today()
+
+    @staticmethod
+    def add_person_competency(
+        contractor_id: int,
+        competency_kind: str,
+        label: str,
+        *,
+        use_hr_job_title: bool = False,
+        file_path: Optional[str] = None,
+        issued_on: Optional[date] = None,
+        expires_on: Optional[date] = None,
+        notes: Optional[str] = None,
+        created_by_user_id: Optional[int] = None,
+    ) -> Optional[int]:
+        if not contractor_id or not TrainingService.person_competencies_table_exists():
+            return None
+        kind = (competency_kind or "").strip().lower()
+        if kind not in TrainingService.COMPETENCY_KINDS:
+            return None
+        lab = (label or "").strip()
+        if kind != "clinical_grade" and not lab:
+            return None
+        if kind == "clinical_grade" and not lab and not use_hr_job_title:
+            return None
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO trn_person_competencies
+                  (contractor_id, competency_kind, label, use_hr_job_title,
+                   file_path, issued_on, expires_on, notes, created_by_user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    int(contractor_id),
+                    kind,
+                    lab if lab else "",
+                    1 if use_hr_job_title else 0,
+                    file_path,
+                    issued_on,
+                    expires_on,
+                    (notes or "").strip() or None,
+                    int(created_by_user_id) if created_by_user_id else None,
+                ),
+            )
+            conn.commit()
+            _audit(
+                "person_competency_create",
+                "trn_person_competencies",
+                int(cur.lastrowid),
+                contractor_id=int(contractor_id),
+                actor_user_id=created_by_user_id,
+                payload={"kind": kind, "label": lab},
+            )
+            return int(cur.lastrowid)
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def delete_person_competency(competency_id: int, contractor_id: int) -> bool:
+        if not competency_id or not contractor_id:
+            return False
+        if not TrainingService.person_competencies_table_exists():
+            return False
+        app_static = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "static"))
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT file_path FROM trn_person_competencies WHERE id = %s AND contractor_id = %s",
+                (int(competency_id), int(contractor_id)),
+            )
+            row = cur.fetchone() or {}
+            fp = row.get("file_path")
+            cur.execute(
+                "DELETE FROM trn_person_competencies WHERE id = %s AND contractor_id = %s",
+                (int(competency_id), int(contractor_id)),
+            )
+            conn.commit()
+            ok = cur.rowcount > 0
+            if ok and fp:
+                rel = str(fp).replace("\\", "/").lstrip("/")
+                if ".." not in rel.split("/") and "training_competencies" in rel:
+                    full = os.path.abspath(os.path.join(app_static, *rel.split("/")))
+                    root = os.path.abspath(app_static)
+                    if full.startswith(root) and os.path.isfile(full):
+                        try:
+                            os.remove(full)
+                        except OSError:
+                            pass
+            return ok
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def cad_merge_competencies_into_crew_entry(
+        cur,
+        crew_entry: Dict[str, Any],
+        contractor_id: int,
+        job_title: Optional[str],
+    ) -> None:
+        """Merge Training competencies into crew_entry for CAD API (skills, qualifications, clinical_grade)."""
+        if not contractor_id or not TrainingService.person_competencies_table_exists():
+            return
+        try:
+            cur.execute(
+                """
+                SELECT id, competency_kind, label, use_hr_job_title, file_path, issued_on, expires_on, notes
+                FROM trn_person_competencies
+                WHERE contractor_id = %s
+                ORDER BY id ASC
+                """,
+                (int(contractor_id),),
+            )
+            rows = cur.fetchall() or []
+        except Exception:
+            return
+
+        def _stringify_items(lst: Any) -> List[str]:
+            out: List[str] = []
+            if not isinstance(lst, list):
+                return out
+            for x in lst:
+                if isinstance(x, dict):
+                    s = str(x.get("label") or x.get("name") or x.get("grade") or "").strip()
+                else:
+                    s = str(x).strip()
+                if s:
+                    out.append(s)
+            return out
+
+        def _uniq_extend(dst: List[str], items: List[str]) -> None:
+            seen = {str(x).strip().lower() for x in dst if str(x).strip()}
+            for it in items:
+                s = str(it).strip()
+                if not s:
+                    continue
+                k = s.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                dst.append(s)
+
+        skills = _stringify_items(crew_entry.get("skills"))
+        quals = _stringify_items(crew_entry.get("qualifications"))
+        qual_details: List[Dict[str, Any]] = list(crew_entry.get("qualification_records") or [])
+        if not isinstance(qual_details, list):
+            qual_details = []
+
+        clinical: Optional[str] = None
+        jt = (job_title or "").strip() or None
+
+        for r in rows:
+            row = dict(r) if not isinstance(r, dict) else r
+            if TrainingService._row_expired(row):
+                continue
+            kind = (row.get("competency_kind") or "").strip().lower()
+            label = (row.get("label") or "").strip()
+            use_hr = bool(row.get("use_hr_job_title"))
+            if kind == "skill" and label:
+                _uniq_extend(skills, [label])
+            elif kind == "qualification" and label:
+                _uniq_extend(quals, [label])
+                qual_details.append({
+                    "label": label,
+                    "file_path": row.get("file_path"),
+                    "issued_on": row.get("issued_on"),
+                    "expires_on": row.get("expires_on"),
+                    "notes": row.get("notes"),
+                })
+            elif kind == "clinical_grade":
+                if use_hr and jt and label:
+                    clinical = f"{jt} · {label}"
+                elif use_hr and jt:
+                    clinical = jt
+                elif label:
+                    clinical = label
+
+        crew_entry["skills"] = skills
+        crew_entry["qualifications"] = quals
+        if qual_details:
+            crew_entry["qualification_records"] = qual_details
+        if clinical:
+            crew_entry["clinical_grade"] = clinical
+
+    @staticmethod
+    def dispatch_skill_tokens_for_contractor(
+        cur,
+        contractor_id: int,
+        job_title: Optional[str],
+        base_tokens: set,
+    ) -> set:
+        """Extend base_tokens (lowercase) with Training competencies for dispatch matching."""
+        out = set(base_tokens)
+        if not contractor_id or not TrainingService.person_competencies_table_exists():
+            return out
+        try:
+            cur.execute(
+                """
+                SELECT competency_kind, label, use_hr_job_title, expires_on
+                FROM trn_person_competencies
+                WHERE contractor_id = %s
+                """,
+                (int(contractor_id),),
+            )
+            rows = cur.fetchall() or []
+        except Exception:
+            return out
+        jt = (job_title or "").strip() or None
+        for r in rows:
+            row = dict(r) if not isinstance(r, dict) else r
+            if TrainingService._row_expired(row):
+                continue
+            kind = (row.get("competency_kind") or "").strip().lower()
+            label = (row.get("label") or "").strip()
+            use_hr = bool(row.get("use_hr_job_title"))
+            if kind == "skill" and label:
+                out.add(label.lower())
+            elif kind == "qualification" and label:
+                out.add(label.lower())
+            elif kind == "clinical_grade":
+                if use_hr and jt:
+                    out.add(jt.lower())
+                if label:
+                    out.add(label.lower())
+                if use_hr and jt and label:
+                    out.add(f"{jt} · {label}".lower())
+        return out

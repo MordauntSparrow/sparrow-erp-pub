@@ -6,6 +6,7 @@
 {# Remember-me can restore user while server session (site_settings) is empty #}
 {% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
 <title>{{ _site.get('company_name') or 'Sparrow ERP' }}</title>
+{% include 'partials/sparrow_date_locale.html' %}
 
 <!-- MDB UI Kit -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
@@ -117,12 +118,31 @@ a:hover {
 .btn-secondary { background-color: #6c757d; color: #fff; }
 
 /* ===== Inputs (checkboxes/radios untouched) ===== */
-input, textarea, select, .form-control {
+/* Exclude checkbox/radio — themed background !important hides native/Bootstrap control */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.form-control:not([type="checkbox"]):not([type="radio"]) {
   {% if config.theme_settings.theme == 'dark' %}
     background-color: #1f1f1f; color: #fff; border: 1px solid #444;
   {% else %}
-    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+    /* Off-white so inputs are not a stark white slab on themed pages */
+    background-color: #f1f3f5; color: #212529; border: 1px solid #ced4da;
   {% endif %}
+}
+
+input:not([type="checkbox"]):not([type="radio"]):-webkit-autofill,
+textarea:-webkit-autofill,
+select:-webkit-autofill,
+.form-control:not([type="checkbox"]):not([type="radio"]):-webkit-autofill {
+  {% if config.theme_settings.theme == 'dark' %}
+    -webkit-text-fill-color: #fff;
+    box-shadow: 0 0 0 1000px #1f1f1f inset;
+  {% else %}
+    -webkit-text-fill-color: #212529;
+    box-shadow: 0 0 0 1000px #f1f3f5 inset;
+  {% endif %}
+  transition: background-color 99999s ease-out 0s;
 }
 
 /* ===== Modals ===== */
@@ -177,17 +197,21 @@ input, textarea, select, .form-control {
           <i class="bi bi-speedometer2 me-1"></i> Dashboard
         </a>
       </li>
-      {% if current_user.is_authenticated and (current_user.role or '')|lower in ['admin', 'superuser'] %}
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
       <li class="nav-item">
         <a class="nav-link py-2 px-3 {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}" {% if request.path.startswith('/core/settings') %}aria-current="page"{% endif %}>
           <i class="bi bi-sliders me-1"></i> Settings
         </a>
       </li>
+      {% endif %}
+      {% if current_user.is_authenticated and can_open_user_management() %}
       <li class="nav-item">
         <a class="nav-link py-2 px-3 {% if request.path.startswith('/users') %}active{% endif %}" href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>
           <i class="bi bi-people me-1"></i> Users
         </a>
       </li>
+      {% endif %}
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
       <li class="nav-item dropdown">
         <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
           <i class="bi bi-wrench-adjustable me-1"></i> System
@@ -206,8 +230,8 @@ input, textarea, select, .form-control {
           </li>
           <li><hr class="dropdown-divider"></li>
           <li>
-            <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings', tab='integrations') }}">
-              <i class="bi bi-key me-2 text-secondary"></i> GitLab &amp; .env
+            <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}">
+              <i class="bi bi-gear me-2 text-secondary"></i> Core settings
             </a>
           </li>
         </ul>
@@ -230,7 +254,23 @@ input, textarea, select, .form-control {
 </nav>
 
 <!-- Page Content -->
-<main class="container-fluid">{% block content %}{% endblock %}</main>
+<main class="container-fluid">
+{% with _fl = get_flashed_messages(with_categories=true) %}
+  {% set _alerts = _fl|admin_visible_flashes %}
+  {% if _alerts %}
+  <div class="container-fluid px-3 pt-3" aria-live="polite">
+    {% for category, message in _alerts %}
+    {% set cat = category|lower %}
+    <div class="alert alert-{% if cat in ['danger', 'error', 'plugins_page_danger', 'plugins_page_error'] %}danger{% elif cat in ['success', 'plugins_page_success'] %}success{% elif cat == 'warning' %}warning{% else %}info{% endif %} alert-dismissible fade show" role="alert">
+      {{ message }}
+      <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endwith %}
+{% block content %}{% endblock %}
+</main>
 
 <!-- Footer -->
 <footer class="footer text-center py-3 mt-4">
