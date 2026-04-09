@@ -4,10 +4,12 @@ import json
 import subprocess
 import sys
 import re
+import time
 
 from flask import Flask
 from flask_login import LoginManager
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from dotenv import load_dotenv, set_key
 
@@ -88,6 +90,109 @@ def _configure_werkzeug_access_log_stdout() -> None:
     log.propagate = False
 
 
+def _should_trust_proxy_headers() -> bool:
+    """
+    Enable trusted proxy header handling when running behind Railway/nginx unless
+    explicitly disabled.
+    """
+    v = (os.environ.get("TRUST_PROXY_HEADERS") or "").strip().lower()
+    if v in ("0", "false", "no"):
+        return False
+    if v in ("1", "true", "yes"):
+        return True
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name, default)).strip())
+    except Exception:
+        return int(default)
+
+
+_SCANNER_GUARD_SUSPICIOUS_PATH_RE = re.compile(
+    r"^/(?:"
+    r"\.(?!well-known/)"
+    r"|wp-"
+    r"|wordpress"
+    r"|phpmyadmin"
+    r"|cgi-bin"
+    r"|vendor(?:/|\.js$)"
+    r"|node_modules/"
+    r"|composer\.(?:json|lock)"
+    r"|package(?:-lock)?\.json"
+    r"|yarn\.lock"
+    r"|pnpm-lock\.yaml"
+    r"|Dockerfile"
+    r"|docker-compose\.ya?ml"
+    r"|server-status"
+    r"|config(?:/|\.|$)"
+    r"|backup(?:/|\.|$)"
+    r"|api-docs/swagger\.json"
+    r"|swagger(?:/|\.|$)"
+    r"|openapi(?:\.json|/)"
+    r"|manifest\.json"
+    r"|asset-manifest\.json"
+    r"|env\.json"
+    r"|\.env"
+    r"|\.git"
+    r"|\.svn"
+    r"|\.hg"
+    r"|@vite/client"
+    r"|\.vite/"
+    r")",
+    re.IGNORECASE,
+)
+_LOCAL_SCANNER_GUARD_STATE = {}
+
+
+def _scanner_guard_enabled() -> bool:
+    return _env_truthy("SPARROW_SCANNER_GUARD_ENABLED", default=True)
+
+
+def _is_suspicious_probe_path(path: str) -> bool:
+    path = str(path or "").strip()
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return bool(_SCANNER_GUARD_SUSPICIOUS_PATH_RE.match(path))
+
+
+def _scanner_guard_store_get(key: str):
+    now = time.time()
+    item = _LOCAL_SCANNER_GUARD_STATE.get(key)
+    if not item:
+        return None
+    expires_at, value = item
+    if expires_at <= now:
+        _LOCAL_SCANNER_GUARD_STATE.pop(key, None)
+        return None
+    return value
+
+
+def _scanner_guard_store_set(key: str, value, ttl_seconds: int) -> None:
+    _LOCAL_SCANNER_GUARD_STATE[key] = (time.time() + max(1, int(ttl_seconds)), value)
+
+
+def _scanner_guard_store_incr(key: str, ttl_seconds: int) -> int:
+    current = _scanner_guard_store_get(key)
+    new_value = int(current or 0) + 1
+    _scanner_guard_store_set(key, new_value, ttl_seconds)
+    return new_value
+
+
 def _resolve_socketio_async_mode() -> str:
     """
     Default was eventlet, but eventlet is not in requirements.txt — that caused
@@ -165,34 +270,15 @@ def restart_application():
 
 def _ensure_core_manifest(config_dir: str) -> str:
     """
-    Ensures app/config/manifest.json exists. Returns its path.
+    Ensures app/config/manifest.json exists (or symlink to volume after bind_persistent_directories).
     """
+    from app.storage_paths import write_default_core_manifest_file
+
     core_manifest_path = os.path.join(config_dir, "manifest.json")
     os.makedirs(config_dir, exist_ok=True)
 
     if not os.path.exists(core_manifest_path):
-        core_manifest = {
-            "name": "Core Module",
-            "system_name": "Sparrow_ERP_Core",
-            "version": "1.0.0",
-            "theme_settings": {
-                "theme": "default",
-                "custom_css_path": "",
-                "dashboard_background_mode": "slideshow",
-                "dashboard_background_color": "#1e293b",
-                "dashboard_background_image_path": "",
-            },
-            "site_settings": {
-                "company_name": "Sparrow ERP",
-                "branding": "name",
-                "logo_path": ""
-            },
-            "ai_settings": {
-                "chat_model": ""
-            }
-        }
-        with open(core_manifest_path, 'w', encoding="utf-8") as f:
-            json.dump(core_manifest, f, indent=4)
+        write_default_core_manifest_file(core_manifest_path)
         print(f"Core manifest created at {core_manifest_path}")
 
     return core_manifest_path
@@ -318,6 +404,16 @@ def _register_jinja_filters(app: Flask) -> None:
     app.jinja_env.filters['admin_visible_flashes'] = admin_visible_flashes
     app.jinja_env.filters['fleet_vdi_suppress_flash'] = fleet_vdi_suppress_flash
 
+    from app.static_upload_paths import (
+        normalize_manifest_static_path,
+        static_upload_file_exists,
+    )
+
+    app.jinja_env.globals["normalize_manifest_static_path"] = (
+        normalize_manifest_static_path
+    )
+    app.jinja_env.globals["static_upload_file_exists"] = static_upload_file_exists
+
 
 # ---------------------------------------------------------------------
 # Flask app factory
@@ -331,7 +427,15 @@ def create_app():
     config_dir = os.path.join(app_root, "config")
     plugins_dir = os.path.abspath(os.path.join(app_root, "plugins"))
 
-    # Ensure core config exists
+    # Railway volume: bind before core manifest so app/config/manifest.json can symlink to the volume.
+    try:
+        from app.storage_paths import bind_persistent_directories
+
+        bind_persistent_directories(app_root)
+    except Exception as e:
+        print(f"[WARN] Persistent storage bind failed: {e}")
+
+    # Ensure core config exists (writes to volume when manifest.json is symlinked)
     _ensure_core_manifest(config_dir)
 
     # Dependency handler (your existing behaviour)
@@ -345,14 +449,10 @@ def create_app():
 
     # Create Flask app
     app = Flask(__name__)
-
-    # Railway volume: symlink upload dirs before blueprints import app.routes (mkdirs, etc.)
-    try:
-        from app.storage_paths import bind_persistent_directories
-
-        bind_persistent_directories(app.root_path)
-    except Exception as e:
-        print(f"[WARN] Persistent storage bind failed: {e}")
+    if _should_trust_proxy_headers():
+        # Railway sits in front of the container and nginx sits in front of Flask inside
+        # the container, so trust one hop of forwarded headers by default there.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     try:
         from app.storage_paths import load_volume_smtp_into_os_environ
 
@@ -375,6 +475,93 @@ def create_app():
             "can_open_user_management": user_can_open_user_management,
             "can_open_org_admin_nav": user_can_open_org_admin_nav,
         }
+
+    @app.context_processor
+    def inject_copyright_year():
+        from datetime import datetime
+
+        return {"current_year": datetime.now().year}
+
+    @app.before_request
+    def _scanner_guard_before_request():
+        """
+        Short-circuit obvious exploit probes and temporarily ban repeat offenders.
+        Uses Redis when available so bans survive worker/process restarts.
+        """
+        from flask import request
+
+        if not _scanner_guard_enabled():
+            return None
+        path = request.path or "/"
+        if path.startswith("/static/") or path.startswith("/.well-known/"):
+            return None
+        client_ip = (
+            request.headers.get("CF-Connecting-IP")
+            or request.headers.get("True-Client-IP")
+            or request.remote_addr
+            or "unknown"
+        )
+        key_prefix = (
+            os.environ.get("SPARROW_SCANNER_GUARD_KEY_PREFIX")
+            or "sparrow:scanner_guard"
+        ).strip()
+        ban_key = f"{key_prefix}:ban:{client_ip}"
+        counter_key = f"{key_prefix}:probe:{client_ip}"
+        ban_seconds = max(60, _env_int("SPARROW_SCANNER_BAN_SECONDS", 3600))
+        window_seconds = max(60, _env_int("SPARROW_SCANNER_WINDOW_SECONDS", 600))
+        threshold = max(3, _env_int("SPARROW_SCANNER_BAN_THRESHOLD", 12))
+        status_code = _env_int("SPARROW_SCANNER_BLOCK_STATUS", 404)
+        if status_code not in (400, 403, 404, 410, 429):
+            status_code = 404
+
+        redis_client = app.config.get("SESSION_REDIS")
+
+        def _is_banned() -> bool:
+            if redis_client is not None:
+                try:
+                    return bool(redis_client.exists(ban_key))
+                except Exception:
+                    pass
+            return bool(_scanner_guard_store_get(ban_key))
+
+        def _register_probe() -> int:
+            if redis_client is not None:
+                try:
+                    pipe = redis_client.pipeline()
+                    pipe.incr(counter_key)
+                    pipe.ttl(counter_key)
+                    count, ttl = pipe.execute()
+                    if int(ttl) < 0:
+                        redis_client.expire(counter_key, window_seconds)
+                    count = int(count)
+                    if count >= threshold:
+                        redis_client.setex(ban_key, ban_seconds, "1")
+                    return count
+                except Exception:
+                    pass
+            count = _scanner_guard_store_incr(counter_key, window_seconds)
+            if count >= threshold:
+                _scanner_guard_store_set(ban_key, "1", ban_seconds)
+            return count
+
+        if _is_banned():
+            return ("", status_code)
+
+        if not _is_suspicious_probe_path(path):
+            return None
+
+        count = _register_probe()
+        if count >= threshold:
+            try:
+                app.logger.warning(
+                    "scanner_guard banned ip=%s after suspicious path=%s count=%s",
+                    client_ip,
+                    path,
+                    count,
+                )
+            except Exception:
+                pass
+        return ("", status_code)
 
     # Config
     _default_secret = "defaultsecretkey"
@@ -564,6 +751,31 @@ def create_app():
         init_dbs_status_scheduler(app)
     except Exception as _dbs_sched_err:
         print(f"[WARN] DBS Update Service scheduler not started: {_dbs_sched_err}")
+
+    try:
+        from app.plugins.hr_module.hcpc_scheduler import init_hcpc_status_scheduler
+
+        init_hcpc_status_scheduler(app)
+    except Exception as _hcpc_sched_err:
+        print(f"[WARN] HCPC scheduler not started: {_hcpc_sched_err}")
+
+    try:
+        from app.plugins.hr_module.appraisal_scheduler import (
+            init_appraisal_reminder_scheduler,
+        )
+
+        init_appraisal_reminder_scheduler(app)
+    except Exception as _appr_sched_err:
+        print(f"[WARN] HR appraisal reminder scheduler not started: {_appr_sched_err}")
+
+    try:
+        from app.plugins.compliance_audit_module.scheduler import (
+            init_compliance_audit_scheduler,
+        )
+
+        init_compliance_audit_scheduler(app)
+    except Exception as _ca_sched_err:
+        print(f"[WARN] Compliance audit scheduler not started: {_ca_sched_err}")
 
     _PLUGIN_URL_ACCESS_EXEMPT = frozenset(
         {"settings", "enable", "disable", "install", "uninstall", "install-remote"}
@@ -771,6 +983,11 @@ def create_app():
                     r"clinical/(?:review_epcr_access_request|epcr/delete/<int:case_id>)"
                     r")$"
                 ),
+                # Ventus Response: browser fetch() + JSON + session cookie for /dispatch/* and /response/*
+                # (not under /plugin/.../api/). Matches medical EPCR exemption when SeaSurf would otherwise
+                # reject POST/DELETE without a valid X-CSRFToken.
+                re.compile(r"^/plugin/ventus_response_module/dispatch/"),
+                re.compile(r"^/plugin/ventus_response_module/response/"),
             )
             _csrf_state_changing = frozenset(
                 {"POST", "PUT", "PATCH", "DELETE"}
@@ -820,9 +1037,9 @@ def create_app():
 
                 return (_rq.method or "").upper() != "POST"
 
-            _api_login_lim = os.environ.get("API_LOGIN_RATE_LIMIT", "30 per minute")
-            _form_login_lim = os.environ.get("FORM_LOGIN_RATE_LIMIT", "15 per minute")
-            _pw_reset_lim = os.environ.get("PASSWORD_RESET_RATE_LIMIT", "5 per minute")
+            _api_login_lim = os.environ.get("API_LOGIN_RATE_LIMIT", "10 per minute")
+            _form_login_lim = os.environ.get("FORM_LOGIN_RATE_LIMIT", "5 per minute")
+            _pw_reset_lim = os.environ.get("PASSWORD_RESET_RATE_LIMIT", "3 per hour")
             _v = app.view_functions.get("api.api_login")
             if _v:
                 limiter.limit(_api_login_lim, methods=["POST"])(_v)
@@ -967,6 +1184,12 @@ def create_app():
     # ------------------------------------------------------------------
     try:
         from . import socketio
+
+        # Vendored Socket.IO v4 browser bundle (same line as MDT client / python-socketio 5.12).
+        _sio_vendor_dir = os.path.join(app.root_path, "static", "vendor")
+        _sio_vendor_name = "socket.io-4.7.5.min.js"
+        _sio_vendor_path = os.path.join(_sio_vendor_dir, _sio_vendor_name)
+
         redis_url = os.environ.get('REDIS_URL') or os.environ.get('REDIS_URLS')
         socketio_opts = {}
         # If a Redis message queue is configured, provide it so SocketIO can
@@ -987,6 +1210,45 @@ def create_app():
             async_mode=async_mode,
             **socketio_opts,
         )
+
+        # Flask-SocketIO replaces app.wsgi_app with middleware that forwards ALL /socket.io/*
+        # to Engine.IO before Flask routes run — so @app.route("/socket.io/socket.io.js") never
+        # executes. Wrap the stack to serve the client bundle with application/javascript first.
+        class _VentusSocketIOBrowserBundleMiddleware:
+            __slots__ = ("_inner", "_vendor_path")
+
+            def __init__(self, inner, vendor_abs_path):
+                self._inner = inner
+                self._vendor_path = vendor_abs_path
+
+            def __call__(self, environ, start_response):
+                if environ.get("PATH_INFO") == "/socket.io/socket.io.js":
+                    vp = self._vendor_path
+                    if os.path.isfile(vp):
+                        try:
+                            with open(vp, "rb") as _sf:
+                                _body = _sf.read()
+                        except OSError:
+                            pass
+                        else:
+                            start_response(
+                                "200 OK",
+                                [
+                                    (
+                                        "Content-Type",
+                                        "application/javascript; charset=utf-8",
+                                    ),
+                                    ("Cache-Control", "public, max-age=86400"),
+                                ],
+                            )
+                            return [_body]
+                return self._inner(environ, start_response)
+
+        if os.path.isfile(_sio_vendor_path):
+            app.wsgi_app = _VentusSocketIOBrowserBundleMiddleware(
+                app.wsgi_app, _sio_vendor_path
+            )
+
         # Authenticated sockets only; panel sync scoped per user (no cross-account broadcast)
         try:
             from flask_login import current_user
@@ -1000,6 +1262,19 @@ def create_app():
                     return f"panel_user_{current_user.get_id()}"
                 except Exception:
                     return None
+
+            # Panic audio: map JWT MDT socket sid → callsign; WebRTC publish/listen state (in-process)
+            _socketio_sid_callsign = {}
+            _panic_audio_publishers = {}
+            _panic_audio_listener_by_sid = {}
+            _panic_audio_listeners_by_cad = {}
+            _panic_audio_ice = [{"urls": "stun:stun.l.google.com:19302"}]
+            try:
+                _ice_raw = (os.environ.get("PANIC_AUDIO_ICE_SERVERS_JSON") or "").strip()
+                if _ice_raw:
+                    _panic_audio_ice = json.loads(_ice_raw)
+            except Exception:
+                pass
 
             @socketio.on('connect')
             def _on_connect(auth=None):
@@ -1053,10 +1328,217 @@ def create_app():
                             ).upper()[:64]
                             if cs_clean:
                                 join_room(f"mdt_callsign_{cs_clean}")
+                                _socketio_sid_callsign[_socketio_request.sid] = cs_clean
                             return
                     disconnect()
                 except Exception:
                     disconnect()
+
+            @socketio.on('disconnect')
+            def _panic_audio_on_disconnect():
+                try:
+                    sid = _socketio_request.sid
+                    _socketio_sid_callsign.pop(sid, None)
+                    for cad, psid in list(_panic_audio_publishers.items()):
+                        if psid == sid:
+                            _panic_audio_publishers.pop(cad, None)
+                            for lsid in list(_panic_audio_listeners_by_cad.pop(cad, set())):
+                                _panic_audio_listener_by_sid.pop(lsid, None)
+                                emit("panic_audio_ended", {"cad": cad}, room=lsid)
+                            return
+                    lcad = _panic_audio_listener_by_sid.pop(sid, None)
+                    if lcad is not None:
+                        s = _panic_audio_listeners_by_cad.get(lcad)
+                        if s:
+                            s.discard(sid)
+                        pub = _panic_audio_publishers.get(lcad)
+                        if pub:
+                            emit(
+                                "panic_audio_listener_left",
+                                {"cad": lcad, "listener_sid": sid},
+                                room=pub,
+                            )
+                except Exception:
+                    pass
+
+            @socketio.on("panic_audio_publish")
+            def _panic_audio_publish(data):
+                try:
+                    if not isinstance(data, dict):
+                        return
+                    cad = int(data.get("cad"))
+                    cs = str(data.get("callsign") or "").strip().upper()
+                    sid_c = _socketio_sid_callsign.get(_socketio_request.sid)
+                    if not sid_c or sid_c != cs:
+                        emit("panic_audio_error", {"message": "callsign mismatch"})
+                        return
+                    _panic_audio_publishers[cad] = _socketio_request.sid
+                    emit(
+                        "panic_audio_published",
+                        {"cad": cad, "ice_servers": _panic_audio_ice},
+                    )
+                except Exception:
+                    try:
+                        emit("panic_audio_error", {"message": "publish failed"})
+                    except Exception:
+                        pass
+
+            @socketio.on("panic_audio_listen")
+            def _panic_audio_listen(data):
+                try:
+                    if not getattr(current_user, "is_authenticated", False):
+                        emit("panic_audio_listen_failed", {"reason": "auth"})
+                        return
+                    cad = int((data or {}).get("cad"))
+                    pub = _panic_audio_publishers.get(cad)
+                    if not pub:
+                        emit(
+                            "panic_audio_listen_failed",
+                            {"cad": cad, "reason": "no_uplink"},
+                        )
+                        return
+                    lsid = _socketio_request.sid
+                    _panic_audio_listener_by_sid[lsid] = cad
+                    _panic_audio_listeners_by_cad.setdefault(cad, set()).add(lsid)
+                    emit(
+                        "panic_audio_listen_ok",
+                        {
+                            "cad": cad,
+                            "publisher_sid": pub,
+                            "ice_servers": _panic_audio_ice,
+                        },
+                    )
+                    emit(
+                        "panic_audio_listener_joined",
+                        {
+                            "cad": cad,
+                            "listener_sid": lsid,
+                            "ice_servers": _panic_audio_ice,
+                        },
+                        room=pub,
+                    )
+                except Exception:
+                    try:
+                        emit("panic_audio_listen_failed", {"reason": "server"})
+                    except Exception:
+                        pass
+
+            @socketio.on("panic_audio_offer")
+            def _panic_audio_offer_fwd(d):
+                try:
+                    if not isinstance(d, dict):
+                        return
+                    cad = int(d["cad"])
+                    to_sid = d.get("to_sid")
+                    if _panic_audio_publishers.get(cad) != _socketio_request.sid:
+                        return
+                    emit("panic_audio_offer", {"cad": cad, "sdp": d.get("sdp")}, room=to_sid)
+                except Exception:
+                    pass
+
+            @socketio.on("panic_audio_answer")
+            def _panic_audio_answer_fwd(d):
+                try:
+                    if not isinstance(d, dict):
+                        return
+                    cad = int(d["cad"])
+                    to_sid = d.get("to_sid")
+                    if _panic_audio_listener_by_sid.get(_socketio_request.sid) != cad:
+                        return
+                    emit(
+                        "panic_audio_answer",
+                        {
+                            "cad": cad,
+                            "sdp": d.get("sdp"),
+                            "from_listener_sid": _socketio_request.sid,
+                        },
+                        room=to_sid,
+                    )
+                except Exception:
+                    pass
+
+            @socketio.on("panic_audio_ice")
+            def _panic_audio_ice_fwd(d):
+                try:
+                    if not isinstance(d, dict):
+                        return
+                    cad = int(d["cad"])
+                    to_sid = d.get("to_sid")
+                    cand = d.get("candidate")
+                    sid = _socketio_request.sid
+                    if _panic_audio_publishers.get(cad) == sid:
+                        emit(
+                            "panic_audio_ice",
+                            {"cad": cad, "candidate": cand, "from_sid": sid},
+                            room=to_sid,
+                        )
+                        return
+                    if _panic_audio_listener_by_sid.get(sid) == cad:
+                        emit(
+                            "panic_audio_ice",
+                            {
+                                "cad": cad,
+                                "candidate": cand,
+                                "from_listener_sid": sid,
+                            },
+                            room=to_sid,
+                        )
+                except Exception:
+                    pass
+
+            @socketio.on("panic_audio_stop")
+            def _panic_audio_stop(d):
+                try:
+                    if not isinstance(d, dict):
+                        return
+                    cad = int(d.get("cad"))
+                    sid = _socketio_request.sid
+                    if _panic_audio_publishers.get(cad) == sid:
+                        _panic_audio_publishers.pop(cad, None)
+                        for lsid in list(_panic_audio_listeners_by_cad.pop(cad, set())):
+                            _panic_audio_listener_by_sid.pop(lsid, None)
+                            emit("panic_audio_ended", {"cad": cad}, room=lsid)
+                        return
+                    if _panic_audio_listener_by_sid.get(sid) == cad:
+                        s = _panic_audio_listeners_by_cad.get(cad)
+                        if s:
+                            s.discard(sid)
+                        _panic_audio_listener_by_sid.pop(sid, None)
+                        pub = _panic_audio_publishers.get(cad)
+                        if pub:
+                            emit(
+                                "panic_audio_listener_left",
+                                {"cad": cad, "listener_sid": sid},
+                                room=pub,
+                            )
+                except Exception:
+                    pass
+
+            @socketio.on("panic_voice_recording_finalize")
+            def _panic_voice_recording_finalize(data):
+                """CAD (Flask-Login): seal current panic mic archive segment on MDT; uplink stays live."""
+                try:
+                    if not getattr(current_user, "is_authenticated", False):
+                        emit("panic_voice_finalize_failed", {"reason": "auth"})
+                        return
+                    if not isinstance(data, dict):
+                        emit("panic_voice_finalize_failed", {"reason": "bad_request"})
+                        return
+                    cad = int(data.get("cad"))
+                    pub = _panic_audio_publishers.get(cad)
+                    if not pub:
+                        emit(
+                            "panic_voice_finalize_failed",
+                            {"cad": cad, "reason": "no_uplink"},
+                        )
+                        return
+                    emit("panic_voice_finalize_segment", {"cad": cad}, room=pub)
+                    emit("panic_voice_finalize_ok", {"cad": cad})
+                except Exception:
+                    try:
+                        emit("panic_voice_finalize_failed", {"reason": "server"})
+                    except Exception:
+                        pass
 
             @socketio.on('panel_message')
             def _on_panel_message(msg):
@@ -1090,6 +1572,8 @@ def create_app():
         """
         Email fleet compliance + asset maintenance reminders (requires SMTP env).
         Recipients: FLEET_ASSET_REMINDER_EMAILS or all admin/superuser emails.
+        Also includes kit consumable expiry lines on serial assets unless
+        FLEET_REMINDER_SKIP_KIT_CONSUMABLES=1.
         """
         try:
             from app.plugins.fleet_management.reminders import run_reminders
@@ -1105,6 +1589,66 @@ def create_app():
         elif not out.get("lines"):
             print("[OK] Nothing to send.")
 
+    @app.cli.command("inventory-kit-consumable-alerts")
+    def inventory_kit_consumable_alerts_command():
+        """
+        Email kit consumable expiry alerts only (dated lines on serial equipment).
+        Recipients: INVENTORY_KIT_CONSUMABLE_ALERT_EMAILS, else FLEET_ASSET_REMINDER_EMAILS,
+        else admin/superuser emails. Disabled when INVENTORY_KIT_CONSUMABLE_ALERTS_DISABLED=1.
+        """
+        try:
+            from app.plugins.inventory_control.kit_consumable_alerts import (
+                run_kit_consumable_alerts,
+            )
+        except ImportError as e:
+            print(f"[ERROR] inventory_control.kit_consumable_alerts not available: {e}")
+            return
+        out = run_kit_consumable_alerts(send_email=True)
+        print(out.get("message", out))
+        if out.get("error"):
+            print(f"[WARN] {out['error']}")
+        if out.get("skipped"):
+            print("[OK] Skipped (disabled).")
+        elif out.get("sent"):
+            print("[OK] Email sent.")
+        elif not out.get("lines"):
+            print("[OK] Nothing to send.")
+
+    @app.cli.command("hr-appraisal-reminders")
+    def hr_appraisal_reminders_command():
+        """
+        Run the daily appraisal reminder scan once (logs + optional digest email).
+        Respects HR_APPRAISAL_REMINDERS_DISABLED and manifest appraisal_digest_email_enabled.
+        """
+        try:
+            from app.plugins.hr_module.appraisals_reminders import (
+                run_appraisal_daily_reminder_scan,
+            )
+        except ImportError as e:
+            print(f"[ERROR] hr_module appraisals_reminders not available: {e}")
+            return
+        out = run_appraisal_daily_reminder_scan(send_email=True)
+        print(out)
+        if out.get("skip") == "already_ran_today":
+            print("[OK] Today's scan already ran — no duplicate.")
+        elif out.get("email_sent"):
+            print("[OK] Digest email sent.")
+        elif out.get("items", 0) == 0:
+            print("[OK] Nothing due.")
+
+    @app.cli.command("hr-appraisal-reminders-now")
+    def hr_appraisal_reminders_now_command():
+        """Same as hr-appraisal-reminders but forces another scan today (extra log + email if due)."""
+        try:
+            from app.plugins.hr_module.appraisals_reminders import (
+                run_appraisal_daily_reminder_scan,
+            )
+        except ImportError as e:
+            print(f"[ERROR] hr_module appraisals_reminders not available: {e}")
+            return
+        out = run_appraisal_daily_reminder_scan(send_email=True, force=True)
+        print(out)
+
     try:
         from app import admin_staff_audit as _admin_staff_audit
 
@@ -1113,6 +1657,13 @@ def create_app():
             return _admin_staff_audit.after_request_record(response)
     except Exception as _asa_err:
         app.logger.warning("admin_staff_audit hook not registered: %s", _asa_err)
+
+    try:
+        from app.schema_upgrade_recovery import register_schema_upgrade_recovery
+
+        register_schema_upgrade_recovery(app)
+    except Exception as _sur_exc:
+        app.logger.warning("schema_upgrade_recovery not registered: %s", _sur_exc)
 
     @app.errorhandler(DatabaseTemporarilyUnavailable)
     def _database_temporarily_unavailable(exc):

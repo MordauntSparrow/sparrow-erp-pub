@@ -67,6 +67,30 @@ def user_can_open_org_admin_nav() -> bool:
     return r in ("admin", "superuser", SUPPORT_SHADOW_ROLE)
 
 
+def management_may_edit_user_row(
+    editor_user_id: Any,
+    target_user_id: Any,
+    editor_role: str | None,
+    target_role: str | None,
+) -> bool:
+    """User management table: you may always open Edit on your own row; otherwise role hierarchy applies."""
+    if str(editor_user_id or "") == str(target_user_id or ""):
+        return True
+    return editor_may_edit_target_user(editor_role, target_role)
+
+
+def management_may_delete_user_row(
+    editor_user_id: Any,
+    target_user_id: Any,
+    editor_role: str | None,
+    target_role: str | None,
+) -> bool:
+    """Never offer Delete on your own row; otherwise same as edit privilege for other accounts."""
+    if str(editor_user_id or "") == str(target_user_id or ""):
+        return False
+    return editor_may_edit_target_user(editor_role, target_role)
+
+
 def editor_may_edit_target_user(editor_role: str | None, target_role: str | None) -> bool:
     """
     Hierarchy: only superuser may change superuser, admin, or clinical_lead accounts.
@@ -107,7 +131,11 @@ def editor_may_assign_elevated_core_role(new_role: str | None) -> bool:
     return has_permission("core.manage_users")
 
 
-def serialize_user_row_for_management_api(row: dict, editor_role: str | None) -> dict:
+def serialize_user_row_for_management_api(
+    row: dict,
+    editor_role: str | None,
+    editor_user_id: Any = None,
+) -> dict:
     """JSON-serializable user dict + may_edit / may_delete for the management UI."""
     out: dict[str, Any] = {}
     for k, v in row.items():
@@ -117,9 +145,15 @@ def serialize_user_row_for_management_api(row: dict, editor_role: str | None) ->
             out[k] = v
     raw_perms = out.get("permissions")
     out["permissions"] = normalize_stored_permissions(raw_perms)
-    tr = (row.get("role") or "").lower()
-    out["may_edit"] = editor_may_edit_target_user(editor_role, row.get("role"))
-    out["may_delete"] = out["may_edit"]
+    tid = row.get("id")
+    out["may_edit"] = management_may_edit_user_row(
+        editor_user_id, tid, editor_role, row.get("role")
+    )
+    out["may_delete"] = management_may_delete_user_row(
+        editor_user_id, tid, editor_role, row.get("role")
+    )
+    if "has_personal_pin" in out:
+        out["has_personal_pin"] = bool(out.get("has_personal_pin"))
     return out
 
 

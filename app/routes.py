@@ -7,19 +7,20 @@ Sections:
   1. Authentication & Password Reset
       - /login
       - /reset-password and /reset-password/<token>
-  2. Dashboard & Logout
+  2. Dashboard, Logout & Account
       - / (dashboard)
       - /logout
+      - /account/personal-pin -> Set or change own 6-digit personal PIN (not manageable by admins)
   3. User Management (Admin Only)
       - /users           -> Combined management page (live search + modals for add/edit/delete)
       - /users/search    -> AJAX endpoint for live search
-      - /users/add       -> Process adding a new user (includes first_name and last_name)
-      - /users/edit/<user_id>  -> Process editing a user (updates email, first_name, last_name, role, permissions, and optionally password)
+      - /users/add       -> Process adding a new user (includes first_name and last_name; personal PIN via /account/personal-pin only)
+      - /users/edit/<user_id>  -> Process editing a user (updates email, first_name, last_name, role, permissions, and optionally password; never personal PIN)
       - /users/delete/<user_id> -> Delete a user
   4. Version Management (Admin Only)
       - /version         -> View/apply updates
   5. Core Module Settings (Admin Only)
-      - /core/settings   -> Tabbed: manifest (branding, theme, AI model id) + .env (SMTP, GitLab, LLM, security)
+      - /core/settings   -> Tabbed: manifest (branding, theme, AI model id) + .env (SMTP, LLM, security)
   6. SMTP/Email Configuration (Admin Only)
       - Core settings Email tab persists SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
         SMTP_USE_SSL, SMTP_USE_TLS (via connection mode: STARTTLS / implicit SSL / plain),
@@ -47,6 +48,7 @@ from app.ai_config import (
     sanitize_chat_model_id,
 )
 from app.create_app import update_env_var
+from app.static_upload_paths import normalize_manifest_static_path
 from app.storage_paths import get_persistent_data_root, get_persistent_smtp_env_path
 from app.auth_jwt import encode_session_token
 from app.compliance_audit import log_security_event, pseudonymous_username_hint
@@ -131,8 +133,7 @@ def _smtp_connection_mode_for_ui() -> str:
 
 
 def _settings_env_context():
-    """Snapshot for Core Settings UI. GitLab read token is included for admin prefill (see integrations tab)."""
-    _g_user, _g_pass = effective_gitlab_basic_credentials()
+    """Snapshot for Core Settings UI (.env-backed fields shown on each tab)."""
     _mode = _smtp_connection_mode_for_ui()
     _use_tls = _mode == "starttls"
     return {
@@ -148,17 +149,6 @@ def _settings_env_context():
             "from_name": (os.environ.get("SMTP_FROM_NAME") or "").strip(),
             "stored_on_volume": bool(get_persistent_smtp_env_path()),
         },
-        "gitlab": {
-            "token_set": bool(
-                (effective_gitlab_read_token() or "").strip()
-            ),
-            # Prefill: env or built-in official-registry defaults (same as UpdateManager).
-            "token_current": effective_gitlab_read_token(),
-            "username": _g_user,
-            "password_set": bool(_g_pass),
-            "project_id": effective_core_project_id(),
-            "core_manifest_url": os.environ.get("CORE_MANIFEST_REMOTE_URL", "") or "",
-        },
         "llm": {
             "openai_key_set": _env_nonempty("OPENAI_API_KEY"),
             "sparrow_key_set": _env_nonempty("SPARROW_OPENAI_API_KEY"),
@@ -172,9 +162,6 @@ def _settings_env_context():
             "openrouter_title": os.environ.get("OPENROUTER_SITE_TITLE")
             or os.environ.get("OPENROUTER_APP_NAME")
             or "",
-        },
-        "infra": {
-            "redis_url": os.environ.get("REDIS_URL") or os.environ.get("REDIS_URLS") or "",
         },
         "security": {
             "secret_set": _env_nonempty("SECRET_KEY"),
@@ -510,6 +497,21 @@ def login():
                     user_id=user_data.get("id"),
                     role=user_data.get("role"),
                 )
+                try:
+                    from app.plugins.compliance_audit_module.login_audit_hook import (
+                        record_compliance_login,
+                    )
+
+                    record_compliance_login(
+                        success=True,
+                        channel="web_form",
+                        user_id=str(user_data.get("id")),
+                        username=user_data.get("username"),
+                        ip=request.remote_addr,
+                        user_agent=request.headers.get("User-Agent"),
+                    )
+                except Exception:
+                    pass
                 if int(user_data.get("billable_exempt") or 0):
                     session["support_shadow"] = True
                     log_security_event(
@@ -550,6 +552,20 @@ def login():
 
                 return redirect(url_for('routes.dashboard'))
 
+            try:
+                from app.plugins.compliance_audit_module.login_audit_hook import (
+                    record_compliance_login,
+                )
+
+                record_compliance_login(
+                    success=False,
+                    channel="web_form",
+                    username=username,
+                    ip=request.remote_addr,
+                    user_agent=request.headers.get("User-Agent"),
+                )
+            except Exception:
+                pass
             flash(
                 'Invalid username or password. Please check your credentials and try again.', 'error')
         except Exception:
@@ -765,6 +781,85 @@ def logout():
     return redirect(url_for('routes.login'))
 
 
+def _personal_pin_format_ok(pin: str) -> tuple:
+    s = (pin or "").strip()
+    if len(s) != 6 or not s.isdigit():
+        return False, "Personal PIN must be exactly 6 digits."
+    return True, ""
+
+
+@routes.route('/account/personal-pin', methods=['GET', 'POST'])
+@login_required
+def account_personal_pin():
+    """Only the signed-in user may set or change their personal PIN (never via user management)."""
+    uid = str(getattr(current_user, "id", "") or "")
+    if not uid:
+        flash("Could not determine your account.", "danger")
+        return redirect(url_for("routes.dashboard"))
+
+    if request.method == "POST":
+        current_pin = (request.form.get("current_personal_pin") or "").strip()
+        new_pin = (request.form.get("new_personal_pin") or "").strip()
+        confirm = (request.form.get("confirm_personal_pin") or "").strip()
+
+        ok, err = _personal_pin_format_ok(new_pin)
+        if not ok:
+            flash(err, "danger")
+            return redirect(url_for("routes.account_personal_pin"))
+        if new_pin != confirm:
+            flash("New PIN and confirmation do not match.", "danger")
+            return redirect(url_for("routes.account_personal_pin"))
+
+        u = User.get_user_by_id(uid)
+        if not u:
+            flash("Could not load your account.", "danger")
+            return redirect(url_for("routes.dashboard"))
+
+        ph = u.personal_pin_hash
+        has_pin = bool(ph and str(ph).strip())
+
+        if has_pin:
+            if not current_pin:
+                flash("Enter your current personal PIN to change it.", "danger")
+                return redirect(url_for("routes.account_personal_pin"))
+            if not AuthManager.verify_password(ph, current_pin):
+                flash("Current personal PIN is incorrect.", "danger")
+                return redirect(url_for("routes.account_personal_pin"))
+
+        new_hash = AuthManager.hash_password(new_pin)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET personal_pin_hash = %s WHERE id = %s",
+            (new_hash, uid),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        log_security_event(
+            "personal_pin_updated",
+            user_id=uid,
+            change_type="initial_set" if not has_pin else "changed",
+            via="account_personal_pin",
+        )
+
+        session.pop("crew_pin_verified_at", None)
+        session.pop("safeguarding_oversight_pin_verified_at", None)
+
+        flash("Your personal PIN has been updated.", "success")
+        return redirect(url_for("routes.account_personal_pin"))
+
+    u = User.get_user_by_id(uid)
+    pin_is_set = bool(
+        u and u.personal_pin_hash and str(u.personal_pin_hash).strip()
+    )
+    return render_template(
+        "account_personal_pin.html",
+        personal_pin_is_set=pin_is_set,
+    )
+
+
 ##############################################################################
 # SECTION 3: User Management (superuser > admin / clinical lead; delegated staff via core.manage_users)
 ##############################################################################
@@ -804,13 +899,17 @@ def search_users():
     if query:
         search_param = f"%{query}%"
         cursor.execute("""
-            SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
+            SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login,
+                   (personal_pin_hash IS NOT NULL AND CHAR_LENGTH(TRIM(personal_pin_hash)) > 0)
+                     AS has_personal_pin
             FROM users
             WHERE (username LIKE %s OR email LIKE %s) AND COALESCE(billable_exempt, 0) = 0
         """, (search_param, search_param))
     else:
         cursor.execute("""
-            SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
+            SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login,
+                 (personal_pin_hash IS NOT NULL AND CHAR_LENGTH(TRIM(personal_pin_hash)) > 0)
+                   AS has_personal_pin
             FROM users
             WHERE COALESCE(billable_exempt, 0) = 0
         """)
@@ -820,7 +919,12 @@ def search_users():
     conn.close()
     er = (getattr(current_user, "role", None) or "").lower()
     return jsonify(
-        [serialize_user_row_for_management_api(dict(row), er) for row in users_list]
+        [
+            serialize_user_row_for_management_api(
+                dict(row), er, getattr(current_user, "id", None)
+            )
+            for row in users_list
+        ]
     )
 
 
@@ -830,7 +934,8 @@ def users():
     from app.permissions_registry import (
         collect_permission_catalog,
         default_permission_ids_for_role,
-        editor_may_edit_target_user,
+        management_may_delete_user_row,
+        management_may_edit_user_row,
         normalize_stored_permissions,
     )
 
@@ -841,7 +946,9 @@ def users():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
-      SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login
+      SELECT id, username, email, role, permissions, first_name, last_name, created_at, last_login,
+             (personal_pin_hash IS NOT NULL AND CHAR_LENGTH(TRIM(personal_pin_hash)) > 0)
+               AS has_personal_pin
       FROM users
       WHERE COALESCE(billable_exempt, 0) = 0
     """)
@@ -850,10 +957,12 @@ def users():
     conn.close()
 
     er = (getattr(current_user, "role", None) or "").lower()
+    cid = getattr(current_user, "id", None)
     for u in users_list:
         u["permissions"] = normalize_stored_permissions(u.get("permissions"))
-        u["may_edit"] = editor_may_edit_target_user(er, u.get("role"))
-        u["may_delete"] = u["may_edit"]
+        u["has_personal_pin"] = bool(u.get("has_personal_pin"))
+        u["may_edit"] = management_may_edit_user_row(cid, u.get("id"), er, u.get("role"))
+        u["may_delete"] = management_may_delete_user_row(cid, u.get("id"), er, u.get("role"))
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
     available_permissions = plugin_manager.get_available_permissions()
@@ -891,6 +1000,7 @@ def users():
         config=core_manifest,
         editor_is_superuser=editor_is_superuser,
         editor_may_assign_elevated=editor_may_assign_elevated,
+        current_user_id=str(cid) if cid is not None else "",
     )
 
 
@@ -911,7 +1021,6 @@ def add_user():
     confirm_password = request.form.get('confirm_password')
     first_name = request.form.get('first_name')
     last_name = request.form.get('last_name')
-    personal_pin = request.form.get('personal_pin')
 
     if password != confirm_password:
         flash("Passwords do not match.", "danger")
@@ -955,9 +1064,8 @@ def add_user():
     new_permissions_json = json.dumps(new_permissions)
     user_id = str(uuid.uuid4())
 
+    # Personal PIN is never set by administrators — only the account owner (Account → Personal PIN).
     personal_pin_hash = None
-    if personal_pin and personal_pin.strip():
-        personal_pin_hash = AuthManager.hash_password(personal_pin.strip())
 
     from app.seat_limits import seat_check_error_for_new_email
 
@@ -992,14 +1100,14 @@ def edit_user(user_id):
 
     from app.permissions_registry import (
         editor_may_assign_elevated_core_role,
-        editor_may_edit_target_user,
+        management_may_edit_user_row,
     )
 
     conn_chk = get_db_connection()
     cur_chk = conn_chk.cursor(dictionary=True)
     cur_chk.execute(
         """
-        SELECT username, role, COALESCE(billable_exempt,0) AS billable_exempt
+        SELECT username, role, COALESCE(billable_exempt,0) AS billable_exempt, personal_pin_hash
         FROM users WHERE id = %s LIMIT 1
         """,
         (user_id,),
@@ -1018,7 +1126,9 @@ def edit_user(user_id):
         return redirect(url_for("routes.users"))
 
     er = (getattr(current_user, "role", None) or "").lower()
-    if not editor_may_edit_target_user(er, row_u.get("role")):
+    if not management_may_edit_user_row(
+        getattr(current_user, "id", None), user_id, er, row_u.get("role")
+    ):
         flash("You do not have permission to modify this account.", "danger")
         return redirect(url_for("routes.users"))
 
@@ -1060,7 +1170,34 @@ def edit_user(user_id):
 
     new_password = request.form.get("new_password")
     confirm_new_password = request.form.get("confirm_new_password")
-    new_personal_pin = request.form.get("personal_pin")
+
+    editing_self = str(user_id) == str(getattr(current_user, "id", "") or "")
+    pin_update_hash = None
+    if editing_self:
+        new_pp = (request.form.get("personal_pin") or "").strip()
+        conf_pp = (request.form.get("confirm_personal_pin") or "").strip()
+        cur_pp = (request.form.get("current_personal_pin") or "").strip()
+        if new_pp or conf_pp or cur_pp:
+            if not new_pp or not conf_pp:
+                flash("Enter your new personal PIN twice to confirm.", "danger")
+                return redirect(url_for("routes.users"))
+            if new_pp != conf_pp:
+                flash("New personal PIN and confirmation do not match.", "danger")
+                return redirect(url_for("routes.users"))
+            ok_pin, pin_err = _personal_pin_format_ok(new_pp)
+            if not ok_pin:
+                flash(pin_err, "danger")
+                return redirect(url_for("routes.users"))
+            ph_raw = row_u.get("personal_pin_hash")
+            has_pp = bool(ph_raw and str(ph_raw).strip())
+            if has_pp:
+                if not cur_pp:
+                    flash("Enter your current personal PIN to change it.", "danger")
+                    return redirect(url_for("routes.users"))
+                if not AuthManager.verify_password(ph_raw, cur_pp):
+                    flash("Current personal PIN is incorrect.", "danger")
+                    return redirect(url_for("routes.users"))
+            pin_update_hash = AuthManager.hash_password(new_pp)
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1072,41 +1209,39 @@ def edit_user(user_id):
             return redirect(url_for("routes.users"))
 
         new_hash = AuthManager.hash_password(new_password)
-
-        if new_personal_pin and new_personal_pin.strip():
-            new_personal_pin_hash = AuthManager.hash_password(
-                new_personal_pin.strip())
-            cursor.execute("""
-                UPDATE users
-                SET email = %s, role = %s, permissions = %s, password_hash = %s, first_name = %s, last_name = %s, personal_pin_hash = %s
-                WHERE id = %s
-            """, (new_email, new_role, permissions_json, new_hash, new_first_name, new_last_name, new_personal_pin_hash, user_id))
-        else:
-            cursor.execute("""
-                UPDATE users
-                SET email = %s, role = %s, permissions = %s, password_hash = %s, first_name = %s, last_name = %s
-                WHERE id = %s
-            """, (new_email, new_role, permissions_json, new_hash, new_first_name, new_last_name, user_id))
+        cursor.execute("""
+            UPDATE users
+            SET email = %s, role = %s, permissions = %s, password_hash = %s, first_name = %s, last_name = %s
+            WHERE id = %s
+        """, (new_email, new_role, permissions_json, new_hash, new_first_name, new_last_name, user_id))
     else:
-        if new_personal_pin and new_personal_pin.strip():
-            new_personal_pin_hash = AuthManager.hash_password(
-                new_personal_pin.strip())
-            cursor.execute("""
-                UPDATE users
-                SET email = %s, role = %s, permissions = %s, first_name = %s, last_name = %s, personal_pin_hash = %s
-                WHERE id = %s
-            """, (new_email, new_role, permissions_json, new_first_name, new_last_name, new_personal_pin_hash, user_id))
-        else:
-            cursor.execute("""
-                UPDATE users
-                SET email = %s, role = %s, permissions = %s, first_name = %s, last_name = %s
-                WHERE id = %s
-            """, (new_email, new_role, permissions_json, new_first_name, new_last_name, user_id))
+        cursor.execute("""
+            UPDATE users
+            SET email = %s, role = %s, permissions = %s, first_name = %s, last_name = %s
+            WHERE id = %s
+        """, (new_email, new_role, permissions_json, new_first_name, new_last_name, user_id))
+
+    if pin_update_hash is not None:
+        cursor.execute(
+            "UPDATE users SET personal_pin_hash = %s WHERE id = %s",
+            (pin_update_hash, user_id),
+        )
 
     conn.commit()
     cursor.close()
     conn.close()
     sync_core_user_to_portal_contractor(user_id)
+    if pin_update_hash is not None:
+        log_security_event(
+            "personal_pin_updated",
+            user_id=user_id,
+            change_type="initial_set"
+            if not (row_u.get("personal_pin_hash") and str(row_u.get("personal_pin_hash")).strip())
+            else "changed",
+            via="user_management_self_edit",
+        )
+        session.pop("crew_pin_verified_at", None)
+        session.pop("safeguarding_oversight_pin_verified_at", None)
     flash("User updated successfully.", "success")
     return redirect(url_for("routes.users"))
 
@@ -1134,6 +1269,11 @@ def delete_user(user_id):
         cursor.close()
         conn.close()
         flash("User not found.", "danger")
+        return redirect(url_for("routes.users"))
+    if str(user_id) == str(getattr(current_user, "id", "")):
+        cursor.close()
+        conn.close()
+        flash("You cannot delete your own account.", "danger")
         return redirect(url_for("routes.users"))
     if int(row.get("billable_exempt") or 0):
         flash(
@@ -1391,7 +1531,9 @@ def core_module_settings():
                     ext = dbg_file.filename.rsplit(".", 1)[-1].lower()
                     if ext in ALLOWED_DASHBOARD_BG_EXTENSIONS:
                         dbg_name = secure_filename(dbg_file.filename)
-                        if not dbg_name.lower().startswith("dashboard_bg_"):
+                        if not dbg_name:
+                            dbg_name = f"dashboard_bg_upload.{ext}"
+                        elif not dbg_name.lower().startswith("dashboard_bg_"):
                             dbg_name = f"dashboard_bg_{dbg_name}"
                         dbg_disk = os.path.join(STATIC_UPLOAD_FOLDER, dbg_name)
                         dbg_file.save(dbg_disk)
@@ -1458,6 +1600,14 @@ def core_module_settings():
                 else:
                     config_data["ai_settings"]["chat_model"] = ""
 
+            _ts_pre_write = config_data.get("theme_settings")
+            if isinstance(_ts_pre_write, dict):
+                _bgp = (_ts_pre_write.get("dashboard_background_image_path") or "").strip()
+                if _bgp:
+                    _ts_pre_write["dashboard_background_image_path"] = (
+                        normalize_manifest_static_path(_bgp)
+                    )
+
             with open(manifest_path, 'w', encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
 
@@ -1470,6 +1620,9 @@ def core_module_settings():
             _ts.setdefault("dashboard_background_mode", "slideshow")
             _ts.setdefault("dashboard_background_color", "#1e293b")
             _ts.setdefault("dashboard_background_image_path", "")
+            _ts["dashboard_background_image_path"] = normalize_manifest_static_path(
+                _ts.get("dashboard_background_image_path")
+            )
             current_app.config["theme_settings"] = _ts
 
             core_manifest = plugin_manager.get_core_manifest() or {}
@@ -1497,32 +1650,9 @@ def core_module_settings():
 
         elif section == "integrations":
             redirect_tab = "integrations"
-            if request.form.get("clear_gitlab_token"):
-                update_env_var("GITLAB_TOKEN", "")
-            else:
-                _update_secret_env_if_nonempty(
-                    "GITLAB_TOKEN", request.form.get("gitlab_token"))
-
-            update_env_var(
-                "GITLAB_USERNAME",
-                (request.form.get("gitlab_username") or "").strip(),
-            )
-            if request.form.get("clear_gitlab_password"):
-                update_env_var("GITLAB_PASSWORD", "")
-            else:
-                _update_secret_env_if_nonempty(
-                    "GITLAB_PASSWORD", request.form.get("gitlab_password"))
-
-            gpid = (request.form.get("gitlab_project_id") or "").strip()
-            update_env_var("GITLAB_PROJECT_ID", gpid)
-            update_env_var("CORE_PROJECT_ID", gpid)
-            update_env_var(
-                "CORE_MANIFEST_REMOTE_URL",
-                (request.form.get("core_manifest_remote_url") or "").strip(),
-            )
             update_env_var(
                 "REDIS_URL", (request.form.get("redis_url") or "").strip())
-            flash("Integrations saved to .env.", "success")
+            flash("Sessions & cache settings saved to .env.", "success")
 
         elif section == "llm":
             redirect_tab = "llm"
@@ -1653,10 +1783,11 @@ def core_module_settings():
     active_tab = (request.args.get("tab") or "general").strip().lower()
     if active_tab == "licensing":
         return redirect(url_for("routes.core_module_settings", tab="plan"))
+    if active_tab == "integrations":
+        return redirect(url_for("routes.core_module_settings", tab="general"))
     if active_tab not in (
         "general",
         "email",
-        "integrations",
         "llm",
         "security",
         "plan",
@@ -2062,6 +2193,21 @@ def api_login():
             user_id=user_data.get("id"),
             role=user_data.get("role"),
         )
+        try:
+            from app.plugins.compliance_audit_module.login_audit_hook import (
+                record_compliance_login,
+            )
+
+            record_compliance_login(
+                success=True,
+                channel="api_jwt",
+                user_id=str(user_data.get("id")),
+                username=user_data.get("username"),
+                ip=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+        except Exception:
+            pass
         if int(user_data.get("billable_exempt") or 0):
             log_security_event(
                 "support_shadow_api_login",
@@ -2122,6 +2268,21 @@ def api_login():
             contractor_id=cid,
             role=jwt_role,
         )
+        try:
+            from app.plugins.compliance_audit_module.login_audit_hook import (
+                record_compliance_login,
+            )
+
+            record_compliance_login(
+                success=True,
+                channel="api_jwt_contractor",
+                contractor_id=int(cid),
+                username=canonical_username,
+                ip=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+            )
+        except Exception:
+            pass
         display_name = (c.get("name") or "").strip()
         parts = display_name.split(None, 1) if display_name else []
         first_name = parts[0] if parts else ""
@@ -2144,6 +2305,20 @@ def api_login():
             },
         }), 200
 
+    try:
+        from app.plugins.compliance_audit_module.login_audit_hook import (
+            record_compliance_login,
+        )
+
+        record_compliance_login(
+            success=False,
+            channel="api_jwt",
+            username=login_key,
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except Exception:
+        pass
     return jsonify({"status": "error", "message": "Invalid credentials."}), 401
 
 

@@ -50,6 +50,7 @@ PLUGIN_AUDIT_PREFIXES: tuple[str, ...] = (
     "/plugin/employee_portal_module/",
     "/plugin/work_module/",
     "/plugin/news_blog_module/",
+    "/plugin/compliance_audit_module/",
 )
 
 # Contractor-facing blueprints (same Flask process; session tb_user)
@@ -311,6 +312,8 @@ def _infer_permission(endpoint: str | None, path: str) -> str | None:
         return "work_module.access"
     if "news_blog" in low or "/news_blog_module/" in path_l:
         return "news_blog_module.access"
+    if "compliance_audit" in low or "/compliance_audit_module/" in path_l:
+        return "compliance_audit_module.access"
     if low.startswith("public_employee_portal") or path_l.startswith("/employee-portal/"):
         return "employee_portal_module.access"
     if low.startswith("public_time_billing") or path_l.startswith("/time-billing/"):
