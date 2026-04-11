@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Personal PIN — Sparrow ERP{% endblock %}
+
+{% block content %}
+<div class="container mt-5" style="max-width: 520px;">
+  <h1 class="h3 mb-3">Personal PIN</h1>
+  <p class="text-muted small mb-4">
+    Your 6-digit personal PIN is used for sensitive clinical and crew actions. Only you can set or change it here —
+    organisation administrators cannot set it on your behalf.
+  </p>
+
+  <form method="post" action="{{ url_for('routes.account_personal_pin') }}" autocomplete="off">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    {% if personal_pin_is_set %}
+    <div class="mb-3">
+      <label for="current_personal_pin" class="form-label">Current PIN</label>
+      <input type="password" class="form-control" id="current_personal_pin" name="current_personal_pin"
+             maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="current-password"
+             placeholder="6 digits" required aria-required="true">
+    </div>
+    {% endif %}
+
+    <div class="mb-3">
+      <label for="new_personal_pin" class="form-label">{% if personal_pin_is_set %}New PIN{% else %}Choose PIN{% endif %}</label>
+      <input type="password" class="form-control" id="new_personal_pin" name="new_personal_pin"
+             maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="new-password"
+             placeholder="6 digits" required aria-required="true">
+    </div>
+    <div class="mb-3">
+      <label for="confirm_personal_pin" class="form-label">Confirm PIN</label>
+      <input type="password" class="form-control" id="confirm_personal_pin" name="confirm_personal_pin"
+             maxlength="6" inputmode="numeric" pattern="[0-9]{6}" autocomplete="new-password"
+             placeholder="6 digits" required aria-required="true">
+    </div>
+
+    <button type="submit" class="btn btn-primary">{% if personal_pin_is_set %}Update PIN{% else %}Save PIN{% endif %}</button>
+    <a href="{{ url_for('routes.dashboard') }}" class="btn btn-link">Back to dashboard</a>
+  </form>
+</div>
+{% endblock %}

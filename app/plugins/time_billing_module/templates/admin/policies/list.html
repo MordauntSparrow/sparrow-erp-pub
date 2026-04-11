@@ -1,0 +1,99 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-diagram-3 me-2"></i> Policies
+        </h4>
+        <button id="btnNew" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-lg me-1"></i> New policy
+        </button>
+    </div>
+
+    <!-- Policies Table -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Name</th>
+                            <th>Scope</th>
+                            <th>Version</th>
+                            <th>Active</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="polBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    (async function () {
+        const body = document.getElementById('polBody');
+        const btnNew = document.getElementById('btnNew');
+
+        async function load() {
+            const r = await fetch('{{ url_for("internal_time_billing.get_policies") }}');
+            const list = await r.json();
+
+            body.innerHTML = '';
+            if (!list || !list.length) {
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No policies yet.</td></tr>';
+                return;
+            }
+
+            for (const p of list) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+        <td>${p.id}</td>
+        <td>${p.name || ''}</td>
+        <td>${p.scope || 'global'}</td>
+        <td>${p.version || 1}</td>
+        <td>${p.active ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>'}</td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm">
+            <a class="btn btn-outline-primary" href="{{ url_for('internal_time_billing.policies_edit_page') or '#' }}#edit-${p.id}">Edit</a>
+          </div>
+        </td>
+      `;
+                body.appendChild(tr);
+            }
+        }
+
+        btnNew.addEventListener('click', async () => {
+            const name = prompt('Policy name:');
+            if (!name) return;
+
+            const r = await fetch('{{ url_for("internal_time_billing.create_policy") }}', {
+                method: 'POST',
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+                body: JSON.stringify({
+                    name,
+                    active: true,
+                    scope: 'global',
+                    version: 1,
+                    rules: []
+                })
+            });
+
+            if (!r.ok) {
+                alert('Create failed');
+                return;
+            }
+
+            load();
+        });
+
+        // Initial load
+        load();
+    })();
+</script>
+{% endblock %}

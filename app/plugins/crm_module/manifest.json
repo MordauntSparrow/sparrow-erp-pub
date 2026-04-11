@@ -1,0 +1,28 @@
+{
+  "system_name": "crm_module",
+  "name": "CRM",
+  "description": "CRM, quotes (rules, conditions, revisions), activities, medical event plans and branded PDFs.",
+  "version": "0.5.2",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "access_permission": "crm_module.access",
+  "alternate_access_permissions": ["crm_module.edit"],
+  "declared_permissions": [
+    {
+      "id": "crm_module.access",
+      "label": "CRM — view accounts, contacts, opportunities, and quotes",
+      "description": "Read-only access to CRM lists, quotes, and rule sets."
+    },
+    {
+      "id": "crm_module.edit",
+      "label": "CRM — create and edit",
+      "description": "Create, update, and delete CRM records, quotes, and quote rule sets."
+    }
+  ],
+  "dependencies": ["website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Opportunity view: purple-style event guide breakdown, guide_questions in lead meta, approximate wage costs from Time & Billing cards (SPARROW_CRM_GUIDE_WAGE_CARD_ID); public calculator venue_type. Prior: calculator routes, lead_meta_json, Kanban, intake, quote prefill, CRM nav.",
+  "repository_token": ""
+}

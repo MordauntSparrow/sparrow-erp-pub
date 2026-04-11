@@ -1,0 +1,197 @@
+{% extends "recruitment_module/public/base_public.html" %}
+{% block title %}{{ application.opening_title }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('public_recruitment_site.applicant_dashboard') }}">My applications</a></li><li class="breadcrumb-item active" aria-current="page">{{ application.opening_title }}</li></ol></nav>
+<h1 class="h4 mb-2">{{ application.opening_title }}</h1>
+<p class="text-muted small mb-4">Status: <strong>{{ application.status }}</strong> · Stage: <strong>{{ application.stage }}</strong></p>
+<p class="small text-muted border-start border-3 ps-2 mb-4" style="border-color: var(--bs-primary) !important;">
+  Your details live in the <strong>applicant</strong> system until you are hired. After hire, documents are copied to HR; recruitment-only data is scheduled for deletion after <strong>{{ retention_days }} days</strong> (employee records stay until you leave).
+</p>
+
+<h2 class="h6 text-uppercase text-muted">Progress</h2>
+<div class="d-flex flex-wrap gap-2 mb-4">
+  {% for step in progress %}
+  <span class="badge rounded-pill {% if step.current %}bg-primary{% elif step.done %}bg-success{% else %}bg-light text-muted border{% endif %}">{{ step.label }}</span>
+  {% endfor %}
+</div>
+
+{% if application.stage == 'interview' or application.stage == 'offer' %}
+<div class="card border-primary mb-4">
+  <div class="card-header fw-semibold">Interview</div>
+  <div class="card-body small">
+    {% if application.interview_format == 'online' and application.interview_meeting_url %}
+    <p class="mb-2">Your interview is <strong>online</strong>.</p>
+    <a href="{{ application.interview_meeting_url }}" class="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer">Join meeting</a>
+    <p class="text-muted mt-2 mb-0 small">Open the link at the time agreed with the recruiter. If the button doesn’t work, copy the link from your browser bar or ask HR.</p>
+    {% elif application.interview_format == 'onsite' and application.interview_location %}
+    <p class="mb-1">Your interview is <strong>on-site</strong> at:</p>
+    <div class="border rounded p-2 bg-light text-break" style="white-space:pre-wrap;">{{ application.interview_location }}</div>
+    {% elif application.stage == 'interview' %}
+    <p class="text-muted mb-0">Interview details (link or address) will appear here once your recruiter adds them.</p>
+    {% else %}
+    <p class="text-muted mb-0">No interview location was stored for this application.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if application.date_of_birth or application.address_line1 %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Your application profile</div>
+  <div class="card-body small">
+    <dl class="row mb-0">
+      <dt class="col-sm-4 text-muted">Date of birth</dt>
+      <dd class="col-sm-8">{{ application.date_of_birth }}</dd>
+      <dt class="col-sm-4 text-muted">Address</dt>
+      <dd class="col-sm-8">
+        {{ application.address_line1 or '—' }}{% if application.address_line2 %}<br>{{ application.address_line2 }}{% endif %}
+        {% if application.postcode %}<br>{{ application.postcode }}{% endif %}
+      </dd>
+      <dt class="col-sm-4 text-muted">Emergency contact</dt>
+      <dd class="col-sm-8">{{ application.emergency_contact_name or '—' }}{% if application.emergency_contact_phone %} · {{ application.emergency_contact_phone }}{% endif %}</dd>
+    </dl>
+    <p class="text-muted mb-0 mt-2">To change these details, contact HR — they are fixed after you submit the application.</p>
+  </div>
+</div>
+{% endif %}
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold">CV</div>
+  <div class="card-body">
+    {% if application.cv_path %}
+    <p class="small mb-2">Uploaded: <code>{{ application.cv_path }}</code></p>
+    <a href="{{ url_for('public_recruitment_site.applicant_application_cv_file', application_id=application.id) }}" class="btn btn-sm btn-primary" target="_blank" rel="noopener">Open CV</a>
+    {% else %}<p class="text-muted small mb-2">No CV on file.</p>{% endif %}
+    <form method="post" action="{{ url_for('public_recruitment_site.applicant_upload_cv', application_id=application.id) }}" enctype="multipart/form-data" class="mt-2">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      {# Native file+form-control inside flex/col-auto often gets zero hit-area on mobile Safari / in-app browsers — use a visible button that opens the picker. #}
+      <input type="file" id="applicant_cv_file" name="cv" class="d-none" accept=".pdf,.doc,.docx,application/pdf" required data-rec-filename-for="applicant_cv_fname">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="applicant_cv_pick" aria-label="Choose CV file to upload">Choose file</button>
+        <span class="small text-muted flex-grow-1" style="min-width: 8rem;" id="applicant_cv_fname">No file selected yet</span>
+        <button type="submit" class="btn btn-sm btn-outline-primary">Upload / replace CV</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-header fw-semibold">Policies &amp; handbook</div>
+  <div class="card-body">
+    {% if application.policies_acknowledged_at %}
+    <p class="small text-success mb-0">You confirmed you have read and agree to company policies (recorded for HR).</p>
+    {% elif application.contractor_id %}
+    <p class="small text-muted mb-0">You are already linked as an employee.</p>
+    {% else %}
+    <p class="small text-muted mb-2">Before an offer can be finalised, confirm you have read the relevant policies and handbook.</p>
+    <form method="post" action="{{ url_for('public_recruitment_site.applicant_policies_ack', application_id=application.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" value="1" id="polack" required>
+        <label class="form-check-label small" for="polack">I confirm I have read and agree to the employer&apos;s policies and handbook (or will complete any separate signing step if asked).</label>
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Submit confirmation</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if prehire_requests %}
+<h2 class="h6 text-uppercase text-muted">Documents requested by HR</h2>
+<div class="card shadow-sm mb-4">
+  <div class="card-body small">
+    <p class="text-muted">Upload each item here — you do <strong>not</strong> need an employee login. HR will review before you are added as staff.</p>
+    <ul class="list-group list-group-flush">
+      {% for r in prehire_requests %}
+      <li class="list-group-item px-0">
+        <div class="fw-medium">{{ r.title }}</div>
+        <div class="text-muted">{{ prehire_type_labels.get(r.request_type, r.request_type) }}</div>
+        {% if r.description %}<div class="mt-1">{{ r.description }}</div>{% endif %}
+        <div class="mt-2"><span class="badge bg-light text-dark border">{{ r.status }}</span>
+          {% if r.latest_file_path %}<code class="small ms-1">{{ r.latest_file_path }}</code>{% endif %}
+        </div>
+        {% if r.status == 'approved' %}
+        <p class="small text-success mb-0 mt-2">Approved by HR.</p>
+        {% elif r.status == 'rejected' %}
+        <p class="small text-danger mb-2 mt-2">Please upload again.</p>
+        {% endif %}
+        {% if r.request_type == 'policy_ack' %}
+          {% if r.status != 'approved' %}
+          <form method="post" class="mt-2" action="{{ url_for('public_recruitment_site.applicant_prehire_policy_ack', application_id=application.id, request_id=r.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">I confirm policies / handbook for this step</button>
+          </form>
+          {% endif %}
+        {% elif r.status != 'approved' %}
+        <form method="post" class="mt-2" enctype="multipart/form-data"
+              action="{{ url_for('public_recruitment_site.applicant_prehire_upload', application_id=application.id, request_id=r.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="file" id="prehire_file_{{ r.id }}" name="file" class="d-none" required
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.gif,application/pdf,image/*"
+            data-rec-filename-for="prehire_fname_{{ r.id }}">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary rec-prehire-pick" data-rec-target="prehire_file_{{ r.id }}" aria-label="Choose document file to upload">Choose file</button>
+            <span class="small text-muted flex-grow-1" style="min-width: 8rem;" id="prehire_fname_{{ r.id }}">No file selected yet</span>
+            <button type="submit" class="btn btn-sm btn-primary">Upload</button>
+          </div>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endif %}
+
+<h2 class="h6 text-uppercase text-muted">Surveys &amp; assessments</h2>
+{% if tasks %}
+<ul class="list-group shadow-sm mb-4">
+  {% for t in tasks %}
+  <li class="list-group-item d-flex justify-content-between align-items-center">
+    <div>
+      <div class="fw-medium">{{ t.template_name }}</div>
+      <div class="small text-muted">{{ t.template_purpose }}</div>
+    </div>
+    <div>
+      {% if t.status == 'completed' %}
+      <span class="badge bg-success">Completed</span>
+      {% else %}
+      <a class="btn btn-sm btn-primary" href="{{ url_for('public_recruitment_site.applicant_task', task_id=t.id) }}">Complete</a>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted small">No forms assigned yet.</p>
+{% endif %}
+
+{% if application.cover_note %}
+<div class="card"><div class="card-header small fw-semibold">Your cover note</div><div class="card-body small">{{ application.cover_note }}</div></div>
+{% endif %}
+<script>
+(function () {
+  function bindFilename(input) {
+    var sid = input.getAttribute('data-rec-filename-for');
+    if (!sid) return;
+    var out = document.getElementById(sid);
+    if (!out) return;
+    input.addEventListener('change', function () {
+      var f = input.files && input.files[0];
+      out.textContent = f ? f.name : 'No file selected yet';
+    });
+  }
+  document.querySelectorAll('input[type="file"][data-rec-filename-for]').forEach(bindFilename);
+  var cvPick = document.getElementById('applicant_cv_pick');
+  var cvInp = document.getElementById('applicant_cv_file');
+  if (cvPick && cvInp) cvPick.addEventListener('click', function () { cvInp.click(); });
+  document.querySelectorAll('button.rec-prehire-pick[data-rec-target]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-rec-target');
+      var inp = id && document.getElementById(id);
+      if (inp) inp.click();
+    });
+  });
+})();
+</script>
+{% endblock %}

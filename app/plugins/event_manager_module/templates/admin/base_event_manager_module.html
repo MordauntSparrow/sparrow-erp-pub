@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+{% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+<title>{{ _site.get('company_name') or 'Sparrow ERP' }}</title>
+
+<!-- MDB UI Kit -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+<!-- Bootstrap Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+<!-- Font Awesome -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+<style>
+/* ===== Theme-aware base ===== */
+body {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #121212;
+    color: #ffffff;
+  {% elif config.theme_settings.theme == 'modern' %}
+    background-color: #f0f2f5;
+    color: #212529;
+  {% else %}
+    background-color: #ffffff;
+    color: #212529;
+  {% endif %}
+}
+
+{% include 'partials/sparrow_admin_nav_styles.html' %}
+
+/* ===== Links ===== */
+a { 
+  {% if config.theme_settings.theme == 'dark' %} color: #1e90ff; {% else %} color: #007bff; {% endif %} 
+}
+a:hover { 
+  {% if config.theme_settings.theme == 'dark' %} color: #87ceeb; {% else %} color: #0056b3; {% endif %} 
+  text-decoration: none;
+}
+
+/* ===== List groups ===== */
+.list-group {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border-bottom: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border-bottom: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item:hover {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929;
+  {% else %}
+    background-color: #f8f9fa;
+  {% endif %}
+}
+
+/* ===== Buttons ===== */
+.btn-primary { background-color: {% if config.theme_settings.theme == 'dark' %} #1e90ff {% else %} #007bff {% endif %}; color: #fff; }
+.btn-danger { background-color: #dc3545; color: #fff; }
+.btn-warning { background-color: #ffc107; color: #212529; }
+.btn-secondary { background-color: #6c757d; color: #fff; }
+
+/* ===== Inputs (checkboxes/radios untouched) ===== */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.form-control:not([type="checkbox"]):not([type="radio"]) {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1f1f1f; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+
+/* ===== Modals ===== */
+.modal-content {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff;
+  {% else %}
+    background-color: #fff; color: #212529;
+  {% endif %}
+}
+.modal-header, .modal-footer {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929; color: #fff;
+  {% else %}
+    background-color: #f8f9fa; color: #212529;
+  {% endif %}
+}
+
+/* ===== Cards ===== */
+.card {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  {% endif %}
+}
+
+/* Footer separation */
+.footer { {% if config.theme_settings.theme != 'dark' %} border-top: 1px solid rgba(0,0,0,.06); {% endif %} }
+</style>
+{% include 'partials/sparrow_csrf_head.html' %}
+</head>
+<body>
+
+{% include 'partials/sparrow_admin_top_nav.html' %}
+<nav class="nav-module border-bottom py-2 px-3" style="{% if config.theme_settings.theme == 'dark' %}background:#1a1a1a;border-color:#333!important{% else %}background:#f8f9fa;border-color:#dee2e6!important{% endif %}">
+  <div class="container-fluid px-3">
+    <div class="d-flex flex-wrap align-items-center gap-1">
+      <a class="nav-link {% if request.endpoint == 'internal_event_manager.events_list' %}active{% endif %}" href="{{ url_for('internal_event_manager.events_list') }}">
+        <i class="bi bi-calendar-event me-1"></i> Events
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Page Content -->
+<main class="container-fluid">{% block content %}{% endblock %}</main>
+
+<!-- Footer -->
+<footer class="footer text-center py-3 mt-4">
+<div class="container">
+  <div class="row gy-2 align-items-center">
+    <div class="col-12 col-md-6 order-2 order-md-1"><p class="mb-0">&copy; {{ current_year }} {{ _site.get('company_name') or 'Sparrow ERP' }}.</p></div>
+    <div class="col-12 col-md-6 order-1 order-md-2"><p class="mb-0">Powered by <strong>Sparrow ERP</strong></p></div>
+  </div>
+</div>
+</footer>
+
+<!-- MDB JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+<script>
+// Auto-collapse menu on mobile link click
+document.addEventListener('click', function(e){
+  const target = e.target.closest('.navbar .nav-link, .navbar .dropdown-item');
+  if(!target) return;
+  const navbarCollapse = document.getElementById('navbarNav');
+  const toggler = document.querySelector('.navbar-toggler');
+  if(navbarCollapse && toggler && window.getComputedStyle(toggler).display !== 'none'){
+    const collapseInstance = mdb.Collapse.getInstance(navbarCollapse) || new mdb.Collapse(navbarCollapse);
+    collapseInstance.hide();
+  }
+}, false);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../Cura"
+		},
+		{
+			"path": "../../Ventus MDT"
+		}
+	],
+	"settings": {}
+}

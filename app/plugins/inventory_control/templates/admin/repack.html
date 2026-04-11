@@ -1,0 +1,186 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Repack / Split — Inventory Control{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <h1 class="h3 mb-4">Repack / Split Batch</h1>
+  <p class="text-muted">Split one source batch into multiple new batches. Enter quantity (and optional weight) per output batch.</p>
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <form id="repack-form">
+        <div class="row mb-3">
+          <label class="form-label col-sm-2">Source batch</label>
+          <div class="col-sm-4">
+            <select class="form-select" id="source_batch_id" name="source_batch_id" required>
+              <option value="">— Select batch —</option>
+            </select>
+            <small class="text-muted" id="source-batch-info"></small>
+          </div>
+        </div>
+        <div class="row mb-3">
+          <label class="form-label col-sm-2">Location</label>
+          <div class="col-sm-4">
+            <select class="form-select" id="location_id" name="location_id" required>
+              <option value="">— Select location —</option>
+            </select>
+          </div>
+        </div>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <label class="form-label mb-0">Output batches</label>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="add-output">+ Add row</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Quantity *</th>
+                  <th>Weight</th>
+                  <th>Weight UOM</th>
+                  <th>Batch number</th>
+                  <th>Lot number</th>
+                  <th>Unit weight</th>
+                  <th>Unit weight UOM</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="outputs-tbody">
+                <tr class="output-row">
+                  <td><input type="number" class="form-control form-control-sm output-qty" step="any" min="0.000001" required placeholder="Qty" /></td>
+                  <td><input type="number" class="form-control form-control-sm output-weight" step="any" min="0" placeholder="—" /></td>
+                  <td><input type="text" class="form-control form-control-sm output-weight-uom" placeholder="kg" maxlength="32" /></td>
+                  <td><input type="text" class="form-control form-control-sm output-batch-number" placeholder="—" /></td>
+                  <td><input type="text" class="form-control form-control-sm output-lot-number" placeholder="—" /></td>
+                  <td><input type="number" class="form-control form-control-sm output-unit-weight" step="any" min="0" placeholder="—" /></td>
+                  <td><input type="text" class="form-control form-control-sm output-unit-weight-uom" placeholder="—" maxlength="32" /></td>
+                  <td><button type="button" class="btn btn-sm btn-outline-danger remove-output" title="Remove row">×</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="repack-message" class="mb-2"></div>
+        <button type="submit" class="btn btn-primary" id="submit-repack">Run repack</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  const base = '/plugin/inventory_control';
+  const sourceSelect = document.getElementById('source_batch_id');
+  const locationSelect = document.getElementById('location_id');
+  const tbody = document.getElementById('outputs-tbody');
+  const form = document.getElementById('repack-form');
+  const msgEl = document.getElementById('repack-message');
+  const submitBtn = document.getElementById('submit-repack');
+
+  function showMsg(text, isError) {
+    msgEl.textContent = text || '';
+    msgEl.className = isError ? 'text-danger' : 'text-success';
+  }
+
+  function addOutputRow() {
+    const tr = document.createElement('tr');
+    tr.className = 'output-row';
+    tr.innerHTML = '<td><input type="number" class="form-control form-control-sm output-qty" step="any" min="0.000001" required placeholder="Qty" /></td>' +
+      '<td><input type="number" class="form-control form-control-sm output-weight" step="any" min="0" placeholder="—" /></td>' +
+      '<td><input type="text" class="form-control form-control-sm output-weight-uom" placeholder="kg" maxlength="32" /></td>' +
+      '<td><input type="text" class="form-control form-control-sm output-batch-number" placeholder="—" /></td>' +
+      '<td><input type="text" class="form-control form-control-sm output-lot-number" placeholder="—" /></td>' +
+      '<td><input type="number" class="form-control form-control-sm output-unit-weight" step="any" min="0" placeholder="—" /></td>' +
+      '<td><input type="text" class="form-control form-control-sm output-unit-weight-uom" placeholder="—" maxlength="32" /></td>' +
+      '<td><button type="button" class="btn btn-sm btn-outline-danger remove-output" title="Remove row">×</button></td>';
+    tbody.appendChild(tr);
+    tr.querySelector('.remove-output').onclick = function() { tr.remove(); };
+  }
+
+  document.getElementById('add-output').onclick = addOutputRow;
+  tbody.querySelector('.remove-output').onclick = function() {
+    if (tbody.querySelectorAll('.output-row').length > 1) this.closest('tr').remove();
+  };
+
+  Promise.all([
+    fetch(base + '/api/batches?limit=500', { credentials: 'same-origin' }).then(r => r.json()),
+    fetch(base + '/api/locations', { credentials: 'same-origin' }).then(r => r.json())
+  ]).then(([batchData, locData]) => {
+    const batches = batchData.batches || [];
+    const locations = locData.locations || [];
+    batches.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = (b.batch_number || b.lot_number || 'Batch #' + b.id) + ' (Item ' + (b.item_id || '') + ', Qty ' + (b.quantity != null ? b.quantity : '—') + ')';
+      sourceSelect.appendChild(opt);
+    });
+    locations.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = (l.code || l.name || '') + ' — ' + (l.name || l.code || 'Location #' + l.id);
+      locationSelect.appendChild(opt);
+    });
+  }).catch(() => showMsg('Error loading batches/locations', true));
+
+  sourceSelect.addEventListener('change', function() {
+    const batchId = this.value;
+    const info = document.getElementById('source-batch-info');
+    if (!batchId) { info.textContent = ''; return; }
+    fetch(base + '/api/batches/' + batchId, { credentials: 'same-origin' }).then(r => r.json()).then(b => {
+      info.textContent = b.item_id ? 'Item ID ' + b.item_id + ', quantity ' + (b.quantity != null ? b.quantity : '—') : '';
+    }).catch(() => { info.textContent = ''; });
+  });
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const outputs = [];
+    tbody.querySelectorAll('.output-row').forEach(tr => {
+      const qty = parseFloat(tr.querySelector('.output-qty').value);
+      if (isNaN(qty) || qty <= 0) return;
+      const out = { quantity: qty };
+      const w = tr.querySelector('.output-weight').value;
+      if (w !== '' && !isNaN(parseFloat(w))) out.weight = parseFloat(w);
+      const wu = tr.querySelector('.output-weight-uom').value.trim();
+      if (wu) out.weight_uom = wu;
+      const bn = tr.querySelector('.output-batch-number').value.trim();
+      if (bn) out.batch_number = bn;
+      const ln = tr.querySelector('.output-lot-number').value.trim();
+      if (ln) out.lot_number = ln;
+      const uw = tr.querySelector('.output-unit-weight').value;
+      if (uw !== '' && !isNaN(parseFloat(uw))) out.unit_weight = parseFloat(uw);
+      const uwu = tr.querySelector('.output-unit-weight-uom').value.trim();
+      if (uwu) out.unit_weight_uom = uwu;
+      outputs.push(out);
+    });
+    if (outputs.length === 0) {
+      showMsg('Add at least one output with a positive quantity.', true);
+      return;
+    }
+    const payload = {
+      source_batch_id: parseInt(sourceSelect.value, 10),
+      location_id: parseInt(locationSelect.value, 10),
+      outputs: outputs
+    };
+    submitBtn.disabled = true;
+    showMsg('Submitting…');
+    fetch(base + '/api/repack', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(data => {
+      submitBtn.disabled = false;
+      if (data.error) {
+        showMsg(data.error, true);
+        return;
+      }
+      showMsg('Repack completed. Repack ID: ' + (data.repack_id || '—'));
+      form.reset();
+      tbody.innerHTML = '';
+      addOutputRow();
+    }).catch(err => {
+      submitBtn.disabled = false;
+      showMsg('Request failed: ' + err.message, true);
+    });
+  });
+})();
+</script>
+{% endblock %}

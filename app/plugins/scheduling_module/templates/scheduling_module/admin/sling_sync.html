@@ -1,0 +1,124 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Sling Sync{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h3 mb-1">Sling Sync</h1>
+    <p class="text-muted small mb-0">Sync Sling published shifts into ERP for clock-in/out and timesheets.</p>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-body">
+        <h5 class="card-title mb-2">Sling credentials</h5>
+        {% if credentials_saved %}
+          <div class="alert alert-success py-2 small mb-3" role="alert">
+            Sling credentials are stored.
+          </div>
+        {% else %}
+          <div class="alert alert-info py-2 small mb-3" role="alert">
+            No Sling credentials stored yet.
+          </div>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_credentials') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label">Sling email</label>
+          <input type="email" name="email" class="form-control form-control-sm mb-3" required value="{{ stored_email or '' }}" placeholder="you@example.com" />
+
+          <label class="form-label">Sling password</label>
+          <input type="password" name="password" class="form-control form-control-sm mb-3" required />
+
+          <button type="submit" class="btn btn-primary btn-sm w-100">
+            <i class="bi bi-save me-1"></i> Save credentials
+          </button>
+        </form>
+
+        <p class="text-muted small mt-3 mb-0">
+          Credentials are stored encrypted on the server.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
+      <div class="card-body">
+        <h5 class="card-title mb-2">Sync defaults</h5>
+
+        <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_settings') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label">Default job type</label>
+          <select name="default_job_type_id" class="form-select form-select-sm mb-3" required>
+            <option value="">Select…</option>
+            {% for jt in job_types %}
+              <option value="{{ jt.id }}" {% if jt.id == default_job_type_id %}selected{% endif %}>
+                {{ jt.name }}
+              </option>
+            {% endfor %}
+          </select>
+
+          <div class="alert alert-info py-2 small mb-3" role="alert">
+            <strong>Client import:</strong> on Sling free plan we don’t get structured `location/client`,
+            so shifts are imported under the placeholder client <code>Sling Unmapped</code>. You’ll remap
+            clients/sites on the ERP side after import.
+          </div>
+
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="cancel_missing" id="slingCancelMissing" value="1" {% if cancel_missing %}checked{% endif %}>
+            <label class="form-check-label" for="slingCancelMissing">
+              Cancel ERP shifts if they disappear from Sling (within the sync date range)
+            </label>
+          </div>
+
+          <button type="submit" class="btn btn-success btn-sm w-100">
+            <i class="bi bi-gear me-1"></i> Save settings
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0 mt-3">
+  <div class="card-body">
+    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+      <h5 class="card-title mb-0">Run sync</h5>
+    </div>
+
+    <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_run') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-3">
+        <div class="col-12 col-md-6">
+          <label class="form-label">Date from</label>
+          <input type="date" name="date_from" class="form-control form-control-sm" required value="{{ date_from }}" />
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label">Date to</label>
+          <input type="date" name="date_to" class="form-control form-control-sm" required value="{{ date_to }}" />
+        </div>
+      </div>
+
+      <div class="form-check mt-3">
+        <input class="form-check-input" type="checkbox" name="dry_run" id="slingDryRun" value="1">
+        <label class="form-check-label" for="slingDryRun">
+          Dry run (no database changes)
+        </label>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-sm mt-3 w-100">
+        <i class="bi bi-arrow-repeat me-1"></i> Sync from Sling
+      </button>
+
+      <p class="text-muted small mt-3 mb-0">
+        This sync creates/updates `schedule_shifts` as <strong>published</strong> so contractors can clock-in/out in ERP.
+      </p>
+    </form>
+  </div>
+</div>
+
+{# no client/site mapping UI on Sling free plan #}
+{% endblock %}
+

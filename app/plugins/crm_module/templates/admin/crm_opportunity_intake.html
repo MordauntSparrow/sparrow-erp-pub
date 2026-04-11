@@ -1,0 +1,124 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Call / desk intake{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.opportunities_list') }}" class="text-decoration-none">Opportunities</a></li>
+<li class="breadcrumb-item active" aria-current="page">Intake</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 920px;">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <p class="text-muted small text-uppercase fw-semibold mb-1">Pipeline</p>
+      <h1 class="h4 mb-0"><i class="bi bi-telephone me-2 text-primary"></i>Call / desk intake</h1>
+      <p class="text-muted small mb-0 mt-1">Same fields as the public event guide — creates an account (if needed), contact, and opportunity. Use for early discussion; formal medical needs assessment and plan still precede binding quotes.</p>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Board</a>
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_list') }}">List</a>
+    </div>
+  </div>
+
+  {% if not can_edit %}
+  <div class="alert alert-warning">You have read-only CRM access; intake is not available.</div>
+  {% else %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="mb-4">
+        {% with theme='admin' %}
+        {% include 'partials/crm_medical_planning_process.html' %}
+        {% endwith %}
+      </div>
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-3 mb-3 pb-3 border-bottom">
+          <div class="col-md-6">
+            <label class="form-label" for="account_id">Attach to account <span class="text-muted small">(optional — otherwise we create from organisation name)</span></label>
+            <select class="form-select" id="account_id" name="account_id">
+              <option value="">— New or match by organisation below —</option>
+              {% for a in accounts %}
+              <option value="{{ a.id }}">{{ a.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="stage">Initial stage</label>
+            <select class="form-select" id="stage" name="stage">
+              {% for val, label in stages %}
+              <option value="{{ val }}" {% if val == 'prospecting' %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <h2 class="h6 text-uppercase text-muted mb-3">Event &amp; contact</h2>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
+            <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="contact_name">Caller / contact name <span class="text-danger">*</span></label>
+            <input class="form-control" id="contact_name" name="contact_name" required maxlength="255">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+            <input class="form-control" type="email" id="email" name="email" required maxlength="255">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="phone">Phone</label>
+            <input class="form-control" id="phone" name="phone" maxlength="64">
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
+            <input class="form-control" id="event_name" name="event_name" required maxlength="255">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="expected_attendees">Expected peak attendance</label>
+            <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees" value="">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="duration_hours">Hours on site</label>
+            <input class="form-control" type="number" min="1" max="36" step="0.5" id="duration_hours" name="duration_hours" value="6">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="venue_type">Venue</label>
+            <select class="form-select" id="venue_type" name="venue_type">
+              <option value="indoor" selected>Indoor</option>
+              <option value="outdoor">Outdoor</option>
+              <option value="both">Mixed indoor / outdoor</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="crowd_profile">Crowd profile</label>
+            <select class="form-select" id="crowd_profile" name="crowd_profile">
+              <option value="family">Family / daytime</option>
+              <option value="mixed" selected>Mixed general public</option>
+              <option value="young_adult">Young adult / evening-led</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes">
+              <label class="form-check-label" for="alcohol_served">Alcohol served on site</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="late_finish" name="late_finish" value="yes">
+              <label class="form-check-label" for="late_finish">Programme runs past 23:00</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="message">Notes</label>
+            <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000"></textarea>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-4">
+          <button type="submit" class="btn btn-primary rounded-pill">Create opportunity</button>
+          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

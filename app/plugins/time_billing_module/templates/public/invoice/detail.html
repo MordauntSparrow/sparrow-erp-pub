@@ -1,0 +1,126 @@
+{% extends "public/base_timesheet_billing_module.html" %}
+{% block title %}Invoice {{ invoice.invoice_number }}{% endblock %}
+{% block content %}
+<style>
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
+    main.container { max-width: 100% !important; }
+  }
+</style>
+<div class="no-print d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <a href="{{ url_for('public_time_billing.public_invoices_list_page') }}" class="text-decoration-none">&larr; All invoices</a>
+    <h3 class="mb-0 mt-2">Invoice {{ invoice.invoice_number }}</h3>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <button type="button" class="btn btn-outline-secondary" onclick="window.print()">Print</button>
+    <a class="btn btn-primary" href="{{ url_for('public_time_billing.public_invoice_pdf_download', invoice_id=invoice.id) }}">Download PDF</a>
+    {% if invoice.invoice_weeks and invoice.invoice_weeks|length > 1 %}
+    <span class="dropdown">
+      <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Timesheet weeks</button>
+      <ul class="dropdown-menu">
+        {% for w in invoice.invoice_weeks %}
+        <li><a class="dropdown-item" href="{{ url_for('public_time_billing.public_week_page', week_id=w.week_code) }}">Week {{ w.week_code }} ({{ w.week_ending }})</a></li>
+        {% endfor %}
+      </ul>
+    </span>
+    {% else %}
+    <a class="btn btn-outline-primary" href="{{ url_for('public_time_billing.public_week_page', week_id=invoice.timesheet_week_code) }}">Open timesheet week</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if invoice.status == 'draft' and invoice.timesheet_status == 'approved' %}
+<div class="no-print alert alert-warning small mb-3 d-flex flex-wrap align-items-center gap-2">
+  <span>This invoice is still a <strong>draft</strong> while your timesheet is already approved — finalize it to mark it sent (or use the button on the timesheet week).</span>
+  <form method="post" action="{{ url_for('public_time_billing.public_week_invoice_finalize', week_id=invoice.timesheet_week_code) }}" class="mb-0">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-sm btn-warning">Finalize invoice</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row g-2 small">
+      <div class="col-md-4">
+        <strong>Timesheet week{% if invoice.invoice_weeks and invoice.invoice_weeks|length > 1 %}s{% endif %} (ISO)</strong><br>
+        {% if invoice.invoice_weeks and invoice.invoice_weeks|length > 1 %}
+        <ul class="list-unstyled mb-0">
+          {% for w in invoice.invoice_weeks %}
+          <li><a href="{{ url_for('public_time_billing.public_week_page', week_id=w.week_code) }}" class="fw-semibold">{{ w.week_code }}</a>
+            <span class="text-muted">· {{ w.week_ending }}</span></li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <a href="{{ url_for('public_time_billing.public_week_page', week_id=invoice.timesheet_week_code) }}" class="fs-5 fw-semibold">{{ invoice.timesheet_week_code }}</a>
+        <div class="text-muted">Week ending {{ invoice.week_ending }}</div>
+        {% endif %}
+      </div>
+      <div class="col-md-4"><strong>Timesheet status</strong><br>
+        <span class="badge {% if invoice.timesheet_status == 'approved' %}bg-success{% elif invoice.timesheet_status == 'rejected' %}bg-danger{% elif invoice.timesheet_status == 'invoiced' %}bg-success{% else %}bg-secondary{% endif %}">{{ invoice.timesheet_status }}</span>
+        {% if invoice.timesheet_status == 'rejected' and invoice.rejection_reason %}
+        <div class="text-danger mt-1">{{ invoice.rejection_reason }}</div>
+        {% endif %}
+      </div>
+      <div class="col-md-4"><strong>Invoice status</strong><br>
+        <span class="badge {% if invoice.status == 'sent' %}bg-primary{% elif invoice.status == 'draft' %}bg-secondary{% else %}bg-dark{% endif %}">{{ invoice.status }}</span>
+        {% if invoice.void_reason %}<div class="text-muted mt-1">Void: {{ invoice.void_reason }}</div>{% endif %}
+      </div>
+    </div>
+    <p class="mb-0 mt-3 fs-5"><strong>Total</strong> £{{ '%.2f' % (invoice.total_amount or 0) }}</p>
+  </div>
+</div>
+
+{% if invoice.history and invoice.history|length > 1 %}
+<div class="card mb-3">
+  <div class="card-header py-2"><strong>Version history</strong> <span class="text-muted small">(this week)</span></div>
+  <ul class="list-group list-group-flush small">
+    {% for h in invoice.history %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <span>#{{ h.invoice_number }} — {{ h.status }}{% if h.void_reason %} — {{ h.void_reason }}{% endif %}</span>
+      <span class="text-muted">{{ h.created_at }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <strong>Line items</strong>
+    <span class="small text-muted">Lines tagged by ISO week where relevant.</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Timesheet</th>
+          <th>Client</th>
+          <th>Site</th>
+          <th>Job</th>
+          <th class="text-end">Hrs</th>
+          <th class="text-end">Pay</th>
+          <th class="text-end">Travel</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in invoice.lines %}
+        <tr>
+          <td>{{ line.work_date }}</td>
+          <td class="text-nowrap"><a href="{{ url_for('public_time_billing.public_week_page', week_id=line.timesheet_week_code or invoice.timesheet_week_code) }}">{{ line.timesheet_week_code or invoice.timesheet_week_code }}</a></td>
+          <td>{{ line.client_name or '—' }}</td>
+          <td>{{ line.site_name or '—' }}</td>
+          <td>{{ line.job_type_name or '—' }}</td>
+          <td class="text-end">{{ '%.2f' % (line.actual_hours or 0) }}</td>
+          <td class="text-end">£{{ '%.2f' % (line.pay or 0) }}</td>
+          <td class="text-end">£{{ '%.2f' % (line.travel_parking or 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

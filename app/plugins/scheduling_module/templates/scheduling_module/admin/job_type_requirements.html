@@ -1,0 +1,68 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Job type requirements – Scheduling{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Job type requirements</h1>
+    <p class="text-muted small mb-0">Required skills and qualifications per position. Used to validate open shift claims. Matching is case-insensitive. Contractor data is read from crew profiles.</p>
+  </div>
+  <a href="{{ url_for('internal_scheduling.admin_index') }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body p-0">
+    {% if job_types %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0 job-req-table">
+        <thead class="table-light">
+          <tr>
+            <th class="job-req-col-type">Job type</th>
+            <th class="job-req-col-position">Position</th>
+            <th class="job-req-col-reqs">Required skills & qualifications</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for jt in job_types %}
+          {% set r = reqs.get(jt.id, {}) %}
+          <tr>
+            <td class="job-req-type">
+              <span class="fw-semibold text-body">{{ jt.code or jt.id }}</span>
+            </td>
+            <td class="job-req-position text-secondary">{{ jt.name or '—' }}</td>
+            <td class="p-2">
+              <form method="post" action="{{ url_for('internal_scheduling.admin_job_type_requirements_save', job_type_id=jt.id) }}" class="d-flex flex-wrap gap-2 align-items-center">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="text" name="skills" class="form-control form-control-sm job-req-input" value="{{ (r.skills or [])|join(', ') if r else '' }}"  aria-label="Required skills for {{ jt.name }}">
+                <input type="text" name="qualifications" class="form-control form-control-sm job-req-input" value="{{ (r.qualifications or [])|join(', ') if r else '' }}"  aria-label="Required qualifications for {{ jt.name }}">
+                <div class="d-flex gap-1">
+                  <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                  <button type="submit" name="clear" value="1" class="btn btn-outline-secondary btn-sm">Clear</button>
+                </div>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer bg-transparent border-top small text-muted">
+      Comma-separated values per field.
+    </div>
+    {% else %}
+    <div class="card-body">
+      <p class="text-muted mb-0">No job types found.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+<style>
+.job-req-table { font-size: 0.9375rem; }
+.job-req-col-type { width: 10%; min-width: 80px; }
+.job-req-col-position { width: 18%; min-width: 120px; }
+.job-req-col-skills { width: 28%; }
+.job-req-col-qual { width: 28%; }
+.job-req-col-actions { width: 16%; min-width: 140px; }
+.job-req-form { display: contents; }
+.job-req-form input.form-control { width: 100%; }
+</style>
+{% endblock %}

@@ -1,0 +1,310 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+    <div>
+      <h1 class="h4 mb-1"><i class="bi bi-calendar2-check text-primary me-2"></i>Staffing overview</h1>
+      <p class="text-muted small mb-0">Run sheets in the next few days vs positions to cover (Cura expected roster when linked, otherwise at least one crew). <strong>Labour (planning)</strong> uses median wage-card rates among active contractors for that job type, run-sheet window hours (or 8h default), and any posted shift pay. Figures are indicative only.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <label class="small text-muted mb-0">Ahead (days)</label>
+      <input type="number" class="form-control form-control-sm" id="inpDays" value="14" min="1" max="90" style="width:4.5rem">
+      <label class="small text-muted mb-0">Urgent ≤</label>
+      <input type="number" class="form-control form-control-sm" id="inpUrgent" value="3" min="0" max="14" style="width:4rem" title="Days from today to flag as urgent">
+      <label class="small text-muted mb-0">Past</label>
+      <input type="number" class="form-control form-control-sm" id="inpPast" value="0" min="0" max="14" style="width:4rem" title="Include past days for overdue gaps">
+      <button type="button" class="btn btn-primary btn-sm" id="btnRefresh"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.runsheets_page') }}"><i class="bi bi-clipboard2-check me-1"></i>Runsheets list</a>
+    </div>
+  </div>
+
+  <div id="loadErr" class="alert alert-danger d-none"></div>
+
+  <div id="kpiRow" class="row g-3 mb-4 d-none">
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Run sheets</div>
+          <div class="fs-4 fw-semibold" id="kpiSheets">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Positions required</div>
+          <div class="fs-4 fw-semibold" id="kpiReq">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Filled (vs req.)</div>
+          <div class="fs-4 fw-semibold text-success" id="kpiFilled">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100" id="kpiGapCard">
+        <div class="card-body py-3">
+          <div class="text-muted small">Gap (uncovered)</div>
+          <div class="fs-4 fw-semibold" id="kpiGap">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="text-muted small">Events with gap</div>
+          <div class="fs-4 fw-semibold" id="kpiEventsGap">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-2">
+      <div class="card border-0 shadow-sm h-100" id="kpiUrgentCard">
+        <div class="card-body py-3">
+          <div class="text-muted small">Urgent gaps</div>
+          <div class="fs-4 fw-semibold" id="kpiUrgent">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-transparent py-2 d-flex justify-content-between align-items-center">
+          <strong><i class="bi bi-exclamation-triangle text-warning me-2"></i>Pressing — uncovered positions</strong>
+          <span class="small text-muted" id="gapHint"></span>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Date</th>
+                  <th>Event / client</th>
+                  <th class="text-center">Req.</th>
+                  <th class="text-center">Assigned</th>
+                  <th class="text-center">Gap</th>
+                  <th>Pay</th>
+                  <th>Labour (planning)</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="gapBody">
+                <tr><td colspan="8" class="text-center text-muted py-4">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-transparent py-2"><strong><i class="bi bi-calendar3 me-2"></i>By day</strong></div>
+        <div class="card-body py-2" id="byDayBody" style="max-height:280px;overflow-y:auto"></div>
+      </div>
+      <div class="card border-0 shadow-sm">
+        <div class="card-header bg-transparent py-2"><strong><i class="bi bi-link-45deg me-2"></i>Upcoming Cura-linked events</strong></div>
+        <div class="card-body py-2 small" id="curaBody" style="max-height:220px;overflow-y:auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Uplift modal -->
+<div class="modal fade" id="upliftModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Apply pay uplift</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted">Sets shift pay on this run sheet to attract crew (hourly or flat day). Does not change assignments.</p>
+        <input type="hidden" id="upliftRsId" value="">
+        <div class="mb-2">
+          <label class="form-label small">Model</label>
+          <select class="form-select form-select-sm" id="upliftModel">
+            <option value="hourly">Hourly rate</option>
+            <option value="day">Day flat rate</option>
+          </select>
+        </div>
+        <div class="mb-0">
+          <label class="form-label small">Rate (£)</label>
+          <input type="number" class="form-control form-control-sm" id="upliftRate" step="0.01" min="0" placeholder="e.g. 22.50">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="upliftSave">Save uplift</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+(function () {
+  const API = "{{ url_for('internal_time_billing.api_runsheets_staffing_overview') }}";
+  const UPLIFT_TMPL = "{{ url_for('internal_time_billing.api_runsheet_scheduler_uplift', rs_id=999999) }}";
+  const EDIT_PAGE = "{{ url_for('internal_time_billing.runsheets_edit_page') }}";
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  async function load() {
+    document.getElementById('loadErr').classList.add('d-none');
+    const days = parseInt(document.getElementById('inpDays').value, 10) || 14;
+    const urgent = parseInt(document.getElementById('inpUrgent').value, 10);
+    const past = parseInt(document.getElementById('inpPast').value, 10) || 0;
+    const p = new URLSearchParams({ days: String(days), urgent_days: String(isNaN(urgent) ? 3 : urgent), past: String(past) });
+    try {
+      const r = await fetch(API + '?' + p.toString());
+      if (!r.ok) throw new Error('Failed to load overview');
+      const data = await r.json();
+      render(data);
+    } catch (e) {
+      document.getElementById('loadErr').textContent = e.message || String(e);
+      document.getElementById('loadErr').classList.remove('d-none');
+    }
+  }
+
+  function render(data) {
+    const k = data.kpis || {};
+    document.getElementById('kpiRow').classList.remove('d-none');
+    document.getElementById('kpiSheets').textContent = k.runsheet_count != null ? k.runsheet_count : '0';
+    document.getElementById('kpiReq').textContent = k.positions_required_total != null ? k.positions_required_total : '0';
+    document.getElementById('kpiFilled').textContent = k.positions_filled_total != null ? k.positions_filled_total : '0';
+    const gap = k.positions_gap_total != null ? k.positions_gap_total : 0;
+    document.getElementById('kpiGap').textContent = gap;
+    document.getElementById('kpiGapCard').classList.toggle('border-warning', gap > 0);
+    document.getElementById('kpiGapCard').classList.toggle('border-2', gap > 0);
+    document.getElementById('kpiEventsGap').textContent = k.events_with_gap != null ? k.events_with_gap : '0';
+    const ug = k.urgent_gap_events != null ? k.urgent_gap_events : 0;
+    document.getElementById('kpiUrgent').textContent = ug;
+    document.getElementById('kpiUrgentCard').classList.toggle('border-danger', ug > 0);
+    document.getElementById('kpiUrgentCard').classList.toggle('border-2', ug > 0);
+
+    const w = data.window || {};
+    document.getElementById('gapHint').textContent = (w.from_date || '') + ' → ' + (w.to_date || '');
+
+    const gaps = data.gaps || [];
+    const tb = document.getElementById('gapBody');
+    tb.innerHTML = '';
+    if (!gaps.length) {
+      tb.innerHTML = '<tr><td colspan="8" class="text-center text-success py-4">No coverage gaps in this window.</td></tr>';
+    } else {
+      gaps.forEach(g => {
+        const tr = document.createElement('tr');
+        if (g.is_urgent) tr.classList.add('table-warning');
+        if (g.is_past_gap) tr.classList.add('table-danger');
+        const pay = (g.shift_pay_model || 'inherit') + (g.shift_pay_rate != null && g.shift_pay_rate !== '' ? ' · £' + g.shift_pay_rate : '');
+        const cura = g.cura_event_name ? '<div class="small text-muted">' + esc(g.cura_event_name) + '</div>' : '';
+        const L = g.labour || {};
+        const wc = L.wage_card || {};
+        let labourHtml = '<span class="text-muted">—</span>';
+        if (L.hours_estimated != null) {
+          const basis = L.hours_basis === 'window' ? 'from window' : 'default 8h';
+          const lines = (L.summary_lines || []).map(t => '<div class="mb-1">' + esc(t) + '</div>').join('');
+          const band = wc.n > 0
+            ? `<div class="text-muted" style="font-size:0.72rem">~${esc(String(L.hours_estimated))}h (${esc(basis)}); card band £${esc(String(wc.min_gbp_per_h))}–£${esc(String(wc.max_gbp_per_h))}/h (n=${esc(String(wc.n))})</div>`
+            : `<div class="text-muted" style="font-size:0.72rem">~${esc(String(L.hours_estimated))}h (${esc(basis)})</div>`;
+          const enh = (L.posted && L.posted.is_enhanced) ? '<div class="mt-1"><span class="badge bg-info text-dark">Posted above typical band</span></div>' : '';
+          labourHtml = `<div class="small" style="max-width:22rem">${lines}${band}${enh}<div class="text-muted mt-1" style="font-size:0.68rem">${esc(L.disclaimer || '')}</div></div>`;
+        }
+        tr.innerHTML = `
+          <td>${esc(g.work_date)}${g.is_urgent ? ' <span class="badge bg-warning text-dark">Urgent</span>' : ''}</td>
+          <td><div>${esc(g.title || '')}</div>${cura}<div class="small"><span class="badge" style="background:${g.job_type_colour_hex || '#6c757d'};color:#fff">${esc(g.job_type_name || '')}</span></div></td>
+          <td class="text-center">${g.required_positions}</td>
+          <td class="text-center">${g.assigned_count}</td>
+          <td class="text-center fw-semibold text-danger">${g.gap}</td>
+          <td class="small">${esc(pay)}</td>
+          <td class="small align-top">${labourHtml}</td>
+          <td class="text-end text-nowrap align-top">
+            <a class="btn btn-sm btn-outline-primary" href="${EDIT_PAGE}#edit-${g.runsheet_id}">Edit</a>
+            <button type="button" class="btn btn-sm btn-outline-success js-uplift" data-id="${g.runsheet_id}">Uplift</button>
+          </td>`;
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('.js-uplift').forEach(btn => {
+        btn.addEventListener('click', () => openUplift(parseInt(btn.dataset.id, 10)));
+      });
+    }
+
+    const byDay = data.by_date || [];
+    const bd = document.getElementById('byDayBody');
+    bd.innerHTML = '';
+    if (!byDay.length) {
+      bd.innerHTML = '<p class="text-muted mb-0">No data.</p>';
+    } else {
+      byDay.forEach(d => {
+        const gap = d.gap_positions || 0;
+        const row = document.createElement('div');
+        row.className = 'd-flex justify-content-between align-items-center py-1 border-bottom';
+        row.innerHTML = `<span>${esc(d.work_date)} <span class="text-muted">(${d.runsheet_count} sheets)</span></span>
+          <span>${gap > 0 ? '<span class="badge bg-warning text-dark">' + gap + ' open</span>' : '<span class="text-success small">OK</span>'}</span>`;
+        bd.appendChild(row);
+      });
+    }
+
+    const cura = data.upcoming_cura_events || [];
+    const cb = document.getElementById('curaBody');
+    cb.innerHTML = '';
+    if (!cura.length) {
+      cb.innerHTML = '<p class="text-muted mb-0">No Cura-linked run sheets in the upcoming slice, or Medical Records not installed.</p>';
+    } else {
+      cura.forEach(c => {
+        const el = document.createElement('div');
+        el.className = 'mb-2 pb-2 border-bottom';
+        const short = (c.required_positions > c.assigned_count)
+          ? '<span class="text-danger">' + c.assigned_count + '/' + c.required_positions + ' crew</span>'
+          : '<span class="text-success">' + c.assigned_count + '/' + c.required_positions + ' crew</span>';
+        el.innerHTML = `<div class="fw-semibold">${esc(c.cura_event_name)}</div>
+          <div class="text-muted">${esc(c.work_date)} · ${short}
+          <a href="${EDIT_PAGE}#edit-${c.runsheet_id}" class="ms-1">Edit</a></div>`;
+        cb.appendChild(el);
+      });
+    }
+  }
+
+  let upliftModal = null;
+  function openUplift(rsId) {
+    document.getElementById('upliftRsId').value = String(rsId);
+    document.getElementById('upliftRate').value = '';
+    if (typeof mdb !== 'undefined') {
+      const el = document.getElementById('upliftModal');
+      upliftModal = upliftModal || new mdb.Modal(el);
+      upliftModal.show();
+    } else alert('Modal unavailable');
+  }
+
+  document.getElementById('upliftSave').addEventListener('click', async () => {
+    const rsId = document.getElementById('upliftRsId').value;
+    const model = document.getElementById('upliftModel').value;
+    const rate = parseFloat(document.getElementById('upliftRate').value);
+    if (!rsId || !Number.isFinite(rate)) { alert('Enter a valid rate'); return; }
+    const url = UPLIFT_TMPL.replace('999999', rsId);
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+      body: JSON.stringify({ shift_pay_model: model, shift_pay_rate: rate })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) {
+      if (upliftModal) upliftModal.hide();
+      await load();
+    } else alert(j.error || 'Uplift failed');
+  });
+
+  document.getElementById('btnRefresh').addEventListener('click', load);
+  load();
+})();
+</script>
+{% endblock %}

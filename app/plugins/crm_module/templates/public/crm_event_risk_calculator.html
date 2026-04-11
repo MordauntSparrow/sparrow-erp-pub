@@ -1,0 +1,162 @@
+{% extends "public/crm_public_base.html" %}
+{% block crm_public_title %}Event risk guide &amp; enquiry{% endblock %}
+{% block crm_public_body %}
+{% set fv = form_values or {} %}
+<div class="crm-pu-hero p-4 p-md-5 mb-4">
+  <p class="crm-pu-pill mb-2">For professional event organisers</p>
+  <h1 class="h2 fw-bold mb-3">Event risk guide &amp; quoting enquiry</h1>
+  <p class="mb-0 opacity-90 lead">
+    Walk through <strong>risk</strong> factors (not attendance alone), see <strong>indicative</strong> resourcing hints,
+    then send an enquiry. This supports early conversation only — a <strong>medical needs assessment</strong> and
+    <strong>event medical plan</strong> are normally required before we can commit to binding cover and pricing.
+    Not clinical advice or a substitute for your own event risk assessment.
+  </p>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5 order-lg-2">
+    <div class="crm-pu-card p-4 mb-4">
+      <h2 class="h5 fw-bold mb-3"><i class="bi bi-signpost-2 me-2 text-primary"></i>How this helps</h2>
+      <ul class="small crm-pu-guide ps-3 mb-0">
+        <li>Structures what we need to scope cover for crowds and time on site.</li>
+        <li>Surfaces common risk amplifiers (outdoor, alcohol, late finish, profile).</li>
+        <li>Builds a <strong>pipeline card</strong> for our team — aligned with risk-led planning (e.g. Purple Guide thinking).</li>
+        <li>May pre-fill high-level fields if you move to a quote — final fees follow formal needs assessment.</li>
+      </ul>
+    </div>
+    {% with theme='public' %}
+    {% include 'partials/crm_medical_planning_process.html' %}
+    {% endwith %}
+    <div class="crm-pu-card p-4 border border-2 border-light" id="liveRiskPanel">
+      <h3 class="h6 fw-bold text-uppercase text-muted mb-2">Indicative band</h3>
+      <p class="display-6 fw-bold mb-0 text-primary" id="riskBandLabel">—</p>
+      <p class="small text-muted mt-2 mb-0" id="riskBandHint">Enter attendance to see a live guide.</p>
+    </div>
+  </div>
+  <div class="col-lg-7 order-lg-1">
+    <div class="crm-pu-card p-4 p-md-4">
+      <h2 class="h5 fw-bold mb-3">Your event &amp; contact</h2>
+      <form method="post" action="{{ url_for('crm_public.public_event_risk_calculator') }}" id="crmRiskForm">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
+            <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255"
+                   value="{{ fv.get('organisation_name', '') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="contact_name">Your name <span class="text-danger">*</span></label>
+            <input class="form-control" id="contact_name" name="contact_name" required maxlength="255"
+                   value="{{ fv.get('contact_name', '') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+            <input class="form-control" type="email" id="email" name="email" required maxlength="255"
+                   value="{{ fv.get('email', '') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="phone">Phone</label>
+            <input class="form-control" id="phone" name="phone" maxlength="64" value="{{ fv.get('phone', '') }}">
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
+            <input class="form-control" id="event_name" name="event_name" required maxlength="255"
+                   value="{{ fv.get('event_name', '') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="expected_attendees">Expected peak attendance</label>
+            <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees"
+                   value="{{ fv.get('expected_attendees', '') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="duration_hours">Hours on site (cover window)</label>
+            <input class="form-control" type="number" min="1" max="36" step="0.5" id="duration_hours" name="duration_hours"
+                   value="{{ fv.get('duration_hours', '6') }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="venue_type">Venue</label>
+            <select class="form-select" id="venue_type" name="venue_type">
+              {% set vt = fv.get('venue_type', 'indoor') %}
+              <option value="indoor" {% if vt == 'indoor' %}selected{% endif %}>Indoor</option>
+              <option value="outdoor" {% if vt == 'outdoor' %}selected{% endif %}>Outdoor</option>
+              <option value="both" {% if vt == 'both' %}selected{% endif %}>Mixed indoor / outdoor</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="crowd_profile">Crowd profile</label>
+            <select class="form-select" id="crowd_profile" name="crowd_profile">
+              {% set cp = fv.get('crowd_profile', 'mixed') %}
+              <option value="family" {% if cp == 'family' %}selected{% endif %}>Family / daytime</option>
+              <option value="mixed" {% if cp == 'mixed' %}selected{% endif %}>Mixed general public</option>
+              <option value="young_adult" {% if cp == 'young_adult' %}selected{% endif %}>Young adult / evening-led</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes"
+                     {% if fv.get('alcohol_served') %}checked{% endif %}>
+              <label class="form-check-label" for="alcohol_served">Alcohol served on site</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="late_finish" name="late_finish" value="yes"
+                     {% if fv.get('late_finish') %}checked{% endif %}>
+              <label class="form-check-label" for="late_finish">Programme runs past 23:00</label>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="message">Anything else we should know?</label>
+            <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000">{{ fv.get('message', '') }}</textarea>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 mt-4">
+          <button type="submit" class="btn btn-lg btn-crm-pu rounded-pill px-4"><i class="bi bi-send me-2"></i>Send enquiry</button>
+          <a class="btn btn-lg btn-outline-dark rounded-pill px-3 border-0" style="background:rgba(255,255,255,.15);color:#fff;" href="{{ url_for('crm_public.public_quoting_landing') }}">Refresh</a>
+        </div>
+        <p class="small text-muted mt-3 mb-0">By submitting, you agree we may contact you about this event. We process data per our privacy notice.</p>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block crm_public_scripts %}
+<script>
+(function () {
+  function score() {
+    var n = parseInt(document.getElementById('expected_attendees').value, 10) || 0;
+    var hours = parseFloat(document.getElementById('duration_hours').value) || 6;
+    hours = Math.max(1, Math.min(36, hours));
+    var s = 1;
+    if (n >= 5000) s += 1.2;
+    else if (n >= 1500) s += 0.7;
+    else if (n >= 500) s += 0.35;
+    if (hours >= 10) s += 0.5;
+    else if (hours >= 6) s += 0.25;
+    var vt = document.getElementById('venue_type').value;
+    if (vt === 'outdoor' || vt === 'both') s += 0.45;
+    if (document.getElementById('alcohol_served').checked) s += 0.55;
+    if (document.getElementById('late_finish').checked) s += 0.4;
+    var cp = document.getElementById('crowd_profile').value;
+    if (cp === 'young_adult') s += 0.35;
+    s = Math.max(1, Math.min(5, s));
+    var band = Math.round(s);
+    var labels = {1:'Low',2:'Low–moderate',3:'Moderate',4:'Elevated',5:'High'};
+    return { band: band, label: labels[band] || 'Moderate', medics: Math.max(band >= 3 ? 2 : 1, Math.ceil(n / 2500) || 1, Math.ceil(band * 1.5)) };
+  }
+  function refresh() {
+    var el = document.getElementById('riskBandLabel');
+    var hint = document.getElementById('riskBandHint');
+    var n = parseInt(document.getElementById('expected_attendees').value, 10);
+    if (!n && n !== 0) { el.textContent = '—'; hint.textContent = 'Enter attendance to see a live guide.'; return; }
+    var r = score();
+    el.textContent = r.label;
+    hint.textContent = 'Indicative medic team size (pre-assessment only): ~' + r.medics + ' — subject to medical needs assessment before any binding quote.';
+  }
+  ['expected_attendees','duration_hours','venue_type','crowd_profile','alcohol_served','late_finish'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', refresh);
+    if (el && el.type === 'checkbox') el.addEventListener('click', refresh);
+  });
+  refresh();
+})();
+</script>
+{% endblock %}

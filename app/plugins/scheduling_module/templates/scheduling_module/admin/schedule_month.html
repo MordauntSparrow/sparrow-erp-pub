@@ -1,0 +1,273 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Month view – Scheduling{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="sched-breadcrumb mb-3">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Month view</li>
+  </ol>
+</nav>
+
+<div class="sched-panel card mb-3">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <div>
+      <h1 class="h5 mb-0">Month view</h1>
+      <p class="text-muted small mb-0">Calendar overview — jump to a week or add shifts by day.</p>
+    </div>
+    <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar-week me-1"></i> Week view</a>
+  </div>
+</div>
+
+<div class="schedule-month-page d-flex flex-column h-100">
+  <div class="schedule-month-toolbar d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      {% set prev_month = month - 1 if month > 1 else 12 %}
+      {% set prev_year = year if month > 1 else year - 1 %}
+      {% set next_month = month + 1 if month < 12 else 1 %}
+      {% set next_year = year if month < 12 else year + 1 %}
+      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=prev_year, month=prev_month, contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Previous month"><i class="bi bi-chevron-left"></i></a>
+      <h1 class="h5 mb-0 fw-semibold schedule-month-title">{{ first.strftime('%B %Y') }}</h1>
+      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=next_year, month=next_month, contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Next month"><i class="bi bi-chevron-right"></i></a>
+      <span class="text-muted ms-1">|</span>
+      <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}{% if contractor_id %}?contractor_id={{ contractor_id }}{% endif %}{% if client_id %}{{ '&' if contractor_id else '?' }}client_id={{ client_id }}{% endif %}" class="btn btn-outline-primary btn-sm">Week</a>
+      <a href="{{ url_for('internal_scheduling.admin_index') }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
+    </div>
+    <form method="get" class="d-inline-flex gap-1 align-items-center">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <select name="contractor_id" class="form-select form-select-sm schedule-month-select" onchange="this.form.submit()">
+        <option value="">All staff</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {{ 'selected' if contractor_id == c.id else '' }}>{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+      <select name="client_id" class="form-select form-select-sm schedule-month-select" onchange="this.form.submit()">
+        <option value="">All {{ assignment_label|default('clients')|lower }}</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if client_id == c.id else '' }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+
+  <div class="schedule-month-calendar-wrapper flex-grow-1 border rounded-3 shadow-sm bg-white overflow-hidden">
+    <table class="table table-bordered mb-0 schedule-month-table h-100">
+      <thead class="schedule-month-head">
+        <tr>
+          <th class="schedule-month-dow">Mon</th>
+          <th class="schedule-month-dow">Tue</th>
+          <th class="schedule-month-dow">Wed</th>
+          <th class="schedule-month-dow">Thu</th>
+          <th class="schedule-month-dow">Fri</th>
+          <th class="schedule-month-dow">Sat</th>
+          <th class="schedule-month-dow">Sun</th>
+        </tr>
+      </thead>
+      <tbody class="schedule-month-body">
+        {% for week in weeks %}
+        <tr>
+          {% for day in week %}
+          <td class="schedule-month-cell align-top {{ 'schedule-month-cell--other' if not day.in_month else '' }} {{ 'schedule-month-cell--past' if day.date < today else ('schedule-month-cell--today' if day.date == today else '') }}">
+            <div class="schedule-month-cell-inner">
+              <div class="schedule-month-cell-header d-flex justify-content-between align-items-center">
+                <span class="schedule-month-day-num">{{ day.date.strftime('%d') }}</span>
+                <a href="{{ url_for('internal_scheduling.admin_shift_new') }}?date={{ day.iso }}" class="schedule-month-add" title="Add shift"><i class="bi bi-plus-lg"></i></a>
+              </div>
+              <div class="schedule-month-shifts">
+                {% for s in day.shifts %}
+                <a href="{{ url_for('internal_scheduling.admin_shift_edit', shift_id=s.id) }}" class="schedule-month-shift schedule-month-shift--{{ (s.job_type_id or 0) % 6 }}" title="{{ s.client_name or '' }} · {{ s.job_type_name or '' }}">
+                  <span class="schedule-month-shift-time">
+                    {{ (time_display(s.scheduled_start) if s.scheduled_start else '—') }}–{{ (time_display(s.scheduled_end) if s.scheduled_end else '—') }}
+                  </span>
+                  <span class="schedule-month-shift-role">{{ s.job_type_name or 'Shift' }}</span>
+                  <span class="schedule-month-shift-name">{{ s.contractor_name or s.contractor_initials or 'Unassigned' }}</span>
+                </a>
+                {% endfor %}
+              </div>
+              {% if day.count > 0 and not day.shifts %}
+              <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}?week={{ (day.date - timedelta(days=day.date.weekday())).isoformat() }}{% if contractor_id %}&contractor_id={{ contractor_id }}{% endif %}{% if client_id %}&client_id={{ client_id }}{% endif %}" class="schedule-month-count-link">{{ day.count }} shift{{ 's' if day.count != 1 else '' }}</a>
+              {% endif %}
+            </div>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+.schedule-month-page {
+  min-height: calc(100vh - 140px);
+}
+.schedule-month-toolbar {
+  flex-shrink: 0;
+}
+.schedule-month-select {
+  width: auto;
+  min-width: 140px;
+}
+.schedule-month-calendar-wrapper {
+  flex: 1 1 auto;
+  min-height: calc(100vh - 220px);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+}
+.schedule-month-table {
+  table-layout: fixed;
+  font-size: 0.8125rem;
+  width: 100%;
+  min-width: 0;
+}
+.schedule-month-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 2px solid #e2e8f0;
+}
+.schedule-month-dow {
+  width: 14.28%;
+  padding: 0.5rem 0.25rem;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #475569;
+  text-align: center;
+}
+.schedule-month-body tr {
+  height: 1fr;
+}
+.schedule-month-cell {
+  width: 14.28%;
+  vertical-align: top;
+  padding: 0.35rem;
+  border-color: #e2e8f0 !important;
+  background: #fefefe;
+  min-height: 100px;
+}
+.schedule-month-cell--other {
+  background: #f8fafc;
+}
+.schedule-month-cell--other .schedule-month-day-num {
+  color: #94a3b8;
+}
+.schedule-month-cell--past {
+  background: #f1f5f9 !important;
+  opacity: 0.88;
+}
+.schedule-month-cell--past .schedule-month-day-num {
+  color: #94a3b8;
+}
+.schedule-month-cell--past .schedule-month-shift {
+  opacity: 0.8;
+}
+.schedule-month-cell--past .schedule-month-add {
+  color: #94a3b8;
+}
+.schedule-month-cell--today {
+  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%) !important;
+  border: 2px solid #2563eb;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.2);
+}
+.schedule-month-cell--today .schedule-month-day-num {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+.schedule-month-cell-inner {
+  height: 100%;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+}
+.schedule-month-cell-header {
+  flex-shrink: 0;
+  margin-bottom: 0.25rem;
+}
+.schedule-month-day-num {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #334155;
+}
+.schedule-month-add {
+  color: #64748b;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  text-decoration: none;
+}
+.schedule-month-add:hover {
+  color: #0ea5e9;
+  opacity: 1;
+}
+.schedule-month-shifts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-height: 0;
+}
+.schedule-month-shift {
+  display: block;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  text-decoration: none;
+  color: #1e293b;
+  font-size: 0.7rem;
+  line-height: 1.25;
+  border-left: 3px solid transparent;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.schedule-month-shift:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+}
+.schedule-month-shift-time {
+  display: block;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 0.1rem;
+}
+.schedule-month-shift-role {
+  display: block;
+  font-weight: 500;
+  color: #334155;
+}
+.schedule-month-shift-name {
+  display: block;
+  color: #64748b;
+  font-size: 0.65rem;
+}
+.schedule-month-shift--0 { background: rgba(234,179,8,0.2); border-left-color: #eab308; }
+.schedule-month-shift--1 { background: rgba(168,85,247,0.18); border-left-color: #a855f7; }
+.schedule-month-shift--2 { background: rgba(34,197,94,0.2); border-left-color: #22c55e; }
+.schedule-month-shift--3 { background: rgba(239,68,68,0.15); border-left-color: #ef4444; }
+.schedule-month-shift--4 { background: rgba(59,130,246,0.18); border-left-color: #3b82f6; }
+.schedule-month-shift--5 { background: rgba(236,72,153,0.15); border-left-color: #ec4899; }
+.schedule-month-count-link {
+  font-size: 0.7rem;
+  color: #0ea5e9;
+  text-decoration: none;
+  margin-top: 0.25rem;
+  display: inline-block;
+}
+.schedule-month-count-link:hover {
+  text-decoration: underline;
+}
+@media (min-height: 700px) {
+  .schedule-month-body tr {
+    min-height: 120px;
+  }
+  .schedule-month-cell {
+    min-height: 120px;
+  }
+}
+</style>
+{% endblock %}

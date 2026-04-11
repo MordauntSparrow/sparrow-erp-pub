@@ -1,0 +1,86 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if activity %}Edit activity{% else %}New activity{% endif %}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 720px;">
+  <h1 class="h4 mb-3">{% if activity %}Edit activity{% else %}New activity{% endif %}</h1>
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Type</label>
+          <select class="form-select" name="activity_type" {% if not can_edit %}disabled{% endif %}>
+            {% for val, label in types %}
+            <option value="{{ val }}" {% if activity and activity.activity_type == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Subject</label>
+          <input class="form-control" name="subject" required maxlength="255" value="{{ activity.subject if activity else '' }}" {% if not can_edit %}readonly{% endif %}>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Details</label>
+          <textarea class="form-control" name="body" rows="4" {% if not can_edit %}readonly{% endif %}>{{ activity.body if activity and activity.body else '' }}</textarea>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col-md-6">
+            <label class="form-label">Due</label>
+            <input class="form-control" type="datetime-local" name="due_at" value="{% if activity and activity.due_at %}{{ activity.due_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Completed</label>
+            <input class="form-control" type="datetime-local" name="completed_at" value="{% if activity and activity.completed_at %}{{ activity.completed_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Account</label>
+          <select class="form-select" name="account_id" {% if not can_edit %}disabled{% endif %}>
+            <option value="">—</option>
+            {% for a in accounts %}
+            <option value="{{ a.id }}" {% if activity and activity.account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Contact</label>
+          <select class="form-select" name="contact_id" {% if not can_edit %}disabled{% endif %}>
+            <option value="">—</option>
+            {% for c in contacts %}
+            <option value="{{ c.id }}" {% if activity and activity.contact_id == c.id %}selected{% endif %}>{{ c.first_name }} {{ c.last_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Opportunity</label>
+          <select class="form-select" name="opportunity_id" {% if not can_edit %}disabled{% endif %}>
+            <option value="">—</option>
+            {% for o in opportunities %}
+            <option value="{{ o.id }}" {% if activity and activity.opportunity_id == o.id %}selected{% endif %}>{{ o.account_name }} — {{ o.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Quote</label>
+          <select class="form-select" name="quote_id" {% if not can_edit %}disabled{% endif %}>
+            <option value="">—</option>
+            {% for q in quotes %}
+            <option value="{{ q.id }}" {% if activity and activity.quote_id == q.id %}selected{% endif %}>#{{ q.id }} {{ q.title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if can_edit %}
+        <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+        {% endif %}
+        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.activities_list') }}">Cancel</a>
+      </form>
+      {% if activity and can_edit %}
+      <form method="post" action="{{ url_for('crm_module.activity_delete', act_id=activity.id) }}" class="mt-3 pt-3 border-top" onsubmit="return confirm('Delete this activity?');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill">Delete activity</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

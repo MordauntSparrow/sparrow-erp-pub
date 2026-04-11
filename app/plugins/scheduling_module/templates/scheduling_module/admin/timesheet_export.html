@@ -1,0 +1,30 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Export timesheets – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Export timesheets</h1>
+<p class="text-muted small mb-3">Download shifts with actual clock-in/out times as CSV for payroll.</p>
+<form method="get" action="{{ url_for('internal_scheduling.admin_timesheet_export') }}" class="card card-body">
+  <div class="row g-3">
+    <div class="col-md-3">
+      <label class="form-label">From</label>
+      <input type="date" name="from" class="form-control" value="{{ date_from }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">To</label>
+      <input type="date" name="to" class="form-control" value="{{ date_to }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Contractor</label>
+      <select name="contractor_id" class="form-select">
+        <option value="">All</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {{ 'selected' if contractor_id == c.id else '' }}>{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button type="submit" class="btn btn-primary">Download CSV</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,61 @@
+{
+  "repository": "official",
+  "system_name": "time_billing_module",
+  "name": "Time Billing",
+  "current_version": "0.0.4",
+  "compatible_with": ">=1.1.0",
+  "force_update": true,
+  "description": "Timesheets with approve/reject, CSV export, native PDF via ReportLab.",
+  "dashboard_category": "Time & pay",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/time_billing_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftime_billing_module%2Ftime_billing_module_v0.0.4.zip/raw?ref=main",
+  "dependencies": [],
+  "settings": {
+    "week_start_day": { "value": "Monday", "editable": true },
+    "date_format": { "value": "DD/MM/YYYY", "editable": true },
+    "travel_parking_default": { "value": 0, "editable": true },
+    "allowed_job_types": {
+      "value": ["School Clean", "Residential", "Commercial", "Deep", "End of Tenancy"],
+      "editable": false
+    },
+    "rate_school_res_comm": { "value": 14.5, "editable": false },
+    "rate_deep_eot": { "value": 15, "editable": false },
+    "submission_cutoff": { "value": "Friday 18:00", "editable": true }
+  },
+  "changelog": [
+    {
+      "version": "0.0.4",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftime_billing_module%2Ftime_billing_module_v0.0.4.zip/raw?ref=main",
+      "changes": [
+        "Align packaging version with marketplace; maintenance release — upload time_billing_module_v0.0.4.zip before clients update."
+      ]
+    },
+    {
+      "version": "0.0.2",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftime_billing_module%2Ftime_billing_module_v0.0.2.zip/raw?ref=main",
+      "changes": [
+        "Complete release package — upload full time_billing_module_v0.0.2.zip to the repository before clients update."
+      ]
+    },
+    {
+      "version": "0.0.1",
+      "date": "2025-09-20",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftime_billing_module%2Ftime_billing_module_v0.0.1.zip/raw?ref=main",
+      "changes": [
+        "Initial release of Time Billing module.",
+        "Admin/staff timesheets with draft/submitted/approved/rejected workflow.",
+        "Inline admin edits with PATCH; approve generates PDF; reject captures reason.",
+        "CSV export; native PDF export via ReportLab.",
+        "Runsheets groundwork (headers, assignments, templates).",
+        "Wage and bill rate cards with effective dating.",
+        "Calendar policies (weekend, bank holiday, night, overtime).",
+        "Admin UI refinements (MDB/Bootstrap-safe modals, safe API URLs)."
+      ]
+    }
+  ]
+}

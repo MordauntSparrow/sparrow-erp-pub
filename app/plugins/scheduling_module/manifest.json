@@ -1,0 +1,14 @@
+{
+  "system_name": "scheduling_module",
+  "name": "Scheduling & Shifts",
+  "description": "View your shifts and schedule.",
+  "version": "0.0.8",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["website_module", "employee_portal_module", "time_billing_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Cura events planning view: Cura roster vs planned schedule_shifts (run-sheet link), CRM event-planner staffing snapshot on handoff (config) with live opportunity fallback, role/vehicle guide vs job types; hardened IDs and fewer per-event schema probes.",
+  "repository_token": ""
+}

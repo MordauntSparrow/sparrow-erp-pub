@@ -1,0 +1,300 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if opportunity %}Edit opportunity{% else %}New opportunity{% endif %}{% endblock %}
+{% block extra_head %}
+<style>
+  .crm-opp-purple-guide {
+    --crm-pu-deep: #1e0a3c;
+    --crm-pu-mid: #4c1d95;
+    --crm-pu-bright: #7c3aed;
+    --crm-pu-soft: #ede9fe;
+    border-radius: 18px;
+    background: linear-gradient(165deg, var(--crm-pu-deep) 0%, var(--crm-pu-mid) 42%, #312e81 100%);
+    color: #f5f3ff;
+    box-shadow: 0 16px 40px rgba(30, 10, 60, 0.35);
+    border: 1px solid rgba(167, 139, 250, 0.35);
+  }
+  .crm-opp-purple-guide .crm-opp-pg-pill {
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #c4b5fd;
+  }
+  .crm-opp-purple-guide .crm-opp-pg-inner {
+    background: rgba(255, 255, 255, 0.97);
+    color: #1e1b4b;
+    border-radius: 14px;
+  }
+  .crm-opp-purple-guide .crm-opp-pg-inner h3 { color: var(--crm-pu-mid); font-size: 0.8rem; }
+  .crm-opp-purple-guide ul.crm-opp-pg-factors li { margin-bottom: 0.25rem; }
+  .crm-opp-cost-panel {
+    border-left: 4px solid var(--crm-pu-bright);
+    background: #faf8ff;
+  }
+  .crm-opp-pg-staff-table th {
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+    font-weight: 700;
+  }
+  .crm-opp-pg-staff-table td { vertical-align: top; }
+  .crm-opp-pg-totals {
+    border: 1px solid #e9e4f7 !important;
+    background: linear-gradient(180deg, #faf8ff 0%, #f4f0ff 100%);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 920px;">
+  <h1 class="h4 mb-3">{% if opportunity %}Edit opportunity{% else %}New opportunity{% endif %}</h1>
+  {% if opportunity and lead_meta %}
+  {% set r = lead_meta.get('risk') or {} %}
+  {% set gq = lead_meta.get('guide_questions') or {} %}
+  {% set inp = r.get('inputs') or {} %}
+  <div class="crm-opp-purple-guide p-3 p-md-4 mb-3">
+    <p class="crm-opp-pg-pill mb-1">Same questions as the public purple guide</p>
+    <h2 class="h5 fw-bold text-white mb-3"><i class="bi bi-signpost-2 me-2"></i>Event risk guide — full breakdown</h2>
+    <p class="small text-white-50 mb-3">
+      Early pipeline view: risk-led hints from intake / calculator — not clinical advice.
+      Binding quotes normally follow medical needs assessment, agreed scope, and event medical plan documentation.
+    </p>
+
+    <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
+      {% with theme='admin' %}
+      {% include 'partials/crm_medical_planning_process.html' %}
+      {% endwith %}
+    </div>
+
+    <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
+      <h3 class="text-uppercase text-muted fw-bold mb-2">Answers captured</h3>
+      <dl class="row small mb-0">
+        <dt class="col-sm-4">Peak attendance</dt>
+        <dd class="col-sm-8">{{ lead_meta.get('expected_attendees', inp.get('expected_attendees', '—')) }}</dd>
+        <dt class="col-sm-4">Hours on site</dt>
+        <dd class="col-sm-8">{{ lead_meta.get('duration_hours') or inp.get('duration_hours') or '—' }} h</dd>
+        <dt class="col-sm-4">Venue</dt>
+        <dd class="col-sm-8">{% if gq.get('venue_label') %}{{ gq.get('venue_label') }}{% elif inp.get('venue_outdoor') %}Outdoor / mixed (exposed){% else %}Indoor{% endif %}</dd>
+        <dt class="col-sm-4">Crowd profile</dt>
+        <dd class="col-sm-8">{% if gq.get('crowd_profile_label') %}{{ gq.get('crowd_profile_label') }}{% else %}{{ (inp.get('crowd_profile') or '—')|replace('_', ' ') }}{% endif %}</dd>
+        <dt class="col-sm-4">Alcohol on site</dt>
+        <dd class="col-sm-8">{% if gq %}{% if gq.get('alcohol_served') %}Yes{% else %}No{% endif %}{% else %}{% if inp.get('alcohol') %}Yes{% else %}No{% endif %}{% endif %}</dd>
+        <dt class="col-sm-4">Late finish (after 23:00)</dt>
+        <dd class="col-sm-8">{% if gq %}{% if gq.get('late_finish') %}Yes{% else %}No{% endif %}{% else %}{% if inp.get('late_finish') %}Yes{% else %}No{% endif %}{% endif %}</dd>
+      </dl>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="crm-opp-pg-inner p-3 h-100">
+          <h3 class="text-uppercase text-muted fw-bold mb-2">Indicative band</h3>
+          {% if r.get('label') %}
+          <p class="display-6 fw-bold text-primary mb-1">{{ r.get('label') }}</p>
+          <p class="small text-muted mb-2">Score {{ r.get('score', '—') }} (band {{ r.get('band', '—') }})</p>
+          {% else %}
+          <p class="text-muted mb-0">No band stored for this lead.</p>
+          {% endif %}
+          <h3 class="text-uppercase text-muted fw-bold mb-2 mt-3">Risk drivers</h3>
+          <ul class="list-unstyled small crm-opp-pg-factors mb-0">
+            {% for f in (r.get('factors') or []) %}
+            <li><i class="bi bi-dot text-primary"></i> {{ f }}</li>
+            {% else %}
+            <li class="text-muted">No factor list on file.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="crm-opp-pg-inner p-3 h-100">
+          <h3 class="text-uppercase text-muted fw-bold mb-2">Staffing &amp; resource guide</h3>
+          {% set sb = r.get('staffing_breakdown') or {} %}
+          {% set tot = sb.get('totals') or {} %}
+          <p class="small text-muted mb-3">{{ sb.get('intro') or 'Indicative headcount and skill mix for quoting — not clinical advice or a deployment order.' }}</p>
+          {% if tot.get('on_foot_clinical') is not none %}
+          <div class="crm-opp-pg-totals rounded-3 p-3 mb-3">
+            <h4 class="h6 text-uppercase fw-bold mb-2" style="color:#4c1d95;">Headcount summary</h4>
+            <ul class="list-unstyled small mb-2">
+              <li class="mb-1">
+                <strong>{{ tot.on_foot_clinical }}</strong> on-foot clinical post(s)
+                <span class="text-muted">(table below — does <strong>not</strong> include vehicle crew).</span>
+              </li>
+              <li class="mb-1">
+                {% if tot.response_vehicles %}
+                <strong>{{ tot.response_vehicles }}</strong> response vehicle(s), typical <strong>~{{ tot.vehicle_crew_positions_hint }}</strong> crew position(s)
+                <span class="text-muted">(driver + clinician / dual-trained — <strong>separate</strong> from the clinical post count above).</span>
+                {% else %}
+                <span class="text-muted">No vehicles in this guide snapshot (crew line not applied).</span>
+                {% endif %}
+              </li>
+            </ul>
+            <p class="small fw-semibold mb-1">
+              Indicative total roles if you plan both: <span class="text-primary fs-6">{{ tot.combined_planning_headcount }}</span>
+              <span class="fw-normal text-muted">= {{ tot.on_foot_clinical }} clinical + ~{{ tot.vehicle_crew_positions_hint }} vehicle crew</span>
+            </p>
+            {% if tot.clarification %}
+            <p class="small text-muted mb-0"><i class="bi bi-info-circle me-1"></i>{{ tot.clarification }}</p>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if sb.get('clinical_roles') %}
+          <div class="table-responsive mb-3">
+            <table class="table table-sm table-borderless crm-opp-pg-staff-table small mb-0">
+              <thead>
+                <tr class="border-bottom">
+                  <th scope="col">Role</th>
+                  <th scope="col" class="text-center text-nowrap">Qty</th>
+                  <th scope="col">Grade / skill level</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in sb.clinical_roles %}
+                <tr>
+                  <td class="fw-semibold">{{ row.role }}</td>
+                  <td class="text-center">{{ row.count }}</td>
+                  <td>
+                    <span class="d-block">{{ row.grade_hint }}</span>
+                    {% if row.rationale %}<span class="text-muted d-block mt-1">{{ row.rationale }}</span>{% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          {% if sb.get('vehicle_package') %}
+          {% set vp = sb.vehicle_package %}
+          <div class="border-top pt-3 mt-2">
+            <h4 class="h6 text-uppercase text-muted fw-bold mb-2">Vehicle package</h4>
+            <p class="small mb-1"><strong>{{ vp.vehicles }}</strong> response vehicle(s); typical <strong>~{{ vp.crew_headcount_hint }}</strong> crew positions (driver + clinician / dual-trained) before rota overlap.</p>
+            <p class="small text-muted mb-1">{{ vp.grade_hint }}</p>
+            <p class="small text-muted mb-0">{{ vp.notes }}</p>
+          </div>
+          {% endif %}
+          {% if sb.get('operational_notes') %}
+          <div class="border-top pt-3 mt-3">
+            <h4 class="h6 text-uppercase text-muted fw-bold mb-2">Operational notes</h4>
+            <ul class="small text-muted ps-3 mb-0">
+              {% for note in sb.operational_notes %}
+              <li>{{ note }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% endif %}
+          <p class="small text-muted mt-3 mb-0">Refine in the medical event plan and quote line items; map grades to your job types for bill rates (customer price) vs wage card (internal cost).</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="crm-opp-pg-inner p-3 p-md-4 mt-3">
+      <h3 class="text-uppercase text-muted fw-bold mb-2">Lead &amp; contact</h3>
+      <dl class="row small mb-0">
+        <dt class="col-sm-4">Source</dt>
+        <dd class="col-sm-8">{{ lead_meta.get('source', '—') }}</dd>
+        {% set c = lead_meta.get('contact') or {} %}
+        <dt class="col-sm-4">Contact</dt>
+        <dd class="col-sm-8">{{ c.get('name') or '—' }}{% if c.get('email') %} · {{ c.get('email') }}{% endif %}{% if c.get('phone') %} · {{ c.get('phone') }}{% endif %}</dd>
+        <dt class="col-sm-4">Organisation</dt>
+        <dd class="col-sm-8">{{ lead_meta.get('organisation_name') or '—' }}</dd>
+        <dt class="col-sm-4">Event</dt>
+        <dd class="col-sm-8">{{ lead_meta.get('event_name') or '—' }}</dd>
+        {% if lead_meta.get('message') %}
+        <dt class="col-sm-4">Message</dt>
+        <dd class="col-sm-8 text-break">{{ lead_meta.get('message') }}</dd>
+        {% endif %}
+      </dl>
+      <a class="btn btn-sm btn-primary rounded-pill mt-3" href="{{ url_for('crm_module.quote_new', opportunity_id=opportunity.id) }}"><i class="bi bi-receipt me-1"></i>New quote (prefill crowd / hours from lead)</a>
+    </div>
+
+    {% if guide_cost_estimate %}
+    <div class="crm-opp-pg-inner p-3 p-md-4 mt-3 crm-opp-cost-panel">
+      <h3 class="text-uppercase fw-bold mb-2" style="color:#4c1d95;">Approximate wage cost (Time &amp; Billing)</h3>
+      <p class="small text-muted mb-2">
+        Uses indicative headcounts from the guide × hours × <strong>£/h from your wage rate card</strong>
+        {% if guide_cost_estimate.wage_card_name %}({{ guide_cost_estimate.wage_card_name }}){% endif %}.
+        This is <strong>not</strong> the customer quote: quote totals still come from <strong>quote rule sets</strong> (bill rates, per-head, VAT, etc.), normally after medical needs assessment and agreed scope.
+        {% if tb_wage_cards_url %}<a href="{{ tb_wage_cards_url }}" class="text-decoration-none">Wage cards</a>{% endif %}
+        · <a href="{{ url_for('crm_module.guide_wage_job_map') }}" class="text-decoration-none">Guide ↔ job type map</a>.
+        Optional: <code class="small">SPARROW_CRM_GUIDE_WAGE_CARD_ID</code> for which card to use.
+      </p>
+      {% if guide_cost_estimate.tb_note %}
+      <div class="alert alert-warning small py-2 mb-2">{{ guide_cost_estimate.tb_note }}</div>
+      {% endif %}
+      {% if guide_cost_estimate.lines %}
+      <ul class="list-group list-group-flush small mb-2">
+        {% for line in guide_cost_estimate.lines %}
+        <li class="list-group-item d-flex justify-content-between align-items-start bg-transparent px-0">
+          <div>
+            <span class="fw-semibold">{{ line.label }}</span>
+            <div class="text-muted">{{ line.detail }}</div>
+          </div>
+          <span class="text-nowrap fw-semibold">£{{ line.amount_gbp | float | round(2) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="mb-0 fw-bold fs-5 text-primary">Estimated wage subtotal: £{{ guide_cost_estimate.total_gbp | float | round(2) }}</p>
+      <p class="small text-muted mt-2 mb-0">Excludes on-costs, overtime rules, travel, and billable uplift — compare with quote breakdown when pricing.</p>
+      {% elif not guide_cost_estimate.tb_note %}
+      <p class="small text-muted mb-0">No cost lines could be built (check wage card job type names: medic / paramedic / nurse / driver, etc.).</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if opportunity and linked_event_plans %}
+  <div class="alert alert-light border small mb-3">
+    <strong>Medical event plans</strong> for this opportunity (or quotes on it):
+    {% for ep in linked_event_plans %}
+    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('crm_module.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
+    <span class="text-muted small">({{ ep.status }})</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="account_id">Account <span class="text-danger">*</span></label>
+          <select class="form-select" id="account_id" name="account_id" required>
+            <option value="">— Select —</option>
+            {% for a in accounts %}
+            <option value="{{ a.id }}" {% if opportunity and opportunity.account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="name">Opportunity name <span class="text-danger">*</span></label>
+          <input class="form-control" id="name" name="name" required maxlength="255"
+            value="{{ opportunity.name if opportunity else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="stage">Stage</label>
+          <select class="form-select" id="stage" name="stage">
+            {% for val, label in stages %}
+            <option value="{{ val }}" {% if opportunity and opportunity.stage == val %}selected{% elif not opportunity and val == 'prospecting' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="amount">Amount (£)</label>
+          <input class="form-control" id="amount" name="amount" inputmode="decimal" placeholder="e.g. 15000.00"
+            value="{% if opportunity and opportunity.amount is not none %}{{ opportunity.amount }}{% endif %}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="notes">Notes</label>
+          <textarea class="form-control" id="notes" name="notes" rows="3">{{ opportunity.notes if opportunity and opportunity.notes else '' }}</textarea>
+        </div>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_list') }}">Cancel</a>
+        </div>
+      </form>
+      {% if opportunity %}
+      <div class="card-footer bg-light border-0 pt-0">
+        <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', opportunity_id=opportunity.id) }}">Create event plan from this opportunity</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

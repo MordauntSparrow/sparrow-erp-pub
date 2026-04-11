@@ -1,0 +1,256 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}CRM overview{% endblock %}
+{% macro crm_fmt_day(d) %}{% if d %}{% if d is string %}{{ d[:16] }}{% else %}{{ d.strftime('%d %b %Y') }}{% endif %}{% else %}—{% endif %}{% endmacro %}
+{% macro crm_fmt_money(v) %}{% if v is not none and v != '' %}£{{ (v|float)|round(2) }}{% else %}—{% endif %}{% endmacro %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-dash-hero text-white p-4 p-md-4 mb-4">
+    <div class="row align-items-start g-3">
+      <div class="col-lg-7">
+        <p class="text-white-50 crm-upper-tight mb-1">Customer relationship management</p>
+        <h1 class="h2 fw-semibold mb-2">Overview</h1>
+        <p class="mb-0 opacity-90 small">
+          At-a-glance pipeline, recents, and quick actions. Standard CRM practice: keep opportunities and activities current,
+          tie quotes to accounts, and use medical event plans once scope is agreed — separate from the public organiser enquiry form.
+        </p>
+        <form method="get" action="{{ url_for('crm_module.crm_search') }}" class="d-flex gap-2 mt-3" role="search">
+          <input type="search" name="q" class="form-control form-control-sm" placeholder="Search accounts, contacts, deals, quotes…" minlength="2" maxlength="200" style="max-width:22rem;">
+          <button type="submit" class="btn btn-sm btn-light rounded-pill px-3 fw-semibold">Search</button>
+        </form>
+      </div>
+      <div class="col-lg-5">
+        <p class="text-white-50 crm-upper-tight mb-2 small">Quick actions</p>
+        <div class="d-flex flex-wrap gap-2">
+          {% if can_edit %}
+          <a href="{{ url_for('crm_module.opportunity_intake') }}" class="btn btn-light btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-telephone me-1"></i>Intake</a>
+          <a href="{{ url_for('crm_module.opportunities_board') }}" class="btn btn-light btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-kanban me-1"></i>Board</a>
+          <a href="{{ url_for('crm_module.quote_new') }}" class="btn btn-success btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-receipt me-1"></i>New quote</a>
+          <a href="{{ url_for('crm_module.event_plan_new') }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2"><i class="bi bi-clipboard2-pulse me-1"></i>New event plan</a>
+          {% endif %}
+          <a href="{{ url_for('crm_module.accounts_list') }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2"><i class="bi bi-building me-1"></i>Accounts</a>
+          {% if public_enquiry_url %}
+          <a href="{{ public_enquiry_url }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2" target="_blank" rel="noopener noreferrer" title="Opens public organiser form (separate from internal event plans)"><i class="bi bi-box-arrow-up-right me-1"></i>Public enquiry</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-xl-4">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-diagram-3 me-2 text-primary"></i>Pipeline by stage</span>
+          <span class="badge rounded-pill bg-light text-primary border border-primary border-opacity-25">{{ pipeline_active_total }} active</span>
+        </div>
+        <div class="card-body pt-2">
+          <p class="small text-muted mb-2">Counts and {% if show_financials %}<strong>opportunity amount</strong> (per record for value).{% else %}amounts hidden (edit permission required).{% endif %}</p>
+          {% if show_financials %}
+          <p class="small fw-semibold text-primary mb-1">Open pipeline value: {{ crm_fmt_money(pipeline_open_value_total) }}</p>
+          <p class="small text-muted mb-3">Weighted (heuristic): <span class="fw-semibold text-primary">{{ crm_fmt_money(weighted_pipeline_open) }}</span> <span style="font-size:0.75rem;">— open stages × default win likelihood (25%–85%).</span></p>
+          {% else %}
+          <p class="small text-muted mb-3"><i class="bi bi-lock me-1"></i>Pipeline £ totals and weighted view require <strong>crm_module.edit</strong>.</p>
+          {% endif %}
+          {% for key, label in stage_labels.items() %}
+          {% set cnt = pipeline_stage_counts.get(key, 0) %}
+          {% set st_val = pipeline_value_by_stage.get(key, 0) %}
+          {% set pct = ((100 * cnt / pipeline_bar_max) if pipeline_bar_max else 0)|int %}
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small mb-1">
+              <span>{{ label }}</span>
+              <span class="text-muted text-nowrap ms-1">{{ cnt }}{% if show_financials %} · {{ crm_fmt_money(st_val) }}{% endif %}</span>
+            </div>
+            <div class="crm-pipeline-track rounded-pill">
+              <div class="crm-pipeline-fill rounded-pill" style="width: {{ pct }}%;"></div>
+            </div>
+          </div>
+          {% endfor %}
+          <a href="{{ url_for('crm_module.opportunities_board') }}" class="btn btn-outline-primary btn-sm rounded-pill w-100 mt-1">Open Kanban</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-8">
+      <div class="row g-3">
+        <div class="col-md-4">
+          <div class="card crm-metric-card h-100">
+            <div class="card-body">
+              <h2 class="h6 text-uppercase text-muted crm-upper-tight">Accounts &amp; contacts</h2>
+              <p class="mb-1"><span class="display-6">{{ n_accounts }}</span> <span class="text-muted small">accounts</span></p>
+              <p class="mb-3"><span class="fs-3 fw-semibold">{{ n_contacts }}</span> <span class="text-muted small">contacts</span></p>
+              <a href="{{ url_for('crm_module.accounts_list') }}" class="btn btn-outline-primary btn-sm rounded-pill">Accounts</a>
+              <a href="{{ url_for('crm_module.contacts_list') }}" class="btn btn-outline-secondary btn-sm rounded-pill ms-1">Contacts</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card crm-metric-card h-100">
+            <div class="card-body">
+              <h2 class="h6 text-uppercase text-muted crm-upper-tight">Sales</h2>
+              <p class="mb-1"><span class="display-6">{{ n_opportunities }}</span> <span class="text-muted small">opportunities</span></p>
+              <p class="mb-2"><span class="fs-3 fw-semibold">{{ n_quotes }}</span> <span class="text-muted small">quotes</span></p>
+              {% if n_quotes == 0 %}
+              <p class="small text-muted mb-3">No quotes yet.</p>
+              {% else %}
+              <p class="small text-muted mb-1">Quotes by status</p>
+              <div class="d-flex flex-wrap gap-1 mb-3">
+                {% for row in quote_status_summary %}
+                <span class="badge rounded-pill {% if row.count %}bg-light text-dark border{% else %}bg-transparent text-muted border-0{% endif %}" title="Quote count">{{ row.label }} · {{ row.count }}</span>
+                {% endfor %}
+              </div>
+              {% endif %}
+              <a href="{{ url_for('crm_module.opportunities_list') }}" class="btn btn-outline-primary btn-sm rounded-pill">Opportunities</a>
+              <a href="{{ url_for('crm_module.quotes_list') }}" class="btn btn-outline-secondary btn-sm rounded-pill ms-1">Quotes</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card crm-metric-card h-100">
+            <div class="card-body">
+              <h2 class="h6 text-uppercase text-muted crm-upper-tight">Delivery &amp; setup</h2>
+              <p class="mb-1"><span class="display-6">{{ n_activities }}</span> <span class="text-muted small">activities</span></p>
+              <p class="mb-3"><span class="fs-3 fw-semibold">{{ n_event_plans }}</span> <span class="text-muted small">event plans</span>
+                {% if n_event_plans_draft %}<span class="badge bg-secondary bg-opacity-10 text-secondary ms-1">{{ n_event_plans_draft }} draft</span>{% endif %}
+              </p>
+              <a href="{{ url_for('crm_module.activities_list') }}" class="btn btn-outline-primary btn-sm rounded-pill">Activities</a>
+              <a href="{{ url_for('crm_module.event_plans_list') }}" class="btn btn-outline-secondary btn-sm rounded-pill ms-1">Plans</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card crm-panel mt-3">
+        <div class="card-header py-2"><i class="bi bi-sliders me-2 text-primary"></i>Pricing configuration</div>
+        <div class="card-body py-3 d-flex flex-wrap align-items-center gap-2">
+          <span class="small text-muted me-2">Quote rule sets drive line generation on quotes.</span>
+          <a href="{{ url_for('crm_module.quote_rule_sets_list') }}" class="btn btn-sm btn-outline-primary rounded-pill">Manage rule sets</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if stage_metrics_available %}
+  <div class="row g-3 mb-4">
+    <div class="col-12">
+      <div class="card crm-panel">
+        <div class="card-header py-3"><i class="bi bi-clock-history me-2 text-primary"></i>Pipeline movement <span class="text-muted fw-normal small">(stage changes — Kanban, intake, and edits)</span></div>
+        <div class="card-body row g-3">
+          <div class="col-md-4">
+            <p class="small text-muted mb-1">Last 90 days</p>
+            <p class="mb-0 fs-6"><span class="text-success fw-semibold">{{ moves_to_won_90d }}</span> → Won &nbsp;·&nbsp; <span class="text-danger fw-semibold">{{ moves_to_lost_90d }}</span> → Lost</p>
+          </div>
+          <div class="col-md-8">
+            <p class="small text-muted mb-2">Recent changes</p>
+            {% if recent_stage_moves %}
+            <ul class="list-unstyled small mb-0">
+              {% for m in recent_stage_moves %}
+              <li class="mb-1">
+                {% if can_edit %}
+                <a href="{{ url_for('crm_module.opportunity_edit', opp_id=m.opportunity_id) }}" class="fw-semibold text-decoration-none">{{ m.opp_name }}</a>
+                {% else %}
+                <span class="fw-semibold">{{ m.opp_name }}</span> <span class="text-muted">#{{ m.opportunity_id }}</span>
+                {% endif %}
+                <span class="text-muted"> · {{ m.from_stage or 'new' }} → {{ m.to_stage }} · {{ crm_fmt_day(m.changed_at) }}</span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-muted small mb-0">No stage changes recorded yet.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row g-3">
+    <div class="col-lg-4">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-check2-square me-2 text-warning"></i>Activities</span>
+          <a href="{{ url_for('crm_module.activities_list') }}" class="small">All</a>
+        </div>
+        <div class="card-body border-bottom py-3">
+          <p class="small text-muted mb-2 mb-0"><strong>Last 30 days</strong> — logged by type</p>
+          {% if activity_mix_30d_total %}
+          <div class="d-flex flex-wrap gap-2 small">
+            {% for row in activity_mix_30d %}
+            <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ row.label }} {{ row.count }}</span>
+            {% endfor %}
+          </div>
+          <p class="small text-muted mt-2 mb-0">Total {{ activity_mix_30d_total }} · ties effort to accounts/opps in lists.</p>
+          {% else %}
+          <p class="small text-muted mb-0">No activities logged in the last 30 days.</p>
+          {% endif %}
+        </div>
+        <div class="px-3 py-2 small text-muted border-top" style="background:#f8fafc;">Due next</div>
+        <div class="card-body p-0">
+          {% if open_tasks %}
+          <ul class="list-group list-group-flush small">
+            {% for t in open_tasks %}
+            <li class="list-group-item d-flex justify-content-between align-items-start">
+              <div>
+                <span class="fw-semibold d-block">{{ t.subject or 'Task' }}</span>
+                <span class="text-muted text-capitalize">{{ t.activity_type or 'task' }}</span>
+                {% if t.due_at %}<span class="text-muted d-block">{{ crm_fmt_day(t.due_at) }}</span>{% endif %}
+              </div>
+              {% if t.opportunity_id and can_edit %}
+              <a href="{{ url_for('crm_module.opportunity_edit', opp_id=t.opportunity_id) }}" class="btn btn-sm btn-link py-0">Opp</a>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted small p-3 mb-0">No dated open tasks. Add due dates on activities to surface them here.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-graph-up-arrow me-2 text-primary"></i>Recent opportunities</span>
+          <a href="{{ url_for('crm_module.opportunities_list') }}" class="small">List</a>
+        </div>
+        <div class="card-body p-0">
+          {% if recent_opportunities %}
+          <ul class="list-group list-group-flush small">
+            {% for o in recent_opportunities %}
+            <li class="list-group-item">
+              {% if can_edit %}<a href="{{ url_for('crm_module.opportunity_edit', opp_id=o.id) }}" class="fw-semibold text-decoration-none">{{ o.name }}</a>{% else %}<span class="fw-semibold">{{ o.name }}</span>{% endif %}
+              <div class="text-muted">{{ o.account_name }} · {{ stage_labels.get(o.stage, o.stage) }}{% if show_financials and o.amount is not none and o.amount != '' %} · {{ crm_fmt_money(o.amount) }}{% endif %}</div>
+              {% if o.updated_at %}<div class="text-muted" style="font-size:0.75rem;">Updated {{ crm_fmt_day(o.updated_at) }}</div>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted small p-3 mb-0">No opportunities yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-receipt me-2 text-success"></i>Recent quotes</span>
+          <a href="{{ url_for('crm_module.quotes_list') }}" class="small">All</a>
+        </div>
+        <div class="card-body p-0">
+          {% if recent_quotes %}
+          <ul class="list-group list-group-flush small">
+            {% for q in recent_quotes %}
+            <li class="list-group-item">
+              <a href="{{ url_for('crm_module.quote_edit', quote_id=q.id) }}" class="fw-semibold text-decoration-none">#{{ q.id }} {{ q.title or 'Untitled' }}</a>
+              <div class="text-muted">{{ q.account_name or '—' }} · <span class="text-capitalize">{{ q.status or 'draft' }}</span></div>
+              {% if q.updated_at %}<div class="text-muted" style="font-size:0.75rem;">{{ crm_fmt_day(q.updated_at) }}</div>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted small p-3 mb-0">No quotes yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

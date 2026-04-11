@@ -1,0 +1,23 @@
+{% extends "public/crm_public_base.html" %}
+{% block crm_public_title %}Thank you{% endblock %}
+{% block crm_public_body %}
+<div class="crm-pu-hero p-5 text-center">
+  <i class="bi bi-check-circle display-3 text-success mb-3 d-block"></i>
+  <h1 class="h3 fw-bold mb-3">Thank you — we’ve got your enquiry</h1>
+  <p class="mb-4 opacity-90">
+    Your details are on our pipeline. A coordinator will respond using the email you provided.
+    {% if lead_meta and lead_meta.risk %}
+    We recorded an indicative <strong>{{ lead_meta.risk.label }}</strong> planning band
+    (attendance {{ lead_meta.expected_attendees or '—' }}) for early discussion only.
+    {% endif %}
+  </p>
+  <p class="small text-white-50 mb-4 px-md-5 mx-auto" style="max-width: 42rem;">
+    A <strong>medical needs assessment</strong> and <strong>event medical plan</strong> are normally completed before a binding quote and final resource levels.
+    Indicative bands are risk-led (not attendance alone) and do not replace your own risk assessment or multi-agency expectations (e.g. SAG).
+  </p>
+  <p class="small text-white-50 mb-0">Reference: opportunity #{{ opportunity_id }} (internal)</p>
+</div>
+<div class="text-center mt-4">
+  <a class="btn btn-light rounded-pill px-4" href="{{ url_for('crm_public.public_event_risk_calculator') }}">Submit another event</a>
+</div>
+{% endblock %}

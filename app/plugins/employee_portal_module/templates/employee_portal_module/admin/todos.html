@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Todos – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_index') }}">Employee Portal</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Todos</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Todos</h1>
+  <p class="text-muted mb-3">View and manage portal tasks assigned to staff.</p>
+
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <a href="{{ url_for('internal_employee_portal.admin_todos_new_form') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1" aria-hidden="true"></i>Add todo</a>
+  </div>
+
+  <form method="get" action="{{ url_for('internal_employee_portal.admin_todos') }}" class="card card-body mb-4">
+    <div class="row g-2">
+      <div class="col-md-2">
+        <label class="form-label small">Contractor ID</label>
+        <input type="number" class="form-control form-control-sm" name="contractor_id" value="{{ contractor_id or '' }}" placeholder="ID">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Source</label>
+        <input type="text" class="form-control form-control-sm" name="source_module" value="{{ source_module or '' }}" placeholder="e.g. employee_portal">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Status</label>
+        <select name="completed" class="form-select form-select-sm">
+          <option value="">All</option>
+          <option value="0" {{ 'selected' if completed == false else '' }}>Pending</option>
+          <option value="1" {{ 'selected' if completed == true else '' }}>Completed</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Due from</label>
+        <input type="date" class="form-control form-control-sm" name="due_date_from" value="{{ due_date_from or '' }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Due to</label>
+        <input type="date" class="form-control form-control-sm" name="due_date_to" value="{{ due_date_to or '' }}">
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <button type="submit" class="btn btn-secondary btn-sm">Filter</button>
+      </div>
+    </div>
+  </form>
+
+  {% if todos %}
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_todos_bulk_complete') }}" id="bulk-todos-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="table-responsive">
+      <table class="table table-bordered table-striped" aria-label="Portal todos">
+        <thead>
+          <tr>
+            <th scope="col" class="text-center" style="width:2.5rem;">
+              <span class="visually-hidden">Select</span>
+              <input type="checkbox" class="form-check-input js-select-all" aria-label="Select all rows" title="Select all">
+            </th>
+            <th scope="col">Assigned to</th>
+            <th scope="col">Title</th>
+            <th scope="col">Source</th>
+            <th scope="col">Due</th>
+            <th scope="col">Status</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in todos %}
+          <tr class="{{ 'table-secondary' if t.completed_at else '' }}">
+            <td class="text-center">
+              <input type="checkbox" name="todo_ids" value="{{ t.id }}" class="form-check-input js-row-select" aria-label="Select todo {{ t.title[:30] }}">
+            </td>
+            <td>{{ t.contractor_name or t.contractor_email }} <span class="small text-muted">#{{ t.contractor_id }}</span></td>
+            <td>{{ t.title }}{% if t.link_url %} <a href="{{ t.link_url }}" class="small" target="_blank" rel="noopener">Link</a>{% endif %}</td>
+            <td><span class="badge bg-secondary">{{ t.source_module }}</span></td>
+            <td class="small">{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }}</td>
+            <td>{% if t.completed_at %}<span class="badge bg-success">Done</span>{% else %}<span class="badge bg-warning text-dark">Pending</span>{% endif %}</td>
+            <td>
+              <a href="{{ url_for('internal_employee_portal.admin_todo_edit_form', tid=t.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+              {% if t.completed_at %}
+              <form method="post" action="{{ url_for('internal_employee_portal.admin_todo_reopen', tid=t.id) }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-warning">Reopen</button>
+              </form>
+              {% else %}
+              <form method="post" action="{{ url_for('internal_employee_portal.admin_todo_complete', tid=t.id) }}" class="d-inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-success">Complete</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-2">
+      <button type="submit" class="btn btn-outline-success btn-sm" name="complete" value="1">Mark selected complete</button>
+      <button type="submit" class="btn btn-outline-warning btn-sm" name="complete" value="0">Mark selected pending</button>
+    </div>
+  </form>
+  <script>
+  (function() {
+    var form = document.getElementById('bulk-todos-form');
+    if (!form) return;
+    var selectAll = form.querySelector('.js-select-all');
+    var rowChecks = form.querySelectorAll('.js-row-select');
+    if (selectAll) {
+      selectAll.addEventListener('change', function() {
+        rowChecks.forEach(function(cb) { cb.checked = selectAll.checked; });
+      });
+    }
+    form.addEventListener('submit', function(e) {
+      var checked = form.querySelectorAll('.js-row-select:checked');
+      if (checked.length === 0) {
+        e.preventDefault();
+        alert('Select at least one todo.');
+      }
+    });
+  })();
+  </script>
+  {% if total_pages > 1 %}
+  <nav class="mt-2">
+    <ul class="pagination pagination-sm">
+      {% for p in range(1, total_pages + 1) %}
+      <li class="page-item {{ 'active' if p == page else '' }}">
+        <a class="page-link" href="{{ url_for('internal_employee_portal.admin_todos', page=p, contractor_id=contractor_id, source_module=source_module, completed=('1' if completed == true else ('0' if completed == false else '')), due_date_from=due_date_from or '', due_date_to=due_date_to or '') }}">{{ p }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </nav>
+  {% endif %}
+  <p class="small text-muted">Showing {{ todos|length }} of {{ total }}.</p>
+  {% else %}
+  <div class="card card-body bg-light text-center py-5">
+    <p class="text-muted mb-0">No todos match the filters. <a href="{{ url_for('internal_employee_portal.admin_todos_new_form') }}">Add a todo</a> to assign tasks to staff.</p>
+  </div>
+  {% endif %}
+
+  <a href="{{ url_for('internal_employee_portal.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Employee Portal admin</a>
+</div>
+{% endblock %}

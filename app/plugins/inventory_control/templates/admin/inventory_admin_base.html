@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  {% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+  <title>{% block page_title %}Inventory{% endblock %} — {{ _site.get('company_name') or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include 'partials/sparrow_csrf_head.html' %}
+
+  <!-- MDB UI Kit (Bootstrap 5 + modals/tabs/collapse; use data-mdb-* in child templates) -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+  <style>
+    body {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #121212 !important;
+        color: #ffffff !important;
+      {% elif config.theme_settings.theme == 'modern' %}
+        background-color: #f0f2f5 !important;
+        color: #212529 !important;
+      {% else %}
+        background-color: #f8f9fa !important;
+        color: #212529 !important;
+      {% endif %}
+    }
+
+    {% include 'partials/sparrow_admin_nav_styles.html' %}
+
+    * { box-sizing: border-box; }
+
+    .inv-main {
+      padding: 1.5rem;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .inv-main .card {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #1e1e1e !important;
+        color: #ffffff !important;
+        border: 1px solid #444444 !important;
+      {% else %}
+        background-color: #fff !important;
+        color: #212529 !important;
+        border: 1px solid #dee2e6 !important;
+      {% endif %}
+    }
+    .inv-main .table { color: inherit; }
+    .inv-main .table-hover tbody tr:hover {
+      {% if config.theme_settings.theme == 'dark' %}
+        background: rgba(255,255,255,0.06);
+      {% else %}
+        background: rgba(0,0,0,0.04);
+      {% endif %}
+    }
+    .inv-main .text-muted {
+      {% if config.theme_settings.theme == 'dark' %}
+        color: #adb5bd !important;
+      {% else %}
+        color: #6c757d !important;
+      {% endif %}
+    }
+    .inv-main .form-control:not([type="checkbox"]):not([type="radio"]),
+    .inv-main .form-select {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #1f1f1f !important;
+        color: #ffffff !important;
+        border: 1px solid #444444 !important;
+      {% else %}
+        background-color: #fff !important;
+        color: #212529 !important;
+        border: 1px solid #ced4da !important;
+      {% endif %}
+    }
+    .inv-main .btn-primary {
+      background-color: {% if config.theme_settings.theme == 'dark' %}#1e90ff{% else %}#0d6efd{% endif %} !important;
+      border-color: {% if config.theme_settings.theme == 'dark' %}#1e90ff{% else %}#0d6efd{% endif %} !important;
+      color: #fff !important;
+    }
+    .inv-main .nav-pills .nav-link {
+      {% if config.theme_settings.theme == 'dark' %}
+        color: #adb5bd;
+        border: 1px solid #444;
+      {% else %}
+        color: #6c757d;
+        border: 1px solid #dee2e6;
+      {% endif %}
+      background: transparent;
+      border-radius: 6px;
+    }
+    .inv-main .nav-pills .nav-link:hover {
+      {% if config.theme_settings.theme == 'dark' %}
+        color: #fff;
+        background: rgba(255,255,255,0.08);
+      {% else %}
+        color: #212529;
+        background: rgba(0,0,0,0.04);
+      {% endif %}
+    }
+    .inv-main .nav-pills .nav-link.active {
+      background: {% if config.theme_settings.theme == 'dark' %}#1e90ff{% else %}#0d6efd{% endif %};
+      border-color: transparent;
+      color: #fff !important;
+    }
+    .inv-main .table-light {
+      {% if config.theme_settings.theme == 'dark' %}
+        background: rgba(255,255,255,0.06) !important;
+        color: #f8f9fa !important;
+      {% else %}
+        background: rgba(0,0,0,0.04) !important;
+        color: #212529 !important;
+      {% endif %}
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% include 'partials/sparrow_admin_top_nav.html' %}
+
+  <nav class="nav-module erp-module-subnav border-bottom py-2 px-3">
+    <div class="container-fluid px-3">
+      <div class="d-flex flex-wrap align-items-center gap-1">
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.dashboard' %}active{% endif %}" href="{{ url_for('inventory_control_internal.dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+        <a class="nav-link {% if request.endpoint in ('inventory_control_internal.items_page', 'inventory_control_internal.item_overview_page') %}active{% endif %}" href="{{ url_for('inventory_control_internal.items_page') }}"><i class="bi bi-droplet me-1"></i>Consumables</a>
+        <a class="nav-link {% set _iep = request.endpoint or '' %}{% if _iep == 'inventory_control_internal.equipment_desk_page' or _iep in ('inventory_control_internal.equipment_servicing_dashboard', 'inventory_control_internal.equipment_assignments_page', 'inventory_control_internal.equipment_assets_catalog_redirect', 'inventory_control_internal.equipment_asset_new') or _iep.startswith('inventory_control_internal.equipment_asset_') %}active{% endif %}" href="{{ url_for('inventory_control_internal.equipment_desk_page') }}"><i class="bi bi-cpu me-1"></i>Equipment</a>
+        <a class="nav-link {% if request.endpoint and request.endpoint.startswith('inventory_control_internal.med_bags') %}active{% endif %}" href="{{ url_for('inventory_control_internal.med_bags_templates_list') }}"><i class="bi bi-bag-heart me-1"></i>Med bags</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.inventory_contractor_kit_requests_admin' %}active{% endif %}" href="{{ url_for('inventory_control_internal.inventory_contractor_kit_requests_admin') }}"><i class="bi bi-inbox me-1"></i>Kit requests</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.categories_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.categories_page') }}"><i class="bi bi-tags me-1"></i>Categories</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.locations_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.locations_page') }}"><i class="bi bi-geo-alt me-1"></i>Locations</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.batches_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.batches_page') }}"><i class="bi bi-collection me-1"></i>Batches</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.repack_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.repack_page') }}"><i class="bi bi-boxes me-1"></i>Repack / Split</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.transactions_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.transactions_page') }}"><i class="bi bi-arrow-left-right me-1"></i>Transactions</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.fit_part_to_vehicle_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.fit_part_to_vehicle_page') }}"><i class="bi bi-wrench-adjustable me-1"></i>Fit to vehicle</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.invoices_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.invoices_page') }}"><i class="bi bi-receipt me-1"></i>Invoices</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.analytics_page' %}active{% endif %}" href="{{ url_for('inventory_control_internal.analytics_page') }}"><i class="bi bi-graph-up me-1"></i>Analytics</a>
+        <a class="nav-link {% if request.endpoint == 'inventory_control_internal.data_import_wizard' %}active{% endif %}" href="{{ url_for('inventory_control_internal.data_import_wizard') }}"><i class="bi bi-file-earmark-arrow-up me-1"></i>Import</a>
+        <a class="nav-link {% if 'equipment/servicing' in request.path or 'equipment/assignments' in request.path or 'equipment/assets' in request.path %}active{% endif %}" href="{{ url_for('inventory_control_internal.equipment_servicing_dashboard') }}"><i class="bi bi-activity me-1"></i>Servicing</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="inv-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+  <script>
+  document.addEventListener('click', function(e){
+    const target = e.target.closest('.navbar .nav-link, .navbar .dropdown-item');
+    if (!target) return;
+    if (target.classList.contains('dropdown-toggle')) return;
+    if ((target.getAttribute('data-mdb-toggle') || '') === 'dropdown') return;
+    const navbarCollapse = document.getElementById('navbarNav');
+    const toggler = document.querySelector('.navbar-toggler');
+    if (navbarCollapse && toggler && window.getComputedStyle(toggler).display !== 'none') {
+      const collapseInstance = mdb.Collapse.getInstance(navbarCollapse) || new mdb.Collapse(navbarCollapse);
+      collapseInstance.hide();
+    }
+  }, false);
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

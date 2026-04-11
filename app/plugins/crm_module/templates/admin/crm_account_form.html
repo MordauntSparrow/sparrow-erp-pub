@@ -1,0 +1,37 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if account %}Edit account{% else %}New account{% endif %}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 720px;">
+  <h1 class="h4 mb-3">{% if account %}Edit account{% else %}New account{% endif %}</h1>
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+          <input class="form-control" id="name" name="name" required maxlength="255"
+            value="{{ account.name if account else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="phone">Phone</label>
+          <input class="form-control" id="phone" name="phone" maxlength="64"
+            value="{{ account.phone if account and account.phone else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="website">Website</label>
+          <input class="form-control" id="website" name="website" maxlength="512" placeholder="https://"
+            value="{{ account.website if account and account.website else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="notes">Notes</label>
+          <textarea class="form-control" id="notes" name="notes" rows="4">{{ account.notes if account and account.notes else '' }}</textarea>
+        </div>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.accounts_list') }}">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

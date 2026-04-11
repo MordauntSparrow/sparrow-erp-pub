@@ -1,0 +1,62 @@
+{% extends "scheduling_module/base_public.html" %}
+{% block content %}
+<h1 class="h5 mb-3">Shift swap</h1>
+<p class="text-muted small mb-3">Offer your shift for someone else to take, or claim a shift that's up for swap.</p>
+
+<h2 class="h6 mb-2">Offer one of your shifts</h2>
+{% if my_shifts %}
+<ul class="list-group mb-4">
+  {% for s in my_shifts %}
+  <li class="list-group-item bg-dark border-secondary d-flex justify-content-between align-items-center">
+    <span>{{ s.work_date.isoformat() if s.work_date else '' }} {{ time_display(s.scheduled_start)|default('') }}–{{ time_display(s.scheduled_end)|default('') }} · {{ s.client_name or '—' }}</span>
+    <form method="post" action="{{ url_for('public_scheduling.offer_shift') }}" class="d-inline">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="shift_id" value="{{ s.id }}">
+      <button type="submit" class="btn btn-outline-primary btn-sm">Offer for swap</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted small mb-3">No upcoming shifts to offer.</p>
+{% endif %}
+
+<h2 class="h6 mb-2">My swap requests</h2>
+{% if my_swaps %}
+<ul class="list-group mb-4">
+  {% for r in my_swaps %}
+  <li class="list-group-item bg-dark border-secondary">
+    <div>{{ r.work_date.isoformat() if r.work_date else '' }} · {{ r.client_name or '—' }} · {{ r.requester_name or '—' }}{% if r.claimer_name %} → {{ r.claimer_name }}{% endif %}</div>
+    <div class="small text-muted">Status: {{ r.status }}</div>
+    {% if r.status in ['open','claimed'] %}
+    <form method="post" action="{{ url_for('public_scheduling.cancel_swap', swap_id=r.id) }}" class="d-inline mt-1">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted small mb-3">You have no swap requests.</p>
+{% endif %}
+
+<h2 class="h6 mb-2">Available to claim</h2>
+{% if available_to_claim %}
+<ul class="list-group mb-4">
+  {% for r in available_to_claim %}
+  <li class="list-group-item bg-dark border-secondary d-flex justify-content-between align-items-center">
+    <span>{{ r.work_date.isoformat() if r.work_date else '' }} {{ time_display(r.scheduled_start)|default('') }}–{{ time_display(r.scheduled_end)|default('') }} · {{ r.client_name or '—' }} (from {{ r.requester_name or '—' }})</span>
+    <form method="post" action="{{ url_for('public_scheduling.claim_swap', swap_id=r.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-success btn-sm">Claim</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-muted small mb-3">No shifts available to claim right now.</p>
+{% endif %}
+
+<a href="{{ url_for('public_scheduling.public_index') }}" class="btn btn-outline-secondary btn-sm">Back to Scheduling</a>
+{% endblock %}

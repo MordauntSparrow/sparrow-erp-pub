@@ -1,0 +1,97 @@
+{
+  "repository": "official",
+  "system_name": "news_blog_module",
+  "name": "News / Blog",
+  "current_version": "0.0.6",
+  "compatible_with": ">=1.1.0",
+  "force_update": false,
+  "description": "Production-grade news/blog module with article workflow (draft/published), SEO fields, taxonomy (categories/tags), cover images, public listing + detail pages, RSS, JSON-LD, and sitemap-ready routing for AI search discoverability.",
+  "dashboard_category": "Web & marketing",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/news_blog_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.5.zip/raw?ref=main",
+  "dependencies": [
+    "website_module"
+  ],
+  "settings": {
+    "nav_item_label": { "value": "News", "editable": true },
+    "section_slug": { "value": "news", "editable": true },
+    "posts_per_page": { "value": 10, "editable": true }
+  },
+  "public_sections": [
+    {
+      "label": "News",
+      "description": "Latest updates and articles.",
+      "url": "/news/",
+      "order": 200
+    }
+  ],
+  "public_sitemaps": [
+    "/news/sitemap.xml"
+  ],
+  "changelog": [
+    {
+      "version": "0.0.6",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.6.zip/raw?ref=main",
+      "changes": [
+        "Maintenance release — upload news_blog_module_v0.0.6.zip before clients update."
+      ]
+    },
+    {
+      "version": "0.0.5",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.5.zip/raw?ref=main",
+      "changes": [
+        "Complete release package — upload full news_blog_module_v0.0.5.zip to the repository before clients update."
+      ]
+    },
+    {
+      "version": "0.0.4",
+      "date": "2026-01-13",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.4.zip/raw?ref=main",
+      "changes": [
+        "Few bug fixes."
+      ]
+    },
+    {
+      "version": "0.0.3",
+      "date": "2026-01-12",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.3.zip/raw?ref=main",
+      "changes": [
+        "Fix: removed unused __init__.py blueprint import that caused plugin import failure (public_bp no longer imported at module import time).",
+        "Improved compatibility with the new get_public_blueprint() loading pattern used by the website module."
+      ]
+    },
+    {
+      "version": "0.0.2",
+      "date": "2026-01-12",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.2.zip/raw?ref=main",
+      "changes": [
+        "Smart sitemap signposting: declares public sitemap endpoints for aggregation into the website module sitemap index.",
+        "Adds/updates public section discovery metadata for /llms.txt and human/AI navigation (public_sections + public_sitemaps)."
+      ]
+    },
+    {
+      "version": "0.0.1",
+      "date": "2026-01-12",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fnews_blog_module%2Fnews_blog_module_v0.0.1.zip/raw?ref=main",
+      "changes": [
+        "Initial release of News/Blog module.",
+        "Admin dashboard with KPIs and single-endpoint action switching for CRUD (articles, categories, tags).",
+        "Draft/published workflow with automatic published_at handling.",
+        "SEO-friendly slugs with uniqueness enforcement and safe input coercion.",
+        "Taxonomy support: categories (with optional primary category) and tags (get-or-create, de-duplication, race-safe insert fallback).",
+        "Cover image upload fields (path + alt text) for accessibility and SEO.",
+        "Public routes: index + article detail (slug-based), with keyword search support (q/keyword).",
+        "Structured data support (JSON-LD NewsArticle) and social metadata hooks (Open Graph/Twitter blocks).",
+        "Schema + installer: idempotent migrations, indexes, and FK constraints with ON DELETE CASCADE for join tables."
+      ]
+    }
+  ]
+}

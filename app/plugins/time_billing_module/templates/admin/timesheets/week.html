@@ -1,0 +1,623 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-table me-2"></i>
+      Timesheet – User {{ data.week_user_id }} – Week {{ data.week.week_id }}
+    </h4>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <a id="btnBack" class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.timesheets_overview_page') }}">
+        <i class="bi bi-box-arrow-left me-1"></i> Back to Overview
+        </a>
+      <button id="btnApprove" class="btn btn-success btn-sm"
+              {% if data.week.status in ['approved', 'invoiced'] %}disabled{% endif %}>
+        <i class="bi bi-check2-circle me-1"></i> Approve
+      </button>
+      <button id="btnReject" class="btn btn-danger btn-sm"
+              {% if data.week.status in ['approved', 'invoiced'] %}disabled{% endif %}>
+        <i class="bi bi-x-circle me-1"></i> Reject
+      </button>
+      {% if data.can_admin_mark_paid_closed %}
+      <form method="post" class="d-flex flex-wrap gap-1 align-items-center border-start ps-2 ms-1"
+            action="{{ url_for('internal_time_billing.admin_mark_week_paid_closed', user_id=data.week_user_id, week_id=data.week.week_id) }}"
+            onsubmit="return confirm('Mark this week paid/closed without a portal invoice? Self-employed contractors will not be able to invoice this week.');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="note" class="form-control form-control-sm" style="max-width:14rem" placeholder="Optional note (e.g. PAY ref)" maxlength="512">
+        <button type="submit" class="btn btn-outline-success btn-sm" title="Use when paid via PAYE, off-system, or before portal invoicing existed">
+          <i class="bi bi-lock me-1"></i> Mark paid / closed
+        </button>
+      </form>
+      {% endif %}
+      {% if data.can_admin_reopen_paid_closure %}
+      <form method="post" class="d-inline border-start ps-2 ms-1"
+            action="{{ url_for('internal_time_billing.admin_reopen_week_paid_closure', user_id=data.week_user_id, week_id=data.week.week_id) }}"
+            onsubmit="return confirm('Reopen this week to approved? Only use if it was closed without a portal invoice.');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-warning btn-sm">
+          <i class="bi bi-unlock me-1"></i> Reopen (undo paid/closed)
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Totals / Status -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Hours</div>
+          <div class="fs-5 fw-semibold">{{ '%.2f'|format(data.totals.hours) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Pay</div>
+          <div class="fs-5 fw-semibold">£{{ '%.2f'|format(data.totals.pay) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Travel</div>
+          <div class="fs-5 fw-semibold">£{{ '%.2f'|format(data.totals.travel) }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+        <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Status</div>
+          <div>
+            {% if data.week.status == 'approved' %}
+              <span class="badge bg-success">Approved</span>
+            {% elif data.week.status == 'invoiced' %}
+              <span class="badge bg-success">Invoiced / paid closed</span>
+              {% if data.week.payment_closed_at %}
+              <div class="small text-muted mt-1">Closed by accounts (no portal invoice){% if data.week.payment_closed_by %} · {{ data.week.payment_closed_by }}{% endif %}{% if data.week.payment_closed_note %} — {{ data.week.payment_closed_note }}{% endif %}</div>
+              {% endif %}
+            {% elif data.week.status == 'submitted' %}
+              <span class="badge bg-primary">Submitted</span>
+            {% elif data.week.status == 'rejected' %}
+              <span class="badge bg-danger">Rejected</span>
+            {% else %}
+              <span class="badge bg-secondary">Draft</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="alert alert-info py-2 small mb-3" role="alert">
+    <strong>Agreed uplift / one-off rate:</strong> edit <strong>Rate</strong> and/or <strong>Pay</strong>, then click <strong>Apply</strong> on that row — a reason is required (audit trail). Contractors cannot set payroll rates from their portal; use run sheet shift pay when the job is run sheet–based, or this screen after agreement.
+  </div>
+
+  <!-- Summaries by job type (for invoicing) -->
+  {% if data.summaries_by_job_type is defined and data.summaries_by_job_type %}
+  <div class="card mb-3">
+    <div class="card-header py-2">
+      <strong>Summaries by job type</strong> <span class="text-muted small">(wage × hours per type for invoicing)</span>
+    </div>
+    <div class="card-body py-2">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>Job type</th>
+              <th class="text-end">Hours</th>
+              <th class="text-end">Pay</th>
+              <th class="text-end">Entries</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in data.summaries_by_job_type %}
+            <tr>
+              <td>
+                <span class="badge me-1" style="background-color: {{ s.job_type_colour_hex or '#6c757d' }}; color: #fff;">{{ s.job_type_name or 'Job type ' ~ s.job_type_id }}</span>
+              </td>
+              <td class="text-end">{{ '%.2f'|format(s.total_hours) }}</td>
+              <td class="text-end">£{{ '%.2f'|format(s.total_pay) }}</td>
+              <td class="text-end">{{ s.entry_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Grid -->
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Client</th>
+              <th>Site</th>
+              <th>Job Type</th>
+              <th>Times</th>
+              <th>Break</th>
+              <th class="text-end">Hours</th>
+              <th class="text-end">Rate</th>
+              <th class="text-end">Pay</th>
+              <th class="text-end">Travel</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="adminEntryBody">
+            {% for e in data.entries %}
+              <tr data-id="{{ e.id }}"
+                  data-server-rate="{{ e.wage_rate_used or 0 }}"
+                  data-server-pay="{{ e.pay or 0 }}">
+                <td>
+                  {{ e.work_date.strftime('%d/%m/%Y') if e.work_date.__class__.__name__ == 'date' else e.work_date }}
+                </td>
+
+                <!-- Client/Site -->
+                <td>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="client_name" type="text"
+                         value="{{ e.client_name or '' }}">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="site_name" type="text"
+                         value="{{ e.site_name or '' }}">
+                </td>
+
+                <!-- Job type -->
+                <td>
+                  <span class="badge me-1" style="background-color: {{ e.job_type_colour_hex or '#6c757d' }}; color: #fff;">{{ e.job_type_name or e.job_type_id or '' }}</span>
+                  <input class="form-control form-control-sm js-edit d-inline-block" style="max-width:80px"
+                         data-field="job_type_id" type="number"
+                         value="{{ e.job_type_id or '' }}">
+                </td>
+
+                <!-- Scheduled -->
+                <td class="d-flex gap-1">
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="scheduled_start"
+                         style="max-width:90px" placeholder="HH:MM"
+                         value="{{ e.scheduled_start }}">
+                  <span>–</span>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="scheduled_end"
+                         style="max-width:90px" placeholder="HH:MM"
+                         value="{{ e.scheduled_end }}">
+                </td>
+
+                <!-- Actual -->
+                <td class="d-flex gap-1">
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="actual_start"
+                         style="max-width:90px" placeholder="HH:MM"
+                         value="{{ e.actual_start }}">
+                  <span>–</span>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="actual_end"
+                         style="max-width:90px" placeholder="HH:MM"
+                         value="{{ e.actual_end }}">
+                </td>
+
+                <!-- Break -->
+                <td>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="break_mins"
+                         style="max-width:80px" type="number" min="0"
+                         value="{{ e.break_mins or 0 }}">
+                </td>
+
+                <!-- Computed values -->
+                <td class="text-end">{{ '%.2f'|format(e.actual_hours or 0) }}</td>
+                <td class="text-end">
+                  <input class="form-control form-control-sm js-pay-override text-end"
+                         style="max-width:96px" type="number" step="0.01" min="0"
+                         data-field="wage_rate_used"
+                         value="{{ '%.2f'|format(e.wage_rate_used or 0) }}"
+                         title="Hourly rate for this line (admin uplift)">
+                  {% if e.rate_overridden %}
+                    <span class="badge bg-warning text-dark mt-1" title="Rate/pay set by admin override">Override</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <input class="form-control form-control-sm js-pay-override text-end"
+                         style="max-width:96px" type="number" step="0.01" min="0"
+                         data-field="pay"
+                         value="{{ '%.2f'|format(e.pay or 0) }}"
+                         title="Line pay (admin uplift)">
+                  <button type="button" class="btn btn-outline-primary btn-sm mt-1 js-pay-save"
+                          title="Save rate &amp; pay with a reason (agreed uplift)">Apply</button>
+                </td>
+
+                <!-- Travel -->
+                <td>
+                  <input class="form-control form-control-sm js-edit"
+                         data-field="travel_parking"
+                         style="max-width:100px" type="number" step="0.01" min="0"
+                         value="{{ e.travel_parking or 0 }}">
+                </td>
+
+                <!-- Notes -->
+                <td>
+                  <div class="d-flex flex-column">
+                    <input class="form-control form-control-sm js-edit"
+                           data-field="notes"
+                           value="{{ e.notes or '' }}">
+                    {% if e.edited_by %}
+                      <small class="text-warning mt-1" title="{{ (e.edit_reason or '')|e }}">
+                        Adjusted
+                      </small>
+                      {% if e.actual_start and e.scheduled_start %}
+                        <small class="text-warning mt-0" title="Start vs scheduled">
+                          Start: {% if e.actual_start < e.scheduled_start %}early{% elif e.actual_start > e.scheduled_start %}late{% else %}on time{% endif %}
+                        </small>
+                      {% endif %}
+                      {% if e.actual_end and e.scheduled_end %}
+                        <small class="text-warning mt-0" title="End vs scheduled">
+                          End: {% if e.actual_end < e.scheduled_end %}early{% elif e.actual_end > e.scheduled_end %}late{% else %}on time{% endif %}
+                        </small>
+                      {% endif %}
+                    {% elif e.edit_reason %}
+                      <small class="text-muted mt-1" title="{{ (e.edit_reason or '')|e }}">
+                        Auto-prefilled
+                      </small>
+                    {% endif %}
+                  </div>
+                </td>
+
+                <!-- Policy
+                <td class="text-end">
+                  <button class="btn btn-outline-secondary btn-sm js-policy" type="button"
+                          data-mdb-toggle="modal" data-mdb-target="#policyModal"
+                          data-policy='{{ e.policy_applied or ""|safe }}'
+                          title="Policy applied">
+                    <i class="bi bi-info-circle"></i>
+                  </button>
+                </td> -->
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="13" class="text-center text-muted py-4">
+                  No entries for this week.
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer actions -->
+      <div class="d-flex justify-content-end">
+        <a class="btn btn-outline-dark btn-sm me-2"
+           href="{{ url_for('internal_time_billing.admin_get_week', user_id=data.week_user_id, week_id=data.week.week_id) }}">
+          <i class="bi bi-braces-asterisk me-1"></i> JSON
+        </a>
+        <a class="btn btn-outline-secondary btn-sm"
+           href="{{ url_for('internal_time_billing.admin_week_page', user_id=data.week_user_id, week_id=data.week.week_id) }}">
+          <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Policy Modal -->
+<div class="modal fade" id="policyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">
+          <i class="bi bi-info-circle me-2"></i> Policy Details
+        </h6>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"
+                aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <pre class="mb-0 small" id="policyJson">{}</pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-mdb-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Rate / pay uplift (reason required) -->
+<div class="modal fade" id="payUpliftModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">Save rate &amp; pay</h6>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2">Recorded on the entry for payroll audit (e.g. &ldquo;£20/h uplift agreed with Sam for uncovered night shift&rdquo;).</p>
+        <label class="form-label">Reason <span class="text-danger">*</span></label>
+        <textarea id="payUpliftReason" class="form-control" rows="3" required minlength="3" placeholder="Agreed uplift — who, what shift, amount agreed"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-mdb-dismiss="modal" id="payUpliftCancel">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="payUpliftConfirm">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal fade" id="rejectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" id="rejectForm">
+      <div class="modal-header">
+        <h6 class="modal-title text-danger">
+          <i class="bi bi-x-circle me-2"></i> Reject Timesheet
+        </h6>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Reason (required)</label>
+        <textarea id="rejectReason" class="form-control" rows="3" required
+                  placeholder="Explain what needs changing or clarifications for staff"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" type="button" data-mdb-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger" type="submit">Reject</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+(function () {
+  "use strict";
+
+  const userId = "{{ data.week_user_id }}";
+  const weekId = "{{ data.week.week_id }}";
+
+  const body = document.getElementById("adminEntryBody");
+  const btnApprove = document.getElementById("btnApprove");
+  const btnReject = document.getElementById("btnReject");
+  const rejectForm = document.getElementById("rejectForm");
+  const rejectTxt = document.getElementById("rejectReason");
+  const rejectModalEl = document.getElementById("rejectModal");
+  const policyModalEl = document.getElementById("policyModal");
+  const payUpliftModalEl = document.getElementById("payUpliftModal");
+  const payUpliftReason = document.getElementById("payUpliftReason");
+  const payUpliftConfirm = document.getElementById("payUpliftConfirm");
+  const payUpliftCancel = document.getElementById("payUpliftCancel");
+
+  let payUpliftPending = null;
+
+  function moneyClose(a, b) {
+    return Math.abs(Number(a) - Number(b)) < 0.009;
+  }
+
+  // MDB modals (admin base loads mdb.min.js)
+  function showModal(el) {
+    if (!el) return;
+    try {
+      if (window.mdb && mdb.Modal) {
+        (mdb.Modal.getInstance(el) || mdb.Modal.getOrCreateInstance(el)).show();
+        return;
+      }
+    } catch (e) {}
+    el.classList.add("show");
+    el.style.display = "block";
+    el.removeAttribute("aria-hidden");
+  }
+
+  function hideModal(el) {
+    if (!el) return;
+    try {
+      if (window.mdb && mdb.Modal) {
+        const inst = mdb.Modal.getInstance(el);
+        if (inst) inst.hide();
+        return;
+      }
+    } catch (e) {}
+    el.classList.remove("show");
+    el.style.display = "none";
+    el.setAttribute("aria-hidden", "true");
+  }
+
+  // API URL bases
+  const PATCH_BASE = "/plugin/time_billing_module/api/timesheets/entry";
+  const APPROVE_URL = (uid, wid) =>
+    `/plugin/time_billing_module/api/timesheets/${uid}/${wid}/approve`;
+  const REJECT_URL = (uid, wid) =>
+    `/plugin/time_billing_module/api/timesheets/${uid}/${wid}/reject`;
+
+  async function patchEntry(id, payload) {
+    const resp = await fetch(`${PATCH_BASE}/${id}`, {
+      method: "PATCH",
+      headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "PATCH"),
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) {
+      alert(data.message || "Failed to update entry");
+      return { ok: false, ...data };
+    }
+    return { ok: true, ...data };
+  }
+
+  function openPayUpliftModal(tr, entryId) {
+    const rateInp = tr.querySelector('.js-pay-override[data-field="wage_rate_used"]');
+    const payInp = tr.querySelector('.js-pay-override[data-field="pay"]');
+    if (!rateInp || !payInp) return;
+    payUpliftPending = { tr, entryId, rateInp, payInp };
+    if (payUpliftReason) payUpliftReason.value = "";
+    showModal(payUpliftModalEl);
+    setTimeout(() => payUpliftReason && payUpliftReason.focus(), 300);
+  }
+
+  async function submitPayUplift() {
+    if (!payUpliftPending) return;
+    const reason = (payUpliftReason && payUpliftReason.value || "").trim();
+    if (reason.length < 3) {
+      alert("Please enter a reason (at least 3 characters).");
+      return;
+    }
+    const { tr, entryId, rateInp, payInp } = payUpliftPending;
+    const wage_rate_used = parseFloat(rateInp.value);
+    const pay = parseFloat(payInp.value);
+    if (Number.isNaN(wage_rate_used) || wage_rate_used < 0 || Number.isNaN(pay) || pay < 0) {
+      alert("Rate and pay must be valid non-negative numbers.");
+      return;
+    }
+    const res = await patchEntry(entryId, {
+      wage_rate_used,
+      pay,
+      edit_reason: reason,
+    });
+    if (res.ok) {
+      tr.dataset.serverRate = String(wage_rate_used);
+      tr.dataset.serverPay = String(pay);
+      hideModal(payUpliftModalEl);
+      payUpliftPending = null;
+      location.reload();
+    }
+  }
+
+  // Bind inline edit
+  if (body) {
+    body.querySelectorAll("tr").forEach((tr) => {
+      const id = tr.dataset.id;
+      if (!id) return;
+
+      tr.querySelectorAll(".js-edit").forEach((inp) => {
+        inp.addEventListener("change", async (e) => {
+          const field = e.target.dataset.field;
+          let val = e.target.value;
+
+          if (field === "job_type_id" || field === "break_mins") {
+            val = val ? parseInt(val, 10) : null;
+          } else if (field === "travel_parking") {
+            val = val ? parseFloat(val) : 0;
+          } else {
+            val = val || null;
+          }
+
+          const payload = {};
+          payload[field] = val;
+          await patchEntry(id, payload);
+        });
+      });
+
+      const savePayBtn = tr.querySelector(".js-pay-save");
+      if (savePayBtn) {
+        savePayBtn.addEventListener("click", () => {
+          const rateInp = tr.querySelector('.js-pay-override[data-field="wage_rate_used"]');
+          const payInp = tr.querySelector('.js-pay-override[data-field="pay"]');
+          if (!rateInp || !payInp) return;
+          const r = parseFloat(rateInp.value);
+          const p = parseFloat(payInp.value);
+          if (Number.isNaN(r) || Number.isNaN(p)) {
+            alert("Enter valid rate and pay.");
+            return;
+          }
+          const sr = parseFloat(tr.dataset.serverRate || "0");
+          const sp = parseFloat(tr.dataset.serverPay || "0");
+          if (moneyClose(r, sr) && moneyClose(p, sp)) {
+            alert("Change rate or pay before applying.");
+            return;
+          }
+          openPayUpliftModal(tr, id);
+        });
+      }
+
+      tr.querySelectorAll(".js-policy").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const raw = btn.getAttribute("data-policy") || "{}";
+          let parsed = raw;
+          try {
+            parsed = JSON.parse(raw);
+          } catch (_) {}
+          const pre = document.getElementById("policyJson");
+          if (pre)
+            pre.textContent =
+              typeof parsed === "string"
+                ? parsed
+                : JSON.stringify(parsed, null, 2);
+          showModal(policyModalEl);
+        });
+      });
+    });
+  }
+
+  if (payUpliftConfirm) {
+    payUpliftConfirm.addEventListener("click", () => submitPayUplift());
+  }
+  if (payUpliftCancel) {
+    payUpliftCancel.addEventListener("click", () => {
+      if (payUpliftPending) {
+        const { tr, rateInp, payInp } = payUpliftPending;
+        rateInp.value = parseFloat(tr.dataset.serverRate || 0).toFixed(2);
+        payInp.value = parseFloat(tr.dataset.serverPay || 0).toFixed(2);
+        payUpliftPending = null;
+      }
+      hideModal(payUpliftModalEl);
+    });
+  }
+
+  // Approve
+  if (btnApprove) {
+    btnApprove.addEventListener("click", async () => {
+      if (!confirm("Approve this week and generate PDF?")) return;
+      const resp = await fetch(APPROVE_URL(userId, weekId), { method: "POST" });
+      if (resp.ok) location.reload();
+      else alert("Approval failed");
+    });
+  }
+
+  // Reject: open modal
+  if (btnReject) {
+    btnReject.addEventListener("click", () => {
+      if (rejectTxt) rejectTxt.value = "";
+      showModal(rejectModalEl);
+    });
+  }
+
+  // Reject: submit
+  if (rejectForm) {
+    rejectForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const reason = (rejectTxt?.value || "").trim();
+      if (!reason) {
+        alert("Reason required");
+        return;
+      }
+      const resp = await fetch(REJECT_URL(userId, weekId), {
+        method: "POST",
+        headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "POST"),
+        body: JSON.stringify({ reason }),
+      });
+      if (resp.ok) {
+        hideModal(rejectModalEl);
+        location.reload();
+      } else {
+        alert("Rejection failed");
+      }
+    });
+  }
+})();
+</script>
+
+{% endblock %}

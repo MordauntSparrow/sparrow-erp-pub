@@ -1,4 +1,5 @@
 # run_website.py
+from app.plugins.website_module import WebsiteServer
 import os
 import sys
 
@@ -10,9 +11,8 @@ try:
 except Exception as e:
     print(f"[WARN] Persistent storage bind failed: {e}", file=sys.stderr)
 
-from app.plugins.website_module import WebsiteServer
 
 if __name__ == '__main__':
-    server = WebsiteServer(port=8080)
+    server = WebsiteServer(port=80)
     print("Starting website server in debug mode (blocking)...")
     server.start(debug=True)

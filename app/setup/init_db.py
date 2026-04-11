@@ -94,6 +94,32 @@ def create_default_admin():
     db.close()
 
 
+def run_predeploy_install_upgrades():
+    """
+    Run core + plugin ``install.py upgrade`` (same as Settings → version / run upgrades).
+    Railway ``preDeployCommand`` uses this module; failures exit non-zero so deploy does not proceed.
+
+    Set SPARROW_SKIP_PREDEPLOY_UPGRADES=1 to skip (e.g. debugging).
+    """
+    flag = (os.environ.get("SPARROW_SKIP_PREDEPLOY_UPGRADES") or "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        print("[init_db] Skipping install upgrades (SPARROW_SKIP_PREDEPLOY_UPGRADES is set).")
+        return
+    from app.objects import run_install_upgrade_scripts
+
+    app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    report = run_install_upgrade_scripts(app_root)
+    core = report.get("core") or {}
+    if core.get("ran") and not core.get("ok"):
+        print("[init_db] Core upgrade failed:", core.get("message"))
+        raise SystemExit(1)
+    if report.get("plugins_failed"):
+        print("[init_db] Plugin upgrade failures:", report["plugins_failed"])
+        raise SystemExit(1)
+    print("[init_db] Install upgrades completed successfully.")
+
+
 if __name__ == "__main__":
     create_database_and_tables()
+    run_predeploy_install_upgrades()
     create_default_admin()

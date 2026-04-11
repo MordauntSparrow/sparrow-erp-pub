@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>{{ site_settings.company_name or 'Employee Portal' }} - Sign In</title>
+
+  <!-- Bootstrap & Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+  <style>
+    :root {
+      --card-bg: rgba(255, 255, 255, 0.14);
+      --card-border: rgba(255, 255, 255, 0.25);
+      --overlay-top: rgba(0, 0, 0, 0.18);
+      --overlay-bottom: rgba(0, 0, 0, 0.6);
+      --primary: #0d6efd;
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+      background: #0b1220;
+      color: #fff;
+      font-family: "Segoe UI", Roboto, sans-serif;
+    }
+
+    .immersive-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    .bg-image {
+      position: absolute;
+      inset: 0;
+      background: center/cover no-repeat;
+      filter: brightness(.9) contrast(1.02);
+      opacity: 1;
+      transition: none !important;
+      will-change: auto;
+    }
+
+    .bg-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, var(--overlay-top), var(--overlay-bottom) 75%);
+    }
+
+    .particles {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .login-shell {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: 460px;
+      padding: 20px;
+    }
+
+    .login-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      backdrop-filter: blur(10px) saturate(120%);
+      -webkit-backdrop-filter: blur(10px) saturate(120%);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+      padding: 32px 28px;
+    }
+
+    .brand-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .brand-logo {
+      max-height: 72px;
+      max-width: 220px;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-weight: 700;
+      font-size: 1.5rem;
+      letter-spacing: 0.3px;
+    }
+
+    .login-title {
+      font-size: 1.125rem;
+      margin: 0.5rem 0 1.25rem;
+      font-weight: 600;
+      opacity: .95;
+      text-align: center;
+    }
+
+    .login-field {
+      position: relative;
+      margin-bottom: 18px;
+    }
+
+    .input-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 15px;
+    }
+
+    .form-control {
+      padding-left: 42px;
+      height: 48px;
+      border-radius: 30px;
+      font-size: 1rem;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      transition: all .2s ease;
+    }
+
+    .form-control::placeholder {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .form-control:focus {
+      border-color: rgba(13, 110, 253, 0.8);
+      box-shadow: 0 0 0 .2rem rgba(13, 110, 253, 0.2);
+      background: rgba(255, 255, 255, 0.18);
+      color: #fff;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      border-color: var(--primary);
+      border-radius: 28px;
+      width: 100%;
+      padding: 12px;
+      font-weight: 700;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary:hover {
+      filter: brightness(.95);
+      transform: translateY(-1px);
+      color: #fff;
+    }
+
+    .footer-text {
+      margin-top: 18px;
+      font-size: .9rem;
+      color: rgba(255, 255, 255, 0.85);
+      text-align: center;
+    }
+
+    .small-muted {
+      font-size: .85rem;
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .login-alerts {
+      margin-bottom: 16px;
+    }
+    .login-alert {
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .login-alert.error {
+      background: rgba(220, 53, 69, 0.25);
+      border: 1px solid rgba(220, 53, 69, 0.5);
+      color: #f8d7da;
+    }
+    .login-alert.success {
+      background: rgba(25, 135, 84, 0.25);
+      border: 1px solid rgba(25, 135, 84, 0.5);
+      color: #d1e7dd;
+    }
+    .login-alert i { flex-shrink: 0; }
+
+    .login-field-password { position: relative; }
+    .login-field-password .form-control { padding-right: 48px; }
+    .password-toggle {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 5;
+      background: none;
+      border: none;
+      color: rgba(255, 255, 255, 0.8);
+      cursor: pointer;
+      padding: 8px;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .password-toggle:hover { color: #fff; }
+    .password-toggle i { pointer-events: none; }
+
+    .remember-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 18px;
+      gap: 8px;
+    }
+    .remember-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--primary);
+      cursor: pointer;
+    }
+    .remember-row label {
+      margin: 0;
+      font-size: 0.95rem;
+      color: rgba(255, 255, 255, 0.9);
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="immersive-wrap">
+    <div id="bg" class="bg-image"></div>
+    <canvas id="particles" class="particles"></canvas>
+    <div class="bg-overlay"></div>
+  </div>
+
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="brand-wrap">
+        {% if site_settings.branding == 'logo' and site_settings.logo_path %}
+          <img src="{{ url_for('static', filename=site_settings['logo_path']) }}" alt="{{ site_settings.company_name }}" class="brand-logo">
+        {% else %}
+          <h1 class="brand-title">{{ site_settings.company_name or 'Employee Portal' }}</h1>
+        {% endif %}
+        <div class="login-title">Sign In</div>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="login-alerts" role="alert" aria-live="polite">
+            {% for category, message in messages %}
+              <div class="login-alert {{ 'error' if category == 'error' else (category or 'success') }}">
+                <i class="fas {{ 'fa-check-circle' if category == 'success' else 'fa-exclamation-circle' }}"></i>
+                <span>{{ message }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <form method="post" action="{{ url_for('public_employee_portal.login_submit') }}" autocomplete="on" id="login-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.args.get('next', '') }}">
+        <div class="login-field">
+          <span class="input-icon"><i class="fas fa-envelope"></i></span>
+          <input type="email" class="form-control" id="email" name="email" placeholder="Work email" required autocomplete="username" autofocus aria-required="true">
+        </div>
+        <div class="login-field login-field-password">
+          <span class="input-icon"><i class="fas fa-lock"></i></span>
+          <input type="password" class="form-control" id="password" name="password" placeholder="Password" required autocomplete="current-password" aria-required="true">
+          <button type="button" class="password-toggle" id="toggle-password" title="Show password" aria-label="Show password">
+            <i class="fas fa-eye" id="toggle-password-icon"></i>
+          </button>
+        </div>
+        <div class="remember-row">
+          <input type="checkbox" id="remember" name="remember" value="on" autocomplete="off">
+          <label for="remember">Remember me</label>
+        </div>
+        <button type="submit" class="btn btn-primary">Sign In</button>
+      </form>
+
+      <div class="footer-text">
+        <div class="small-muted">&copy; {{ current_year }} {{ site_settings.company_name or 'Sparrow ERP' }}. Powered by Sparrow ERP.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      'use strict';
+      var bg = document.getElementById('bg');
+      var periods = [
+        { id: 'night', s: 0, e: 5 },
+        { id: 'dawn', s: 5, e: 7 },
+        { id: 'day', s: 7, e: 17 },
+        { id: 'dusk', s: 17, e: 19 },
+        { id: 'evening', s: 19, e: 24 }
+      ];
+      var imgs = {
+        night: ["https://picsum.photos/id/1015/1920/1080", "https://picsum.photos/id/1003/1920/1080"],
+        dawn: ["https://picsum.photos/id/1043/1920/1080", "https://picsum.photos/id/1021/1920/1080"],
+        day: ["https://picsum.photos/id/1018/1920/1080", "https://picsum.photos/id/1025/1920/1080", "https://picsum.photos/id/1039/1920/1080"],
+        dusk: ["https://picsum.photos/id/1016/1920/1080", "https://picsum.photos/id/1035/1920/1080"],
+        evening: ["https://picsum.photos/id/1011/1920/1080", "https://picsum.photos/id/1032/1920/1080"]
+      };
+      function period(d) {
+        var h = d.getHours();
+        for (var i = 0; i < periods.length; i++) {
+          var p = periods[i];
+          if (h >= p.s && h < p.e) return p.id;
+        }
+        return 'day';
+      }
+      function pick(list, key) {
+        var hash = 0;
+        for (var i = 0; i < key.length; i++) {
+          hash = ((hash << 5) - hash) + key.charCodeAt(i);
+          hash |= 0;
+        }
+        return list[Math.abs(hash) % list.length];
+      }
+      function setBg() {
+        var now = new Date();
+        var per = period(now);
+        var url = pick(imgs[per] || imgs.day, now.toDateString() + per);
+        bg.style.backgroundImage = 'url("' + url + '")';
+        bg.style.filter = (per === 'night' || per === 'evening') ? 'brightness(.6) contrast(1.05)' : 'brightness(1) contrast(1)';
+      }
+      setBg();
+
+      var canvas = document.getElementById('particles');
+      var ctx = canvas.getContext('2d');
+      function measure() {
+        var r = document.body.getBoundingClientRect();
+        return { w: Math.max(1, Math.round(r.width)), h: Math.max(1, Math.round(r.height)) };
+      }
+      var size = measure();
+      canvas.width = size.w;
+      canvas.height = size.h;
+      canvas.style.width = size.w + 'px';
+      canvas.style.height = size.h + 'px';
+      var w = size.w, h = size.h;
+      var COUNT = Math.min(90, Math.max(40, Math.floor(w / 18)));
+      function rnd(a, b) { return a + Math.random() * (b - a); }
+      var parts = [];
+      for (var i = 0; i < COUNT; i++) {
+        parts.push({
+          x: rnd(0, w), y: rnd(0, h), r: rnd(0.6, 2.2), a: rnd(0.25, 0.55),
+          vx: rnd(-0.15, 0.15), vy: rnd(0.05, 0.25)
+        });
+      }
+      function link() {
+        for (var i = 0; i < parts.length; i++) {
+          var p = parts[i];
+          for (var j = i + 1; j < parts.length; j++) {
+            var q = parts[j];
+            var dx = p.x - q.x, dy = p.y - q.y;
+            var d2 = dx * dx + dy * dy;
+            if (d2 < 9000) {
+              ctx.strokeStyle = 'rgba(255,255,255,' + (0.06 * (1 - d2 / 9000)).toFixed(3) + ')';
+              ctx.beginPath();
+              ctx.moveTo(p.x, p.y);
+              ctx.lineTo(q.x, q.y);
+              ctx.stroke();
+            }
+          }
+        }
+      }
+      function draw() {
+        ctx.clearRect(0, 0, w, h);
+        link();
+        for (var i = 0; i < parts.length; i++) {
+          var p = parts[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < 0 || p.x > w) p.vx *= -1;
+          if (p.y > h + 5) p.y = -5;
+          ctx.fillStyle = 'rgba(255,255,255,' + p.a.toFixed(2) + ')';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        requestAnimationFrame(draw);
+      }
+      function resize() {
+        var m = measure();
+        w = canvas.width = m.w;
+        h = canvas.height = m.h;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        for (var i = 0; i < parts.length; i++) {
+          var p = parts[i];
+          if (p.x > w) p.x = w - 1;
+          if (p.y > h) p.y = h - 1;
+        }
+      }
+      window.addEventListener('resize', resize);
+      draw();
+    })();
+
+    (function() {
+      var pw = document.getElementById('password');
+      var btn = document.getElementById('toggle-password');
+      var icon = document.getElementById('toggle-password-icon');
+      if (pw && btn && icon) {
+        btn.addEventListener('click', function() {
+          var isPassword = pw.type === 'password';
+          pw.type = isPassword ? 'text' : 'password';
+          icon.className = isPassword ? 'fas fa-eye-slash' : 'fas fa-eye';
+          btn.title = isPassword ? 'Hide password' : 'Show password';
+          btn.setAttribute('aria-label', btn.title);
+        });
+      }
+    })();
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.min.js" crossorigin="anonymous"></script>
+  <script>if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function() {}); }</script>
+</body>
+</html>

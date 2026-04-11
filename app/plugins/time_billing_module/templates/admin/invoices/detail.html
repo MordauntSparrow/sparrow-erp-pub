@@ -1,0 +1,78 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-4">
+  <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="text-decoration-none small">&larr; All invoices</a>
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mt-2 mb-3">
+    <div>
+      <h4 class="mb-0">Invoice {{ invoice.invoice_number }}</h4>
+      <p class="text-muted small mb-0">{{ invoice.contractor_name }} · {{ invoice.contractor_email }} (ID {{ invoice.contractor_id }})</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.admin_invoice_pdf', invoice_id=invoice.id) }}">Download PDF</a>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('internal_time_billing.admin_week_page', user_id=invoice.contractor_id, week_id=invoice.timesheet_week_code) }}">Admin timesheet</a>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body small">
+      <p><strong>Week (ISO)</strong>
+        <a href="{{ url_for('internal_time_billing.admin_week_page', user_id=invoice.contractor_id, week_id=invoice.timesheet_week_code) }}">{{ invoice.timesheet_week_code }}</a>
+        ending {{ invoice.week_ending }}
+      </p>
+      <p><strong>Timesheet status</strong> {{ invoice.timesheet_status }}
+        {% if invoice.rejection_reason %}<span class="text-danger">— {{ invoice.rejection_reason }}</span>{% endif %}
+      </p>
+      <p><strong>Invoice status</strong> {{ invoice.status }} · <strong>Total</strong> £{{ '%.2f' % (invoice.total_amount or 0) }}</p>
+      {% if invoice.void_reason %}<p class="text-muted mb-0"><strong>Void reason:</strong> {{ invoice.void_reason }}</p>{% endif %}
+    </div>
+  </div>
+
+  {% if invoice.history and invoice.history|length > 1 %}
+  <div class="card mb-3">
+    <div class="card-header py-2">Version history (same week)</div>
+    <ul class="list-group list-group-flush small">
+      {% for h in invoice.history %}
+      <li class="list-group-item">{{ h.invoice_number }} — {{ h.status }} — {{ h.created_at }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="card mb-4">
+    <div class="card-header py-2">Lines</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Date</th><th>Timesheet (ISO)</th><th>Client</th><th>Site</th><th>Job</th><th class="text-end">Pay</th></tr></thead>
+        <tbody>
+          {% for line in invoice.lines %}
+          <tr>
+            <td>{{ line.work_date }}</td>
+            <td><a href="{{ url_for('internal_time_billing.admin_week_page', user_id=invoice.contractor_id, week_id=invoice.timesheet_week_code) }}">{{ invoice.timesheet_week_code }}</a></td>
+            <td>{{ line.client_name }}</td>
+            <td>{{ line.site_name }}</td>
+            <td>{{ line.job_type_name }}</td>
+            <td class="text-end">£{{ '%.2f' % (line.pay or 0) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if invoice.status != 'void' %}
+  <div class="card border-warning">
+    <div class="card-body">
+      <h6 class="card-title">Void invoice</h6>
+      <p class="small text-muted">Clears line links and sets the week back from <code>invoiced</code> to <code>approved</code> so the contractor can issue a new invoice if needed.</p>
+      <form method="post" action="{{ url_for('internal_time_billing.admin_invoice_void', invoice_id=invoice.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <input type="text" name="reason" class="form-control form-control-sm" placeholder="Reason (optional)">
+        </div>
+        <button type="submit" class="btn btn-warning btn-sm" onclick="return confirm('Void this invoice?');">Void invoice</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

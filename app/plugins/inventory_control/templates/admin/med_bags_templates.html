@@ -1,0 +1,52 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Med / kit bag templates — Inventory{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h1 class="h3 mb-0">Med / kit bag templates</h1>
+      <p class="text-muted small mb-0">Define bag types (response, burns, O₂, etc.) and bill-of-materials lines from the catalogue. Then create <a href="{{ url_for('inventory_control_internal.med_bags_instances_list') }}">instances</a> for each physical bag.</p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_witness_rules') }}">Witness rules</a>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">New template</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_template_create') }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3"><label class="form-label small">Name</label><input class="form-control form-control-sm" name="name" required placeholder="e.g. Response drug bag A"></div>
+        <div class="col-md-2"><label class="form-label small">Code</label><input class="form-control form-control-sm" name="code" required placeholder="RDB-A"></div>
+        <div class="col-md-2"><label class="form-label small">Kind</label>
+          <select class="form-select form-select-sm" name="bag_kind">{% for k in bag_kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}</select>
+        </div>
+        <div class="col-md-3"><label class="form-label small">Description</label><input class="form-control form-control-sm" name="description" placeholder="Optional"></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-primary btn-sm w-100">Create</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-light"><tr><th>Code</th><th>Name</th><th>Kind</th><th>Active</th><th></th></tr></thead>
+          <tbody>
+            {% for t in templates %}
+            <tr>
+              <td class="fw-medium">{{ t.code }}</td>
+              <td>{{ t.name }}</td>
+              <td><span class="badge bg-light text-dark border">{{ t.bag_kind }}</span></td>
+              <td>{% if t.is_active %}<span class="text-success">Yes</span>{% else %}<span class="text-muted">No</span>{% endif %}</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('inventory_control_internal.med_bags_template_detail', template_id=t.id) }}">Open</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted small p-4">No templates yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

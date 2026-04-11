@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit item' if item else 'New training item' }} – Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-3">{{ 'Edit item' if item else 'New training item' }}</h1>
+  <form method="post" action="{{ url_for('internal_training.admin_item_update', item_id=item.id) if item else url_for('internal_training.admin_item_create') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Title <span class="text-danger">*</span></label>
+          <input type="text" name="title" class="form-control" value="{{ item.title if item else '' }}" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Slug</label>
+          <input type="text" name="slug" class="form-control" value="{{ item.slug if item else '' }}" placeholder="Auto from title if blank">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Summary</label>
+          <textarea name="summary" class="form-control" rows="2" placeholder="Short description">{{ item.summary if item else '' }}</textarea>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Item type</label>
+          <select name="item_type" class="form-select">
+            <option value="document" {{ 'selected' if (item and item.item_type == 'document') or not item else '' }}>Document</option>
+            <option value="link" {{ 'selected' if item and item.item_type == 'link' else '' }}>Link</option>
+            <option value="acknowledgement" {{ 'selected' if item and item.item_type == 'acknowledgement' else '' }}>Acknowledgement</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">External URL</label>
+          <input type="url" name="external_url" class="form-control" value="{{ item.external_url if item else '' }}" placeholder="For type Link">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Content</label>
+          <textarea name="content" class="form-control" rows="8" placeholder="HTML or plain text (for Document / Acknowledgement)">{{ item.content if item else '' }}</textarea>
+          <div class="form-text">Optional. For Link type, use External URL.</div>
+        </div>
+        <div class="form-check">
+          <input type="checkbox" name="active" value="1" class="form-check-input" id="active" {{ 'checked' if not item or item.active else '' }}>
+          <label class="form-check-label" for="active">Active (visible for assignment)</label>
+        </div>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    <a href="{{ url_for('internal_training.admin_items') }}" class="btn btn-outline-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

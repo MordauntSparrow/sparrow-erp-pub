@@ -1,0 +1,86 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}CRM search{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Search</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 960px;">
+  <h1 class="h4 mb-3">Search CRM</h1>
+  <form method="get" action="{{ url_for('crm_module.crm_search') }}" class="row g-2 mb-4">
+    <div class="col-md-8">
+      <input type="search" name="q" class="form-control" placeholder="Accounts, contacts, opportunities, quotes…" value="{{ q_display }}" autofocus minlength="2" maxlength="200">
+    </div>
+    <div class="col-md-4">
+      <button type="submit" class="btn btn-primary rounded-pill px-4">Search</button>
+    </div>
+  </form>
+  {% if q|length < 2 %}
+  <p class="text-muted small">Enter at least 2 characters.</p>
+  {% else %}
+  {% if not can_edit %}
+  <p class="alert alert-light border small">Read-only CRM access: results are for reference. Use the Accounts, Contacts, Opportunities, and Quotes lists to open records (or ask someone with edit permission).</p>
+  {% endif %}
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-2">Accounts ({{ hits_accounts|length }})</div>
+        <ul class="list-group list-group-flush small">
+          {% for a in hits_accounts %}
+          <li class="list-group-item">{% if can_edit %}<a href="{{ url_for('crm_module.account_edit', account_id=a.id) }}">{{ a.name }}</a>{% else %}{{ a.name }} <span class="text-muted">#{{ a.id }}</span>{% endif %}</li>
+          {% else %}
+          <li class="list-group-item text-muted">No matches</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-2">Contacts ({{ hits_contacts|length }})</div>
+        <ul class="list-group list-group-flush small">
+          {% for c in hits_contacts %}
+          <li class="list-group-item">
+            {% if can_edit %}<a href="{{ url_for('crm_module.contact_edit', contact_id=c.id) }}">{{ c.first_name }} {{ c.last_name }}</a>{% else %}{{ c.first_name }} {{ c.last_name }}{% endif %}
+            {% if c.email %}<span class="text-muted"> · {{ c.email }}</span>{% endif %}
+            {% if c.account_name %}<div class="text-muted">{{ c.account_name }}</div>{% endif %}
+          </li>
+          {% else %}
+          <li class="list-group-item text-muted">No matches</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-2">Opportunities ({{ hits_opportunities|length }})</div>
+        <ul class="list-group list-group-flush small">
+          {% for o in hits_opportunities %}
+          <li class="list-group-item">
+            {% if can_edit %}<a href="{{ url_for('crm_module.opportunity_edit', opp_id=o.id) }}">{{ o.name }}</a>{% else %}{{ o.name }} <span class="text-muted">#{{ o.id }}</span>{% endif %}
+            <div class="text-muted">{{ o.account_name }} · {{ o.stage }}</div>
+          </li>
+          {% else %}
+          <li class="list-group-item text-muted">No matches</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card crm-panel h-100">
+        <div class="card-header py-2">Quotes ({{ hits_quotes|length }})</div>
+        <ul class="list-group list-group-flush small">
+          {% for qn in hits_quotes %}
+          <li class="list-group-item">
+            <a href="{{ url_for('crm_module.quote_edit', quote_id=qn.id) }}">#{{ qn.id }} {{ qn.title or 'Untitled' }}</a>
+            <div class="text-muted">{{ qn.account_name or '—' }} · {{ qn.status }}</div>
+          </li>
+          {% else %}
+          <li class="list-group-item text-muted">No matches</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

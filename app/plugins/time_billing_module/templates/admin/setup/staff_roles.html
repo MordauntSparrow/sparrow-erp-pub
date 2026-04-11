@@ -1,0 +1,98 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3" style="max-width: 760px;">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-person-badge me-2"></i> Staff roles
+    </h4>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.wage_cards_page') }}">
+        <i class="bi bi-currency-pound me-1"></i> Wage rate cards
+      </a>
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">Dashboard</a>
+    </div>
+  </div>
+
+  <div class="alert alert-light border small mb-4">
+    <strong>What this is:</strong> one shared list of <strong>roles</strong> for your organisation.
+    <strong>Hourly pay amounts</strong> are <em>not</em> set here — they live on
+    <a href="{{ url_for('internal_time_billing.wage_cards_page') }}">wage rate cards</a>, and each <strong>new</strong> card must be linked to a role.
+    In <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Edit profile</a>, each person gets a <strong>staff role</strong> plus an optional explicit wage card.
+    Roles also feed rota eligibility, Training rules, and Ventus crew data where you use those features.
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header py-2"><strong>Add staff role</strong></div>
+    <div class="card-body">
+      <form method="post" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="create">
+        <div class="col-md-8">
+          <label class="form-label" for="new_role_name">Name</label>
+          <input class="form-control form-control-sm" id="new_role_name" name="name" maxlength="100" required placeholder="e.g. Band 6 clinician, Crew lead">
+        </div>
+        <div class="col-md-4">
+          <button type="submit" class="btn btn-primary btn-sm w-100">Add role</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span><strong>Existing roles</strong></span>
+      <span class="text-muted small">Usage: primary staff · extra role links · wage cards using role</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="ps-3">Name</th>
+            <th class="text-muted small">Usage</th>
+            <th class="pe-3 text-end" style="min-width: 280px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if roles %}
+            {% for r in roles %}
+            <tr>
+              <td class="ps-3">
+                <span class="fw-medium">{{ r.name }}</span>
+                {% if r.active is defined and not r.active %}<span class="badge bg-secondary ms-2">inactive</span>{% endif %}
+              </td>
+              <td class="text-muted small">
+                {{ r.primary_contractors or 0 }} · {{ r.m2m_contractors or 0 }} · {{ r.wage_cards or 0 }}
+              </td>
+              <td class="pe-3 text-end">
+                <form method="post" class="d-inline-flex flex-wrap gap-1 align-items-center justify-content-end">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="rename">
+                  <input type="hidden" name="role_id" value="{{ r.id }}">
+                  <input type="text" name="name" value="{{ r.name }}" class="form-control form-control-sm" style="max-width: 160px;" maxlength="100" required aria-label="Rename {{ r.name }}">
+                  <button type="submit" class="btn btn-sm btn-outline-primary">Rename</button>
+                </form>
+                <form method="post" class="d-inline ms-1" onsubmit="return confirm('Delete this staff role? This only works when no employees, extra links, or wage cards use it.');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="role_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="3" class="text-center text-muted py-4">No roles yet. Add one above.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <p class="mt-3 small text-muted mb-0">
+    The same list appears under HR for convenience.
+    <a href="{{ url_for('internal_hr.admin_pay_roles') }}">Open HR staff roles page</a>
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Stop detail – Work{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="h4 mb-3">{{ shift.client_name or '—' }}{% if shift.site_name %} · {{ shift.site_name }}{% endif %}</h1>
+  <p class="text-muted small">{{ shift.work_date.isoformat() if shift.work_date else '' }} · {{ shift.contractor_name or '—' }} · {{ shift.job_type_name or '—' }}</p>
+  {% if visit_id %}
+  <p class="small mb-3">Visit ID <code>{{ visit_id }}</code> · Shift ID <code>{{ shift.id }}</code>
+    <a href="{{ url_for('internal_work.admin_photos', visit_id=visit_id) }}" class="ms-2">Photos for this visit</a>
+    <a href="{{ url_for('internal_work.admin_visits', client_id=shift.client_id) }}" class="ms-2">More visits for client</a>
+  </p>
+  {% endif %}
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card mb-3">
+        <div class="card-header small">Scheduled / Recorded</div>
+        <div class="card-body">
+          <p class="mb-1">Scheduled: {{ shift.scheduled_start.strftime('%H:%M') if shift.scheduled_start else '—' }} – {{ shift.scheduled_end.strftime('%H:%M') if shift.scheduled_end else '—' }}</p>
+          <p class="mb-2">Recorded: {{ shift.actual_start.strftime('%H:%M') if shift.actual_start else '—' }} – {{ shift.actual_end.strftime('%H:%M') if shift.actual_end else '—' }}</p>
+          {% if shift.notes %}<p class="small text-muted mb-0">{{ shift.notes }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="card mb-3">
+        <div class="card-header small">Edit times (admin override)</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('internal_work.admin_stop_override', shift_id=shift.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <label class="form-label small">Arrival</label>
+                <input type="time" name="actual_start" class="form-control form-control-sm" value="{{ shift.actual_start.strftime('%H:%M') if shift.actual_start else '' }}">
+              </div>
+              <div class="col-6">
+                <label class="form-label small">Leaving</label>
+                <input type="time" name="actual_end" class="form-control form-control-sm" value="{{ shift.actual_end.strftime('%H:%M') if shift.actual_end else '' }}">
+              </div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small">Notes</label>
+              <textarea name="notes" class="form-control form-control-sm" rows="2">{{ shift.notes or '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Save & sync to Time Billing</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card mb-3">
+        <div class="card-header small">Photos</div>
+        <div class="card-body">
+          {% for p in photos %}
+          <div class="mb-2">
+            <a href="/static/{{ p.file_path }}" target="_blank" rel="noopener"><img src="/static/{{ p.file_path }}" alt="" class="img-fluid rounded" style="max-height: 120px;"></a>
+            <span class="small text-muted d-block">{{ p.caption or p.file_name or 'Photo' }}</span>
+          </div>
+          {% else %}
+          <p class="text-muted small mb-0">No photos.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <a href="{{ url_for('internal_work.admin_stops') }}" class="btn btn-outline-secondary btn-sm">Back to stops</a>
+</div>
+{% endblock %}

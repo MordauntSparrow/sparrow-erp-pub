@@ -1,0 +1,87 @@
+{% extends "hr_module/base_public.html" %}
+{% block content %}
+<div class="d-flex align-items-center gap-3 mb-3">
+  {% set av = profile.profile_picture_path|hr_safe_profile_picture %}
+  {% if av %}
+  <img src="{{ url_for('static', filename=av) }}" alt="" class="rounded-circle border border-secondary" width="72" height="72" style="object-fit:cover;">
+  {% else %}
+  <div class="rounded-circle bg-secondary d-flex align-items-center justify-content-center text-white fw-bold" style="width:72px;height:72px;font-size:1.25rem;">{{ (profile.initials or (profile.name or profile.email or '?')[:2])|upper }}</div>
+  {% endif %}
+  <div>
+    <h1 class="h5 mb-0">My details</h1>
+    <p class="text-secondary small mb-0">Keep your contact and emergency details up to date.</p>
+  </div>
+</div>
+
+{% if profile.driving_licence_expiry or profile.right_to_work_expiry or profile.dbs_expiry or profile.contract_end %}
+<section class="card card-body mb-4 bg-dark border-secondary">
+  <h2 class="h6 text-secondary">Documents on file</h2>
+  <p class="small mb-0">Summary of what we hold. Expiry dates are shown where applicable.</p>
+  {% if compliance_expired_items %}
+  <p class="small text-warning mt-2 mb-0">Some dates below are in the past — please contact HR to renew.</p>
+  {% endif %}
+  <ul class="small mb-0 mt-2 list-unstyled">
+    {% if profile.driving_licence_number or profile.driving_licence_expiry %}<li>Driving licence: {{ profile.driving_licence_number or '—' }} · Expires {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}{% if 'driving_licence' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.right_to_work_type or profile.right_to_work_expiry %}<li>Right to work: {{ profile.right_to_work_type|hr_profile_field }} · Expires {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}{% if 'right_to_work' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.dbs_level or profile.dbs_expiry %}<li>DBS: {{ profile.dbs_level|hr_profile_field }} · Expires {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}{% if 'dbs' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</li>{% endif %}
+    {% if profile.contract_type or profile.contract_end %}<li>Contract: {{ profile.contract_type|hr_profile_field }} · End date {{ profile.contract_end|string if profile.contract_end else '—' }}{% if 'contract_end' in expired_compliance_doc_types %} <span class="badge bg-danger">Ended</span>{% endif %}</li>{% endif %}
+  </ul>
+</section>
+{% endif %}
+
+<form method="post" action="{{ url_for('public_hr.profile_save') }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-2">
+    <label class="form-label small">Name</label>
+    <input type="text" class="form-control bg-dark text-light" value="{{ profile.name or '' }}" disabled>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Email</label>
+    <input type="email" class="form-control bg-dark text-light" value="{{ profile.email or '' }}" disabled>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Job title / role</label>
+    <input type="text" class="form-control bg-dark text-light" value="{{ profile.job_title or '—' }}" disabled>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Department</label>
+    <input type="text" class="form-control bg-dark text-light" value="{{ profile.department or '—' }}" disabled>
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Manager</label>
+    <input type="text" class="form-control bg-dark text-light" value="{% if profile.manager_name or profile.manager_email %}{{ profile.manager_name or '' }}{% if profile.manager_name and profile.manager_email %} · {% endif %}{{ profile.manager_email or '' }}{% else %}—{% endif %}" disabled>
+  </div>
+  {% if profile.date_of_birth %}
+  <div class="mb-2">
+    <label class="form-label small">Date of birth</label>
+    <input type="text" class="form-control bg-dark text-light" value="{{ profile.date_of_birth|string }}" disabled>
+  </div>
+  {% endif %}
+  <div class="mb-2">
+    <label class="form-label small">Phone</label>
+    <input type="text" name="phone" class="form-control bg-dark text-light" value="{{ profile.phone or '' }}" placeholder="Your phone number">
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Address line 1</label>
+    <input type="text" name="address_line1" class="form-control bg-dark text-light" value="{{ profile.address_line1 or '' }}">
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Address line 2</label>
+    <input type="text" name="address_line2" class="form-control bg-dark text-light" value="{{ profile.address_line2 or '' }}">
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Postcode</label>
+    <input type="text" name="postcode" class="form-control bg-dark text-light" value="{{ profile.postcode or '' }}">
+  </div>
+  <div class="mb-2">
+    <label class="form-label small">Emergency contact name</label>
+    <input type="text" name="emergency_contact_name" class="form-control bg-dark text-light" value="{{ profile.emergency_contact_name or '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label small">Emergency contact phone</label>
+    <input type="text" name="emergency_contact_phone" class="form-control bg-dark text-light" value="{{ profile.emergency_contact_phone or '' }}">
+  </div>
+  <button type="submit" class="btn btn-primary">Save</button>
+</form>
+<a href="/hr/" class="btn btn-outline-secondary btn-sm mt-3">Back to HR</a>
+{% endblock %}

@@ -1,0 +1,378 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Bag #{{ instance.id }} — Med bags{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_instances_list') }}">Instances</a></li>
+      {% if instance.parent_instance_id %}
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=instance.parent_instance_id) }}">Parent #{{ instance.parent_instance_id }}{% if instance.parent_template_code %} ({{ instance.parent_template_code }}){% endif %}</a></li>
+      {% endif %}
+      <li class="breadcrumb-item active">#{{ instance.id }}</li>
+    </ol>
+  </nav>
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Instance</div>
+        <div class="card-body small">
+          <p class="mb-1"><strong>Template:</strong> {{ instance.template_code }} — {{ instance.template_name }} <span class="badge bg-secondary">{{ instance.bag_kind }}</span></p>
+          <p class="mb-1"><strong>Public asset #:</strong> {{ instance.public_asset_number or '—' }}</p>
+          <p class="mb-1"><strong>Status:</strong> {% if instance.status == 'in_store' %}<span class="badge bg-success">In store</span>{% elif instance.status == 'issued' %}<span class="badge bg-primary">Issued</span>{% elif instance.status == 'returned' %}<span class="badge bg-info text-dark">Returned</span>{% elif instance.status == 'retired' %}<span class="badge bg-secondary">Retired</span>{% else %}<span class="badge bg-light text-dark border">{{ instance.status }}</span>{% endif %}</p>
+          {% if instance.assignee_type %}<p class="mb-0"><strong>Assignee:</strong> {{ instance.assignee_type }} {{ instance.assignee_id or '' }}</p>{% endif %}
+          {% if instance.parent_instance_id %}
+          <p class="mb-0 mt-2 pt-2 border-top"><strong>Nested in:</strong> <a href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=instance.parent_instance_id) }}">Bag #{{ instance.parent_instance_id }}</a>{% if instance.parent_public_asset_number %} ({{ instance.parent_public_asset_number }}){% endif %}{% if instance.parent_template_name %} — {{ instance.parent_template_name }}{% endif %}</p>
+          {% endif %}
+          {% if instance.tamper_seal_id and instance.tamper_seal_colour %}
+          <p class="mb-0 mt-2 pt-2 border-top"><strong>Registered tamper seal:</strong> ID <code class="user-select-all">{{ instance.tamper_seal_id }}</code> — tag <strong>{{ tamper_tag_colour_labels.get(instance.tamper_seal_colour, instance.tamper_seal_colour|title) }}</strong>{% if instance.tamper_seal_initial %} — initials <strong>{{ instance.tamper_seal_initial }}</strong>{% endif %}{% if instance.tamper_seal_set_at %}<br><span class="text-muted">Recorded {{ instance.tamper_seal_set_at }}{% if instance.tamper_seal_set_by %} by {{ instance.tamper_seal_set_by }}{% endif %}</span>{% endif %}</p>
+          {% else %}
+          <p class="mb-0 mt-2 pt-2 border-top text-muted">No tamper seal registered yet — use the form below after sealing the bag.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      {% if can_edit %}
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Other status (admin)</div>
+        <div class="card-body small">
+          <p class="text-muted">For drug bags, use <strong>Sign-out</strong> and <strong>Sign-in</strong> below. Use this form for <em>In store</em> / <em>Retired</em> or other corrections.</p>
+          <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_status', instance_id=instance.id) }}" class="row g-2 align-items-end">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="col-6"><label class="form-label small">Status</label>
+              <select class="form-select form-select-sm" name="status">
+                <option value="in_store" {% if instance.status == 'in_store' %}selected{% endif %}>In store</option>
+                <option value="issued" {% if instance.status == 'issued' %}selected{% endif %}>Issued</option>
+                <option value="returned" {% if instance.status == 'returned' %}selected{% endif %}>Returned</option>
+                <option value="retired" {% if instance.status == 'retired' %}selected{% endif %}>Retired</option>
+              </select>
+            </div>
+            <div class="col-3"><label class="form-label small">Assignee type</label><input class="form-control form-control-sm" name="assignee_type" value="{{ instance.assignee_type or '' }}" placeholder="vehicle"></div>
+            <div class="col-3"><label class="form-label small">Assignee id</label><input class="form-control form-control-sm" name="assignee_id" value="{{ instance.assignee_id or '' }}" placeholder="id"></div>
+            <div class="col-12 border-top pt-2 mt-2">
+              <p class="text-muted mb-2">If changing to <strong>Issued</strong> or <strong>Returned</strong>, enter tamper tag details when a seal is registered.</p>
+              <div class="row g-2">
+                <div class="col-md-4"><label class="form-label small">Verify seal ID</label><input class="form-control form-control-sm" name="tamper_verify_id" autocomplete="off"></div>
+                <div class="col-md-4"><label class="form-label small">Tag colour</label>
+                  <select class="form-select form-select-sm" name="tamper_verify_colour">
+                    <option value="">—</option>
+                    {% for c in tamper_tag_colours %}<option value="{{ c }}">{{ tamper_tag_colour_labels[c] }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div class="col-md-4"><label class="form-label small">Initials (if registered)</label><input class="form-control form-control-sm" name="tamper_verify_initial" maxlength="16" autocomplete="off" {% if instance.tamper_seal_initial %}placeholder="Required"{% endif %}></div>
+              </div>
+            </div>
+            <div class="col-12"><button type="submit" class="btn btn-outline-primary btn-sm">Update status</button></div>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if can_edit %}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="card border-primary h-100">
+        <div class="card-header fw-semibold bg-primary text-white">Drug bag sign-out (issue)</div>
+        <div class="card-body small">
+          <p class="text-muted">Records the bag as <strong>issued</strong> and sets assignee. Tamper tag must match the registered seal (ID, Green/Orange/Red, and initials if recorded).</p>
+          <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_sign_out', instance_id=instance.id) }}" class="row g-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="col-12 col-md-6"><label class="form-label small">Assignee type</label><input class="form-control form-control-sm" name="assignee_type" value="{{ instance.assignee_type or '' }}" placeholder="e.g. vehicle" autocomplete="off"></div>
+            <div class="col-12 col-md-6"><label class="form-label small">Assignee id</label><input class="form-control form-control-sm" name="assignee_id" value="{{ instance.assignee_id or '' }}" placeholder="e.g. RRV-42" autocomplete="off"></div>
+            <div class="col-12 border-top pt-2"><span class="fw-semibold">Tamper tag on bag now</span></div>
+            <div class="col-md-4"><label class="form-label small">Seal ID</label><input class="form-control form-control-sm" name="tamper_verify_id" autocomplete="off" placeholder="If seal registered"></div>
+            <div class="col-md-4"><label class="form-label small">Colour</label>
+              <select class="form-select form-select-sm" name="tamper_verify_colour">
+                <option value="">—</option>
+                {% for c in tamper_tag_colours %}<option value="{{ c }}">{{ tamper_tag_colour_labels[c] }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4"><label class="form-label small">Initials</label><input class="form-control form-control-sm" name="tamper_verify_initial" maxlength="16" autocomplete="off" placeholder="If registered on seal"></div>
+            <div class="col-12"><button type="submit" class="btn btn-primary btn-sm">Sign out bag</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card border-success h-100">
+        <div class="card-header fw-semibold bg-success text-white">Drug bag sign-in (return)</div>
+        <div class="card-body small">
+          <p class="text-muted">Records the bag as <strong>returned</strong> to store and clears assignee. Verify the tamper tag before accepting the bag back.</p>
+          <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_sign_in', instance_id=instance.id) }}" class="row g-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="col-12 border-top pt-2"><span class="fw-semibold">Tamper tag on bag now</span></div>
+            <div class="col-md-4"><label class="form-label small">Seal ID</label><input class="form-control form-control-sm" name="tamper_verify_id" autocomplete="off" placeholder="If seal registered"></div>
+            <div class="col-md-4"><label class="form-label small">Colour</label>
+              <select class="form-select form-select-sm" name="tamper_verify_colour">
+                <option value="">—</option>
+                {% for c in tamper_tag_colours %}<option value="{{ c }}">{{ tamper_tag_colour_labels[c] }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4"><label class="form-label small">Initials</label><input class="form-control form-control-sm" name="tamper_verify_initial" maxlength="16" autocomplete="off" placeholder="If registered on seal"></div>
+            <div class="col-12"><button type="submit" class="btn btn-success btn-sm">Sign in bag</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if can_edit %}
+  <div class="card mb-3 border-warning">
+    <div class="card-header fw-semibold bg-warning bg-opacity-25">Register / update tamper seal</div>
+    <div class="card-body small">
+      <p class="text-muted">After applying a pull-off tag, record the ID and tag colour (<strong>Green</strong>, <strong>Orange</strong>, or <strong>Red</strong>). Optional initials match what is written on the tag — if set, staff must enter them at sign-out/sign-in.</p>
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_tamper_seal', instance_id=instance.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3"><label class="form-label small">Seal ID (on tag)</label><input class="form-control form-control-sm" name="tamper_seal_id" required value="{{ instance.tamper_seal_id or '' }}" autocomplete="off"></div>
+        <div class="col-md-2"><label class="form-label small">Tag colour</label>
+          <select class="form-select form-select-sm" name="tamper_seal_colour" required>
+            <option value="">—</option>
+            {% for c in tamper_tag_colours %}<option value="{{ c }}" {% if instance.tamper_seal_colour == c %}selected{% endif %}>{{ tamper_tag_colour_labels[c] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label small">Initials (optional)</label><input class="form-control form-control-sm" name="tamper_seal_initial" value="{{ instance.tamper_seal_initial or '' }}" maxlength="16" placeholder="e.g. AB" autocomplete="off"></div>
+        <div class="col-md-3"><label class="form-label small">Notes (optional)</label><input class="form-control form-control-sm" name="tamper_seal_notes" placeholder="e.g. after QA check"></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-warning btn-sm text-dark">Save seal registration</button></div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Tamper seal audit log</div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead class="table-light"><tr><th>When</th><th>Event</th><th>Expected</th><th>Entered</th><th>By</th><th>Notes</th></tr></thead>
+          <tbody>
+            {% for ev in seal_events %}
+            <tr class="{% if ev.event_type.startswith('tamper_mismatch') %}table-danger{% endif %}">
+              <td class="text-nowrap small">{{ ev.created_at }}</td>
+              <td class="small">{% if ev.event_type == 'tamper_seal_registered' %}Seal registered{% elif ev.event_type == 'tamper_seal_updated' %}Seal updated (reseal){% elif ev.event_type == 'tamper_verified_issue' %}Verified at issue{% elif ev.event_type == 'tamper_verified_return' %}Verified at return{% elif ev.event_type == 'tamper_mismatch_issue' %}Mismatch at issue (blocked){% elif ev.event_type == 'tamper_mismatch_return' %}Mismatch at return (blocked){% elif ev.event_type == 'drug_bag_sign_out' %}Drug bag sign-out{% elif ev.event_type == 'drug_bag_sign_in' %}Drug bag sign-in{% else %}{{ ev.event_type }}{% endif %}</td>
+              <td class="small">{% if ev.expected_seal_id %}<code>{{ ev.expected_seal_id }}</code>{% else %}—{% endif %}{% if ev.expected_colour %} / {{ tamper_tag_colour_labels.get(ev.expected_colour, ev.expected_colour) }}{% endif %}{% if ev.expected_initial %} / {{ ev.expected_initial }}{% endif %}</td>
+              <td class="small">{% if ev.entered_seal_id %}<code>{{ ev.entered_seal_id }}</code>{% else %}—{% endif %}{% if ev.entered_colour %} / {{ tamper_tag_colour_labels.get(ev.entered_colour, ev.entered_colour) }}{% endif %}{% if ev.entered_initial %} / {{ ev.entered_initial }}{% endif %}</td>
+              <td class="small">{{ ev.performed_by or '—' }}</td>
+              <td class="small text-muted">{{ ev.notes or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-muted small p-3">No seal events yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if can_edit and templates_for_nested %}
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Nested bags and pods</div>
+    <div class="card-body small">
+      <p class="text-muted">Pods (e.g. airway kit) are separate instances with their own template, asset number, stock, and ledger. They are linked to this bag so you know what is packed inside.</p>
+      {% if child_instances %}
+      <div class="table-responsive mb-3">
+        <table class="table table-sm table-hover mb-0">
+          <thead class="table-light"><tr><th>ID</th><th>Asset #</th><th>Template</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {% for c in child_instances %}
+            <tr>
+              <td>{{ c.id }}</td>
+              <td>{{ c.public_asset_number or '—' }}</td>
+              <td>{{ c.template_code }} — {{ c.template_name }}</td>
+              <td>{{ c.status }}</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=c.id) }}">Open</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-3">No nested bags linked yet.</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_create') }}" class="row g-2 align-items-end border rounded p-2 bg-light">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="parent_instance_id" value="{{ instance.id }}">
+        <div class="col-md-4">
+          <label class="form-label small">Pod template</label>
+          <select class="form-select form-select-sm" name="template_id" required>
+            <option value="">— Select —</option>
+            {% for t in templates_for_nested %}
+            <option value="{{ t.id }}">{{ t.code }} — {{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3"><label class="form-label small">Pod asset # (optional)</label><input class="form-control form-control-sm" name="public_asset_number" placeholder="e.g. AIRWAY-12"></div>
+        <div class="col-md-2"><button type="submit" class="btn btn-primary btn-sm">Add nested bag</button></div>
+      </form>
+    </div>
+  </div>
+  {% elif child_instances %}
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Nested bags and pods</div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead class="table-light"><tr><th>ID</th><th>Asset #</th><th>Template</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {% for c in child_instances %}
+            <tr>
+              <td>{{ c.id }}</td>
+              <td>{{ c.public_asset_number or '—' }}</td>
+              <td>{{ c.template_code }} — {{ c.template_name }}</td>
+              <td>{{ c.status }}</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=c.id) }}">Open</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if can_edit and instance.parent_instance_id %}
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Parent link</div>
+    <div class="card-body small">
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_parent_set', instance_id=instance.id) }}" class="d-flex flex-wrap gap-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div>
+          <label class="form-label small mb-0">Move under a different parent (instance id)</label>
+          <input class="form-control form-control-sm" type="number" min="1" name="parent_instance_id" value="{{ instance.parent_instance_id }}" required style="max-width:10rem" aria-label="Parent instance id">
+        </div>
+        <button type="submit" class="btn btn-sm btn-outline-primary">Change parent</button>
+      </form>
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_parent_set', instance_id=instance.id) }}" class="mt-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" name="detach" value="1" class="btn btn-sm btn-outline-secondary">Detach from parent</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Lot search</div>
+    <div class="card-body">
+      <form method="get" class="d-flex gap-2 flex-wrap">
+        <input class="form-control form-control-sm" style="max-width:16rem" name="lot" value="{{ lot_query }}" placeholder="Lot number (partial match)" aria-label="Lot number search">
+        <button type="submit" class="btn btn-sm btn-outline-secondary">Search</button>
+      </form>
+      {% if lot_query and lot_hits %}
+      <ul class="small mb-0 mt-2">
+        {% for h in lot_hits %}
+        <li>{% if h.instance_id == instance.id %}<strong>This bag</strong>{% else %}Bag #{{ h.instance_id }}{% endif %} — {{ h.sku }} lot {{ h.lot_number }} (qty {{ h.quantity_on_bag }})</li>
+        {% endfor %}
+      </ul>
+      {% elif lot_query %}
+      <p class="text-muted small mb-0 mt-2">No matches.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <h2 class="h5">Lines — return checklist</h2>
+  <p class="text-muted small">After a deployment, record whether each line is present, missing, or needs adding.</p>
+  <div class="table-responsive card mb-4">
+    <table class="table table-sm mb-0 align-middle">
+      <thead class="table-light"><tr><th>SKU</th><th>Item</th><th>Expected</th><th>On bag</th><th>Lot</th><th>Expiry</th><th>Return</th>{% if can_edit %}<th>Trace</th>{% endif %}</tr></thead>
+      <tbody>
+        {% for l in lines %}
+        <tr class="{% if l.return_status == 'missing' %}table-danger{% elif l.return_status == 'to_add' %}table-warning{% endif %}">
+          <td>{{ l.sku }}</td>
+          <td>{{ l.item_name }}</td>
+          <td>{{ l.quantity_expected }}</td>
+          <td>{{ l.quantity_on_bag }}</td>
+          <td>{{ l.lot_number or '—' }}</td>
+          <td>{{ l.expiry_date or '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_line_return_post') }}" class="d-flex gap-1 flex-wrap align-items-center">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="instance_id" value="{{ instance.id }}">
+              <input type="hidden" name="line_id" value="{{ l.id }}">
+              <select class="form-select form-select-sm" style="width:auto;min-width:7rem" name="return_status">
+                <option value="clear" {% if not l.return_status %}selected{% endif %}>Not set</option>
+                {% for rs in return_statuses %}
+                <option value="{{ rs }}" {% if l.return_status == rs %}selected{% endif %}>{% if rs == 'present' %}Present{% elif rs == 'missing' %}Missing{% elif rs == 'to_add' %}To add{% else %}{{ rs }}{% endif %}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-sm btn-outline-secondary py-0">Save</button>
+            </form>
+          </td>
+          {% if can_edit %}
+          <td>
+            <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_line_trace', line_id=l.id) }}" class="row g-1">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="instance_id" value="{{ instance.id }}">
+              <div class="col-5"><input class="form-control form-control-sm" name="lot_number" value="{{ l.lot_number or '' }}" placeholder="Lot"></div>
+              <div class="col-4"><input class="form-control form-control-sm" type="date" name="expiry_date" value="{{ l.expiry_date or '' }}"></div>
+              <div class="col-3"><button type="submit" class="btn btn-sm btn-primary py-0 w-100">Set</button></div>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can_transact %}
+  <h2 class="h5">Restock and disposal</h2>
+  <p class="text-muted small">Witness rules apply — configure under <a href="{{ url_for('inventory_control_internal.med_bags_witness_rules') }}">Witness rules</a>.</p>
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_restock_post') }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="instance_id" value="{{ instance.id }}">
+        <div class="col-md-4"><label class="form-label small">Catalogue line</label>
+          <select class="form-select form-select-sm" name="inventory_item_id" required aria-label="Bag line item">
+            <option value="">— Select item —</option>
+            {% for l in lines %}
+            <option value="{{ l.inventory_item_id }}">{{ l.sku }} — {{ l.item_name }} (on bag: {{ l.quantity_on_bag }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label small">Quantity</label><input class="form-control form-control-sm" type="number" step="0.0001" min="0.0001" name="quantity" required value="1"></div>
+        <div class="col-md-3"><label class="form-label small">Event</label>
+          <select class="form-select form-select-sm" name="event_type">
+            <option value="restock_bag">Restock to bag</option>
+            <option value="restock_hq">Restock from HQ</option>
+            <option value="disposal">Disposal (removes from bag)</option>
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label small">Witness 1</label><input class="form-control form-control-sm" name="witness_user_id" placeholder="User id" autocomplete="off"></div>
+        <div class="col-md-2"><label class="form-label small">Witness 2</label><input class="form-control form-control-sm" name="witness_user_id_2" placeholder="If required" autocomplete="off"></div>
+        <div class="col-12"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes" placeholder="Optional"></div>
+        <div class="col-12"><button type="submit" class="btn btn-warning btn-sm text-dark">Record movement</button></div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <h2 class="h5">Ledger</h2>
+  <p class="text-muted small">Audit trail for consumption, restock, and disposal.</p>
+  <div class="table-responsive card">
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr><th>When</th><th>Event</th><th>Item</th><th>Δ qty</th><th>EPCR ref</th><th>Lot</th><th>Recorded by</th></tr></thead>
+      <tbody>
+        {% for e in ledger %}
+        <tr>
+          <td class="text-nowrap small">{{ e.created_at }}</td>
+          <td>{% if e.event_type == 'epcr_consumption' %}EPCR consumption{% elif e.event_type == 'restock_bag' %}Restock to bag{% elif e.event_type == 'restock_hq' %}Restock from HQ{% elif e.event_type == 'disposal' %}Disposal{% else %}{{ e.event_type }}{% endif %}</td>
+          <td class="small">{% if e.item_sku %}{{ e.item_sku }}{% else %}#{{ e.inventory_item_id }}{% endif %}{% if e.item_name %}<br><span class="text-muted">{{ e.item_name }}</span>{% endif %}</td>
+          <td>{{ e.quantity_delta }}</td>
+          <td class="small">{{ e.epcr_external_ref or e.epcr_episode_ref or '—' }}</td>
+          <td>{{ e.lot_number or '—' }}</td>
+          <td class="small">{{ e.performed_by or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted small p-3">No ledger entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p class="text-muted small mt-3 mb-0">Integration (e.g. Cura): <code>POST …/api/med-bags/consumption</code> with JSON body <code>instance_id</code>, <code>inventory_item_id</code>, <code>quantity</code>, <code>epcr_external_ref</code>, <code>epcr_episode_ref</code>, <code>idempotency_key</code>, and optional witness fields. Use <code>GET …/api/med-bags/instances/&lt;id&gt;</code> to read lines.</p>
+</div>
+{% endblock %}

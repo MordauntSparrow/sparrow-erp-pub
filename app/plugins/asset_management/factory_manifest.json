@@ -1,0 +1,42 @@
+{
+  "repository": "official",
+  "system_name": "asset_management",
+  "name": "Asset Management",
+  "current_version": "0.1.0",
+  "compatible_with": ">=1.1.0",
+  "force_update": false,
+  "dashboard_category": "Stock & assets",
+  "access_permission": "asset_management.access",
+  "declared_permissions": [
+    {
+      "id": "asset_management.access",
+      "label": "Assets — view registry, assignments, and asset detail"
+    },
+    {
+      "id": "asset_management.edit",
+      "label": "Assets — full control (assign, return, maintenance, faults, servicing)"
+    },
+    {
+      "id": "asset_management.assign",
+      "label": "Assets — sign equipment out/in (vehicle, user, contractor) and return to stock"
+    },
+    {
+      "id": "asset_management.records",
+      "label": "Assets — maintenance logs, faults/issues, servicing plan (no assignment)"
+    }
+  ],
+  "description": "Maintenance logs and dashboards for inventory serialised equipment; integrates with Fleet for vehicle assignment.",
+  "icon": "",
+  "download_url": "",
+  "dependencies": ["website_module", "inventory_control"],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-03-26",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": ["Initial release."]
+    }
+  ]
+}

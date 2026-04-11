@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0d6efd">
+  <link rel="manifest" href="{{ url_for('public_employee_portal.pwa_manifest') }}">
+  <meta name="description" content="{% block meta_description %}Employee portal: sign in to access time billing, HR, compliance, scheduling and more.{% endblock %}">
+  <title>{% block title %}{{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Employee Portal' }}{% endblock %}</title>
+  {% if ((config or {}).get('site_settings') or {}).get('favicon_path') %}
+  <link rel="icon" href="{{ url_for('static', filename=((config or {}).get('site_settings') or {}).get('favicon_path')) }}" type="image/x-icon">
+  {% endif %}
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  {% set _core_ts = (config or {}).get('theme_settings') or {} %}
+  {% set _core_ui = (_core_ts.get('theme') or 'default')|lower %}
+  {% set _resolved_portal = portal_theme|default('light') %}
+  {# Core “Dark” matches admin shell; otherwise contractor Light/Dark/Auto. #}
+  {% set _body_theme = 'dark' if _core_ui == 'dark' else _resolved_portal %}
+  {% set ep_dash_mode = (_core_ts.dashboard_background_mode|default('slideshow', true))|lower %}
+  {% set ep_dash_color = _core_ts.dashboard_background_color|default('#1e293b', true) %}
+  {% set ep_dash_path = normalize_manifest_static_path(_core_ts.dashboard_background_image_path|default('', true)) %}
+  {% set ep_dash_img_url = url_for('static', filename=ep_dash_path) if ep_dash_path and ep_dash_mode == 'image' else '' %}
+  {% set ep_dash_bg_layer = ep_dash_mode == 'slideshow' or ep_dash_mode == 'solid' or (ep_dash_mode == 'image' and ep_dash_path) %}
+  {% set ep_dash_footer_immersive = ep_dash_mode in ('slideshow', 'image') %}
+  <style>
+
+    /* Dark: clearly dark page (WCAG AA), distinct from cards */
+    .portal-theme-dark body,
+    body.portal-theme-dark {
+      background-color: #020617 !important;   /* darker than cards so theme is obvious */
+      color: #e2e8f0 !important;
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    /* Light: soft grey page (not stark white), high contrast */
+    .portal-theme-light body,
+    body.portal-theme-light {
+      background-color: #e2e8f0 !important;   /* medium light grey so not harsh */
+      color: #0f172a !important;
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+
+    /* Dark: nav */
+    .portal-theme-dark .ep-nav,
+    .portal-theme-dark .navbar-module,
+    body.portal-theme-dark .ep-nav,
+    body.portal-theme-dark .navbar-module {
+      background-color: #0f172a !important;
+      color: #e2e8f0 !important;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    /* Light: nav */
+    .portal-theme-light .ep-nav,
+    .portal-theme-light .navbar-module,
+    body.portal-theme-light .ep-nav,
+    body.portal-theme-light .navbar-module {
+      background-color: #f8fafc !important;   /* off-white, not pure white */
+      color: #0f172a !important;
+      border-bottom: 1px solid #cbd5e1;
+    }
+
+    .navbar-brand, .nav-link { color: inherit !important; }
+    /* Module name (navbar-text) must contrast the header in both themes */
+    .portal-theme-dark .ep-nav .navbar-text, .portal-theme-dark .navbar-module .navbar-text,
+    body.portal-theme-dark .ep-nav .navbar-text, body.portal-theme-dark .navbar-module .navbar-text { color: #e2e8f0 !important; }
+    .portal-theme-light .ep-nav .navbar-text, .portal-theme-light .navbar-module .navbar-text,
+    body.portal-theme-light .ep-nav .navbar-text, body.portal-theme-light .navbar-module .navbar-text { color: #0f172a !important; }
+
+    /* Links: dark — WCAG AA (4.5:1) on dark backgrounds */
+    .portal-theme-dark a, body.portal-theme-dark a { color: #7dd3fc !important; text-decoration: none; }
+    .portal-theme-dark a:hover, body.portal-theme-dark a:hover { color: #bae6fd !important; }
+    /* Links: light */
+    .portal-theme-light a, body.portal-theme-light a { color: #0369a1 !important; text-decoration: none; }
+    .portal-theme-light a:hover, body.portal-theme-light a:hover { color: #0284c7 !important; }
+
+    /* Cards: dark — elevated so they stand out from page */
+    .portal-theme-dark .ep-card,
+    .portal-theme-dark .card-module,
+    body.portal-theme-dark .ep-card,
+    body.portal-theme-dark .card-module {
+      background-color: #1e293b !important;
+      color: #e2e8f0 !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      border-radius: 1rem;
+    }
+    /* Cards: light — off-white on grey page */
+    .portal-theme-light .ep-card,
+    .portal-theme-light .card-module,
+    body.portal-theme-light .ep-card,
+    body.portal-theme-light .card-module {
+      background-color: #f8fafc !important;   /* soft off-white */
+      color: #0f172a !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 1rem;
+    }
+    .ep-card:hover { opacity: 0.98; }
+    .ep-link { color: inherit; text-decoration: none; }
+    .ep-link:hover { color: inherit; opacity: 0.9; }
+
+    .ep-avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; border: 3px solid #3b82f6; }
+    .ep-avatar-initials {
+      width: 96px; height: 96px; border-radius: 50%;
+      background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff;
+      font-size: 2rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Module tiles: dark */
+    .portal-theme-dark .module-tile, body.portal-theme-dark .module-tile {
+      background-color: #1e293b !important; color: #e2e8f0 !important; border: 1px solid rgba(255,255,255,0.15);
+      display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-radius: 1rem;
+      text-decoration: none; transition: background .15s, opacity .15s;
+    }
+    .portal-theme-dark .module-tile:hover, body.portal-theme-dark .module-tile:hover {
+      background-color: #334155 !important; color: #f8fafc !important;
+    }
+    /* Module tiles: light */
+    .portal-theme-light .module-tile, body.portal-theme-light .module-tile {
+      background-color: #fff !important; color: #0f172a !important; border: 1px solid #cbd5e1;
+      display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-radius: 1rem;
+      text-decoration: none; transition: background .15s, opacity .15s;
+    }
+    .portal-theme-light .module-tile:hover, body.portal-theme-light .module-tile:hover {
+      background-color: #f8fafc !important; color: #0f172a !important;
+    }
+    .module-tile i { font-size: 1.5rem; opacity: 0.9; }
+    .module-tile--disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+
+    /* Secondary text: WCAG AA (≥4.5:1) — dark: lighter grey on dark bg; light: dark grey on white */
+    .portal-theme-dark .text-secondary, body.portal-theme-dark .text-secondary,
+    .portal-theme-dark .text-muted, body.portal-theme-dark .text-muted { color: #cbd5e1 !important; }
+    .portal-theme-light .text-secondary, body.portal-theme-light .text-secondary,
+    .portal-theme-light .text-muted, body.portal-theme-light .text-muted { color: #475569 !important; }
+
+    /* Form labels and small text: always readable (WCAG AA) */
+    .portal-theme-dark .form-label, body.portal-theme-dark .form-label,
+    .portal-theme-dark .form-check-label, body.portal-theme-dark .form-check-label { color: #e2e8f0 !important; }
+    .portal-theme-light .form-label, body.portal-theme-light .form-label,
+    .portal-theme-light .form-check-label, body.portal-theme-light .form-check-label { color: #1e293b !important; }
+
+    .btn-primary, a.btn-primary { background-color: #3b82f6 !important; border-color: #3b82f6 !important; color: #fff !important; }
+    .btn-primary:hover, .btn-primary:focus, a.btn-primary:hover, a.btn-primary:focus { color: #fff !important; }
+    body.portal-theme-light .btn-primary, body.portal-theme-light a.btn-primary { color: #fff !important; }
+    body.portal-theme-light .btn-primary:hover, body.portal-theme-light .btn-primary:focus, body.portal-theme-light a.btn-primary:hover, body.portal-theme-light a.btn-primary:focus { color: #fff !important; }
+    .portal-theme-dark .btn-outline-primary, body.portal-theme-dark .btn-outline-primary { border-color: #7dd3fc !important; color: #7dd3fc !important; }
+    .portal-theme-dark .btn-outline-primary:hover, body.portal-theme-dark .btn-outline-primary:hover { background-color: rgba(125,211,252,0.15) !important; color: #bae6fd !important; border-color: #bae6fd !important; }
+    .portal-theme-light .btn-outline-primary, body.portal-theme-light .btn-outline-primary { border-color: #0369a1 !important; color: #0369a1 !important; }
+    .portal-theme-light .btn-outline-primary:hover, body.portal-theme-light .btn-outline-primary:hover { background-color: #f0f9ff !important; color: #0284c7 !important; border-color: #0284c7 !important; }
+    .portal-theme-dark .btn-outline-secondary, body.portal-theme-dark .btn-outline-secondary { border-color: #94a3b8 !important; color: #cbd5e1 !important; }
+    .portal-theme-dark .btn-outline-secondary:hover, body.portal-theme-dark .btn-outline-secondary:hover { background-color: rgba(148,163,184,0.2) !important; color: #e2e8f0 !important; border-color: #cbd5e1 !important; }
+    .portal-theme-light .btn-outline-light, body.portal-theme-light .btn-outline-light { border-color: #64748b !important; color: #475569 !important; }
+    .portal-theme-light .btn-outline-light:hover, body.portal-theme-light .btn-outline-light:hover { background-color: #e2e8f0 !important; color: #0f172a !important; }
+    .btn-outline-warning, .btn-warning, .btn-info { color: #1f1f1f !important; }
+
+    /* List groups and form containers in modules (e.g. swap, open shifts) — theme-aware so light mode is never black on black */
+    .portal-theme-dark .list-group-item.bg-dark, body.portal-theme-dark .list-group-item.bg-dark { background-color: #1e293b !important; color: #e2e8f0 !important; border-color: rgba(255,255,255,0.15) !important; }
+    .portal-theme-dark .list-group-item.bg-dark .text-muted, body.portal-theme-dark .list-group-item.bg-dark .text-muted { color: #cbd5e1 !important; }
+    .portal-theme-dark .card.bg-dark, body.portal-theme-dark .card.bg-dark, .portal-theme-dark .card-body.bg-dark, body.portal-theme-dark .card-body.bg-dark { background-color: #1e293b !important; color: #e2e8f0 !important; }
+    .portal-theme-light .list-group-item.bg-dark, body.portal-theme-light .list-group-item.bg-dark { background-color: #f8fafc !important; color: #0f172a !important; border-color: #e2e8f0 !important; }
+    .portal-theme-light .list-group-item.bg-dark span, .portal-theme-light .list-group-item.bg-dark div, body.portal-theme-light .list-group-item.bg-dark span, body.portal-theme-light .list-group-item.bg-dark div { color: #0f172a !important; }
+    .portal-theme-light .list-group-item.bg-dark .text-muted, body.portal-theme-light .list-group-item.bg-dark .text-muted { color: #475569 !important; }
+    .portal-theme-light .card.bg-dark, body.portal-theme-light .card.bg-dark, .portal-theme-light .card-body.bg-dark, body.portal-theme-light .card-body.bg-dark { background-color: #f8fafc !important; color: #0f172a !important; }
+
+    /* Icons and .text-primary in cards: ensure contrast in both themes */
+    .portal-theme-dark .text-primary, body.portal-theme-dark .text-primary { color: #7dd3fc !important; }
+    .portal-theme-light .text-primary, body.portal-theme-light .text-primary { color: #0369a1 !important; }
+
+    /* Form controls with bg-dark / form-control-dark: light theme override so inputs are readable */
+    .portal-theme-light .form-control.bg-dark, .portal-theme-light .form-select.bg-dark,
+    .portal-theme-light .form-control.form-control-dark, .portal-theme-light .form-select.form-control-dark,
+    body.portal-theme-light .form-control.bg-dark, body.portal-theme-light .form-select.bg-dark,
+    body.portal-theme-light .form-control.form-control-dark, body.portal-theme-light .form-select.form-control-dark {
+      background-color: #ffffff !important; color: #0f172a !important; border-color: #cbd5e1 !important;
+    }
+
+    /* Core “Modern” page chrome (admin base.html) when no full-bleed dashboard bg */
+    body.core-theme-modern.portal-theme-light:not(.ep-dash-bg-active) {
+      background-color: #f0f2f5 !important;
+      color: #212529 !important;
+    }
+    body.core-theme-modern.portal-theme-light:not(.ep-dash-bg-active) .ep-nav,
+    body.core-theme-modern.portal-theme-light:not(.ep-dash-bg-active) .navbar-module {
+      background-color: #ffffff !important;
+      color: #212529 !important;
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .ep-page-bg {
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      background: center/cover no-repeat;
+      background-color: #0b1220;
+    }
+    .ep-page-bg-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      /* Stronger default scrim so busy photos (waterfall, forest) don’t wash out content */
+      background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,.62) 70%);
+    }
+    /*
+      When a full-bleed dashboard image/slideshow is active, group “naked” headings and controls
+      in .ep-readability-wrap so text and outline buttons sit on a solid/frosted layer (WCAG).
+    */
+    body.ep-dash-bg-active .ep-readability-wrap {
+      background: rgba(248, 250, 252, 0.94);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border-radius: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      padding: 1rem 1.15rem;
+    }
+    @media (min-width: 768px) {
+      body.ep-dash-bg-active .ep-readability-wrap {
+        padding: 1.25rem 1.5rem;
+      }
+    }
+    body.ep-dash-bg-active.portal-theme-dark .ep-readability-wrap {
+      background: rgba(15, 23, 42, 0.9);
+      border-color: rgba(255, 255, 255, 0.14);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    /* No extra chrome when there is no full-bleed background */
+    body:not(.ep-dash-bg-active) .ep-readability-wrap {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      padding: 0;
+    }
+    /*
+      All contractor modules (Work, HR, Compliance, Scheduling, …) share this layout.
+      When a full-bleed background is on, put the whole <main> on a frosted panel so headings
+      and footer links are never drawn directly on the photo.
+    */
+    body.ep-dash-bg-active main#main-content {
+      background: rgba(248, 250, 252, 0.94);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border-radius: 1rem;
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    body.ep-dash-bg-active.portal-theme-dark main#main-content {
+      background: rgba(15, 23, 42, 0.92);
+      border-color: rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    }
+    /* Ghost “outline-light” buttons were invisible on busy backgrounds; force readable chrome */
+    body.ep-dash-bg-active a.btn-outline-light,
+    body.ep-dash-bg-active button.btn-outline-light {
+      border-color: #64748b !important;
+      color: #0f172a !important;
+      background-color: rgba(255, 255, 255, 0.92) !important;
+    }
+    body.ep-dash-bg-active a.btn-outline-light:hover,
+    body.ep-dash-bg-active button.btn-outline-light:hover {
+      background-color: #f1f5f9 !important;
+      color: #020617 !important;
+      border-color: #475569 !important;
+    }
+    body.ep-dash-bg-active.portal-theme-dark a.btn-outline-light,
+    body.ep-dash-bg-active.portal-theme-dark button.btn-outline-light {
+      border-color: #94a3b8 !important;
+      color: #f8fafc !important;
+      background-color: rgba(30, 41, 59, 0.85) !important;
+    }
+    body.ep-dash-bg-active.portal-theme-dark a.btn-outline-light:hover,
+    body.ep-dash-bg-active.portal-theme-dark button.btn-outline-light:hover {
+      background-color: rgba(51, 65, 85, 0.95) !important;
+      color: #fff !important;
+      border-color: #cbd5e1 !important;
+    }
+    body.ep-dash-bg-active.portal-theme-light,
+    body.ep-dash-bg-active.portal-theme-dark {
+      background-color: transparent !important;
+    }
+    body.ep-dash-bg-immersive.portal-theme-light footer.text-center {
+      color: rgba(255,255,255,0.9) !important;
+    }
+    body.ep-dash-bg-immersive.portal-theme-light footer.text-center strong {
+      color: #fff !important;
+    }
+  </style>
+  {% include 'partials/sparrow_csrf_head.html' %}
+  {% block head %}{% endblock %}
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="portal-theme-{{ _body_theme }} core-theme-{{ _core_ui }}{% if ep_dash_bg_layer %} ep-dash-bg-active{% endif %}{% if ep_dash_footer_immersive %} ep-dash-bg-immersive{% endif %}">
+  <a href="#main-content" class="visually-hidden-focusable position-absolute top-0 start-0 m-2 btn btn-sm btn-outline-secondary">Skip to main content</a>
+  {% if ep_dash_bg_layer %}
+  <div id="epPageBg" class="ep-page-bg" aria-hidden="true"
+    {% if ep_dash_mode == 'solid' %}style="background-image:none !important;background-color:{{ ep_dash_color }};opacity:1;"
+    {% elif ep_dash_mode == 'image' and ep_dash_img_url %}style="background-image:url({{ ep_dash_img_url | tojson }});background-size:cover;background-position:center;opacity:1;"
+    {% endif %}></div>
+  <div id="epPageBgOverlay" class="ep-page-bg-overlay" aria-hidden="true"></div>
+  {% endif %}
+  {% block nav %}
+  <nav class="ep-nav navbar navbar-expand" aria-label="Primary">
+    <div class="container">
+      {% set _site = (config or {}).get('site_settings') or {} %}
+      {% set _logo_ep = normalize_manifest_static_path(_site.get('logo_path') or '') %}
+      {% if _site.get('branding') == 'logo' and _logo_ep %}
+        <a class="navbar-brand d-flex align-items-center" href="{{ url_for('public_employee_portal.dashboard') }}">
+          <img src="{{ url_for('static', filename=_logo_ep) }}" alt="{{ _site.get('company_name') }}" height="40">
+        </a>
+      {% else %}
+        <a class="navbar-brand fw-semibold" href="{{ url_for('public_employee_portal.dashboard') }}">
+          {{ _site.get('company_name') or 'Employee Portal' }}
+        </a>
+      {% endif %}
+      <div class="navbar-nav ms-auto align-items-center gap-2">
+        <span class="navbar-text small me-1" aria-hidden="true">Theme</span>
+        <form method="post" action="{{ url_for('sparrow_shared_contractor_ui.set_contractor_theme') }}" class="d-inline">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          {% set _pref = portal_theme_preference|default('light') %}
+          <button type="submit" name="theme" value="light" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'light' else 'btn-secondary' }}" title="Light mode" aria-label="Light theme">Light</button>
+          <button type="submit" name="theme" value="dark" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'dark' else 'btn-secondary' }}" title="Dark mode" aria-label="Dark theme">Dark</button>
+          <button type="submit" name="theme" value="auto" class="btn btn-sm {{ 'btn-outline-secondary' if _pref != 'auto' else 'btn-secondary' }}" title="Auto: light by day, dark by night (UTC)" aria-label="Auto theme by time">Auto</button>
+        </form>
+        {% if user is defined and user %}
+        <a class="nav-link" href="{{ url_for('public_employee_portal.logout') }}">Log out</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+  {% endblock %}
+  <main id="main-content" class="container py-4" role="main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="text-center py-3 mt-4 small text-secondary">
+    <span>Powered by <strong>Sparrow ERP</strong></span>
+    <span class="mx-1">&copy; {{ current_year }} {{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Sparrow ERP' }}.</span>
+  </footer>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  {% block scripts %}{% endblock %}
+  {% block extra_scripts %}{% endblock %}
+  {% if ep_dash_bg_layer and ep_dash_mode == 'slideshow' %}
+  <script>
+  (function () {
+    var bg = document.getElementById('epPageBg');
+    var overlay = document.getElementById('epPageBgOverlay');
+    if (!bg) return;
+    var periods = [
+      { id: 'night', s: 0, e: 5 },
+      { id: 'dawn', s: 5, e: 7 },
+      { id: 'day', s: 7, e: 17 },
+      { id: 'dusk', s: 17, e: 19 },
+      { id: 'evening', s: 19, e: 24 }
+    ];
+    var imgs = {
+      night: ['https://picsum.photos/id/1015/1920/1080', 'https://picsum.photos/id/1003/1920/1080'],
+      dawn: ['https://picsum.photos/id/1043/1920/1080', 'https://picsum.photos/id/1021/1920/1080'],
+      day: ['https://picsum.photos/id/1018/1920/1080', 'https://picsum.photos/id/1025/1920/1080', 'https://picsum.photos/id/1039/1920/1080'],
+      dusk: ['https://picsum.photos/id/1016/1920/1080', 'https://picsum.photos/id/1035/1920/1080'],
+      evening: ['https://picsum.photos/id/1011/1920/1080', 'https://picsum.photos/id/1032/1920/1080']
+    };
+    function periodOf(d) {
+      var h = d.getHours();
+      for (var i = 0; i < periods.length; i++) {
+        var p = periods[i];
+        if (h >= p.s && h < p.e) return p.id;
+      }
+      return 'day';
+    }
+    function pick(list, key) {
+      var hash = 0;
+      for (var i = 0; i < key.length; i++) {
+        hash = ((hash << 5) - hash) + key.charCodeAt(i);
+        hash |= 0;
+      }
+      return list[Math.abs(hash) % list.length];
+    }
+    function applyPeriod(per) {
+      var list = imgs[per] || imgs.day;
+      var url = pick(list, new Date().toDateString() + per);
+      bg.style.backgroundImage = 'url("' + url + '")';
+      bg.style.backgroundColor = 'transparent';
+      bg.style.filter = (per === 'night' || per === 'evening') ? 'brightness(.55) contrast(1.05)' : 'brightness(1) contrast(1)';
+      if (overlay) {
+        overlay.style.background = (per === 'night' || per === 'evening')
+          ? 'linear-gradient(180deg, rgba(2,6,23,.35), rgba(2,6,23,.72) 70%)'
+          : 'linear-gradient(180deg, rgba(0,0,0,.26), rgba(0,0,0,.58) 70%)';
+      }
+    }
+    function tick() {
+      var per = periodOf(new Date());
+      if (tick._last !== per) {
+        tick._last = per;
+        applyPeriod(per);
+      }
+    }
+    tick._last = null;
+    tick();
+    setInterval(tick, 60000);
+  })();
+  </script>
+  {% elif ep_dash_bg_layer and ep_dash_mode == 'image' and ep_dash_img_url %}
+  <script>
+  (function () {
+    var bg = document.getElementById('epPageBg');
+    var overlay = document.getElementById('epPageBgOverlay');
+    if (bg) bg.style.filter = 'brightness(.92) contrast(1.02)';
+    if (overlay) overlay.style.background = 'linear-gradient(180deg, rgba(0,0,0,.3), rgba(0,0,0,.68) 70%)';
+  })();
+  </script>
+  {% elif ep_dash_bg_layer and ep_dash_mode == 'solid' %}
+  <script>
+  (function () {
+    var overlay = document.getElementById('epPageBgOverlay');
+    if (overlay) overlay.style.background = 'linear-gradient(180deg, rgba(0,0,0,.06), rgba(0,0,0,.28) 70%)';
+  })();
+  </script>
+  {% endif %}
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register(
+        "{{ url_for('public_employee_portal.pwa_service_worker') }}",
+        { scope: "{{ pwa_scope|default('/employee-portal/') }}" }
+      ).catch(function () {});
+    }
+  </script>
+</body>
+</html>

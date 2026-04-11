@@ -1,0 +1,465 @@
+{% extends "base.html" %}
+{% block title %}Application #{{ application.id }}{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-10">
+  <h1 class="h4 mb-2">{{ application.name }} — {{ application.opening_title }}</h1>
+  <p class="small mb-4"><a href="{{ url_for('internal_recruitment.admin_applications') }}">← Applications</a></p>
+
+  <div class="d-flex flex-wrap gap-2 mb-4">
+    {% for step in progress %}
+    <span class="badge rounded-pill {% if step.current %}bg-primary{% elif step.done %}bg-success{% else %}bg-light text-muted border{% endif %}">{{ step.label }}</span>
+    {% endfor %}
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Pipeline</div>
+        <div class="card-body">
+          {% if rec_can_manage_applications %}
+          <form method="post" class="mb-0">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="stage">
+            <label class="form-label small" for="stage">Stage</label>
+            <div class="input-group">
+              <select class="form-select" id="stage" name="stage">
+                {% for s in stages %}
+                <option value="{{ s }}" {% if application.stage == s %}selected{% endif %}>{{ stage_labels.get(s, s) }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-primary">Update</button>
+            </div>
+            <div class="form-text">Updating stage runs auto-assign rules for that stage.</div>
+          </form>
+          {% else %}
+          <p class="small text-muted mb-0">Current stage: <strong>{{ stage_labels.get(application.stage, application.stage) }}</strong></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Hire → employee (contractor)</div>
+        <div class="card-body small">
+          {% if application.contractor_id %}
+          <p class="text-success mb-2">Linked employee (contractor) ID: <strong>{{ application.contractor_id }}</strong></p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=application.contractor_id) }}" class="btn btn-sm btn-success">Open in HR</a>
+            <a href="{{ url_for('internal_hr.admin_request_new_form', contractor_id=application.contractor_id) }}" class="btn btn-sm btn-outline-primary">Send document request</a>
+          </div>
+          <p class="text-muted small mt-2 mb-0">Use HR to finish onboarding, compliance, and document library. The applicant was emailed and received an employee-portal message where configured.</p>
+          {% else %}
+          <p class="text-muted mb-2">Applicants stay <strong>out of the contractor table</strong> until pre-hire documents are HR-approved, HR authorises hire, and the applicant has confirmed policies on the portal. Then create the contractor — approved files and CV are copied into HR.</p>
+          {% if hire_precheck_ok %}
+          <div class="alert alert-success py-2 mb-2">Ready to create contractor.</div>
+          {% else %}
+          <div class="alert alert-warning py-2 mb-2">{{ hire_precheck_message }}</div>
+          {% endif %}
+          <ul class="mb-2 ps-3">
+            <li>HR authorisation: {% if application.hr_conversion_authorized %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
+            <li>Policies acknowledged (applicant): {% if application.policies_acknowledged_at %}<span class="text-success">Yes</span>{% else %}<span class="text-danger">No</span>{% endif %}</li>
+          </ul>
+          {% if rec_can_hire %}
+          <form method="post" class="mb-3 pb-3 border-bottom">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="authorize_hire">
+            <button type="submit" class="btn btn-sm btn-outline-primary" {% if not prehire_requests %}title="No pre-hire rows — authorisation still allowed"{% endif %}>Authorise contractor creation (HR)</button>
+            <div class="form-text">Only after every pre-hire item below is <strong>approved</strong>.</div>
+          </form>
+          {% else %}
+          <p class="small text-muted mb-3 pb-3 border-bottom">Hire authorisation and contractor creation require the <strong>Recruitment — hire</strong> permission (or full module access).</p>
+          {% endif %}
+          {% if hire_preview and hire_preview.ok %}
+          <div class="alert alert-light border py-2 mb-2 small">
+            <strong>Time billing (default from job role):</strong>
+            role <code>{{ hire_preview.role_name }}</code>
+            {% if hire_preview.wage_card_id %}· wage card #{{ hire_preview.wage_card_id }}{% else %}· wage card: first active for role (or none){% endif %}
+            <br><span class="text-muted">Recruitment role: {{ hire_preview.rec_job_role_title or '—' }}{% if hire_preview.linked_tb_role_name %} · linked TB role: {{ hire_preview.linked_tb_role_name }}{% endif %}</span>
+          </div>
+          {% elif hire_preview and not hire_preview.ok %}
+          <div class="alert alert-secondary py-2 mb-2 small">{{ hire_preview.message }}</div>
+          {% endif %}
+          {% if rec_can_hire %}
+          <form method="post" id="hire-contractor-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="hire">
+            <div class="mb-2">
+              <label class="form-label small" for="tb_role_id">Override time billing role</label>
+              <select class="form-select form-select-sm" id="tb_role_id" name="tb_role_id">
+                <option value="">— Use job role link (or legacy name below) —</option>
+                {% for tr in tb_roles_hire %}
+                <option value="{{ tr.id }}">{{ tr.name }}{% if tr.code %} ({{ tr.code }}){% endif %}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">Leave default to use the job role’s linked time billing role. Pick another role here to override for this hire only.</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="wage_card_id">Override wage rate card</label>
+              <select class="form-select form-select-sm" id="wage_card_id" name="wage_card_id">
+                <option value="">— Default from job role / first card for role —</option>
+                {% for wc in wage_cards_hire %}
+                <option value="{{ wc.id }}" data-role-id="{{ wc.role_id or '' }}">{% if wc.role_name %}{{ wc.role_name }} — {% endif %}{{ wc.name }} (#{{ wc.id }})</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="contractor_role">Legacy role name (fallback)</label>
+              <input class="form-control form-control-sm" id="contractor_role" name="contractor_role" value="staff" placeholder="Only if no TB role above">
+              <div class="form-text">Used only when no time billing role is linked and no override is selected (creates/finds a <code>roles</code> row by name).</div>
+            </div>
+            <div class="mb-2">
+              <label class="form-label small" for="password">Portal password (optional)</label>
+              <input class="form-control form-control-sm" type="password" id="password" name="password" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-sm btn-success" {% if not hire_precheck_ok %}disabled{% endif %} onclick="return confirm('Create contractor, copy documents to HR, and mark hired?');">Create contractor &amp; mark hired</button>
+          </form>
+          {% endif %}
+          <script>
+          (function(){
+            var tb = document.getElementById('tb_role_id');
+            var wc = document.getElementById('wage_card_id');
+            if (!tb || !wc) return;
+            function filterWageCards(){
+              var rid = tb.value || '';
+              var opts = wc.querySelectorAll('option[data-role-id]');
+              var firstVisible = null;
+              opts.forEach(function(o){
+                var orid = o.getAttribute('data-role-id') || '';
+                var show = !rid || !orid || orid === rid;
+                o.hidden = !show;
+                o.disabled = !show;
+                if (show && !firstVisible && o.value) firstVisible = o;
+              });
+              if (wc.value && wc.selectedOptions[0] && wc.selectedOptions[0].hidden) {
+                wc.value = '';
+              }
+            }
+            tb.addEventListener('change', filterWageCards);
+            filterWageCards();
+          })();
+          </script>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-3 border-info">
+    <div class="card-header fw-semibold">Interview arrangements</div>
+    <div class="card-body small">
+      <p class="text-muted mb-2">Applicants see this on their portal when the application is in the <strong>Interview</strong> stage (or later until hired). Choose <strong>Online</strong> for a video link or <strong>On-site</strong> with a location — use saved presets to fill typical offices quickly.</p>
+      {% if rec_can_manage_applications %}
+      <form method="post" class="rec-interview-details-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="interview_details">
+        <div class="mb-2">
+          <span class="form-label d-block">Format</span>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="interview_format" id="iv_none" value="" {% if not application.interview_format %}checked{% endif %}>
+            <label class="form-check-label" for="iv_none">Not set / clear</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="interview_format" id="iv_online" value="online" {% if application.interview_format == 'online' %}checked{% endif %}>
+            <label class="form-check-label" for="iv_online">Online (video call)</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="interview_format" id="iv_onsite" value="onsite" {% if application.interview_format == 'onsite' %}checked{% endif %}>
+            <label class="form-check-label" for="iv_onsite">On-site</label>
+          </div>
+        </div>
+        <div class="mb-3 iv-panel rounded border bg-light p-2" id="iv_panel_online" style="display:none">
+          <label class="form-label" for="interview_meeting_url">Meeting link</label>
+          <input class="form-control form-control-sm" type="url" name="interview_meeting_url" id="interview_meeting_url" value="{{ application.interview_meeting_url or '' }}" placeholder="https://teams.microsoft.com/… or Zoom">
+        </div>
+        <div class="mb-3 iv-panel rounded border bg-light p-2" id="iv_panel_onsite" style="display:none">
+          <label class="form-label" for="preset_pick">Quick fill from saved locations</label>
+          <select class="form-select form-select-sm mb-2" id="preset_pick" aria-label="Office preset">
+            <option value="">— Choose a preset —</option>
+            {% for p in interview_presets %}
+            <option value="{{ p.id }}">{{ p.label }}</option>
+            {% endfor %}
+          </select>
+          <label class="form-label" for="interview_location">Location (address, room, instructions)</label>
+          <textarea class="form-control form-control-sm" name="interview_location" id="interview_location" rows="3" placeholder="e.g. Unit 4, Example Park…">{{ application.interview_location or '' }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Save interview details</button>
+        {% if rec_can_manage_setup %}<a href="{{ url_for('internal_recruitment.admin_interview_presets') }}" class="btn btn-sm btn-link">Manage office presets</a>{% endif %}
+      </form>
+      <script>
+      (function () {
+        var presets = {{ interview_presets|tojson }};
+        var none = document.getElementById('iv_none');
+        var online = document.getElementById('iv_online');
+        var onsite = document.getElementById('iv_onsite');
+        var pOnline = document.getElementById('iv_panel_online');
+        var pOnsite = document.getElementById('iv_panel_onsite');
+        var pick = document.getElementById('preset_pick');
+        var loc = document.getElementById('interview_location');
+        function syncPanels() {
+          if (!pOnline || !pOnsite) return;
+          var on = online && online.checked;
+          var os = onsite && onsite.checked;
+          pOnline.style.display = on ? 'block' : 'none';
+          pOnsite.style.display = os ? 'block' : 'none';
+        }
+        [none, online, onsite].forEach(function (el) {
+          if (el) el.addEventListener('change', syncPanels);
+        });
+        if (pick && loc && presets && presets.length) {
+          pick.addEventListener('change', function () {
+            var id = parseInt(pick.value, 10);
+            if (!id) return;
+            for (var i = 0; i < presets.length; i++) {
+              if (parseInt(presets[i].id, 10) === id) {
+                loc.value = presets[i].location_text || '';
+                break;
+              }
+            }
+          });
+        }
+        syncPanels();
+      })();
+      </script>
+      {% else %}
+      <p class="small text-muted mb-0">Interview format: <strong>{{ application.interview_format or '—' }}</strong>
+        {% if application.interview_meeting_url %}· <a href="{{ application.interview_meeting_url }}" target="_blank" rel="noopener">Meeting link</a>{% endif %}
+      </p>
+      {% if application.interview_location %}<p class="small mb-0 mt-2">{{ application.interview_location }}</p>{% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Pre-hire compliance (applicant portal)</div>
+    <div class="card-body small">
+      <p class="text-muted">Request right-to-work, DBS, contract, policy confirmation, etc. The applicant uploads on <strong>their</strong> login — not the employee portal. After you <strong>approve</strong> each row, use <em>Authorise contractor creation</em> above.</p>
+      {% if rec_can_manage_applications %}
+      <form method="post" class="row g-2 align-items-end border-bottom pb-3 mb-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="prehire_add">
+        <div class="col-md-4">
+          <label class="form-label small">Title</label>
+          <input class="form-control form-control-sm" name="prehire_title" placeholder="e.g. Right to work evidence" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Type</label>
+          <select class="form-select form-select-sm" name="prehire_type">
+            {% for k, lab in prehire_type_labels.items() %}
+            <option value="{{ k }}">{{ lab }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Description (optional)</label>
+          <input class="form-control form-control-sm" name="prehire_description" placeholder="Instructions">
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-sm btn-primary w-100">Add request</button>
+        </div>
+      </form>
+      {% endif %}
+      {% if prehire_requests %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light"><tr><th>Title</th><th>Type</th><th>Status</th><th>File</th><th class="text-end">HR</th></tr></thead>
+          <tbody>
+            {% for r in prehire_requests %}
+            <tr>
+              <td>{{ r.title }}</td>
+              <td>{{ prehire_type_labels.get(r.request_type, r.request_type) }}</td>
+              <td><span class="badge bg-secondary">{{ r.status }}</span></td>
+              <td><code class="small">{% if r.latest_file_path %}{{ r.latest_file_path }}{% else %}—{% endif %}</code></td>
+              <td class="text-end text-nowrap">
+                {% if rec_can_manage_applications %}
+                <form method="post" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="prehire_approve">
+                  <input type="hidden" name="request_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-success" {% if r.status != 'uploaded' %}disabled{% endif %}>Approve</button>
+                </form>
+                <form method="post" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="action" value="prehire_reject">
+                  <input type="hidden" name="request_id" value="{{ r.id }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" {% if r.status == 'approved' %}disabled{% endif %}>Reject</button>
+                </form>
+                {% else %}
+                <span class="small text-muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No pre-hire requests yet. Add types such as right to work, DBS, or contract.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Assign form</div>
+    <div class="card-body">
+      {% if rec_can_manage_applications %}
+      <form method="post" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="assign">
+        <div class="col-md-6">
+          <select class="form-select form-select-sm" name="form_template_id" required>
+            {% for t in templates %}
+            <option value="{{ t.id }}">{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 form-check">
+          <input class="form-check-input" type="checkbox" name="force" value="1" id="force">
+          <label class="form-check-label small" for="force">Force new (even if exists)</label>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-sm btn-outline-primary">Send form</button>
+        </div>
+      </form>
+      {% else %}
+      <p class="small text-muted mb-0">You have read-only access — form assignment is disabled.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Applicant &amp; CV</div>
+    <div class="card-body small">
+      <p class="mb-1"><strong>Email:</strong> {{ application.email }} · <strong>Phone:</strong> {{ application.phone or '—' }}</p>
+      <p class="mb-0">
+        <strong>CV:</strong>
+        {% if application.cv_path %}
+        <a href="{{ url_for('internal_recruitment.admin_application_cv_file', application_id=application.id) }}" class="btn btn-sm btn-primary ms-2" target="_blank" rel="noopener" title="{{ application.cv_path }}">View CV</a>
+        <a href="{{ url_for('internal_recruitment.admin_application_cv_file', application_id=application.id, download=1) }}" class="btn btn-sm btn-outline-secondary ms-1" title="Download with a friendly filename">Download</a>
+        {% else %}—{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">HR profile <span class="text-muted fw-normal">(from application)</span></div>
+    <div class="card-body small">
+      {% if application.date_of_birth or application.address_line1 or application.emergency_contact_name %}
+      <dl class="row mb-0">
+        <dt class="col-sm-3 text-muted">Date of birth</dt>
+        <dd class="col-sm-9">{{ application.date_of_birth or '—' }}</dd>
+        <dt class="col-sm-3 text-muted">Address</dt>
+        <dd class="col-sm-9">
+          {% if application.address_line1 %}{{ application.address_line1 }}{% if application.address_line2 %}<br>{{ application.address_line2 }}{% endif %}<br>{{ application.postcode or '' }}{% else %}—{% endif %}
+        </dd>
+        <dt class="col-sm-3 text-muted">Emergency contact</dt>
+        <dd class="col-sm-9">{% if application.emergency_contact_name %}{{ application.emergency_contact_name }} · {{ application.emergency_contact_phone or '—' }}{% else %}—{% endif %}</dd>
+      </dl>
+      <p class="text-muted mb-0 mt-2 small">Copied into <code>hr_staff_details</code> when you create the contractor (hire).</p>
+      {% else %}
+      <p class="text-muted mb-0">No structured HR profile on this application (submitted before this was required).</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mt-3">
+    <div class="card-header fw-semibold">Admin notes</div>
+    <div class="card-body">
+      {% if rec_can_manage_applications %}
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="notes">
+        <textarea class="form-control mb-2" name="admin_notes" rows="3">{{ application.admin_notes or '' }}</textarea>
+        <button type="submit" class="btn btn-sm btn-secondary">Save notes</button>
+      </form>
+      {% else %}
+      <p class="small text-muted mb-0">{{ application.admin_notes or 'No notes.' }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <h2 class="h6 mt-4">Tasks / responses</h2>
+  <div class="table-responsive border rounded bg-white">
+    <table class="table table-sm mb-0 small">
+      <thead class="table-light"><tr><th>Template</th><th>Status</th><th>Response</th></tr></thead>
+      <tbody>
+        {% for t in tasks %}
+        {% set has_rows = t.response_rows and (t.response_rows|length > 0) %}
+        {% set has_raw = t.response_json %}
+        <tr>
+          <td>{{ t.template_name }} <span class="text-muted">({{ t.purpose }})</span></td>
+          <td><span class="badge {% if t.status == 'completed' %}bg-success{% else %}bg-warning text-dark{% endif %}">{{ t.status }}</span></td>
+          <td>
+            <div class="d-flex flex-wrap align-items-start gap-2">
+              <span class="text-muted flex-grow-1" style="min-width: 140px;">
+                {% if t.response_preview %}{{ t.response_preview }}{% elif has_raw %}<span class="fst-italic">Submitted</span>{% else %}—{% endif %}
+              </span>
+              {% if has_rows or has_raw %}
+              <button type="button"
+                class="btn btn-sm btn-outline-primary flex-shrink-0 js-rec-view-response"
+                data-task-id="{{ t.id }}"
+                data-task-title="{{ t.template_name }} ({{ t.purpose }})">
+                View response
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-muted">No tasks.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% for t in tasks %}
+  <div id="rec-response-html-{{ t.id }}" class="d-none rec-task-response-html">
+    {% if t.response_rows and t.response_rows|length > 0 %}
+    <dl class="row mb-0">
+      {% for row in t.response_rows %}
+      <dt class="col-sm-4 text-muted small mb-1">{{ row.label }}</dt>
+      <dd class="col-sm-8 small mb-2">{{ row.value }}</dd>
+      {% endfor %}
+    </dl>
+    {% elif t.response_json %}
+    <p class="text-muted small mb-0">We couldn’t match this submission to the form’s field list. Ask a developer to check the stored response format.</p>
+    {% else %}
+    <p class="text-muted mb-0">No response submitted yet.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <div class="modal fade" id="recTaskResponseModal" tabindex="-1" aria-labelledby="recTaskResponseModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="recTaskResponseModalLabel">Form response</h5>
+          <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="recTaskResponseModalBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var modalEl = document.getElementById('recTaskResponseModal');
+    if (!modalEl || typeof mdb === 'undefined' || !mdb.Modal) return;
+    document.querySelectorAll('.js-rec-view-response').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tid = btn.getAttribute('data-task-id');
+        var title = btn.getAttribute('data-task-title') || 'Form response';
+        var titleEl = modalEl.querySelector('.modal-title');
+        var bodyEl = modalEl.querySelector('.modal-body');
+        if (titleEl) titleEl.textContent = title;
+        var src = document.getElementById('rec-response-html-' + tid);
+        if (bodyEl) {
+          bodyEl.innerHTML = src ? src.innerHTML : '<p class="text-muted mb-0">Nothing to show.</p>';
+        }
+        var inst = mdb.Modal.getInstance(modalEl) || new mdb.Modal(modalEl);
+        inst.show();
+      });
+    });
+  })();
+  </script>
+</div>
+{% endblock %}

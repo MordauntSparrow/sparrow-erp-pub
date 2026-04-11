@@ -1,0 +1,67 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Quotes{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Quotes</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Commercial</p>
+        <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-receipt me-2 text-primary"></i>Quotes</h1>
+      </div>
+      {% if can_edit %}
+      <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('crm_module.quote_new') }}"><i class="bi bi-plus-lg me-1"></i>New quote</a>
+      {% endif %}
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+    </div>
+  </div>
+  {% if not quotes %}
+  <div class="card crm-panel border-0">
+    <div class="card-body text-center py-5 text-muted">
+      <p class="mb-2">No quotes yet.</p>
+      {% if can_edit %}
+      <a class="btn btn-primary rounded-pill" href="{{ url_for('crm_module.quote_new') }}">Create quote</a>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="crm-table-wrap">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Title</th>
+            <th>Account</th>
+            <th>Opportunity</th>
+            <th>Status</th>
+            <th class="text-end">Total</th>
+            <th>Updated</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for q in quotes %}
+          <tr>
+            <td class="fw-medium">{{ q.title or 'Quote' }}</td>
+            <td>{{ q.account_name or '—' }}</td>
+            <td>{{ q.opp_name or '—' }}</td>
+            <td><span class="badge bg-light text-dark border">{{ status_labels.get(q.status, q.status) }}</span></td>
+            <td class="text-end font-monospace">{% if q.total_amount is not none %}£{{ q.total_amount }}{% else %}—{% endif %}</td>
+            <td class="small text-muted">{{ q.updated_at }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.quote_edit', quote_id=q.id) }}">Open</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

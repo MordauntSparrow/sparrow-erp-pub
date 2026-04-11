@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}{% if appraisal %}Edit appraisal{% else %}New appraisal{% endif %} · HR{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_appraisals_list') }}">Appraisals</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{% if appraisal %}#{{ appraisal.id }}{% else %}New{% endif %}</li>
+    </ol>
+  </nav>
+
+  <h1 class="h3 mb-1">{% if appraisal %}Appraisal{% else %}New appraisal{% endif %}</h1>
+  <p class="text-muted mb-4">
+    <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=contractor_id) }}">{{ employee_name }}</a>
+    {% if appraisal %}· last updated {{ appraisal.updated_at or '—' }}{% endif %}
+  </p>
+
+  {% if appraisal and hr_can_edit_employees %}
+  <form method="post" action="{{ url_for('internal_hr.admin_appraisal_delete', aid=appraisal.id) }}" class="mb-3" onsubmit="return confirm('Delete this appraisal and all goals?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-outline-danger btn-sm">Delete appraisal</button>
+  </form>
+  {% endif %}
+
+  {% set appr_ro = not hr_can_edit_employees %}
+  {% if hr_can_edit_employees %}
+  <form method="post" action="{% if appraisal %}{{ url_for('internal_hr.admin_appraisal_save', aid=appraisal.id) }}{% else %}{{ url_for('internal_hr.admin_appraisal_new_save') }}{% endif %}" class="card card-body mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {% if not appraisal %}
+    <input type="hidden" name="contractor_id" value="{{ contractor_id }}">
+    {% endif %}
+  {% else %}
+  <div class="card card-body mb-4">
+  {% endif %}
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="cycle_label">Cycle label</label>
+        <input type="text" class="form-control" id="cycle_label" name="cycle_label" maxlength="128" value="{{ (appraisal.cycle_label if appraisal else '') or 'Annual appraisal' }}" {% if appr_ro %}readonly{% endif %}>
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label" for="period_start">Period start</label>
+        <input type="date" class="form-control" id="period_start" name="period_start" value="{{ appraisal.period_start|string if appraisal and appraisal.period_start else '' }}" {% if appr_ro %}readonly{% endif %}>
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label" for="period_end">Period end</label>
+        <input type="date" class="form-control" id="period_end" name="period_end" value="{{ appraisal.period_end|string if appraisal and appraisal.period_end else '' }}" {% if appr_ro %}readonly{% endif %}>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="manager_contractor_id">Reviewing manager</label>
+        <select class="form-select" id="manager_contractor_id" name="manager_contractor_id" {% if appr_ro %}disabled{% endif %}>
+          <option value="">— None —</option>
+          {% for m in manager_choices %}
+          <option value="{{ m.id }}" {% if default_manager_id is not none and default_manager_id|int == m.id|int %}selected{% endif %}>{{ m.name or m.email }}{% if m.name and m.email %} · {{ m.email }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="status">Status</label>
+        <select class="form-select" id="status" name="status" {% if appr_ro %}disabled{% endif %}>
+          {% set st = (appraisal.status if appraisal else 'draft')|lower %}
+          <option value="draft" {% if st == 'draft' %}selected{% endif %}>Draft</option>
+          <option value="open" {% if st == 'open' %}selected{% endif %}>Open</option>
+          <option value="complete" {% if st == 'complete' %}selected{% endif %}>Complete</option>
+        </select>
+      </div>
+    </div>
+
+    <h2 class="h6 mt-2">Overall comments</h2>
+    <div class="mb-3">
+      <label class="form-label" for="employee_summary">Employee summary</label>
+      <textarea class="form-control" id="employee_summary" name="employee_summary" rows="3" {% if appr_ro %}readonly{% endif %}>{{ appraisal.employee_summary if appraisal else '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="manager_summary">Manager summary</label>
+      <textarea class="form-control" id="manager_summary" name="manager_summary" rows="3" {% if appr_ro %}readonly{% endif %}>{{ appraisal.manager_summary if appraisal else '' }}</textarea>
+    </div>
+
+    <h2 class="h6 mt-3">Goals / objectives</h2>
+    <p class="small text-muted">Add a row per goal. Empty titles are ignored.</p>
+    <div class="table-responsive mb-2">
+      <table class="table table-sm align-middle" id="goals-table">
+        <thead class="table-light">
+          <tr>
+            <th style="min-width:9rem;">Title</th>
+            <th>Description</th>
+            <th>Employee notes</th>
+            <th>Manager notes</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="goal-rows">
+          {% for g in goals %}
+          <tr class="goal-row">
+            <td><input type="text" class="form-control form-control-sm" name="goal_title" value="{{ g.title or '' }}" placeholder="Goal title" {% if appr_ro %}readonly{% endif %}></td>
+            <td><input type="text" class="form-control form-control-sm" name="goal_description" value="{{ g.description or '' }}" placeholder="Optional" {% if appr_ro %}readonly{% endif %}></td>
+            <td><input type="text" class="form-control form-control-sm" name="goal_employee_notes" value="{{ g.employee_notes or '' }}" placeholder="" {% if appr_ro %}readonly{% endif %}></td>
+            <td><input type="text" class="form-control form-control-sm" name="goal_manager_notes" value="{{ g.manager_notes or '' }}" placeholder="" {% if appr_ro %}readonly{% endif %}></td>
+            <td class="text-nowrap">{% if not appr_ro %}<button type="button" class="btn btn-sm btn-outline-secondary remove-goal" title="Remove row">×</button>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if not appr_ro %}
+    <button type="button" class="btn btn-sm btn-outline-primary mb-4" id="add-goal-row">Add goal row</button>
+    {% endif %}
+
+    {% if appraisal and hr_can_edit_employees %}
+    <h2 class="h6 mt-2">Signatures</h2>
+    <p class="small text-muted mb-2">Record when paperwork or online acknowledgement was captured. Timestamps are stored in UTC.</p>
+    <p class="small mb-2">Employee signed: {% if appraisal.employee_signed_at %}<strong>{{ appraisal.employee_signed_at }}</strong>{% else %}—{% endif %}</p>
+    <p class="small mb-3">Manager signed: {% if appraisal.manager_signed_at %}<strong>{{ appraisal.manager_signed_at }}</strong>{% else %}—{% endif %}</p>
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="sign_employee_now" value="1" id="sign_employee_now">
+      <label class="form-check-label" for="sign_employee_now">Record employee signature time as now (when you save)</label>
+    </div>
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="sign_manager_now" value="1" id="sign_manager_now">
+      <label class="form-check-label" for="sign_manager_now">Record manager signature time as now (when you save)</label>
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="clear_employee_sign" value="1" id="clear_employee_sign">
+      <label class="form-check-label" for="clear_employee_sign">Clear employee signature timestamp</label>
+    </div>
+    <div class="form-check mb-4">
+      <input class="form-check-input" type="checkbox" name="clear_manager_sign" value="1" id="clear_manager_sign">
+      <label class="form-check-label" for="clear_manager_sign">Clear manager signature timestamp</label>
+    </div>
+    {% elif appraisal %}
+    <h2 class="h6 mt-2">Signatures</h2>
+    <p class="small mb-2">Employee signed: {% if appraisal.employee_signed_at %}<strong>{{ appraisal.employee_signed_at }}</strong>{% else %}—{% endif %}</p>
+    <p class="small mb-4">Manager signed: {% if appraisal.manager_signed_at %}<strong>{{ appraisal.manager_signed_at }}</strong>{% else %}—{% endif %}</p>
+    {% endif %}
+
+    {% if hr_can_edit_employees %}
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">{% if appraisal %}Save{% else %}Create appraisal{% endif %}</button>
+      <a href="{{ url_for('internal_hr.admin_appraisals_list', cid=contractor_id) }}" class="btn btn-outline-secondary">Back to list</a>
+      <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=contractor_id) }}" class="btn btn-outline-secondary">Employee profile</a>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-2">View only — you do not have permission to edit appraisals.</p>
+    <a href="{{ url_for('internal_hr.admin_appraisals_list', cid=contractor_id) }}" class="btn btn-outline-secondary btn-sm">Back to list</a>
+    <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=contractor_id) }}" class="btn btn-outline-secondary btn-sm">Employee profile</a>
+    {% endif %}
+  {% if hr_can_edit_employees %}</form>{% else %}</div>{% endif %}
+
+  {% if appraisal %}
+  <div class="card card-body mb-4">
+    <h2 class="h6">Attachment (PDF or scan)</h2>
+    {% if appraisal.attachment_path %}
+    <p class="small mb-2"><a href="{{ url_for('internal_hr.admin_appraisal_attachment_download', aid=appraisal.id) }}">Download current file</a></p>
+    {% if hr_can_edit_employees %}
+    <form method="post" action="{{ url_for('internal_hr.admin_appraisal_attachment_upload', aid=appraisal.id) }}" class="mb-3">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="clear_attachment" value="1">
+      <button type="submit" class="btn btn-sm btn-outline-danger">Remove attachment</button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% if hr_can_edit_employees %}
+    <form method="post" action="{{ url_for('internal_hr.admin_appraisal_attachment_upload', aid=appraisal.id) }}" enctype="multipart/form-data" class="row g-2 align-items-end">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-6">
+        <label class="form-label small">Upload PDF or image</label>
+        <input type="file" name="file" class="form-control form-control-sm" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-primary">Upload</button>
+      </div>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if appraisal and appraisal_events is defined and appraisal_events %}
+  <div class="card mb-4">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Activity log</strong>
+      <a href="{{ url_for('internal_hr.admin_appraisal_events_log', appraisal_id=appraisal.id) }}" class="btn btn-sm btn-outline-secondary">Full history filter</a>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light"><tr><th>When</th><th>Event</th><th>Summary</th><th></th></tr></thead>
+          <tbody>
+            {% for ev in appraisal_events %}
+            <tr>
+              <td class="small text-nowrap">{{ ev.created_at }}</td>
+              <td class="small">{{ ev.event_type|hr_appraisal_event_type }}</td>
+              <td class="small">{{ ev.summary }}</td>
+              <td class="small text-muted">{{ ev.channel or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<template id="goal-row-template">
+  <tr class="goal-row">
+    <td><input type="text" class="form-control form-control-sm" name="goal_title" value="" placeholder="Goal title"></td>
+    <td><input type="text" class="form-control form-control-sm" name="goal_description" value="" placeholder="Optional"></td>
+    <td><input type="text" class="form-control form-control-sm" name="goal_employee_notes" value="" placeholder=""></td>
+    <td><input type="text" class="form-control form-control-sm" name="goal_manager_notes" value="" placeholder=""></td>
+    <td class="text-nowrap"><button type="button" class="btn btn-sm btn-outline-secondary remove-goal" title="Remove row">×</button></td>
+  </tr>
+</template>
+<script>
+(function () {
+  var tbody = document.getElementById('goal-rows');
+  var tpl = document.getElementById('goal-row-template');
+  document.getElementById('add-goal-row').addEventListener('click', function () {
+    if (!tbody || !tpl) return;
+    tbody.appendChild(tpl.content.cloneNode(true));
+  });
+  if (tbody) {
+    tbody.addEventListener('click', function (e) {
+      if (e.target.closest('.remove-goal')) {
+        var row = e.target.closest('tr');
+        if (row && tbody.querySelectorAll('tr.goal-row').length > 1) row.remove();
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

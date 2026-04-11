@@ -1,0 +1,62 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Quote rule sets{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Quote rule sets</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Configuration</p>
+        <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-calculator me-2 text-primary"></i>Quote rule sets</h1>
+      </div>
+      {% if can_edit %}
+      <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('crm_module.quote_rule_set_new') }}"><i class="bi bi-plus-lg me-1"></i>New rule set</a>
+      {% endif %}
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+    </div>
+  </div>
+  {% if not rule_sets %}
+  <div class="card crm-panel border-0">
+    <div class="card-body text-center py-5 text-muted">
+      <p class="mb-2">No rule sets yet. Create one to power quote calculations.</p>
+      {% if can_edit %}
+      <a class="btn btn-primary rounded-pill" href="{{ url_for('crm_module.quote_rule_set_new') }}">Create rule set</a>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="crm-table-wrap">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Updated</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rs in rule_sets %}
+          <tr>
+            <td class="fw-medium">{{ rs.name }}</td>
+            <td>{% if rs.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+            <td class="small text-muted">{{ rs.updated_at }}</td>
+            <td class="text-end text-nowrap">
+              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.quote_rule_set_edit', rs_id=rs.id) }}">Edit rules</a>
+              <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_rule_set_test', rs_id=rs.id) }}">Test</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

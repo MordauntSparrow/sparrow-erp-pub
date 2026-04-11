@@ -1,0 +1,24 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}New quote rule set{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 640px;">
+  <h1 class="h4 mb-3">New rule set</h1>
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
+          <input class="form-control" id="name" name="name" required maxlength="255" placeholder="e.g. Default 2026">
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="is_active" value="1" id="is_active" checked>
+          <label class="form-check-label" for="is_active">Active (available on new quotes)</label>
+        </div>
+        <button type="submit" class="btn btn-primary rounded-pill">Create</button>
+        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_rule_sets_list') }}">Cancel</a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

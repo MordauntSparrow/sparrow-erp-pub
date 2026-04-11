@@ -1,0 +1,59 @@
+{# Shared copy: MNA / event medical plan before binding quote. theme: 'public' | 'admin' #}
+{% set t = theme|default('admin') %}
+{% if t == 'public' %}
+<div class="crm-pu-card p-4 mb-0 border border-2 border-light">
+  <h2 class="h6 fw-bold text-uppercase text-muted mb-3">Assessment before a binding quote</h2>
+  <p class="small mb-3">
+    Reputable medical event providers usually treat a <strong>medical needs assessment</strong> and an <strong>event medical plan</strong>
+    as part of proper governance before committing to cover. Initial figures from attendance and risk factors can be discussed early,
+    but a <strong>final, accurate quote</strong> normally depends on the full risk profile and specific requirements established through that process.
+  </p>
+  <h3 class="h6 fw-bold mb-2">Why the plan matters for pricing</h3>
+  <ul class="small ps-3 mb-3 crm-pu-guide">
+    <li><strong>Risk-led, not attendance-only:</strong> guidance such as the Purple Guide frames provision around risk; a smaller high-risk event can need more resource than a larger low-risk one.</li>
+    <li><strong>Defining scope:</strong> staffing (e.g. doctors, paramedics, first aiders), equipment, vehicles, and facilities are priced once required levels are agreed.</li>
+    <li><strong>Compliance:</strong> providers typically ensure planned cover matches registration and regulatory expectations (e.g. CQC in England where applicable) and local multi-agency expectations.</li>
+  </ul>
+  <h3 class="h6 fw-bold mb-2">Typical sequence</h3>
+  <ol class="small ps-3 mb-3">
+    <li class="mb-1"><strong>Before quote — discussion:</strong> event type, audience, history, and context (this enquiry captures high-level inputs).</li>
+    <li class="mb-1"><strong>Before quote — assessment:</strong> medical needs assessment to agree the required level of cover.</li>
+    <li class="mb-1"><strong>Quote:</strong> formal proposal based on that assessment.</li>
+    <li class="mb-1"><strong>After acceptance:</strong> detailed event medical plan finalised — often shared with the Safety Advisory Group (SAG) or equivalent.</li>
+  </ol>
+  <p class="small text-muted mb-0 border-top pt-3">
+    <strong>Takeaway:</strong> quoting without a proper needs assessment risks inadequate cover (organiser and public risk) or unnecessary cover (avoidable cost).
+    Numbers shown in this tool are <strong>indicative</strong> for early conversation — not a substitute for your own risk assessment or our clinical / operational sign-off.
+  </p>
+</div>
+{% else %}
+<div class="border rounded-3 p-3 mb-0" style="border-color: rgba(124, 58, 237, 0.35) !important; background: #faf8ff;">
+  <h3 class="h6 text-uppercase fw-bold mb-2" style="color:#4c1d95;">Medical needs assessment &amp; event medical plan</h3>
+  <p class="small text-muted mb-3">
+    Standard practice for medical event cover: a <strong>medical needs assessment</strong> and <strong>event medical plan</strong> underpin governance before a <strong>binding</strong> quote.
+    Early bands and headcounts here support pipeline and rough estimates only; final pricing follows agreed scope (staffing grades, kit, vehicles, facilities).
+  </p>
+  <div class="row g-3 small">
+    <div class="col-md-6">
+      <p class="fw-semibold mb-1">Why plan-led quoting</p>
+      <ul class="text-muted ps-3 mb-0">
+        <li class="mb-1"><strong>Risk-led</strong> (e.g. Purple Guide framing): not attendance alone.</li>
+        <li class="mb-1"><strong>Scope</strong> for accurate fees: roles, equipment, vehicles, infrastructure.</li>
+        <li class="mb-0"><strong>Compliance</strong>: e.g. CQC / registration and SAG-aligned documentation.</li>
+      </ul>
+    </div>
+    <div class="col-md-6">
+      <p class="fw-semibold mb-1">Typical flow</p>
+      <ol class="text-muted ps-3 mb-0">
+        <li class="mb-1">Discussion &amp; context</li>
+        <li class="mb-1">Medical needs assessment</li>
+        <li class="mb-1">Quote from agreed requirements</li>
+        <li class="mb-0">After award: final event medical plan (often SAG)</li>
+      </ol>
+    </div>
+  </div>
+  <p class="small text-muted mb-0 mt-3 pt-2 border-top">
+    <strong>Takeaway:</strong> avoid binding prices from guide numbers alone — under- or over-resourcing both harm the organiser. Use CRM event plans and quote revisions once assessment is recorded.
+  </p>
+</div>
+{% endif %}

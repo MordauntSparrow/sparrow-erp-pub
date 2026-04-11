@@ -1,0 +1,214 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Add equipment{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 720px;">
+  <h1 class="h4 mb-1">Add equipment</h1>
+  <p class="text-muted small mb-4">Step 1: choose or create the product line. Step 2: this physical unit (serial, warranty, service).</p>
+
+  <div class="d-flex align-items-center gap-2 mb-4">
+    <span class="badge rounded-pill bg-primary" id="pill1">1</span>
+    <span class="text-muted small" id="lbl1">Product line</span>
+    <span class="text-muted">→</span>
+    <span class="badge rounded-pill bg-secondary" id="pill2">2</span>
+    <span class="text-muted small" id="lbl2">This unit</span>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <form method="post" id="equipWizardForm" class="row g-3" novalidate>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <div class="col-12" id="step1">
+          <div class="fw-semibold mb-2">Product line</div>
+          <p class="text-muted small mb-3">The <strong>model</strong> all serial units of this type share (one catalogue row). Step 2 registers <strong>one physical unit</strong> with its own serial number.</p>
+          <div class="btn-group btn-group-sm mb-3" role="group">
+            <input type="radio" class="btn-check" name="model_mode" id="modePick" value="existing" autocomplete="off" {% if equipment_items %}checked{% endif %}>
+            <label class="btn btn-outline-primary" for="modePick">Use existing</label>
+            <input type="radio" class="btn-check" name="model_mode" id="modeNew" value="new" autocomplete="off" {% if not equipment_items %}checked{% endif %}>
+            <label class="btn btn-outline-primary" for="modeNew">New line</label>
+          </div>
+
+          <div id="blockExisting" class="{% if not equipment_items %}d-none{% endif %}">
+            <label class="form-label">Line</label>
+            <select class="form-select form-select-sm" name="item_id" id="selItemId">
+              <option value="">—</option>
+              {% for it in equipment_items %}
+              <option value="{{ it.id }}">{{ it.name }}{% if it.sku %} · {{ it.sku }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Equipment product lines already in the system. Pick one, then enter the new unit’s serial on the next step.</div>
+          </div>
+
+          <div id="blockNew" class="{% if equipment_items %}d-none{% endif %} row g-2">
+            <div class="col-md-6">
+              <label class="form-label">Name</label>
+              <input class="form-control form-control-sm" name="new_model_name" id="newModelName" maxlength="255" placeholder="e.g. Zoll AED Plus" autocomplete="off">
+              <div class="form-text">Human-readable model name shown in lists and on the asset record.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">SKU</label>
+              <input class="form-control form-control-sm" name="new_model_sku" id="newModelSku" maxlength="120" placeholder="e.g. AED-ZOLL-PLUS" autocomplete="off">
+              <div class="form-text">Stable code for this model (not the serial). Used in search and reporting.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Unit of measure (UOM)</label>
+              <input class="form-control form-control-sm" name="new_model_unit" id="newModelUnit" maxlength="32" value="ea" placeholder="ea" aria-describedby="hintNewModelUnit">
+              <div class="form-text" id="hintNewModelUnit">Short label for <em>how quantities are described</em> (not a number). <strong>ea</strong> = each discrete asset. Use <strong>box</strong>, <strong>pair</strong>, etc. only if that matches how you count this line.</div>
+            </div>
+          </div>
+
+          <p class="text-danger small mb-2 d-none" id="clientErr1"></p>
+          <div class="mt-3">
+            <button type="button" class="btn btn-primary btn-sm" id="btnStep2">Continue</button>
+            {% if inventory_bp_available|default(false) %}
+            <a class="btn btn-outline-secondary btn-sm ms-1" href="{{ url_for('inventory_control_internal.equipment_desk_page') }}">Cancel</a>
+            {% else %}
+            <a class="btn btn-outline-secondary btn-sm ms-1" href="{{ url_for('inventory_control_internal.equipment_servicing_dashboard') }}">Cancel</a>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="col-12 d-none" id="step2">
+          <div class="fw-semibold mb-2">This unit</div>
+          <p class="text-muted small mb-2">Details for <strong>this one physical item</strong> (must differ from every other unit of the same line).</p>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label">Serial number</label>
+              <input class="form-control form-control-sm" name="serial_number" id="serialNumber" required maxlength="191" autocomplete="off" placeholder="Manufacturer or internal serial">
+              <div class="form-text">Unique per unit. Used for traceability and sign-out; duplicates are not allowed.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Asset tag</label>
+              <input class="form-control form-control-sm" name="public_asset_code" maxlength="64" placeholder="Optional; else auto" autocomplete="off">
+              <div class="form-text">Friendly ID on the sticker (e.g. PLAT-990). Leave blank to let the system assign one.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Make</label>
+              <input class="form-control form-control-sm" name="make" maxlength="120" autocomplete="off" placeholder="e.g. Zoll">
+              <div class="form-text">Manufacturer or brand for this physical unit.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Model</label>
+              <input class="form-control form-control-sm" name="model" maxlength="120" autocomplete="off" placeholder="e.g. AED Plus">
+              <div class="form-text">Manufacturer’s model name/version for this unit (can refine the product line name).</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Purchase date</label>
+              <input class="form-control form-control-sm" type="date" name="purchase_date">
+              <div class="form-text">When ownership was acquired (for audit).</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Warranty until</label>
+              <input class="form-control form-control-sm" type="date" name="warranty_expiry">
+              <div class="form-text">End date of supplier warranty cover.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Warranty start</label>
+              <input class="form-control form-control-sm" type="date" name="warranty_start_date">
+              <div class="form-text">When the warranty period began (if you track it).</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Warranty from</label>
+              <select class="form-select form-select-sm" name="warranty_start_basis">
+                <option value="">—</option>
+                <option value="delivery">Delivery / goods-in</option>
+                <option value="install">Install / commissioning</option>
+                <option value="custom">Custom</option>
+              </select>
+              <div class="form-text">What the start date is measured from (for notes and reporting).</div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Warranty (months)</label>
+              <input class="form-control form-control-sm" type="number" name="warranty_months" min="0" placeholder="—">
+              <div class="form-text">Length of cover if you prefer months over a fixed end date.</div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Service every (days)</label>
+              <input class="form-control form-control-sm" type="number" name="service_interval_days" min="0" placeholder="—">
+              <div class="form-text">Planned interval between inspections or manufacturer service (optional).</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Next service due</label>
+              <input class="form-control form-control-sm" type="date" name="next_service_due_date">
+              <div class="form-text">When the next service or inspection is due (shows on dashboards).</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Condition</label>
+              <input class="form-control form-control-sm" name="condition" maxlength="64" autocomplete="off" placeholder="e.g. Good, Awaiting test">
+              <div class="form-text">Short free-text state of the unit at registration.</div>
+            </div>
+          </div>
+          <div class="mt-3 d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBack1">Back</button>
+            <button class="btn btn-primary btn-sm" type="submit" id="btnSubmit">Save unit</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var step1 = document.getElementById('step1');
+  var step2 = document.getElementById('step2');
+  var modePick = document.getElementById('modePick');
+  var modeNew = document.getElementById('modeNew');
+  var blockExisting = document.getElementById('blockExisting');
+  var blockNew = document.getElementById('blockNew');
+  var pill1 = document.getElementById('pill1');
+  var pill2 = document.getElementById('pill2');
+  function syncMode(){
+    var newM = modeNew && modeNew.checked;
+    if (blockExisting) blockExisting.classList.toggle('d-none', newM);
+    if (blockNew) blockNew.classList.toggle('d-none', !newM);
+    if (newM) {
+      var s = document.getElementById('selItemId');
+      if (s) s.value = '';
+    }
+  }
+  if (modePick) modePick.addEventListener('change', syncMode);
+  if (modeNew) modeNew.addEventListener('change', syncMode);
+  syncMode();
+
+  var err1 = document.getElementById('clientErr1');
+  function showErr1(msg){
+    if (!err1) return;
+    err1.textContent = msg || '';
+    err1.classList.toggle('d-none', !msg);
+  }
+  document.getElementById('btnStep2').addEventListener('click', function(){
+    showErr1('');
+    var newM = modeNew && modeNew.checked;
+    if (newM) {
+      var n = (document.getElementById('newModelName').value || '').trim();
+      var sku = (document.getElementById('newModelSku').value || '').trim();
+      if (!n || !sku) {
+        showErr1('Enter a name and SKU for the new product line.');
+        return;
+      }
+    } else {
+      var sid = document.getElementById('selItemId').value;
+      if (!sid) {
+        showErr1('Choose a product line, or select “New line”.');
+        return;
+      }
+    }
+    step1.classList.add('d-none');
+    step2.classList.remove('d-none');
+    pill1.classList.remove('bg-primary');
+    pill1.classList.add('bg-secondary');
+    pill2.classList.remove('bg-secondary');
+    pill2.classList.add('bg-primary');
+    document.getElementById('serialNumber').focus();
+  });
+  document.getElementById('btnBack1').addEventListener('click', function(){
+    step2.classList.add('d-none');
+    step1.classList.remove('d-none');
+    pill2.classList.remove('bg-primary');
+    pill2.classList.add('bg-secondary');
+    pill1.classList.remove('bg-secondary');
+    pill1.classList.add('bg-primary');
+  });
+})();
+</script>
+{% endblock %}

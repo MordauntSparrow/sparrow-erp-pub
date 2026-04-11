@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Courses – Training{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  {% set delivery_labels = {
+    'internal': 'Internal (lessons/quizzes)',
+    'internal_signoff': 'Internal + supervisor sign-off',
+    'external_required': 'External certificate required',
+    'evidence_only': 'Evidence only (admin review)'
+  } %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="mb-0">Courses</h1>
+    <a href="{{ url_for('internal_training.admin_course_new') }}" class="btn btn-primary btn-sm">New course</a>
+  </div>
+  <div class="table-responsive border rounded bg-white">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="table-light">
+        <tr><th>Title</th><th>Delivery</th><th>Active</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for c in courses %}
+        <tr>
+          <td><a href="{{ url_for('internal_training.admin_course_edit', course_id=c.id) }}">{{ c.title }}</a></td>
+          <td><span class="badge bg-secondary">{{ delivery_labels.get(c.delivery_type, c.delivery_type) }}</span></td>
+          <td>{% if c.active %}<span class="text-success">Yes</span>{% else %}No{% endif %}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('internal_training.admin_course_assign', course_id=c.id) }}" class="btn btn-outline-primary btn-sm">Assign</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted p-4">No courses yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <a href="{{ url_for('internal_training.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back</a>
+</div>
+{% endblock %}

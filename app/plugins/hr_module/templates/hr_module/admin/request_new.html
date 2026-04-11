@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}New document request – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_requests') }}">Document requests</a></li>
+      <li class="breadcrumb-item active" aria-current="page">New request</li>
+    </ol>
+  </nav>
+  <h1 class="mb-3">New document request</h1>
+
+  <form method="post" action="{{ url_for('internal_hr.admin_request_new') }}" class="card card-body" style="max-width: 640px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">Recipients</label>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="all_contractors" id="all_contractors" value="on">
+        <label class="form-check-label" for="all_contractors">All staff</label>
+      </div>
+      <select class="form-select" id="contractor_select" name="contractor_ids" multiple size="8">
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {% if preselect_contractor_id is not none and c.id == preselect_contractor_id %}selected{% endif %}>{{ c.name or c.email }} ({{ c.email }})</option>
+        {% endfor %}
+      </select>
+      <p class="small text-muted mt-1">Hold Ctrl/Cmd to select multiple. Or check "All staff".</p>
+    </div>
+    <div class="mb-3">
+      <label for="request_type" class="form-label">Request type</label>
+      <select class="form-select" id="request_type" name="request_type">
+        {% for rt in request_types %}
+        <option value="{{ rt }}">{{ rt|hr_request_type }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+      <input type="text" class="form-control" id="title" name="title" required maxlength="255" placeholder="e.g. Right to work document" value="{{ suggested_title or '' }}">
+    </div>
+    <div class="mb-3">
+      <label for="description" class="form-label">Description (optional)</label>
+      <textarea class="form-control" id="description" name="description" rows="2" placeholder="Instructions for the staff member"></textarea>
+    </div>
+    <div class="mb-3">
+      <label for="required_by_date" class="form-label">Required by date (optional)</label>
+      <input type="date" class="form-control" id="required_by_date" name="required_by_date">
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Create request</button>
+      <a href="{{ url_for('internal_hr.admin_requests') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+  {% if contractors %}
+  <script>
+  document.querySelector('form').addEventListener('submit', function(e) {
+    if (!document.getElementById('all_contractors').checked) {
+      var sel = document.getElementById('contractor_select');
+      var n = 0;
+      for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].selected) n++; }
+      if (n === 0) {
+        e.preventDefault();
+        alert('Select at least one recipient or check "All staff".');
+      }
+    }
+  });
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

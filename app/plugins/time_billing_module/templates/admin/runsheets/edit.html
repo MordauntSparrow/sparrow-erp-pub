@@ -1,0 +1,383 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-clipboard2-plus me-2"></i> Edit Runsheet (admin)
+        </h4>
+        <div class="d-flex gap-2">
+            <button id="btnSave" class="btn btn-primary btn-sm">
+                <i class="bi bi-save me-1"></i> Save
+            </button>
+            <button id="btnPublish" class="btn btn-success btn-sm">
+                <i class="bi bi-upload me-1"></i> Publish / resync
+            </button>
+        </div>
+    </div>
+
+    <p class="text-muted small mb-3">
+        Use this screen to fix data or create a runsheet <strong>on behalf of</strong> crew (enter numeric <strong>Contractor ID</strong> per row).
+        Day-to-day crew selection and template forms belong on the <strong>contractor</strong> time-billing UI (crew search API: <code>/time-billing/api/refs/contractors?q=</code>).
+        <strong>Publish / resync</strong> runs the same server step every time: upserts each contractor’s timesheet row from this runsheet (assignments with <code>payroll_included = 1</code> only). Use after fixing times, after crew reactivate, or after <strong>Ventus sign-off</strong> updated <code>actual_end</code> but timesheets still show old data.
+    </p>
+
+    <div id="rsForm" class="card">
+        <div class="card-body">
+
+            <div class="row g-2">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Client ID</label>
+                    <input class="form-control form-control-sm" id="client_id" placeholder="e.g. 12">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Job Type ID</label>
+                    <input class="form-control form-control-sm" id="job_type_id">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Work Date</label>
+                    <input class="form-control form-control-sm" id="work_date" placeholder="YYYY-MM-DD">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select form-select-sm" id="status">
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Min. crew role ID</label>
+                    <input class="form-control form-control-sm" id="required_role_id" placeholder="roles.id — blank = any">
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Shift staff role ID</label>
+                    <input class="form-control form-control-sm" id="shift_staff_role_id" placeholder="optional label role">
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Pay model</label>
+                    <select class="form-select form-select-sm" id="shift_pay_model">
+                        <option value="inherit">Wage card</option>
+                        <option value="hourly">Hourly</option>
+                        <option value="day">Day flat</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Pay rate</label>
+                    <input class="form-control form-control-sm" id="shift_pay_rate" placeholder="amount">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Shift address line 1</label>
+                    <input class="form-control form-control-sm" id="shift_address_line1">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Shift address line 2</label>
+                    <input class="form-control form-control-sm" id="shift_address_line2">
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label">City</label>
+                    <input class="form-control form-control-sm" id="shift_city">
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label">Postcode</label>
+                    <input class="form-control form-control-sm" id="shift_postcode">
+                </div>
+            </div>
+            <p class="text-muted small mb-0">To assign someone below the ladder, tick <strong>Override</strong> and enter a reason (audited).</p>
+            <hr>
+
+            <h6 class="mb-2">Cura operational event (Medical Records)</h6>
+            <div class="row g-2 align-items-end mb-2">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Cura event ID</label>
+                    <input class="form-control form-control-sm" id="cura_operational_event_id" placeholder="e.g. 42">
+                </div>
+                <div class="col-12 col-md-9 d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="btnCuraApply" title="Copy name, location, config notes into run sheet">
+                        Apply Cura details to header
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCuraSync" title="Add crew from Cura expected roster (principal username → contractor)">
+                        Sync roster from Cura
+                    </button>
+                </div>
+            </div>
+            <div id="curaPreview" class="small text-muted border rounded p-2 mb-3" style="display:none;"></div>
+
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <h6 class="mb-0">Assignments (contractor IDs)</h6>
+                <button class="btn btn-outline-secondary btn-sm" id="btnAddAssign">
+                    <i class="bi bi-plus-lg"></i> Add row
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="assignTbl">
+                    <thead>
+                        <tr>
+                            <th>Contractor ID</th>
+                            <th>Vehicle ID</th>
+                            <th>Scheduled</th>
+                            <th>Actual</th>
+                            <th>Notes</th>
+                            <th>Override</th>
+                            <th>Override reason</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+    (function () {
+        const hashMatch = location.hash.match(/edit-(new|\d+)/);
+        const rsId = hashMatch ? (hashMatch[1] === 'new' ? null : hashMatch[1]) : null;
+        const isNew = !rsId;
+        const q = (sel) => document.querySelector(sel);
+        const URL_CURA_APPLY = "{{ url_for('internal_time_billing.api_runsheet_cura_apply_details', rs_id=999999) }}";
+        const URL_CURA_SYNC = "{{ url_for('internal_time_billing.api_runsheet_cura_sync_roster', rs_id=999999) }}";
+
+        function addAssignmentRow(a = {}) {
+            const tbody = q('#assignTbl tbody');
+            const tr = document.createElement('tr');
+            const cid = a.contractor_id || a.user_id || '';
+            tr.innerHTML = `
+      <td>
+        <input class="form-control form-control-sm js" data-field="contractor_id" value="${cid}">
+      </td>
+      <td>
+        <input class="form-control form-control-sm js" data-field="fleet_vehicle_id" placeholder="fleet id" value="${a.fleet_vehicle_id != null && a.fleet_vehicle_id !== '' ? a.fleet_vehicle_id : ''}">
+      </td>
+      <td>
+        <div class="d-flex gap-1 align-items-center flex-wrap">
+          <input class="form-control form-control-sm js" data-field="scheduled_start" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_start || ''}">
+          <span>–</span>
+          <input class="form-control form-control-sm js" data-field="scheduled_end" style="max-width:90px" placeholder="HH:MM" value="${a.scheduled_end || ''}">
+        </div>
+      </td>
+      <td>
+        <div class="d-flex gap-1 align-items-center flex-wrap">
+          <input class="form-control form-control-sm js" data-field="actual_start" style="max-width:90px" placeholder="HH:MM" value="${a.actual_start || ''}">
+          <span>–</span>
+          <input class="form-control form-control-sm js" data-field="actual_end" style="max-width:90px" placeholder="HH:MM" value="${a.actual_end || ''}">
+        </div>
+      </td>
+      <td>
+        <input class="form-control form-control-sm js" data-field="notes" value="">
+      </td>
+      <td class="text-center align-middle">
+        <input type="checkbox" class="form-check-input js" data-field="role_eligibility_override" title="Allow despite ladder">
+      </td>
+      <td>
+        <input class="form-control form-control-sm js" data-field="role_eligibility_override_reason" placeholder="If override">
+      </td>
+      <td class="text-end">
+        <button class="btn btn-outline-danger btn-sm js-del" type="button">
+          <i class="bi bi-trash"></i>
+        </button>
+      </td>
+    `;
+            tbody.appendChild(tr);
+            const notesEl = tr.querySelector('[data-field="notes"]');
+            if (notesEl && a.notes) notesEl.value = a.notes;
+            const ovr = tr.querySelector('[data-field="role_eligibility_override"]');
+            if (ovr && (a.role_eligibility_override === 1 || a.role_eligibility_override === true)) ovr.checked = true;
+            const ovrR = tr.querySelector('[data-field="role_eligibility_override_reason"]');
+            if (ovrR && a.role_eligibility_override_reason) ovrR.value = a.role_eligibility_override_reason;
+            tr.querySelector('.js-del').addEventListener('click', () => tr.remove());
+            return tr;
+        }
+
+        async function load() {
+            if (!rsId) return;
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_get_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId));
+            if (!resp.ok) { alert('Failed to load runsheet'); return; }
+            const d = await resp.json();
+            q('#client_id').value = (d.client_id != null ? d.client_id : d.client_name) || '';
+            q('#job_type_id').value = d.job_type_id || '';
+            q('#work_date').value = d.work_date || '';
+            q('#status').value = d.status || 'draft';
+            q('#required_role_id').value = d.required_role_id != null ? d.required_role_id : '';
+            q('#shift_staff_role_id').value = d.shift_staff_role_id != null ? d.shift_staff_role_id : '';
+            q('#shift_pay_model').value = (d.shift_pay_model || 'inherit').toLowerCase();
+            q('#shift_pay_rate').value = d.shift_pay_rate != null && d.shift_pay_rate !== '' ? d.shift_pay_rate : '';
+            q('#shift_address_line1').value = d.shift_address_line1 || '';
+            q('#shift_address_line2').value = d.shift_address_line2 || '';
+            q('#shift_city').value = d.shift_city || '';
+            q('#shift_postcode').value = d.shift_postcode || '';
+            const ce = q('#cura_operational_event_id');
+            if (ce) ce.value = d.cura_operational_event_id != null ? d.cura_operational_event_id : '';
+            renderCuraPreview(d.cura_operational_event);
+
+            const tbody = q('#assignTbl tbody');
+            tbody.innerHTML = '';
+            (d.assignments || []).forEach(addAssignmentRow);
+        }
+
+        function renderCuraPreview(bundle) {
+            const box = q('#curaPreview');
+            if (!box) return;
+            if (!bundle || !bundle.name) {
+                box.style.display = 'none';
+                box.innerHTML = '';
+                return;
+            }
+            const loc = bundle.location_summary || '';
+            const veh = (bundle.event_vehicles || []).map(v => v.summary + (v.role_label ? ` (${v.role_label})` : '')).filter(Boolean);
+            const roster = (bundle.expected_roster || []).map(r => r.principal_username).filter(Boolean);
+            box.style.display = 'block';
+            box.innerHTML = `<strong>${bundle.name}</strong>${loc ? ' — ' + escapeHtml(loc) : ''}` +
+                (roster.length ? `<div class="mt-1">Expected roster (Cura): ${roster.map(escapeHtml).join(', ')}</div>` : '') +
+                (veh.length ? `<div class="mt-1">Event vehicles: ${veh.map(escapeHtml).join('; ')}</div>` : '');
+        }
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function collect() {
+            const cRaw = (q('#client_id').value || '').trim();
+            const rr = (q('#required_role_id').value || '').trim();
+            const ssr = (q('#shift_staff_role_id').value || '').trim();
+            const pr = (q('#shift_pay_rate').value || '').trim();
+            const curaRaw = (q('#cura_operational_event_id').value || '').trim();
+            const curaParsed = curaRaw ? parseInt(curaRaw, 10) : NaN;
+            const payload = {
+                client_id: cRaw ? parseInt(cRaw, 10) : null,
+                job_type_id: q('#job_type_id').value ? parseInt(q('#job_type_id').value, 10) : null,
+                work_date: q('#work_date').value || null,
+                status: q('#status').value || 'draft',
+                required_role_id: rr ? parseInt(rr, 10) : null,
+                shift_staff_role_id: ssr ? parseInt(ssr, 10) : null,
+                shift_pay_model: q('#shift_pay_model').value || 'inherit',
+                shift_pay_rate: pr === '' ? null : parseFloat(pr),
+                shift_address_line1: (q('#shift_address_line1').value || '').trim() || null,
+                shift_address_line2: (q('#shift_address_line2').value || '').trim() || null,
+                shift_city: (q('#shift_city').value || '').trim() || null,
+                shift_postcode: (q('#shift_postcode').value || '').trim() || null,
+                cura_operational_event_id: Number.isFinite(curaParsed) ? curaParsed : null,
+                assignments: []
+            };
+            q('#assignTbl tbody').querySelectorAll('tr').forEach(tr => {
+                const get = (f) => {
+                    const el = tr.querySelector(`.js[data-field="${f}"]`);
+                    return el ? el.value : null;
+                };
+                const ovrEl = tr.querySelector('.js[data-field="role_eligibility_override"]');
+                const fvRaw = (get('fleet_vehicle_id') || '').trim();
+                const fvParsed = fvRaw ? parseInt(fvRaw, 10) : NaN;
+                payload.assignments.push({
+                    contractor_id: get('contractor_id') ? parseInt(get('contractor_id'), 10) : null,
+                    fleet_vehicle_id: Number.isFinite(fvParsed) ? fvParsed : null,
+                    scheduled_start: get('scheduled_start') || null,
+                    scheduled_end: get('scheduled_end') || null,
+                    actual_start: get('actual_start') || null,
+                    actual_end: get('actual_end') || null,
+                    notes: get('notes') || null,
+                    role_eligibility_override: ovrEl && ovrEl.checked,
+                    role_eligibility_override_reason: (get('role_eligibility_override_reason') || '').trim() || null
+                });
+            });
+            return payload;
+        }
+
+        async function save() {
+            const payload = collect();
+            if (isNew) {
+                if (!payload.client_id) { alert('Client ID is required'); return; }
+                if (!payload.job_type_id) { alert('Job Type ID is required'); return; }
+                if (!payload.work_date) { alert('Work Date is required'); return; }
+                const resp = await fetch("{{ url_for('internal_time_billing.api_create_runsheet') }}", {
+                    method: 'POST',
+                    headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    alert('Create failed: ' + (err.error || err.message || resp.status));
+                    return;
+                }
+                const data = await resp.json();
+                const newId = data.id;
+                if (newId) {
+                    location.hash = 'edit-' + newId;
+                    location.reload();
+                } else {
+                    alert('Create succeeded but no ID returned');
+                }
+                return;
+            }
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_update_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId), {
+                method: 'PUT',
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
+                body: JSON.stringify(payload)
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                alert('Save failed: ' + (err.error || err.message || resp.status));
+            } else alert('Saved');
+        }
+
+        async function publish() {
+            if (!rsId) { alert('Save the runsheet first to get an ID'); return; }
+            if (!confirm('Publish / resync this runsheet to contractor timesheets? (Upserts rows for payroll_included assignments.)')) return;
+            const resp = await fetch(`{{ url_for('internal_time_billing.api_publish_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId), {
+                method: 'POST',
+                headers: window.tbMergeCsrfHeaders({}, 'POST')
+            });
+            let msg = resp.ok ? 'Published' : 'Publish failed';
+            try {
+                const j = await resp.json();
+                if (j && j.message) msg += ': ' + j.message;
+            } catch (e) { /* ignore */ }
+            alert(msg);
+        }
+
+        async function curaApply() {
+            if (!rsId) { alert('Save the run sheet first (need an ID).'); return; }
+            const r = await fetch(URL_CURA_APPLY.replace('999999', String(rsId)), {
+                method: 'POST',
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+                body: JSON.stringify({ merge_notes: true, fill_shift_location: true })
+            });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok && j.ok) { alert('Applied Cura details.'); await load(); }
+            else alert(j.error || 'Apply failed');
+        }
+        async function curaSync() {
+            if (!rsId) { alert('Save the run sheet first (need an ID).'); return; }
+            if (!confirm('Add missing crew from the Cura event expected roster? Existing rows are kept.')) return;
+            const r = await fetch(URL_CURA_SYNC.replace('999999', String(rsId)), {
+                method: 'POST',
+                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+                body: JSON.stringify({})
+            });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok && j.ok) {
+                const parts = [`Added: ${(j.added_user_ids || []).length}`];
+                if ((j.unmatched_principals || []).length) parts.push('No contractor for: ' + j.unmatched_principals.join(', '));
+                if ((j.skipped_role_ladder || []).length) parts.push('Skipped (role ladder): ' + j.skipped_role_ladder.join(', '));
+                alert(parts.join('\n'));
+                await load();
+            } else alert(j.error || 'Sync failed');
+        }
+
+        document.getElementById('btnAddAssign').addEventListener('click', () => addAssignmentRow());
+        document.getElementById('btnSave').addEventListener('click', save);
+        document.getElementById('btnPublish').addEventListener('click', publish);
+        const btnCuraA = document.getElementById('btnCuraApply');
+        const btnCuraS = document.getElementById('btnCuraSync');
+        if (btnCuraA) btnCuraA.addEventListener('click', curaApply);
+        if (btnCuraS) btnCuraS.addEventListener('click', curaSync);
+
+        if (rsId) load();
+    })();
+</script>
+{% endblock %}

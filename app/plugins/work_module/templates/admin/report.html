@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Hours report – Work{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="h4 mb-3">Hours report</h1>
+  <form method="get" class="row g-2 mb-3">
+    <div class="col-auto">
+      <label class="form-label small mb-0">From</label>
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from.isoformat() if date_from else '' }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">To</label>
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to.isoformat() if date_to else '' }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">Contractor</label>
+      <select name="contractor_id" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {{ 'selected' if contractor_id == c.id else '' }}>{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">Client</label>
+      <select name="client_id" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if client_id == c.id else '' }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto align-self-end">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    </div>
+    <div class="col-auto align-self-end">
+      <a href="{{ url_for('internal_work.admin_report_export') }}?date_from={{ date_from.isoformat() if date_from else '' }}&date_to={{ date_to.isoformat() if date_to else '' }}{% if contractor_id %}&contractor_id={{ contractor_id }}{% endif %}{% if client_id %}&client_id={{ client_id }}{% endif %}" class="btn btn-success btn-sm">Export CSV</a>
+    </div>
+  </form>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Visit</th>
+          <th>Shift</th>
+          <th>Contractor</th>
+          <th>Client</th>
+          <th>Site</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Hours</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.work_date.isoformat() if r.work_date else '—' }}</td>
+          <td>{{ r.contractor_name or '—' }}</td>
+          <td>{{ r.client_name or '—' }}</td>
+          <td>{{ r.site_name or '—' }}</td>
+          <td>{{ r.actual_start_str or '—' }}</td>
+          <td>{{ r.actual_end_str or '—' }}</td>
+          <td>{{ r.hours or '—' }}</td>
+          <td class="small text-muted">{{ (r.notes or '')[:50] }}{% if r.notes and r.notes|length > 50 %}…{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="text-muted">No recorded hours in range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <a href="{{ url_for('internal_work.admin_index') }}" class="btn btn-outline-secondary btn-sm">Back to Work</a>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% set ep = request.endpoint %}
+<nav class="rec-topnav" aria-label="Recruitment sections">
+  <a href="{{ url_for('internal_recruitment.admin_index') }}" class="{% if ep == 'internal_recruitment.admin_index' %}rec-nav-active{% endif %}">Overview</a>
+  <a href="{{ url_for('internal_recruitment.admin_openings') }}" class="{% if ep == 'internal_recruitment.admin_openings' or ep == 'internal_recruitment.admin_opening_new' or ep == 'internal_recruitment.admin_opening_edit' or ep == 'internal_recruitment.admin_opening_rules' %}rec-nav-active{% endif %}">Job positions</a>
+  <a href="{{ url_for('internal_recruitment.admin_applications') }}" class="{% if ep == 'internal_recruitment.admin_applications' or ep == 'internal_recruitment.admin_application_detail' %}rec-nav-active{% endif %}">Applications</a>
+  <a href="{{ url_for('internal_recruitment.admin_roles') }}" class="{% if ep == 'internal_recruitment.admin_roles' or ep == 'internal_recruitment.admin_role_new' or ep == 'internal_recruitment.admin_role_edit' %}rec-nav-active{% endif %}">Job roles</a>
+  <a href="{{ url_for('internal_recruitment.admin_templates') }}" class="{% if ep == 'internal_recruitment.admin_templates' or ep == 'internal_recruitment.admin_template_new' or ep == 'internal_recruitment.admin_template_edit' %}rec-nav-active{% endif %}">Form templates</a>
+  <a href="{{ url_for('internal_recruitment.admin_interview_presets') }}" class="{% if ep == 'internal_recruitment.admin_interview_presets' %}rec-nav-active{% endif %}">Interview locations</a>
+  <a href="{{ url_for('public_recruitment_site.vacancies_list') }}" target="_blank" rel="noopener" class="ms-auto"><i class="bi bi-box-arrow-up-right"></i> Public careers site</a>
+</nav>

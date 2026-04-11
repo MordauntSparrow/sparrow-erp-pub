@@ -1,0 +1,23 @@
+{
+    "system_name": "time_billing_module",
+    "name": "Shift Timesheets",
+    "description": "Captures weekly contractor timesheets with auto rates, travel, and billing variance rollups.",
+    "version": "0.0.19",
+    "changelog": "Admin timesheet: Mark paid/closed without a portal invoice (PAYE/off-system/legacy) sets week to invoiced and blocks self-serve invoicing; optional audit fields (migration 019). Reopen to approved when no draft/sent portal invoice. Uninvoiced-entry queries respect invoiced weeks.",
+    "icon": "icon.png",
+    "enabled": true,
+    "installed": true,
+    "update_available": false,
+    "settings": {
+        "scheduler_week_prefill_enabled": {
+            "value": "true",
+            "editable": true,
+            "tooltip": "If enabled, the weekly timesheet is prefilled from schedule_shifts (scheduled times + clock data when present)."
+        },
+        "scheduler_source_scheduled_edit_allowed": {
+            "value": "false",
+            "editable": true,
+            "tooltip": "If false, staff cannot edit scheduled_start/end on scheduler-prefilled entries (they can still override actual times)."
+        }
+    }
+}

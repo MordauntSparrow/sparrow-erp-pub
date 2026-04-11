@@ -1,0 +1,114 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Pipeline board{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Pipeline board</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Sales pipeline</p>
+        <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-kanban me-2 text-primary"></i>Interactive board</h1>
+        <p class="small text-muted mb-0 mt-2">Drag cards between columns to update stage. Public enquiries from the event risk calculator land in <strong>Prospecting</strong>.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        {% if can_edit %}
+        <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('crm_module.opportunity_intake') }}"><i class="bi bi-telephone me-1"></i>Call / desk intake</a>
+        <a class="btn btn-outline-primary rounded-pill px-3" href="{{ url_for('crm_module.opportunity_new') }}">New opportunity</a>
+        {% endif %}
+        <a class="btn btn-outline-secondary rounded-pill px-3" href="{{ url_for('crm_module.opportunities_list') }}">Table view</a>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+    </div>
+  </div>
+
+  {% if not can_edit %}
+  <div class="alert alert-info border-0 small">View-only — ask an editor to move cards.</div>
+  {% endif %}
+
+  <div class="row flex-nowrap overflow-auto pb-3 g-2" style="min-height:520px;">
+    {% for stage_key, stage_label in columns %}
+    <div class="col crm-kanban-col" style="min-width:260px;">
+      <div class="crm-kanban-col__title d-flex justify-content-between align-items-center">
+        <span>{{ stage_label }}</span>
+        <span class="badge bg-light text-dark border">{{ (by_stage[stage_key] or [])|length }}</span>
+      </div>
+      <div class="crm-kanban-list rounded-3 p-2 bg-white bg-opacity-50 border border-light" data-stage="{{ stage_key }}" style="min-height:360px;">
+        {% for o in by_stage[stage_key] or [] %}
+        <div class="card crm-kanban-card shadow-sm mb-2 {% if not can_edit %}opacity-75{% endif %}" data-opp-id="{{ o.id }}">
+          <div class="card-body p-2 small">
+            <div class="fw-semibold text-dark">{{ o.name }}</div>
+            <div class="text-muted">{{ o.account_name }}</div>
+            {% if o.amount is not none %}<div class="mt-1 font-monospace">£{{ o.amount }}</div>{% endif %}
+            <div class="mt-2 d-flex flex-wrap gap-1">
+              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.opportunity_edit', opp_id=o.id) }}">Open</a>
+              <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_new', opportunity_id=o.id) }}">Quote</a>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-muted small text-center py-4 mb-0">Drop cards here</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<style>
+.crm-kanban-col__title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  margin-bottom: 0.5rem;
+  padding: 0 0.25rem;
+}
+.crm-kanban-card { cursor: {% if can_edit %}grab{% else %}default{% endif %}; }
+.crm-kanban-card:active { cursor: {% if can_edit %}grabbing{% else %}default{% endif %}; }
+.sortable-ghost { opacity: 0.45; }
+</style>
+{% if can_edit %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+  var tmpl = {{ kanban_api_url_tmpl|tojson }};
+  var tokenEl = document.querySelector('meta[name="csrf-token"]');
+  var token = tokenEl ? tokenEl.getAttribute('content') : '';
+  document.querySelectorAll('.crm-kanban-list').forEach(function (col) {
+    new Sortable(col, {
+      group: 'crm-pipeline',
+      animation: 160,
+      draggable: '.crm-kanban-card',
+      ghostClass: 'sortable-ghost',
+      onEnd: function (evt) {
+        if (evt.from === evt.to && evt.oldIndex === evt.newIndex) return;
+        var id = evt.item.getAttribute('data-opp-id');
+        var stage = evt.to.getAttribute('data-stage');
+        if (!id || !stage) return;
+        var url = tmpl.replace('__OPP__', id);
+        fetch(url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': token
+          },
+          body: JSON.stringify({ stage: stage })
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (b) { throw new Error(b.error || r.status); });
+        }).catch(function () {
+          alert('Could not save stage — refresh and try again.');
+          window.location.reload();
+        });
+      }
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

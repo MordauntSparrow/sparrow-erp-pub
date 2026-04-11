@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Contractors – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Contractors</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Search employees</h1>
+  <p class="text-muted mb-3">Search by name or email, or <a href="{{ url_for('internal_hr.admin_employees') }}">browse all employees</a>.</p>
+
+  <form method="get" action="{{ url_for('internal_hr.admin_contractors') }}" class="mb-4">
+    <div class="input-group" style="max-width: 400px;">
+      <input type="search" class="form-control" name="q" value="{{ q or '' }}" placeholder="Name or email">
+      <button type="submit" class="btn btn-primary">Search</button>
+    </div>
+  </form>
+
+  {% if q is not none and q != '' %}
+  {% if contractors %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in contractors %}
+        <tr>
+          <td>{{ c.name or c.email or '—' }}</td>
+          <td>{{ c.email }}</td>
+          <td>{{ c.phone or '—' }}</td>
+          <td><span class="badge bg-secondary">{{ (c.status or 'active')|hr_contractor_status }}</span></td>
+          <td>
+            <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=c.id) }}" class="btn btn-sm btn-outline-primary">Profile</a>
+            <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=c.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small text-muted">{{ contractors|length }} result(s).</p>
+  {% else %}
+  <p class="text-muted">No contractors found for "{{ q }}".</p>
+  {% endif %}
+  {% else %}
+  <p class="text-muted">Enter a name or email and click Search.</p>
+  {% endif %}
+
+  <a href="{{ url_for('internal_hr.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to HR admin</a>
+</div>
+{% endblock %}

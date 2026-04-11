@@ -1,0 +1,209 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Cura events — planning{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="sched-breadcrumb mb-3">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Cura events (planning)</li>
+  </ol>
+</nav>
+
+<div class="sched-panel card mb-3">
+  <div class="card-body">
+    <h1 class="h4 mb-2">Cura events — planning view</h1>
+    <p class="text-muted small mb-3">
+      {{ planning.note }}
+      <strong>Planned cover</strong> is taken from <code>schedule_shifts</code> linked to run sheets that reference the same Cura operational event.
+      This is separate from <strong>Time Billing / timesheets</strong> (actual worked time and pay).
+    </p>
+    <form method="get" class="row g-2 align-items-end flex-wrap mb-0">
+      <div class="col-auto">
+        <label class="form-label small mb-0">From</label>
+        <input type="date" name="from" class="form-control form-control-sm" value="{{ date_from.isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-0">To</label>
+        <input type="date" name="to" class="form-control form-control-sm" value="{{ date_to.isoformat() }}">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if planning.warning %}
+<div class="alert alert-warning small">{{ planning.warning }}</div>
+{% endif %}
+
+{% if not planning.events %}
+<div class="alert alert-light border text-muted">No operational events overlap this window, or Cura tables are not available.</div>
+{% endif %}
+
+{% for ev in planning.events %}
+<div class="sched-panel card mb-4">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div>
+      <h2 class="h5 mb-1">{{ ev.name }}</h2>
+      <div class="small text-muted">
+        {% if ev.status %}<span class="badge bg-secondary">{{ ev.status }}</span>{% endif %}
+        {% if ev.slug %}<span class="font-monospace ms-1">{{ ev.slug }}</span>{% endif %}
+        · Window {{ ev.shift_date_from }} → {{ ev.shift_date_to }}
+        {% if ev.location_summary %}· {{ ev.location_summary }}{% endif %}
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      {% if ev.headcount_gap is not none and ev.headcount_gap > 0 %}
+      <span class="badge bg-warning text-dark">{{ ev.headcount_gap }} roster gap</span>
+      {% elif ev.roster_count > 0 and ev.headcount_gap == 0 %}
+      <span class="badge bg-success">Roster covered</span>
+      {% endif %}
+      <span class="badge bg-light text-dark border">{{ ev.planned_shifts|length }} planned shift row(s)</span>
+      <span class="badge bg-light text-dark border">{{ ev.planned_distinct_people }} people on schedule</span>
+      {% set du = cura_detail_url(ev.id) %}
+      {% if du %}
+      <a href="{{ du }}" class="btn btn-sm btn-outline-primary">Open in Cura ops</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card-body">
+    {% if not ev.has_runsheet_link %}
+    <div class="alert alert-secondary small py-2 mb-3">
+      Run sheets are not linked to Cura on this database (missing column or module). You can still see the Cura roster; planned shifts will appear once run sheets use <code>cura_operational_event_id</code>.
+    </div>
+    {% elif ev.runsheet_count == 0 %}
+    <div class="alert alert-light border small py-2 mb-3">
+      No run sheet rows reference this event yet. Create/link a run sheet in <strong>Time Billing → Runsheets</strong> with this Cura event ID, then add <strong>schedule shifts</strong> against that run sheet.
+    </div>
+    {% endif %}
+
+    {% if ev.crm_recommended_staffing and ev.crm_recommended_staffing.staffing_breakdown %}
+    {% set sb = ev.crm_recommended_staffing.staffing_breakdown %}
+    <div class="alert alert-info small py-2 mb-3">
+      <strong>CRM event planner guide</strong>
+      {% if ev.crm_staffing_source == 'cura_event_config' %}
+      <span class="text-muted">(stored on this Cura event from last <strong>Send to Cura</strong>)</span>
+      {% elif ev.crm_staffing_source == 'crm_opportunity_lookup' %}
+      <span class="text-muted">(loaded live from the linked CRM plan / opportunity — use <strong>Send to Cura</strong> again to persist on the event)</span>
+      {% endif %}
+      {% if sb.intro %}<p class="mb-2 mt-2">{{ sb.intro }}</p>{% endif %}
+      {% if ev.crm_recommended_staffing.risk_hints %}
+      {% set rh = ev.crm_recommended_staffing.risk_hints %}
+      <p class="mb-0 small text-muted">Risk calculator hints: {{ rh.suggested_medics|default(0) }} medics · {{ rh.suggested_vehicles|default(0) }} vehicles (guide only).</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if ev.crm_role_coverage %}
+    <h3 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:0.05em;">Roles needed (CRM guide) vs planned job types</h3>
+    <p class="small text-muted mb-2">Each row is a <strong>recommended grade/role mix</strong> from the opportunity linked to the CRM event plan. “Matching planned shifts” uses job type names on <code>schedule_shifts</code> in this date window — align naming in Time Billing job types with the planner labels where you can.</p>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>Role (guide)</th><th>Grade hint</th><th>Guide posts</th><th>Matching shifts</th><th>With assignee</th><th>Still needed</th></tr></thead>
+        <tbody>
+          {% for row in ev.crm_role_coverage %}
+          <tr>
+            <td>{{ row.role }}</td>
+            <td class="small text-muted">{% if row.grade_hint %}{{ row.grade_hint|string|truncate(120, True, '…') }}{% else %}—{% endif %}</td>
+            <td><span class="badge bg-secondary">{{ row.required_count }}</span></td>
+            <td>{{ row.matching_shift_rows }}</td>
+            <td>{{ row.shift_rows_with_assignee }}</td>
+            <td>
+              {% if row.gap_shift_rows_vs_guide > 0 %}
+              <span class="badge bg-warning text-dark">{{ row.gap_shift_rows_vs_guide }} shift row(s) vs guide</span>
+              {% elif row.unfilled_matching_shift_rows > 0 %}
+              <span class="badge bg-warning text-dark">{{ row.unfilled_matching_shift_rows }} shift(s) unfilled</span>
+              {% elif row.people_short_vs_guide %}
+              <span class="badge bg-warning text-dark">{{ row.people_short_vs_guide }} people vs guide</span>
+              {% else %}
+              <span class="badge bg-success">OK</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if ev.crm_vehicle_guide %}
+    <h3 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:0.05em;">Vehicles (CRM guide) vs Cura fleet resources</h3>
+    <p class="small mb-3">
+      Guide: <strong>{{ ev.crm_vehicle_guide.guide_vehicles }}</strong> vehicle line(s);
+      Cura fleet rows on this event: <strong>{{ ev.crm_vehicle_guide.cura_fleet_resource_rows }}</strong>.
+      {% if ev.crm_vehicle_guide.gap_vs_cura_fleet > 0 %}
+      <span class="badge bg-warning text-dark ms-1">{{ ev.crm_vehicle_guide.gap_vs_cura_fleet }} fewer fleet row(s) than guide</span>
+      {% endif %}
+      {% if ev.crm_vehicle_guide.crew_headcount_hint %}
+      <span class="text-muted small d-block mt-1">Crew headcount hint (guide): {{ ev.crm_vehicle_guide.crew_headcount_hint }}</span>
+      {% endif %}
+    </p>
+    {% endif %}
+
+    <div class="row g-4">
+      <div class="col-lg-6">
+        <h3 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:0.05em;">Cura roster (expected)</h3>
+        <p class="small text-muted mb-2">People listed in Event Manager. “On schedule” = same contractor has at least one linked planned shift in the window.</p>
+        {% if ev.roster_count == 0 %}
+        <p class="small text-muted mb-0">No roster rows — add usernames in Cura ops (or treat headcount as TBD).</p>
+        {% else %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>User</th><th>Name</th><th>Callsign</th><th>Schedule</th></tr></thead>
+            <tbody>
+              {% for r in ev.roster %}
+              <tr>
+                <td><code class="small">{{ r.username or '—' }}</code></td>
+                <td>{{ r.contractor_name or '—' }}</td>
+                <td class="small">{% if r.expected_callsign %}<code>{{ r.expected_callsign }}</code>{% else %}—{% endif %}</td>
+                <td>{% if r.on_schedule %}<span class="badge bg-success">On schedule</span>{% else %}<span class="badge bg-secondary">Not linked</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-lg-6">
+        <h3 class="h6 text-uppercase text-muted mb-2" style="letter-spacing:0.05em;">Roles / job types (planned shifts)</h3>
+        <p class="small text-muted mb-2">Each row is a <strong>schedule_shift</strong> (planned), with job type as the role label on the shift.</p>
+        {% if not ev.planned_shifts %}
+        <p class="small text-muted mb-0">No planned shifts linked to this event’s run sheets in this date range.</p>
+        {% else %}
+        <div class="table-responsive" style="max-height:280px;overflow-y:auto">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Date</th><th>Role (job type)</th><th>Who</th><th>Time</th></tr></thead>
+            <tbody>
+              {% for s in ev.planned_shifts %}
+              <tr>
+                <td class="text-nowrap small">{{ s.work_date }}</td>
+                <td><span class="badge bg-primary">{{ s.job_type_name or '—' }}</span></td>
+                <td class="small">{{ s.contractor_name or s.contractor_username or '—' }}</td>
+                <td class="small text-nowrap text-muted">{{ (time_display(s.scheduled_start) if s.scheduled_start else '—') }}–{{ (time_display(s.scheduled_end) if s.scheduled_end else '—') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if ev.fleet_resources %}
+    <h3 class="h6 text-uppercase text-muted mt-4 mb-2" style="letter-spacing:0.05em;">Fleet / resources (Cura)</h3>
+    <ul class="list-unstyled small mb-0">
+      {% for fr in ev.fleet_resources %}
+      <li class="mb-1">
+        <strong>{{ fr.summary }}</strong>
+        {% if fr.role_label %}<span class="text-muted">· {{ fr.role_label }}</span>{% endif %}
+        {% if fr.notes %}<span class="text-muted">— {{ fr.notes }}</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

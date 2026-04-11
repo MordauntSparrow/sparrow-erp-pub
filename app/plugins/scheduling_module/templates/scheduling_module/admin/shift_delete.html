@@ -1,0 +1,55 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Delete shift – Scheduling{% endblock %}
+{% block content %}
+<nav class="mb-2 small">
+  <a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a>
+  <span class="text-muted">/</span>
+  <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}">Week view</a>
+  <span class="text-muted">/</span>
+  <a href="{{ url_for('internal_scheduling.admin_shift_edit', shift_id=shift.id) }}">Edit shift</a>
+  <span class="text-muted">/</span>
+  <span>Delete</span>
+</nav>
+<h1 class="h4 mb-3">Delete shift</h1>
+
+<div class="card card-body mb-3">
+  <p class="mb-2">You are about to delete this shift:</p>
+  <p class="mb-0 fw-medium">
+    {{ (shift.work_date|string)[:10] if shift.work_date else '—' }}
+    {{ (time_display(shift.scheduled_start) if shift.scheduled_start else '—') }}–{{ (time_display(shift.scheduled_end) if shift.scheduled_end else '—') }}
+    · {{ shift.job_type_name or '—' }} · {{ shift.client_name or '—' }}
+    {% if shift.contractor_name %}{{ shift.contractor_name }}{% else %}<span class="text-muted">Unassigned</span>{% endif %}
+  </p>
+</div>
+
+<form method="post" action="{{ url_for('internal_scheduling.admin_shift_delete_post', shift_id=shift.id) }}">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label fw-medium">What do you want to delete?</label>
+    <div class="form-check">
+      <input class="form-check-input" type="radio" name="scope" id="scope_this" value="this" checked>
+      <label class="form-check-label" for="scope_this">
+        <strong>This shift only</strong> – delete just this occurrence
+      </label>
+    </div>
+    {% if series|length > 1 %}
+    <div class="form-check">
+      <input class="form-check-input" type="radio" name="scope" id="scope_future" value="future">
+      <label class="form-check-label" for="scope_future">
+        <strong>This and future</strong> – delete this shift and all later ones in the series ({{ future_count }} shift{{ 's' if future_count != 1 else '' }})
+      </label>
+    </div>
+    <div class="form-check">
+      <input class="form-check-input" type="radio" name="scope" id="scope_all" value="all">
+      <label class="form-check-label" for="scope_all">
+        <strong>All in series</strong> – delete all {{ series|length }} linked shifts
+      </label>
+    </div>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-danger">Delete</button>
+    <a href="{{ url_for('internal_scheduling.admin_shift_edit', shift_id=shift.id) }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

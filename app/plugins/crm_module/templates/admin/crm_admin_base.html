@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  {% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+  <title>{% block page_title %}CRM{% endblock %} — {{ _site.get('company_name') or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include 'partials/sparrow_csrf_head.html' %}
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  {% include 'admin/_crm_ui_styles.html' %}
+  <style>
+    body { background: #eef0f4; color: #212529; min-height: 100vh; }
+    {% include 'partials/sparrow_admin_nav_styles.html' %}
+    .crm-main { padding: 0; }
+    .crm-main .card { background: #fff; }
+    .crm-subnav .nav-link { border-radius: 0.35rem; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% include 'partials/sparrow_admin_top_nav.html' %}
+  {% set ep_pipe = request.endpoint in ('crm_module.opportunities_list', 'crm_module.opportunities_board', 'crm_module.opportunity_intake', 'crm_module.opportunity_new', 'crm_module.opportunity_edit') %}
+  {% set ep_quotes = request.endpoint in ('crm_module.quotes_list', 'crm_module.quote_new', 'crm_module.quote_edit', 'crm_module.quote_rule_sets_list', 'crm_module.quote_rule_set_new', 'crm_module.quote_rule_set_edit', 'crm_module.quote_rule_set_test', 'crm_module.guide_wage_job_map') %}
+  {% set ep_events = request.endpoint in ('crm_module.event_plans_list', 'crm_module.event_plan_new', 'crm_module.event_plan_edit', 'crm_module.event_plan_questions_list', 'crm_module.event_plan_question_edit') %}
+  <nav class="nav-module crm-subnav border-bottom py-2 px-3 bg-white shadow-sm">
+    <div class="container-fluid px-3">
+      <div class="d-flex flex-wrap align-items-center gap-1">
+        <a class="nav-link py-1 px-2 {% if request.endpoint == 'crm_module.dashboard' %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.dashboard') }}"><i class="bi bi-grid-1x2 me-1"></i>Overview</a>
+        <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.accounts_list', 'crm_module.account_new', 'crm_module.account_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.accounts_list') }}"><i class="bi bi-building me-1"></i>Accounts</a>
+        <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.contacts_list', 'crm_module.contact_new', 'crm_module.contact_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.contacts_list') }}"><i class="bi bi-people me-1"></i>Contacts</a>
+        <div class="dropdown d-inline-block">
+          <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_pipe %}fw-bold text-primary{% endif %}" href="#" id="crmNavPipeline" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-funnel me-1"></i>Pipeline</a>
+          <ul class="dropdown-menu" aria-labelledby="crmNavPipeline">
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunities_list' %}active{% endif %}" href="{{ url_for('crm_module.opportunities_list') }}">All opportunities</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunities_board' %}active{% endif %}" href="{{ url_for('crm_module.opportunities_board') }}">Kanban board</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_intake' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_intake') }}">Call / desk intake</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_new' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_new') }}">New opportunity</a></li>
+          </ul>
+        </div>
+        <div class="dropdown d-inline-block">
+          <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_quotes %}fw-bold text-primary{% endif %}" href="#" id="crmNavQuotes" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-receipt me-1"></i>Quotes &amp; rules</a>
+          <ul class="dropdown-menu" aria-labelledby="crmNavQuotes">
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.quotes_list' %}active{% endif %}" href="{{ url_for('crm_module.quotes_list') }}">All quotes</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.quote_new' %}active{% endif %}" href="{{ url_for('crm_module.quote_new') }}">New quote</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if request.endpoint in ('crm_module.quote_rule_sets_list', 'crm_module.quote_rule_set_new', 'crm_module.quote_rule_set_edit', 'crm_module.quote_rule_set_test') %}active{% endif %}" href="{{ url_for('crm_module.quote_rule_sets_list') }}">Quote rule sets</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.guide_wage_job_map' %}active{% endif %}" href="{{ url_for('crm_module.guide_wage_job_map') }}">Guide &amp; wage mapping</a></li>
+          </ul>
+        </div>
+        <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.activities_list', 'crm_module.activity_new', 'crm_module.activity_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.activities_list') }}"><i class="bi bi-lightning me-1"></i>Activities</a>
+        <div class="dropdown d-inline-block">
+          <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_events %}fw-bold text-primary{% endif %}" href="#" id="crmNavEvents" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-clipboard2-pulse me-1"></i>Medical events</a>
+          <ul class="dropdown-menu" aria-labelledby="crmNavEvents">
+            <li><h6 class="dropdown-header">Internal — event medical plans</h6></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plans_list' %}active{% endif %}" href="{{ url_for('crm_module.event_plans_list') }}">All plans</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plan_new' %}active{% endif %}" href="{{ url_for('crm_module.event_plan_new') }}">New plan</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in ('crm_module.event_plan_questions_list', 'crm_module.event_plan_question_edit') %}active{% endif %}" href="{{ url_for('crm_module.event_plan_questions_list') }}">Plan questionnaire (admin)</a></li>
+          </ul>
+        </div>
+        {% if crm_cura_ops_hub_url %}
+        <a class="nav-link py-1 px-2 text-secondary" href="{{ crm_cura_ops_hub_url }}"><i class="bi bi-hospital me-1"></i>Cura ops</a>
+        {% endif %}
+        <form class="d-flex align-items-center ms-auto mt-1 mt-md-0" method="get" action="{{ url_for('crm_module.crm_search') }}" role="search">
+          <input type="search" name="q" class="form-control form-control-sm rounded-pill" placeholder="Search CRM…" aria-label="Search CRM" style="max-width:11rem;" minlength="2" maxlength="200">
+        </form>
+      </div>
+    </div>
+  </nav>
+  <main class="crm-main">
+    <div class="crm-admin-surface">
+      <nav aria-label="Breadcrumb" class="mb-3">
+        <ol class="breadcrumb mb-0 small">
+          <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+          <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+          {% block crm_breadcrumb_current %}
+          <li class="breadcrumb-item active" aria-current="page">CRM</li>
+          {% endblock %}
+        </ol>
+      </nav>
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+  <script>
+  (function () {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    var tok = meta && meta.getAttribute('content') ? String(meta.getAttribute('content')).trim() : '';
+    if (!tok) return;
+    document.querySelectorAll('.crm-main form[method="post"], .crm-main form[method="POST"]').forEach(function (f) {
+      if (f.querySelector('input[name="_csrf_token"]')) return;
+      var i = document.createElement('input');
+      i.type = 'hidden';
+      i.name = '_csrf_token';
+      i.value = tok;
+      f.insertBefore(i, f.firstChild);
+    });
+  })();
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,467 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Event plan{% endblock %}
+{% block crm_breadcrumb_current %}
+{% set _bc_title = plan.title or 'Plan' %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.event_plans_list') }}" class="text-decoration-none">Event plans</a></li>
+<li class="breadcrumb-item active" aria-current="page">{{ _bc_title[:48] }}{% if _bc_title|length > 48 %}…{% endif %}</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Medical planning</p>
+        <h1 class="h3 fw-semibold text-dark mb-0">{{ plan.title or 'Event plan' }}</h1>
+      </div>
+      <a class="btn btn-outline-secondary rounded-pill px-3" href="{{ url_for('crm_module.event_plans_list') }}"><i class="bi bi-list-ul me-1"></i>All plans</a>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+    </div>
+  </div>
+
+  {% if plan.quote_id or plan.opportunity_id %}
+  <div class="alert alert-info border-0 py-2 small mb-3">
+    {% if plan.quote_id %}
+    <span class="me-3">Quote: <a href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">#{{ plan.quote_id }}</a>{% if plan_link_labels.quote_title %} — {{ plan_link_labels.quote_title }}{% endif %}</span>
+    {% endif %}
+    {% if plan.opportunity_id %}
+    <span>Opportunity: <a href="{{ url_for('crm_module.opportunity_edit', opp_id=plan.opportunity_id) }}">{% if plan_link_labels.opportunity_name %}{{ plan_link_labels.opportunity_name }}{% else %}#{{ plan.opportunity_id }}{% endif %}</a></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card crm-panel border-0 mb-3">
+    <div class="card-body py-3 small">
+      <p class="fw-semibold text-dark mb-1">Cura handoff</p>
+      <p class="mb-2 text-muted">Nothing is sent automatically. On the last step, click <strong>Send to Cura</strong> only when you intend to push this plan (e.g. after the client has agreed pricing if a quote is linked). Requires <code>SPARROW_CRM_EVENT_HANDOFF_MODE=live</code> and medical records integration for a real sync.</p>
+      <p class="mb-0 text-muted">
+        Mode: <code>{{ crm_handoff_mode or 'off' }}</code>
+        {% if plan.handoff_status %}
+        · Last: <span class="fw-medium text-dark">{{ plan.handoff_status }}</span>
+        {% if plan.handoff_external_ref %} · <code class="small">{{ plan.handoff_external_ref }}</code>{% endif %}
+        {% if plan.handoff_at %} · {{ plan.handoff_at }}{% endif %}
+        {% else %}
+        · Not sent yet.
+        {% endif %}
+      </p>
+      {% if cura_ops_event_url %}
+      <div class="mt-2">
+        <a class="btn btn-sm btn-primary rounded-pill" href="{{ cura_ops_event_url }}">Open in Cura</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if handoff_log %}
+  <div class="card crm-panel border-0 mb-3">
+    <div class="card-body py-2">
+      <h2 class="h6 text-uppercase text-muted mb-2">Handoff log</h2>
+      <ul class="list-unstyled small mb-0">
+        {% for h in handoff_log %}
+        <li class="mb-1 pb-1 border-bottom">
+          <span class="text-muted">{{ h.created_at }}</span>
+          <span class="badge bg-light text-dark border">{{ h.status }}</span>
+          {% if h.trigger_key %}<span class="text-muted">{{ h.trigger_key }}</span>{% endif %}
+          {% if h.external_ref %}<code class="small">{{ h.external_ref }}</code>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if pdf_history %}
+  <div class="alert alert-light border small mb-3">
+    <strong>Recent PDFs</strong>
+    {% for row in pdf_history %}
+    <div class="d-flex justify-content-between align-items-center py-1">
+      <span>{{ row.pdf_generated_at }}</span>
+      <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.event_plan_pdf_download', plan_id=plan.id, f=row.file_path) }}">Download</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <style>
+    .crm-event-plan-edit:not(.crm-ep-viewer) [data-ep-step] { display: none; }
+    .crm-event-plan-edit:not(.crm-ep-viewer) [data-ep-step].crm-ep-active { display: block; }
+  </style>
+  <noscript>
+    <style>
+      .crm-event-plan-edit [data-ep-step] { display: block !important; }
+    </style>
+  </noscript>
+
+  <div class="crm-event-plan-edit{% if not can_edit %} crm-ep-viewer{% endif %}">
+  <form method="post" id="crmEpMainForm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {% if can_edit %}
+    <input type="hidden" name="wizard_step" id="crmEpWizardStep" value="{{ display_step }}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+          <span class="small text-muted text-uppercase me-1">Plan steps</span>
+          {% set labels = ['1 Details', '2 Location', '3 Checklist', '4 Hospitals & handover', '5 Resources', '6 Risk', '7 Sign-off', '8 Review'] %}
+          {% for i in range(1, 9) %}
+          <button type="button" class="btn btn-sm rounded-pill crm-ep-go{% if display_step == i %} btn-primary{% else %} btn-outline-secondary{% endif %}" data-go="{{ i }}">{{ labels[i - 1] }}</button>
+          {% endfor %}
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpPrev" {% if display_step <= 1 %}disabled{% endif %}>Previous</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpNext" {% if display_step >= 8 %}disabled{% endif %}>Next</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div data-ep-step="1" class="crm-ep-panel mb-1{% if display_step == 1 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Event details</h2>
+        <div class="row g-2">
+          <div class="col-md-8">
+            <label class="form-label">Title</label>
+            <input class="form-control" name="title" value="{{ plan.title or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Status</label>
+            <select class="form-select" name="status" {% if not can_edit %}disabled{% endif %}>
+              <option value="draft" {% if plan.status == 'draft' %}selected{% endif %}>Draft</option>
+              <option value="completed" {% if plan.status == 'completed' %}selected{% endif %}>Completed</option>
+              <option value="archived" {% if plan.status == 'archived' %}selected{% endif %}>Archived</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Event type</label>
+            <input class="form-control" name="event_type" value="{{ plan.event_type or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Start</label>
+            <input class="form-control" type="datetime-local" name="start_datetime" value="{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">End</label>
+            <input class="form-control" type="datetime-local" name="end_datetime" value="{% if plan.end_datetime %}{{ plan.end_datetime.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Expected attendance</label>
+            <input class="form-control" name="expected_attendance" inputmode="numeric" value="{{ plan.expected_attendance or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Demographics / crowd profile</label>
+          <textarea class="form-control" name="demographics_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.demographics_notes or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Environment (indoor/outdoor, movement, water, etc.)</label>
+          <textarea class="form-control" name="environment_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.environment_notes or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="2" class="crm-ep-panel mb-1{% if display_step == 2 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Location</h2>
+        <div class="mb-2">
+          <label class="form-label">Address line</label>
+          <input class="form-control" name="address_line1" id="crmEpAddress" value="{{ plan.address_line1 or '' }}" {% if not can_edit %}readonly{% endif %}>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <label class="form-label">Postcode</label>
+            <input class="form-control" name="postcode" id="crmEpPostcode" value="{{ plan.postcode or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">what3words</label>
+            <input class="form-control" name="what3words" value="{{ plan.what3words or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Site / access notes</label>
+          <textarea class="form-control" name="location_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.location_notes or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="3" class="crm-ep-panel mb-1{% if display_step == 3 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Planning checklist</h2>
+        <p class="small text-muted">Admin-defined questions (see Plan questions). Answers are stored with this plan.</p>
+        {% for q in questions %}
+        <div class="mb-3 pb-2 border-bottom">
+          <label class="form-label small mb-0"><span class="text-muted">{{ q.group_name }}</span> — {{ q.question_text }}</label>
+          {% if q.help_url and (q.help_url.startswith('http://') or q.help_url.startswith('https://')) %}
+          <div class="mt-1"><a class="small" href="{{ q.help_url }}" target="_blank" rel="noopener noreferrer">Guidance / policy link</a></div>
+          {% endif %}
+          {% if q.answer_type == 'yes_no' %}
+          <select class="form-select form-select-sm mt-1" name="chk_{{ q.id }}" {% if not can_edit %}disabled{% endif %}>
+            <option value="">—</option>
+            <option value="yes" {% if answers.get(q.id|string) == 'yes' %}selected{% endif %}>Yes</option>
+            <option value="no" {% if answers.get(q.id|string) == 'no' %}selected{% endif %}>No</option>
+          </select>
+          {% elif q.answer_type == 'number' %}
+          <input class="form-control form-control-sm mt-1" type="number" name="chk_{{ q.id }}" value="{{ answers.get(q.id|string, '') }}" {% if not can_edit %}readonly{% endif %}>
+          {% else %}
+          <textarea class="form-control form-control-sm mt-1" name="chk_{{ q.id }}" rows="2" {% if not can_edit %}readonly{% endif %}>{{ answers.get(q.id|string, '') }}</textarea>
+          {% endif %}
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">No active questions — add some under <strong>Plan questions</strong>.</p>
+        {% endfor %}
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="4" class="crm-ep-panel mb-1{% if display_step == 4 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-2">Hospitals &amp; clinical routing</h2>
+        <p class="small text-muted mb-3">Use the <strong>site postcode</strong> from step 2 (or type an outcode). Suggestions rank nearby hospitals; add free-text lines for units not found.</p>
+        {% if can_edit %}
+        <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill" id="crmEpHospitalSuggest">Add nearby hospitals</button>
+          <span class="small text-muted" id="crmEpHospitalSuggestMsg"></span>
+        </div>
+        {% endif %}
+        <label class="form-label">Receiving hospitals &amp; units <span class="text-muted small fw-normal">(one per line)</span></label>
+        <textarea class="form-control mb-3" name="hospitals_list_lines" id="crmEpHospitalsLines" rows="4" placeholder="e.g. Royal County Hospital A&amp;E — DT1 2JY" {% if not can_edit %}readonly{% endif %}>{{ hospitals_list_lines }}</textarea>
+        <label class="form-label">Routes, access, transfer notes</label>
+        <textarea class="form-control mb-4" name="hospitals_notes" rows="3" placeholder="Helipad, ambulance access, preferred receiving unit…" {% if not can_edit %}readonly{% endif %}>{{ plan.hospitals_notes or '' }}</textarea>
+
+        <h3 class="h6 text-uppercase text-muted mb-2">Medical control</h3>
+        <label class="form-label small text-muted">Event medical control / comms <span class="fw-normal">(call sign, frequency, control desk, NHS numbers — free text)</span></label>
+        <textarea class="form-control mb-4" name="medical_control" rows="2" placeholder="e.g. Event Med Control 079… · NHS triage …" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.medical_control or '' }}</textarea>
+
+        <h3 class="h6 text-uppercase text-muted mb-2">ASHICE <span class="text-muted small fw-normal">(optional — pre-alert / handover)</span></h3>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-0">A — Age</label>
+            <input class="form-control form-control-sm" name="ashice_age" value="{{ clinical_handover.ashice.age or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">S — Sex</label>
+            <input class="form-control form-control-sm" name="ashice_sex" value="{{ clinical_handover.ashice.sex or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">H — History</label>
+            <textarea class="form-control form-control-sm" name="ashice_history" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.history or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">I — Injuries / findings</label>
+            <textarea class="form-control form-control-sm" name="ashice_injuries" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.injuries or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">C — Current condition</label>
+            <textarea class="form-control form-control-sm" name="ashice_current" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.current or '' }}</textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">E — Expected</label>
+            <textarea class="form-control form-control-sm" name="ashice_expected" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.expected or '' }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="5" class="crm-ep-panel mb-1{% if display_step == 5 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Resources</h2>
+        <div class="mb-2">
+          <label class="form-label">Medics (planned)</label>
+          <input class="form-control" name="resources_medics" value="{{ plan.resources_medics or '' }}" {% if not can_edit %}readonly{% endif %}>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Vehicles / equipment</label>
+          <textarea class="form-control" name="resources_vehicles" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.resources_vehicles or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Comms</label>
+          <textarea class="form-control" name="resources_comms" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.resources_comms or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Escalation</label>
+          <textarea class="form-control" name="escalation_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.escalation_notes or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="6" class="crm-ep-panel mb-1{% if display_step == 6 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Risk assessment</h2>
+        <textarea class="form-control mb-2" name="risk_summary" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.risk_summary or '' }}</textarea>
+        <label class="form-label">Optional score (1–10)</label>
+        <input class="form-control" style="max-width:8rem" name="risk_score" inputmode="numeric" value="{{ plan.risk_score or '' }}" {% if not can_edit %}readonly{% endif %}>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="7" class="crm-ep-panel mb-1{% if display_step == 7 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Sign-off</h2>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <label class="form-label">Name</label>
+            <input class="form-control" name="signoff_name" value="{{ plan.signoff_name or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Role</label>
+            <input class="form-control" name="signoff_role" value="{{ plan.signoff_role or '' }}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">Date/time</label>
+            <input class="form-control" type="datetime-local" name="signoff_at" value="{% if plan.signoff_at %}{{ plan.signoff_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="8" class="crm-ep-panel mb-1{% if display_step == 8 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Review, PDF &amp; Cura</h2>
+        <ol class="small text-muted mb-3 ps-3">
+          <li class="mb-1"><strong>Save plan</strong> (button below).</li>
+          <li class="mb-1"><strong>Generate PDF</strong> for the file pack.</li>
+          <li class="mb-0"><strong>Send to Cura</strong> — single explicit action; creates or updates the operational event for rostering.{% if plan.quote_id %} If this plan is linked to a quote, that quote must be <strong>Accepted</strong> first.{% endif %}</li>
+        </ol>
+        {% if can_edit %}
+        {% if handoff_block_message %}
+        <div class="alert alert-warning small mb-3 py-2">{{ handoff_block_message }}</div>
+        {% if plan.quote_id %}
+        <a class="btn btn-sm btn-outline-secondary rounded-pill mb-3" href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">Open linked quote</a>
+        {% endif %}
+        {% endif %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <button type="submit" form="crmEpPdfForm" class="btn btn-outline-dark rounded-pill">Generate PDF</button>
+          {% if handoff_block_message %}
+          <button type="button" class="btn btn-primary rounded-pill" disabled aria-disabled="true">Send to Cura</button>
+          {% else %}
+          <button type="submit" form="crmEpHandoffForm" class="btn btn-primary rounded-pill" id="crmEpHandoffSubmitBtn">Send to Cura</button>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    </div>
+
+    {% if can_edit %}
+    <button type="submit" class="btn btn-primary rounded-pill mb-3">Save plan</button>
+    {% endif %}
+  </form>
+  </div>
+
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('crm_module.event_plan_pdf', plan_id=plan.id) }}" id="crmEpPdfForm" class="visually-hidden" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  <form method="post" action="{{ url_for('crm_module.event_plan_handoff', plan_id=plan.id) }}" id="crmEpHandoffForm" class="visually-hidden" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% endif %}
+
+  {% if can_edit and not handoff_block_message %}
+  <script>
+  (function () {
+    var hf = document.getElementById('crmEpHandoffForm');
+    if (!hf) return;
+    hf.addEventListener('submit', function (e) {
+      if (!window.confirm('Send this event plan to Cura now? Only confirm after the client has agreed pricing if a quote is linked to this plan.')) {
+        e.preventDefault();
+      }
+    });
+  })();
+  </script>
+  {% endif %}
+
+  {% if can_edit %}
+  <script>
+  (function () {
+    var root = document.querySelector('.crm-event-plan-edit:not(.crm-ep-viewer)');
+    if (!root) return;
+    var stepInput = document.getElementById('crmEpWizardStep');
+    if (!stepInput) return;
+    var panels = root.querySelectorAll('[data-ep-step]');
+    var navBtns = root.querySelectorAll('.crm-ep-go');
+    var prevBtn = document.getElementById('crmEpPrev');
+    var nextBtn = document.getElementById('crmEpNext');
+
+    function currentStep() {
+      var n = parseInt(stepInput.value, 10);
+      return isNaN(n) ? 1 : Math.max(1, Math.min(8, n));
+    }
+
+    function showStep(s) {
+      var n = Math.max(1, Math.min(8, s));
+      stepInput.value = String(n);
+      panels.forEach(function (el) {
+        var sn = parseInt(el.getAttribute('data-ep-step'), 10);
+        el.classList.toggle('crm-ep-active', sn === n);
+      });
+      navBtns.forEach(function (btn) {
+        var gn = parseInt(btn.getAttribute('data-go'), 10);
+        btn.classList.toggle('btn-primary', gn === n);
+        btn.classList.toggle('btn-outline-secondary', gn !== n);
+      });
+      if (prevBtn) prevBtn.disabled = n <= 1;
+      if (nextBtn) nextBtn.disabled = n >= 8;
+    }
+
+    navBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        showStep(parseInt(btn.getAttribute('data-go'), 10));
+      });
+    });
+    if (prevBtn) prevBtn.addEventListener('click', function () { showStep(currentStep() - 1); });
+    if (nextBtn) nextBtn.addEventListener('click', function () { showStep(currentStep() + 1); });
+
+    showStep(currentStep());
+
+    var sugBtn = document.getElementById('crmEpHospitalSuggest');
+    var sugMsg = document.getElementById('crmEpHospitalSuggestMsg');
+    var pcEl = document.getElementById('crmEpPostcode');
+    var linesEl = document.getElementById('crmEpHospitalsLines');
+    var sugUrl = {{ hospital_suggest_url|tojson }};
+    if (sugBtn && linesEl && sugUrl) {
+      sugBtn.addEventListener('click', function () {
+        var q = pcEl && pcEl.value ? pcEl.value.trim() : '';
+        sugMsg.textContent = 'Loading…';
+        fetch(sugUrl + '?q=' + encodeURIComponent(q))
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data.message) {
+              sugMsg.textContent = data.message;
+            } else if (data.stub) {
+              sugMsg.textContent = 'Illustrative catalogue — enter a UK postcode for nearest hospitals.';
+            } else {
+              sugMsg.textContent = 'Ranked by distance from your postcode.';
+            }
+            var rows = data.suggestions || [];
+            var lines = (linesEl.value || '').replace(/\s+$/, '');
+            var add = rows.map(function (s) {
+              var n = s.name || '';
+              var p = s.postcode || s.vicinity || '';
+              return p ? (n + ' — ' + p) : n;
+            }).filter(Boolean);
+            if (add.length) {
+              linesEl.value = lines + (lines ? '\n' : '') + add.join('\n');
+            }
+          })
+          .catch(function () { sugMsg.textContent = 'Request failed'; });
+      });
+    }
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

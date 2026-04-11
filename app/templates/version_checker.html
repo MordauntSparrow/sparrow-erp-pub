@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
+  {% set can_schedule_core = update_available and latest_version %}
+  {% set schedulable_plugins = plugins|selectattr('update_available')|list %}
   <div class="container mt-4">
     <h1 class="mb-4">Version Manager</h1>
 
-    <!-- Schedule Update Button -->
+    <!-- Schedule Update Button (only when at least one component has a newer repo version) -->
+    {% if can_schedule_core or schedulable_plugins|length > 0 %}
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#scheduleUpdateModal">Schedule an Update</button>
+    {% else %}
+    <p class="text-muted small mb-0">Scheduling is hidden while everything matches or exceeds the repository (or the update feed could not be reached).</p>
+    {% endif %}
     <form method="POST" action="{{ url_for('routes.run_version_upgrades') }}" class="d-inline ms-2">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-outline-warning">Run DB Upgrades</button>
@@ -24,13 +30,13 @@
             {{ latest_version }}
           {% else %}
             <span class="text-muted">Unable to check</span>
-            <span class="d-block small text-secondary mt-1">Sparrow could not reach the update feed (often because the repository is private or sign-in is missing). Open <a href="{{ url_for('routes.core_module_settings', tab='integrations') }}">Core settings → GitLab &amp; cache</a> and add your GitLab access token or deploy credentials, or ask your host to configure an accessible manifest URL.</span>
+            <span class="d-block small text-secondary mt-1">Sparrow could not reach the update feed (often because the repository is private or sign-in is missing). Ask your host to set GitLab or registry credentials in the deployment environment, or to expose an accessible manifest URL.</span>
           {% endif %}
         </p>
         {% if update_available %}
           <p><strong class="text-success">Update Available!</strong></p>
         {% elif not latest_version %}
-          <p class="text-secondary small">Configure GitLab access under Core settings to see whether a newer core release is available.</p>
+          <p class="text-secondary small">Registry access must be configured in the server environment to see whether a newer core release is available.</p>
         {% else %}
           <p>No updates available for the core module.</p>
         {% endif %}
@@ -38,8 +44,13 @@
         <!-- Core Changelog Button -->
         <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#coreChangelogModal">View Core Changelog</button>
 
-        <!-- Core Update Now Button -->
-        <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModalCore">Update Core Now</button>
+        <!-- Core Update Now — only when repo reports a strictly newer version -->
+        {% if can_schedule_core %}
+        <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModalCore">Update Core Now</button>
+        {% else %}
+        <button type="button" class="btn btn-warning" disabled
+                title="No newer core on the repository, or latest version could not be determined.">Update Core Now</button>
+        {% endif %}
       </div>
     </div>
 
@@ -89,6 +100,7 @@
       </div>
     </div>
 
+    {% if can_schedule_core %}
     <!-- Core Update Now Modal -->
     <div class="modal fade" id="updateNowModalCore" tabindex="-1" aria-labelledby="updateNowModalCoreLabel" aria-hidden="true">
       <div class="modal-dialog">
@@ -111,6 +123,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
 
 <!-- Installed Plugins and Changelog -->
 <div class="card mb-4">
@@ -147,8 +160,12 @@
               <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#pluginChangelogModal{{ plugin.plugin_name }}">View Changelog</button>
             </td>
             <td>
-              <!-- Update Now Button for Plugin -->
-              <button class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModal{{ plugin.plugin_name }}">Update Now</button>
+              {% if plugin.update_available %}
+              <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#updateNowModal{{ plugin.plugin_name }}">Update Now</button>
+              {% else %}
+              <button type="button" class="btn btn-outline-secondary" disabled
+                      title="Installed version is already at or ahead of the repository (remote force flags are ignored).">Update Now</button>
+              {% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -203,6 +220,7 @@
     </div>
   </div>
 
+  {% if plugin.update_available %}
   <!-- Modal for Plugin Update Now -->
   <div class="modal fade" id="updateNowModal{{ plugin.plugin_name }}" tabindex="-1" aria-labelledby="updateNowModalLabel{{ plugin.plugin_name }}" aria-hidden="true">
     <div class="modal-dialog">
@@ -226,10 +244,12 @@
       </div>
     </div>
   </div>
+  {% endif %}
 {% endfor %}
 
 
 <!-- Modal to Schedule Update -->
+{% if can_schedule_core or schedulable_plugins|length > 0 %}
 <div class="modal fade" id="scheduleUpdateModal" tabindex="-1" aria-labelledby="scheduleUpdateModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -243,15 +263,15 @@
           <div class="mb-3">
             <label for="update_type" class="form-label">Select Update Type</label>
             <select name="update_type" id="update_type" class="form-select">
-              <option value="core">Core Module</option>
-              <option value="plugin">Plugin</option>
+              <option value="core" {% if can_schedule_core %}selected{% endif %} {% if not can_schedule_core %}disabled{% endif %}>Core Module{% if not can_schedule_core %} (up to date){% endif %}</option>
+              <option value="plugin" {% if not can_schedule_core and schedulable_plugins|length > 0 %}selected{% endif %} {% if schedulable_plugins|length == 0 %}disabled{% endif %}>Plugin{% if schedulable_plugins|length == 0 %} (none pending){% endif %}</option>
             </select>
           </div>
 
           <div id="plugin_name_div" class="mb-3" style="display: none;">
             <label for="plugin_name" class="form-label">Select Plugin</label>
             <select name="plugin_name" id="plugin_name" class="form-select">
-              {% for plugin in plugins %}
+              {% for plugin in schedulable_plugins %}
                 <option value="{{ plugin.plugin_name }}">{{ plugin.display_name|default(plugin.plugin_name, true) }}</option>
               {% endfor %}
             </select>
@@ -268,20 +288,23 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <!-- Add Bootstrap and Popper.js -->
 <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.6/dist/umd/popper.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.min.js"></script>
 <script>
-  // Adjust form fields visibility based on selected update type
-  document.getElementById("update_type").addEventListener("change", function() {
-    var selectedType = this.value;
-    if (selectedType === "plugin") {
-      document.getElementById("plugin_name_div").style.display = "block";
-    } else {
-      document.getElementById("plugin_name_div").style.display = "none";
+  (function () {
+    var sel = document.getElementById("update_type");
+    var div = document.getElementById("plugin_name_div");
+    if (!sel || !div) return;
+    function sync() {
+      var selectedType = sel.value;
+      div.style.display = selectedType === "plugin" ? "block" : "none";
     }
-  });
+    sel.addEventListener("change", sync);
+    sync();
+  })();
 </script>
 
 {% endblock %}

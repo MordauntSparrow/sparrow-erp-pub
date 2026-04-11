@@ -1,0 +1,209 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Scheduling{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="sched-breadcrumb mb-3">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Scheduling</li>
+  </ol>
+</nav>
+
+<div class="sched-dash-hero text-white p-4 p-md-5 mb-4">
+  <div class="row align-items-center g-3">
+    <div class="col-lg-8">
+      <p class="text-white-50 text-uppercase small mb-1" style="letter-spacing: 0.06em;">Workforce scheduling</p>
+      <h1 class="h2 fw-semibold mb-2">Shifts &amp; coverage</h1>
+      <p class="mb-0 opacity-90">
+        Plan by week or month, manage open-shift claims, time off, and templates.
+      </p>
+    </div>
+    <div class="col-lg-4 text-lg-end">
+      <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
+        <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-light btn-lg shadow-sm px-4 fw-semibold">
+          <i class="bi bi-calendar-week me-2"></i>Week view
+        </a>
+        <a href="{{ url_for('internal_scheduling.admin_schedule_month') }}" class="btn btn-outline-light btn-lg">
+          <i class="bi bi-calendar3 me-1"></i>Month
+        </a>
+        <a href="{{ url_for('internal_scheduling.admin_cura_event_planning') }}" class="btn btn-outline-light btn-lg">
+          <i class="bi bi-calendar-event me-1"></i>Cura planning
+        </a>
+        <a href="{{ url_for('internal_scheduling.admin_shift_new') }}" class="btn btn-success btn-lg shadow-sm fw-semibold">
+          <i class="bi bi-plus-lg me-1"></i>New shift
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mb-3">
+  <h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing: 0.06em;">Cura &amp; operational staffing</h2>
+  <p class="small text-muted mb-3">
+    <strong>Planning:</strong> roster vs scheduled shifts by Cura event (Scheduling → Cura events).
+    <strong>Run-sheet board / billing:</strong> Time Billing below. Open-shift <em>claims</em> under <strong>Open claims</strong>.
+  </p>
+  <div class="row g-3 mb-2">
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_for('internal_scheduling.admin_cura_event_planning') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0 border-start border-4" style="border-color:#0f766e!important;">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(15,118,110,0.12)!important;">
+            <i class="bi bi-calendar-event fs-3" style="color:#0f766e;"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Cura events — planning</h3>
+            <p class="card-text small text-muted mb-0">Roster, gaps, planned shifts &amp; job types, fleet hints — not timesheets.</p>
+          </div>
+          <i class="bi bi-chevron-right ms-auto text-muted"></i>
+        </div>
+      </a>
+    </div>
+  </div>
+{% if url_tb_runsheets_board or url_tb_staffing_overview or url_mr_cura_hub %}
+  <div class="row g-3">
+    {% if url_tb_runsheets_board %}
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_tb_runsheets_board }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0 border-start border-4" style="border-color:#0d9488!important;">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(13,148,136,0.12)!important;">
+            <i class="bi bi-people fs-3" style="color:#0d9488;"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Run sheets · staffing board</h3>
+            <p class="card-text small text-muted mb-0">By date: Cura event name, expected vs assigned crew, vehicles. Same data as run sheet edit.</p>
+          </div>
+          <i class="bi bi-box-arrow-up-right ms-auto text-muted small"></i>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+    {% if url_tb_staffing_overview %}
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_tb_staffing_overview }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(245,158,11,0.15);">
+            <i class="bi bi-exclamation-triangle fs-3 text-warning"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Staffing overview</h3>
+            <p class="card-text small text-muted mb-0">Gaps vs Cura expected roster, pay uplift, urgent rows.</p>
+          </div>
+          <i class="bi bi-chevron-right ms-auto text-muted"></i>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+    {% if url_mr_cura_hub %}
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_mr_cura_hub }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(99,102,241,0.12);">
+            <i class="bi bi-hospital fs-3" style="color:#6366f1;"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Cura ops hub (Medical Records)</h3>
+            <p class="card-text small text-muted mb-0">Operational events, assignments KPIs, links into event detail.</p>
+          </div>
+          <i class="bi bi-box-arrow-up-right ms-auto text-muted small"></i>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+  </div>
+{% endif %}
+</div>
+
+<div class="row g-3">
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(13,148,136,0.12)!important;">
+          <i class="bi bi-calendar-week fs-3" style="color:#0d9488;"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Week view</h2>
+          <p class="card-text small text-muted mb-0">Staff × days grid. Add shifts, copy week, labour hints.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_schedule_month') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(59,130,246,0.1);">
+          <i class="bi bi-calendar3 fs-3 text-primary"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Month view</h2>
+          <p class="card-text small text-muted mb-0">Full month; shift density per day, jump to a week.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_shifts') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(100,116,139,0.12);">
+          <i class="bi bi-list-task fs-3 text-secondary"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Shifts list</h2>
+          <p class="card-text small text-muted mb-0">Filter by date, contractor, {{ assignment_label|default('client')|lower }}.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_open_shift_claims') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(245,158,11,0.15);">
+          <i class="bi bi-person-check fs-3 text-warning"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Open shift claims {% if pending_open_shift_claims and pending_open_shift_claims > 0 %}<span class="badge bg-danger ms-1">{{ pending_open_shift_claims }}</span>{% endif %}</h2>
+          <p class="card-text small text-muted mb-0">Approve or reject staff claims.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_templates') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(99,102,241,0.1);">
+          <i class="bi bi-journal-bookmark fs-3" style="color:#6366f1;"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Templates</h2>
+          <p class="card-text small text-muted mb-0">Reusable weekly patterns. Apply to a week.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url_for('internal_scheduling.admin_time_off') }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+      <div class="card-body d-flex align-items-center">
+        <div class="rounded-3 p-3 me-3" style="background: rgba(34,197,94,0.12);">
+          <i class="bi bi-calendar-x fs-3 text-success"></i>
+        </div>
+        <div class="flex-grow-1">
+          <h2 class="h5 card-title mb-1">Time off</h2>
+          <p class="card-text small text-muted mb-0">Requests, approvals, add on behalf.</p>
+        </div>
+        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+      </div>
+    </a>
+  </div>
+</div>
+
+<div class="mt-4 d-flex flex-wrap gap-2 align-items-center">
+  <a href="{{ url_for('internal_scheduling.admin_shift_new') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> New shift</a>
+  <a href="{{ url_for('internal_scheduling.admin_swaps') }}" class="btn btn-outline-secondary"><i class="bi bi-arrow-left-right me-1"></i> Swaps</a>
+  <a href="{{ url_for('routes.plugins') }}" class="btn btn-outline-secondary">Plugins</a>
+  <a href="/" class="btn btn-outline-secondary">Home</a>
+</div>
+{% endblock %}

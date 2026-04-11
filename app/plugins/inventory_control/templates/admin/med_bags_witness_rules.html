@@ -1,0 +1,35 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Med bag witness rules — Inventory{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_templates_list') }}">Med bags</a></li>
+      <li class="breadcrumb-item active">Witness rules</li>
+    </ol>
+  </nav>
+  <h1 class="h3 mb-2">Witness rules</h1>
+  <p class="text-muted small">INV-MEDS-002 — number of witness user ids required per action (0–2).</p>
+
+  <form method="post" action="{{ url_for('inventory_control_internal.med_bags_witness_rules_save') }}" class="card">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Action</th><th>Witness count (0–2)</th><th>Enabled</th></tr></thead>
+          <tbody>
+            {% for r in rules %}
+            <tr>
+              <td class="fw-medium">{{ r.action_type }}</td>
+              <td><input class="form-control form-control-sm" type="number" min="0" max="2" name="witness_count_{{ r.action_type }}" value="{{ r.witness_count }}"></td>
+              <td><input class="form-check-input" type="checkbox" name="enabled_{{ r.action_type }}" value="1" {% if r.enabled %}checked{% endif %}></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,502 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ profile.name or profile.email }} – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_contractors') }}">Contractors</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id) }}">{{ profile.name or profile.email }}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Edit</li>
+    </ol>
+  </nav>
+  <h1 class="mb-3">Edit profile</h1>
+  <p class="text-muted">{{ profile.name or profile.email }}</p>
+
+  <form method="post" action="{{ url_for('internal_hr.admin_contractor_edit_save', cid=profile.id) }}" enctype="multipart/form-data" class="card card-body mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <h2 class="h6 mb-3">Identity &amp; portal (Time Billing)</h2>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="edit_name">Full name <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" id="edit_name" name="name" required maxlength="255" value="{{ profile.name or '' }}" autocomplete="name">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="edit_email">Work email <span class="text-danger">*</span></label>
+        <input type="email" class="form-control" id="edit_email" name="email" required maxlength="255" value="{{ profile.email or '' }}" autocomplete="email">
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="edit_username">Login username</label>
+        <input type="text" class="form-control font-monospace" id="edit_username" value="{{ profile.username or '' }}" readonly>
+        <div class="form-text">Set when the employee is created in HR (from full name, or from a core admin user’s username if one exists with the same work email). Not editable here.</div>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="edit_status">Employee status</label>
+        <select class="form-select" id="edit_status" name="status">
+          <option value="active" {% if (profile.status or 'active')|lower not in ('inactive', '0') %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if (profile.status or '')|lower in ('inactive', '0') %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="tb_role_id">Staff role (Time Billing) <span class="text-danger">*</span></label>
+        {% if tb_roles %}
+        <select class="form-select" id="tb_role_id" name="tb_role_id" required>
+          {% for r in tb_roles %}
+          <option value="{{ r.id }}" {% if profile.tb_role_id is not none and profile.tb_role_id|int == r.id|int %}selected{% endif %}>{{ r.name }}</option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <div class="alert alert-warning py-2 small mb-2">No staff roles yet. <a href="{{ url_for('internal_time_billing.tb_staff_roles_page') }}">Create staff roles in Time Billing</a> before saving.</div>
+        <select class="form-select" id="tb_role_id" name="tb_role_id" disabled><option value="">—</option></select>
+        {% endif %}
+        <p class="form-text mb-0">
+          Hourly £ come from the <strong>wage rate card</strong> below (or the default card for this role if none selected).
+          <a href="{{ url_for('internal_time_billing.tb_staff_roles_page') }}">Staff roles</a> ·
+          <a href="{{ url_for('internal_time_billing.wage_cards_page') }}">Wage cards</a>
+        </p>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="tb_wage_rate_card_id">Wage rate card</label>
+        <select class="form-select" id="tb_wage_rate_card_id" name="tb_wage_rate_card_id">
+          <option value="">— None —</option>
+          {% for w in wage_cards %}
+          <option value="{{ w.id }}" {% if profile.tb_wage_rate_card_id is not none and profile.tb_wage_rate_card_id|int == w.id|int %}selected{% endif %}>{% if w.name %}{{ w.name }}{% else %}Wage rate card{% endif %}{% if w.role_name %} ({{ w.role_name }}){% endif %}</option>
+          {% endfor %}
+        </select>
+        <p class="form-text mb-0">Rates are edited under <a href="{{ url_for('internal_time_billing.wage_cards_page') }}">Time Billing → Wage rate cards</a>.</p>
+      </div>
+    </div>
+
+    <h2 class="h6 mb-3 mt-2">Profile photo</h2>
+    <div class="mb-4 d-flex align-items-start gap-3 flex-wrap">
+      {% set pv = profile.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+      {% if pv %}
+      <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='profile_picture') }}" alt="" width="88" height="88" class="rounded-circle border flex-shrink-0" style="object-fit:cover;">
+      {% else %}
+      <div class="rounded-circle bg-secondary bg-opacity-25 text-secondary d-flex align-items-center justify-content-center flex-shrink-0 fw-semibold" style="width:88px;height:88px;font-size:1.25rem;">{{ (profile.initials or (profile.name or profile.email or '?')[:2])|upper }}</div>
+      {% endif %}
+      <div class="flex-grow-1" style="min-width:220px;">
+        <label class="form-label" for="profile_picture">Upload new photo</label>
+        <input type="file" class="form-control form-control-sm" id="profile_picture" name="profile_picture" accept="image/jpeg,image/png,image/webp,image/gif">
+        <div class="form-text">Optional. Replaces the current photo on the HR profile and employee directory when you save.</div>
+      </div>
+    </div>
+
+    <h2 class="h6 mt-2 mb-3">Role &amp; organisation</h2>
+    <div class="mb-4">
+      <label class="form-label" for="employment_type">Employment type (payroll)</label>
+      <select class="form-select" id="employment_type" name="employment_type">
+        <option value="paye" {% if (profile.employment_type or 'self_employed')|lower == 'paye' %}selected{% endif %}>PAYE (timesheet only — no contractor invoices)</option>
+        <option value="self_employed" {% if (profile.employment_type or 'self_employed')|lower != 'paye' %}selected{% endif %}>Self-employed (can submit invoices with timesheets)</option>
+      </select>
+      <div class="form-text">Stored on the Time Billing contractor record; controls whether invoicing appears in the contractor portal.</div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="job_title">Job title / role</label>
+        <input type="text" class="form-control" id="job_title" name="job_title" value="{{ profile.job_title or '' }}" placeholder="e.g. Senior engineer" maxlength="128">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="department">Department</label>
+        <input type="text" class="form-control" id="department" name="department" value="{{ profile.department or '' }}" placeholder="e.g. Operations" maxlength="128">
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="form-label" for="manager_contractor_id">Manager</label>
+      <select class="form-select" id="manager_contractor_id" name="manager_contractor_id">
+        <option value="">— None —</option>
+        {% for m in manager_choices %}
+        <option value="{{ m.id }}" {% if profile.manager_contractor_id is not none and profile.manager_contractor_id == m.id %}selected{% endif %}>{{ m.name or m.email }}{% if m.name and m.email %} · {{ m.email }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Line manager (another person in your contractor list). Leave blank if not set.</div>
+    </div>
+
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Phone</label>
+        <input type="text" class="form-control" name="phone" value="{{ profile.phone or '' }}">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Emergency contact name</label>
+        <input type="text" class="form-control" name="emergency_contact_name" value="{{ profile.emergency_contact_name or '' }}">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Address line 1</label>
+      <input type="text" class="form-control" name="address_line1" value="{{ profile.address_line1 or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Address line 2</label>
+      <input type="text" class="form-control" name="address_line2" value="{{ profile.address_line2 or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Postcode</label>
+      <input type="text" class="form-control" name="postcode" value="{{ profile.postcode or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Emergency contact phone</label>
+      <input type="text" class="form-control" name="emergency_contact_phone" value="{{ profile.emergency_contact_phone or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Date of birth</label>
+      <input type="date" class="form-control" name="date_of_birth" value="{{ profile.date_of_birth|string if profile.date_of_birth else '' }}">
+    </div>
+
+    <h3 class="h6 mt-4">Driving licence</h3>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Number</label>
+        <input type="text" class="form-control" name="driving_licence_number" value="{{ profile.driving_licence_number or '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="driving_licence_expiry" value="{{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="driving_licence_document_path" value="{{ profile.driving_licence_document_path or '' }}" placeholder="e.g. uploads/hr/...">
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">Right to work</h3>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Type</label>
+        <input type="text" class="form-control" name="right_to_work_type" value="{{ profile.right_to_work_type or '' }}" placeholder="e.g. passport, visa">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="right_to_work_expiry" value="{{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '' }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="right_to_work_document_path" value="{{ profile.right_to_work_document_path or '' }}">
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">DBS</h3>
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Level</label>
+        <input type="text" class="form-control" name="dbs_level" value="{{ profile.dbs_level or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Number</label>
+        <input type="text" class="form-control" name="dbs_number" value="{{ profile.dbs_number or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Expiry</label>
+        <input type="date" class="form-control" name="dbs_expiry" value="{{ profile.dbs_expiry|string if profile.dbs_expiry else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="dbs_document_path" value="{{ profile.dbs_document_path or '' }}">
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">DBS Update Service (CRSC)</h3>
+      {% if not dbs_update_service_enabled %}
+      <div class="alert alert-warning small mb-3">
+        <strong>CRSC calls are turned off on this server</strong> (<code class="small">DBS_UPDATE_SERVICE_ENABLED</code> is <code>0</code>, <code>false</code>, <code>no</code>, or <code>off</code>). You can still record settings here; lookups will not run until that is cleared.
+      </div>
+      {% endif %}
+      <p class="small text-muted mb-3">Tick below only if this person is on the DBS Update Service. Manual and scheduled <strong>status-only</strong> lookups use the government CRSC API when consent is on file, date of birth is set, and DBS number or certificate reference is filled in.</p>
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="dbs_update_service_subscribed" value="1" id="dbs_us_sub"
+          {% if profile.dbs_update_service_subscribed %}checked{% endif %}>
+        <label class="form-check-label" for="dbs_us_sub">Employee is on the Update Service — allow CRSC status lookups</label>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Disclosure certificate reference (if different from DBS number)</label>
+        <input type="text" class="form-control" name="dbs_certificate_ref" maxlength="64" value="{{ profile.dbs_certificate_ref or '' }}" placeholder="Optional; falls back to DBS number">
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="dbs_update_consent_confirm" value="1" id="dbs_us_consent"
+          {% if profile.dbs_update_consent_at %}checked{% endif %}>
+        <label class="form-check-label" for="dbs_us_consent">Consent for CRSC status checks is on file (required before lookups)</label>
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">Additional fields</h3>
+      <p class="small text-muted mb-3">Extra text values for this employee (e.g. internal IDs, union, site codes). Optional <strong>review date</strong> helps you track when to revisit the entry. For <strong>files</strong>, use the document library on the profile — not here.</p>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:10rem;">Label</th>
+              <th style="min-width:12rem;">Value</th>
+              <th style="min-width:9rem;">Review date <span class="text-muted fw-normal">(optional)</span></th>
+              <th style="width:2.5rem;"></th>
+            </tr>
+          </thead>
+          <tbody id="hr-custom-fields-tbody">
+            {% for it in (profile.custom_fields_form_rows or []) %}
+            <tr class="hr-cf-row">
+              <td><input type="text" class="form-control form-control-sm" name="custom_field_label" maxlength="128" value="{{ it.label }}" placeholder="e.g. Union" autocomplete="off"></td>
+              <td><input type="text" class="form-control form-control-sm" name="custom_field_value" maxlength="4000" value="{{ it.value }}" placeholder="Text" autocomplete="off"></td>
+              <td><input type="date" class="form-control form-control-sm" name="custom_field_review_date" value="{{ it.review_date }}" title="Optional — when to review this entry"></td>
+              <td class="text-end p-0 align-middle"><button type="button" class="btn btn-sm btn-outline-secondary border-0 hr-cf-remove" title="Remove row" aria-label="Remove row">&times;</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+        <button type="button" class="btn btn-sm btn-outline-primary" id="hr-custom-fields-add">Add field</button>
+        <span class="small text-muted">Up to 80 rows. Leave a label empty to skip a row. No rows with labels clears stored additional fields.</span>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var tbody = document.getElementById("hr-custom-fields-tbody");
+      var btnAdd = document.getElementById("hr-custom-fields-add");
+      var maxRows = 80;
+      function clearRow(tr) {
+        tr.querySelectorAll("input").forEach(function (inp) { inp.value = ""; });
+      }
+      if (btnAdd && tbody) {
+        btnAdd.addEventListener("click", function () {
+          var rows = tbody.querySelectorAll("tr.hr-cf-row");
+          if (rows.length >= maxRows) return;
+          var tr = rows[0].cloneNode(true);
+          clearRow(tr);
+          tbody.appendChild(tr);
+        });
+      }
+      if (tbody) {
+        tbody.addEventListener("click", function (e) {
+          var rm = e.target.closest(".hr-cf-remove");
+          if (!rm) return;
+          var tr = rm.closest("tr.hr-cf-row");
+          var rows = tbody.querySelectorAll("tr.hr-cf-row");
+          if (rows.length <= 1) { clearRow(tr); return; }
+          tr.remove();
+        });
+      }
+    })();
+    </script>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">HPAC register (pre-hospital / emergency care)</h3>
+      <p class="small text-muted mb-3">Record the registrant number and when they joined the register. Sparrow does not call HPAC automatically — there is no published employer API for register status. Verify on <a href="https://www.hpac-uk.org/check-the-register" target="_blank" rel="noopener">Check the Register</a> (HPAC) or your organisation portal, then update status here.</p>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hpac_registration_number">Registration number</label>
+          <input type="text" class="form-control" id="hpac_registration_number" name="hpac_registration_number" maxlength="64" value="{{ profile.hpac_registration_number or '' }}" autocomplete="off">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hpac_registered_on">Date registered</label>
+          <input type="date" class="form-control" id="hpac_registered_on" name="hpac_registered_on" value="{{ profile.hpac_registered_on|string if profile.hpac_registered_on else '' }}">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hpac_register_grade">Grade on register</label>
+          <input type="text" class="form-control" id="hpac_register_grade" name="hpac_register_grade" maxlength="64" value="{{ profile.hpac_register_grade or '' }}" placeholder="Optional">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="hpac_register_status">Last known register status</label>
+        <select class="form-select" id="hpac_register_status" name="hpac_register_status">
+          <option value="" {% if not profile.hpac_register_status %}selected{% endif %}>— Not set —</option>
+          <option value="not_checked" {% if (profile.hpac_register_status or '')|lower == 'not_checked' %}selected{% endif %}>Not checked</option>
+          <option value="verified_on_register" {% if (profile.hpac_register_status or '')|lower == 'verified_on_register' %}selected{% endif %}>Verified on HPAC register</option>
+          <option value="not_found" {% if (profile.hpac_register_status or '')|lower == 'not_found' %}selected{% endif %}>Not found on register</option>
+          <option value="no_longer_listed" {% if (profile.hpac_register_status or '')|lower == 'no_longer_listed' %}selected{% endif %}>No longer listed / removed</option>
+          <option value="uncertain" {% if (profile.hpac_register_status or '')|lower == 'uncertain' %}selected{% endif %}>Uncertain — needs review</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="hpac_register_check_notes">Verification notes</label>
+        <textarea class="form-control" id="hpac_register_check_notes" name="hpac_register_check_notes" rows="2" placeholder="Optional — who checked, register snapshot, etc.">{{ profile.hpac_register_check_notes or '' }}</textarea>
+      </div>
+      <p class="small text-muted mb-2">Last verification recorded: {% if profile.hpac_register_last_checked_at %}<strong>{{ profile.hpac_register_last_checked_at }}</strong>{% else %}—{% endif %}</p>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="hpac_record_verification" value="1" id="hpac_record_verification">
+        <label class="form-check-label" for="hpac_record_verification">Record verification time as now (updates “last checked” when you save)</label>
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">HCPC register (statutory health &amp; care professions)</h3>
+      <p class="small text-muted mb-3">Record the HCPC registration number (e.g. two letters + six digits, including any leading zeroes) and date registered. Check live status on <a href="https://www.hcpc-uk.org/check-the-register/" target="_blank" rel="noopener">HCPC — Check the Register</a>. Employers can also use <a href="https://www.hcpc-uk.org/multiple-registrant-search/" target="_blank" rel="noopener">Multiple Registrant Search</a> (up to 100 numbers). {% if hcpc_register_api_enabled %}Sparrow can also run the live HCPC API check from the employee profile once a registration number is saved here.{% else %}Sparrow’s live HCPC API check is currently disabled on this server.{% endif %}</p>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hcpc_registration_number">Registration number</label>
+          <input type="text" class="form-control" id="hcpc_registration_number" name="hcpc_registration_number" maxlength="64" value="{{ profile.hcpc_registration_number or '' }}" placeholder="e.g. PH123456" autocomplete="off">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hcpc_registered_on">Date registered</label>
+          <input type="date" class="form-control" id="hcpc_registered_on" name="hcpc_registered_on" value="{{ profile.hcpc_registered_on|string if profile.hcpc_registered_on else '' }}">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="hcpc_register_profession">Profession on register</label>
+          <input type="text" class="form-control" id="hcpc_register_profession" name="hcpc_register_profession" maxlength="64" value="{{ profile.hcpc_register_profession or '' }}" placeholder="e.g. Paramedic">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="hcpc_register_status">Last known register status</label>
+        <select class="form-select" id="hcpc_register_status" name="hcpc_register_status">
+          <option value="" {% if not profile.hcpc_register_status %}selected{% endif %}>— Not set —</option>
+          <option value="not_checked" {% if (profile.hcpc_register_status or '')|lower == 'not_checked' %}selected{% endif %}>Not checked</option>
+          <option value="verified_on_register" {% if (profile.hcpc_register_status or '')|lower == 'verified_on_register' %}selected{% endif %}>Verified on HCPC register</option>
+          <option value="not_found" {% if (profile.hcpc_register_status or '')|lower == 'not_found' %}selected{% endif %}>Not found on register</option>
+          <option value="no_longer_listed" {% if (profile.hcpc_register_status or '')|lower == 'no_longer_listed' %}selected{% endif %}>No longer listed / removed</option>
+          <option value="uncertain" {% if (profile.hcpc_register_status or '')|lower == 'uncertain' %}selected{% endif %}>Uncertain — needs review</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="hcpc_register_check_notes">Verification notes</label>
+        <textarea class="form-control" id="hcpc_register_check_notes" name="hcpc_register_check_notes" rows="2" placeholder="Optional — who checked, register snapshot, etc.">{{ profile.hcpc_register_check_notes or '' }}</textarea>
+      </div>
+      <p class="small text-muted mb-2">Last verification recorded: {% if profile.hcpc_register_last_checked_at %}<strong>{{ profile.hcpc_register_last_checked_at }}</strong>{% else %}—{% endif %}</p>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="hcpc_record_verification" value="1" id="hcpc_record_verification">
+        <label class="form-check-label" for="hcpc_record_verification">Record verification time as now (updates “last checked” when you save)</label>
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">GMC register (medical doctors)</h3>
+      <p class="small text-muted mb-3">Employer-held record. The GMC does not publish a free real-time employer API like HCPC; employers typically use <a href="https://www.gmc-uk.org/registration-and-licensing/our-registers/download-our-registers" target="_blank" rel="noopener">register download services</a> or manual checks on <a href="https://www.gmc-uk.org/registration-and-licensing/the-medical-register/search-the-register" target="_blank" rel="noopener">Search the medical register</a>. Record the outcome here.</p>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="gmc_number">GMC number</label>
+          <input type="text" class="form-control" id="gmc_number" name="gmc_number" maxlength="32" value="{{ profile.gmc_number or '' }}" placeholder="e.g. 6045678" autocomplete="off">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="gmc_registered_on">Date registered (if known)</label>
+          <input type="date" class="form-control" id="gmc_registered_on" name="gmc_registered_on" value="{{ profile.gmc_registered_on|string if profile.gmc_registered_on else '' }}">
+        </div>
+        <div class="col-md-4 mb-3 d-flex align-items-end">
+          <p class="small text-muted mb-0">Last verification: {% if profile.gmc_register_last_checked_at %}<strong>{{ profile.gmc_register_last_checked_at }}</strong>{% else %}—{% endif %}</p>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="gmc_register_status">Last known register status</label>
+        <select class="form-select" id="gmc_register_status" name="gmc_register_status">
+          <option value="" {% if not profile.gmc_register_status %}selected{% endif %}>— Not set —</option>
+          <option value="not_checked" {% if (profile.gmc_register_status or '')|lower == 'not_checked' %}selected{% endif %}>Not checked</option>
+          <option value="verified_on_register" {% if (profile.gmc_register_status or '')|lower == 'verified_on_register' %}selected{% endif %}>Verified on GMC register</option>
+          <option value="not_found" {% if (profile.gmc_register_status or '')|lower == 'not_found' %}selected{% endif %}>Not found on register</option>
+          <option value="no_longer_listed" {% if (profile.gmc_register_status or '')|lower == 'no_longer_listed' %}selected{% endif %}>No longer listed / removed</option>
+          <option value="uncertain" {% if (profile.gmc_register_status or '')|lower == 'uncertain' %}selected{% endif %}>Uncertain — needs review</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="gmc_register_check_notes">Verification notes</label>
+        <textarea class="form-control" id="gmc_register_check_notes" name="gmc_register_check_notes" rows="2" placeholder="Optional">{{ profile.gmc_register_check_notes or '' }}</textarea>
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="gmc_record_verification" value="1" id="gmc_record_verification">
+        <label class="form-check-label" for="gmc_record_verification">Record verification time as now (updates “last checked” when you save)</label>
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">NMC register (nurses &amp; midwives)</h3>
+      <p class="small text-muted mb-3">Employer-held record. There is no NMC employer API integrated in Sparrow; confirm on <a href="https://www.nmc.org.uk/registration/search-the-register/" target="_blank" rel="noopener">NMC — Search the register</a> and record the PIN and status here.</p>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="nmc_pin">NMC PIN</label>
+          <input type="text" class="form-control" id="nmc_pin" name="nmc_pin" maxlength="32" value="{{ profile.nmc_pin or '' }}" autocomplete="off">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="nmc_registered_on">Date registered (if known)</label>
+          <input type="date" class="form-control" id="nmc_registered_on" name="nmc_registered_on" value="{{ profile.nmc_registered_on|string if profile.nmc_registered_on else '' }}">
+        </div>
+        <div class="col-md-4 mb-3 d-flex align-items-end">
+          <p class="small text-muted mb-0">Last verification: {% if profile.nmc_register_last_checked_at %}<strong>{{ profile.nmc_register_last_checked_at }}</strong>{% else %}—{% endif %}</p>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="nmc_register_status">Last known register status</label>
+        <select class="form-select" id="nmc_register_status" name="nmc_register_status">
+          <option value="" {% if not profile.nmc_register_status %}selected{% endif %}>— Not set —</option>
+          <option value="not_checked" {% if (profile.nmc_register_status or '')|lower == 'not_checked' %}selected{% endif %}>Not checked</option>
+          <option value="verified_on_register" {% if (profile.nmc_register_status or '')|lower == 'verified_on_register' %}selected{% endif %}>Verified on NMC register</option>
+          <option value="not_found" {% if (profile.nmc_register_status or '')|lower == 'not_found' %}selected{% endif %}>Not found on register</option>
+          <option value="no_longer_listed" {% if (profile.nmc_register_status or '')|lower == 'no_longer_listed' %}selected{% endif %}>No longer listed / removed</option>
+          <option value="uncertain" {% if (profile.nmc_register_status or '')|lower == 'uncertain' %}selected{% endif %}>Uncertain — needs review</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="nmc_register_check_notes">Verification notes</label>
+        <textarea class="form-control" id="nmc_register_check_notes" name="nmc_register_check_notes" rows="2" placeholder="Optional">{{ profile.nmc_register_check_notes or '' }}</textarea>
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="nmc_record_verification" value="1" id="nmc_record_verification">
+        <label class="form-check-label" for="nmc_record_verification">Record verification time as now (updates “last checked” when you save)</label>
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
+      <h3 class="h6">GPhC register (pharmacists &amp; pharmacy technicians)</h3>
+      <p class="small text-muted mb-3">Employer-held record. No GPhC API in Sparrow; use <a href="https://www.pharmacyregulation.org/registers" target="_blank" rel="noopener">GPhC registers</a> to verify, then record details here.</p>
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="gphc_registration_number">Registration number</label>
+          <input type="text" class="form-control" id="gphc_registration_number" name="gphc_registration_number" maxlength="32" value="{{ profile.gphc_registration_number or '' }}" autocomplete="off">
+        </div>
+        <div class="col-md-4 mb-3">
+          <label class="form-label" for="gphc_registered_on">Date registered (if known)</label>
+          <input type="date" class="form-control" id="gphc_registered_on" name="gphc_registered_on" value="{{ profile.gphc_registered_on|string if profile.gphc_registered_on else '' }}">
+        </div>
+        <div class="col-md-4 mb-3 d-flex align-items-end">
+          <p class="small text-muted mb-0">Last verification: {% if profile.gphc_register_last_checked_at %}<strong>{{ profile.gphc_register_last_checked_at }}</strong>{% else %}—{% endif %}</p>
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="gphc_register_status">Last known register status</label>
+        <select class="form-select" id="gphc_register_status" name="gphc_register_status">
+          <option value="" {% if not profile.gphc_register_status %}selected{% endif %}>— Not set —</option>
+          <option value="not_checked" {% if (profile.gphc_register_status or '')|lower == 'not_checked' %}selected{% endif %}>Not checked</option>
+          <option value="verified_on_register" {% if (profile.gphc_register_status or '')|lower == 'verified_on_register' %}selected{% endif %}>Verified on GPhC register</option>
+          <option value="not_found" {% if (profile.gphc_register_status or '')|lower == 'not_found' %}selected{% endif %}>Not found on register</option>
+          <option value="no_longer_listed" {% if (profile.gphc_register_status or '')|lower == 'no_longer_listed' %}selected{% endif %}>No longer listed / removed</option>
+          <option value="uncertain" {% if (profile.gphc_register_status or '')|lower == 'uncertain' %}selected{% endif %}>Uncertain — needs review</option>
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="gphc_register_check_notes">Verification notes</label>
+        <textarea class="form-control" id="gphc_register_check_notes" name="gphc_register_check_notes" rows="2" placeholder="Optional">{{ profile.gphc_register_check_notes or '' }}</textarea>
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="gphc_record_verification" value="1" id="gphc_record_verification">
+        <label class="form-check-label" for="gphc_record_verification">Record verification time as now (updates “last checked” when you save)</label>
+      </div>
+    </div>
+
+    <h3 class="h6 mt-3">Contract</h3>
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Type</label>
+        <input type="text" class="form-control" name="contract_type" value="{{ profile.contract_type or '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Start</label>
+        <input type="date" class="form-control" name="contract_start" value="{{ profile.contract_start|string if profile.contract_start else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">End</label>
+        <input type="date" class="form-control" name="contract_end" value="{{ profile.contract_end|string if profile.contract_end else '' }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Document path</label>
+        <input type="text" class="form-control" name="contract_document_path" value="{{ profile.contract_document_path or '' }}">
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id) }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

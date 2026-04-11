@@ -1,0 +1,32 @@
+{% extends "hr_module/base_public.html" %}
+{% block content %}
+<h1 class="h5 mb-1">{{ req.title }}</h1>
+{% if req.request_type and req.request_type != 'other' %}<p class="small text-muted">{{ req.request_type|hr_request_type }}</p>{% endif %}
+{% if req.description %}<p class="text-secondary small">{{ req.description }}</p>{% endif %}
+{% if req.required_by_date %}<p class="small text-warning">Required by {{ req.required_by_date }}</p>{% endif %}
+<p class="small">
+  {% if req.status == 'approved' %}<span class="badge bg-success">Approved</span>
+  {% elif req.status == 'rejected' %}<span class="badge bg-danger">Rejected</span>{% if req.admin_notes %}<span class="text-muted ms-1">— {{ req.admin_notes }}</span>{% endif %}
+  {% else %}<span class="badge bg-warning text-dark">{{ req.status|hr_doc_request_status }}</span>{% endif %}
+</p>
+
+{% if req.status in ('pending', 'uploaded', 'overdue', 'rejected') %}
+<h2 class="h6 mt-3">{{ 'Upload replacement' if req.status == 'rejected' else 'Upload document' }}</h2>
+<form method="post" action="{{ url_for('public_hr.request_upload', req_id=req.id) }}" enctype="multipart/form-data" class="mb-4">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  {% if req.status == 'rejected' %}<input type="hidden" name="document_type" value="replacement">{% endif %}
+  <input type="file" name="document" class="form-control mb-2 bg-dark text-light border-secondary" {% if req.request_type and req.request_type|lower == 'profile_picture' %}accept="image/jpeg,image/png,image/webp,image/gif"{% else %}accept=".pdf,.jpg,.jpeg,.png,.webp,.gif"{% endif %} required>
+  <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+</form>
+{% endif %}
+
+{% if req.uploads %}
+<h2 class="h6">Uploaded files</h2>
+<ul class="list-unstyled">
+  {% for u in req.uploads %}
+  <li class="small mb-1"><a href="{{ url_for('public_hr.request_upload_file', req_id=req.id, upload_id=u.id, disposition='inline') }}" target="_blank" rel="noopener" class="text-info">{{ u.file_name or u.file_path }}</a> – {{ u.uploaded_at.strftime('%d %b %Y') if u.uploaded_at else '' }}{% if u.document_type == 'replacement' %} <span class="badge bg-secondary">{{ u.document_type|hr_upload_doc_type }}</span>{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+<a href="{{ url_for('public_hr.public_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to HR</a>
+{% endblock %}

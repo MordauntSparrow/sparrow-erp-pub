@@ -1,0 +1,792 @@
+{% extends "base.html" %}
+{% block title %}{{ profile.name or profile.email }} – HR Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">People</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_employees') }}">Employees</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{{ profile.name or profile.email }}</li>
+    </ol>
+  </nav>
+  <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <div class="d-flex align-items-center gap-3 min-w-0">
+      {% set pv = profile.profile_picture_path|default('', true)|hr_safe_profile_picture %}
+      {% if pv %}
+      <img src="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='profile_picture') }}" alt="" class="rounded-circle border flex-shrink-0" width="80" height="80" style="object-fit:cover;">
+      {% else %}
+      <div class="rounded-circle bg-primary bg-opacity-25 text-primary d-flex align-items-center justify-content-center flex-shrink-0 fw-bold" style="width:80px;height:80px;font-size:1.35rem;">{{ (profile.initials or (profile.name or profile.email or '?')[:2])|upper }}</div>
+      {% endif %}
+      <div class="min-w-0">
+        <h1 class="mb-1 text-truncate">{{ profile.name or profile.email }}</h1>
+        <p class="small text-muted mb-1">Login username <code class="user-select-all">{{ profile.username or '—' }}</code></p>
+        <p class="text-muted small mb-0">{{ profile.email }} · {{ profile.status|hr_contractor_status }}{% if profile.job_title %} · {{ profile.job_title }}{% endif %}{% if profile.department %} · {{ profile.department }}{% endif %}</p>
+      </div>
+    </div>
+    {% if hr_can_edit_employees %}
+    <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}" class="btn btn-primary btn-sm flex-shrink-0">Edit profile</a>
+    {% endif %}
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header"><strong>Role &amp; organisation</strong></div>
+    <div class="card-body">
+      <p class="mb-1"><strong>Staff role</strong> {{ profile.tb_role_name or '—' }}</p>
+      <p class="small text-muted mb-3">Used with <strong>wage rate cards</strong> (hourly £ are on card rows, not here), plus <strong>Training</strong> auto-assign and <strong>Ventus CAD</strong> where linked. Manage names under
+        <a href="{{ url_for('internal_time_billing.tb_staff_roles_page') }}">Time Billing → Staff roles</a>
+        or <a href="{{ url_for('internal_hr.admin_pay_roles') }}">HR → Staff roles</a> (same list).</p>
+      <p class="mb-1"><strong>Job title (HR)</strong> {{ profile.job_title or '—' }}</p>
+      <p class="mb-1"><strong>Department</strong> {{ profile.department or '—' }}</p>
+      <p class="mb-0"><strong>Manager</strong>
+        {% if profile.manager_contractor_id %}
+        <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.manager_contractor_id) }}">{{ profile.manager_name or profile.manager_email or 'Manager profile' }}</a>
+        {% if profile.manager_email and profile.manager_name %}<span class="text-muted small"> · {{ profile.manager_email }}</span>{% endif %}
+        {% else %}—{% endif %}
+      </p>
+      {% if direct_reports %}
+      <p class="mb-0 mt-2"><strong>Direct reports</strong></p>
+      <ul class="small mb-0 mt-1">
+        {% for dr in direct_reports %}
+        <li><a href="{{ url_for('internal_hr.admin_contractor_profile', cid=dr.id) }}">{{ dr.name or dr.email }}</a>{% if dr.email %} <span class="text-muted">· {{ dr.email }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if ventus_plugin_available %}
+  <div class="card mb-4" id="ventus-dispatch-register">
+    <div class="card-header"><strong>Ventus CAD — what response sees (read-only)</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Skills, qualifications, and role/grade shown here are <strong>pushed automatically</strong> from this employee’s <strong>staff role</strong>, <strong>job title</strong>, and <strong>Training competency register</strong> into <code>mdt_crew_profiles</code> whenever those change. Ventus is for dispatch/response only — it does not manage staff data. Saving HR profile or Training register updates this snapshot; CAD may still link <code>contractor_id</code> on a crew row without editing competencies.</p>
+      {% if ventus_crew_profile %}
+      <p class="small text-muted mb-2">Crew login <code class="user-select-all">{{ ventus_crew_profile.username or '—' }}</code></p>
+      {% if ventus_crew_profile.gender %}
+      <p class="mb-2 small"><strong>Gender</strong> {{ ventus_crew_profile.gender }} <span class="text-muted">(optional field on crew profile link only)</span></p>
+      {% endif %}
+      {% if ventus_crew_profile.skills_lines %}
+      <p class="mb-1 fw-semibold small">Skills (synced)</p>
+      <ul class="small mb-3">
+        {% for line in ventus_crew_profile.skills_lines %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if ventus_crew_profile.qualifications_lines %}
+      <p class="mb-1 fw-semibold small">Qualifications &amp; grade (synced)</p>
+      <ul class="small mb-2">
+        {% for line in ventus_crew_profile.qualifications_lines %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if not ventus_crew_profile.skills_lines and not ventus_crew_profile.qualifications_lines %}
+      <p class="small text-muted mb-0">Nothing in the crew register yet. Set staff role and job title in HR, add competencies in Training, then save — or ensure a crew profile row exists with this <code>contractor_id</code> so the next sync can attach data.</p>
+      {% endif %}
+      {% if ventus_crew_profile.updated_at %}
+      <p class="small text-muted mb-0">Register row last updated {{ ventus_crew_profile.updated_at }}</p>
+      {% endif %}
+      {% else %}
+      <p class="small text-muted mb-0">No <code>mdt_crew_profiles</code> row for this contractor yet. After the next HR save (or linking <code>contractor_id</code> from CAD), a row is created and filled from HR + Training.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if onboarding_packs and hr_can_document_requests %}
+  <div class="card mb-4">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong class="mb-0">Onboarding document pack</strong>
+      {% if hr_can_configure_onboarding_packs %}
+      <a href="{{ url_for('internal_hr.admin_onboarding_packs_list') }}" class="btn btn-sm btn-outline-secondary">Edit packs</a>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">Send a standard set of HR document requests in one step. Skips any type that already has an open request.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_onboarding_pack', cid=profile.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6">
+          <select class="form-select form-select-sm" name="pack_key" required>
+            {% for p in onboarding_packs %}
+            <option value="{{ p.key }}">{{ p.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">Apply pack</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if compliance_gaps %}
+  <div class="card border-warning mb-4" id="compliance-gaps">
+    <div class="card-header bg-warning bg-opacity-10"><strong>Missing or incomplete on file</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Use <strong>Upload to library</strong> below (pick the matching category) or ask the employee to upload via a document request.</p>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Item</th><th></th></tr></thead>
+          <tbody>
+            {% for gap in compliance_gaps %}
+            <tr>
+              <td>
+                <div class="fw-medium">{{ gap.title }}</div>
+                <div class="small text-muted">{{ gap.hint }}</div>
+              </td>
+              <td class="text-nowrap text-end">
+                {% if hr_can_library %}
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_hr.admin_contractor_profile', cid=profile.id, focus_cat=gap.upload_category) }}#documents">Upload</a>
+                {% endif %}
+                {% set req_state = (open_doc_request_button_state|default({})).get(gap.request_type) %}
+                {% if req_state == 'awaiting_review' %}
+                <button type="button" class="btn btn-sm btn-secondary" disabled title="Open Document requests below to approve or reject.">File uploaded — review below</button>
+                {% elif req_state == 'awaiting_upload' %}
+                <button type="button" class="btn btn-sm btn-secondary" disabled title="A request is already open for this item.">Awaiting upload from request</button>
+                {% elif hr_can_document_requests %}
+                <form method="post" action="{{ url_for('internal_hr.admin_contractor_quick_request', cid=profile.id) }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="request_type" value="{{ gap.request_type }}">
+                  <input type="hidden" name="title" value="Please upload: {{ gap.title }}">
+                  <button type="submit" class="btn btn-sm btn-primary">Request from staff</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% elif not compliance_expired_items %}
+  <div class="alert alert-success py-2 small mb-4">Core compliance items look complete (expiries, linked files, or document library). Review sections below for detail.</div>
+  {% endif %}
+
+  {% if compliance_expired_items %}
+  <div class="card border-danger mb-4" id="compliance-expired">
+    <div class="card-header bg-danger bg-opacity-10"><strong>Expired on file</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">The following dates are before today. Update the profile or document library and renew as needed.</p>
+      <ul class="small mb-0">
+        {% for it in compliance_expired_items %}
+        <li><span class="badge bg-danger me-1">Expired</span> <strong>{{ it.label }}</strong> — was {{ it.expiry_date|string }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if training_courses_ready or training_competencies_table_ready %}
+  <div class="card mb-4" id="training-hr-summary">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Training — courses &amp; competency register</strong>
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
+      <div class="d-flex flex-wrap gap-2">
+        {% if training_admin_assignments_url %}
+        <a href="{{ training_admin_assignments_url }}" class="btn btn-sm btn-outline-primary">Assignments (Training)</a>
+        {% endif %}
+        {% if training_competencies_table_ready %}
+        <a href="{{ url_for('internal_training.admin_person_competencies', contractor_id=profile.id) }}" class="btn btn-sm btn-primary">Manage register</a>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Courses are driven by the same <strong>staff role</strong> as above (Training auto-assign rules). The competency register holds evidence-backed skills, qualifications, and clinical grade for HR and CAD where configured.</p>
+
+      {% if training_courses_ready %}
+      <h3 class="h6 fw-semibold mt-2 mb-2">Assigned courses &amp; compliance status</h3>
+      {% if training_course_assignments %}
+      <div class="table-responsive mb-4">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Course</th>
+              <th>Status</th>
+              <th>Due</th>
+              <th>Mandatory</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in training_course_assignments %}
+            {% set st = (a.status or '')|lower %}
+            <tr>
+              <td class="small">
+                <span class="fw-medium">{{ a.title or 'Course' }}</span>
+                {% if a.delivery_type %}<span class="text-muted"> · {{ a.delivery_type }}</span>{% endif %}
+              </td>
+              <td class="small text-nowrap">
+                {% if st == 'passed' %}<span class="badge bg-success">Passed</span>
+                {% elif st == 'exempt' %}<span class="badge bg-secondary">Exempt</span>
+                {% elif st in ('awaiting_signoff',) %}<span class="badge bg-info text-dark">Awaiting sign-off</span>
+                {% elif st in ('awaiting_external_evidence', 'pending_evidence_review') %}<span class="badge bg-warning text-dark">Evidence</span>
+                {% else %}<span class="badge bg-light text-dark border">{{ (a.status or '—')|replace('_', ' ') }}</span>{% endif %}
+                {% if a.completed_at %}<div class="text-muted mt-1 small">Completed {{ (a.completed_at|string)[:16] }}</div>{% endif %}
+              </td>
+              <td class="small text-nowrap">{% if a.due_date %}{{ (a.due_date|string)[:10] }}{% else %}—{% endif %}</td>
+              <td class="small">{% if a.mandatory %}Yes{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-4">No course assignments yet for this person. Changing their staff role may auto-assign courses if rules exist in Training.</p>
+      {% endif %}
+      {% endif %}
+
+      {% if training_competencies_table_ready %}
+      <h3 class="h6 fw-semibold mb-2">Competency register (skills, qualifications, clinical grade)</h3>
+      {% if training_person_competencies %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Type</th>
+              <th>Detail</th>
+              <th>Dates</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in training_person_competencies %}
+            {% set exp_s = (r.expires_on|string)[:10] if r.expires_on else '' %}
+            <tr class="{% if exp_s and training_competency_today_iso and exp_s < training_competency_today_iso %}table-warning{% endif %}">
+              <td class="text-nowrap small">{{ (r.competency_kind or '')|replace('_', ' ')|title }}</td>
+              <td class="small">
+                {% if r.use_hr_job_title %}<span class="badge bg-secondary me-1">Uses HR job title</span>{% endif %}
+                {{ r.label or '—' }}
+                {% if r.notes %}<div class="text-muted mt-1">{{ r.notes }}</div>{% endif %}
+              </td>
+              <td class="small text-nowrap">
+                {% if r.issued_on %}<div>Issued {{ (r.issued_on|string)[:10] }}</div>{% endif %}
+                {% if r.expires_on %}<div>Expires {{ (r.expires_on|string)[:10] }}</div>{% endif %}
+              </td>
+              <td class="small">
+                {% if r.file_path %}
+                <a href="{{ url_for('internal_training.admin_person_competency_file', contractor_id=profile.id, competency_id=r.id) }}" target="_blank" rel="noopener">Open file</a>
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No register entries yet.{% if current_user.is_authenticated and can_open_org_admin_nav() %} Add them under <strong>Manage register</strong>.{% endif %}</p>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if hr_can_view_staff_activity_log %}
+  <div class="card mb-4" id="admin-activity-audit">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <strong>Activity &amp; access log (this person)</strong>
+      <span class="small text-muted">Rolling {{ staff_audit_retention_days|default(90) }}-day window</span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Mutating actions from the <strong>admin app</strong> (core users) and from <strong>contractor portals</strong> (time billing, employee portal, inventory) when this person is the actor or the subject. Clinical patient access stays in Cura audit.</p>
+      {% if staff_admin_audit_logs %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Channel / actor</th>
+              <th scope="col">What</th>
+              <th scope="col" class="text-end">HTTP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in staff_admin_audit_logs %}
+            <tr>
+              <td class="text-nowrap small">{{ row.created_at }}</td>
+              <td class="small">
+                {% if row.actor_channel == 'contractor_portal' %}
+                <span class="badge bg-info text-dark">Contractor</span>
+                {% if row.actor_contractor_id %}<span class="text-muted">#{{ row.actor_contractor_id }}</span>{% endif %}
+                {% else %}
+                <span class="badge bg-secondary">Admin</span>
+                {% endif %}
+                <div>{{ row.actor_username or row.actor_user_id or '—' }}</div>
+                {% if row.inferred_permission %}<div class="text-muted font-monospace small">{{ row.inferred_permission }}</div>{% endif %}
+              </td>
+              <td class="small">
+                <span class="font-monospace">{{ row.http_method }}</span>
+                <span class="text-break">{{ row.path }}</span>
+                {% if row.endpoint %}<div class="text-muted">{{ row.endpoint }}</div>{% endif %}
+              </td>
+              <td class="text-end small">{{ row.http_status }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No recorded actions for this person in the current retention window.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row">
+    <div class="col-lg-6">
+      <div class="card mb-4">
+        <div class="card-header"><strong>Contact & address</strong></div>
+        <div class="card-body">
+          <p class="mb-1"><strong>Date of birth</strong> {{ profile.date_of_birth|string if profile.date_of_birth else '—' }}</p>
+          <p class="mb-1"><strong>Phone</strong> {{ profile.phone or '—' }}</p>
+          <p class="mb-1"><strong>Address</strong> {{ profile.address_line1 or '—' }}{% if profile.address_line2 %}, {{ profile.address_line2 }}{% endif %}</p>
+          <p class="mb-1"><strong>Postcode</strong> {{ profile.postcode or '—' }}</p>
+          <p class="mb-0"><strong>Emergency contact</strong> {{ profile.emergency_contact_name or '—' }} {{ profile.emergency_contact_phone or '' }}</p>
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>Driving licence</strong></div>
+        <div class="card-body">
+          <p class="mb-1">{{ profile.driving_licence_number or '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '—' }}{% if 'driving_licence' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</p>
+          {% if profile.driving_licence_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='driving_licence', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>Right to work</strong></div>
+        <div class="card-body">
+          <p class="mb-1">Type: {{ profile.right_to_work_type|hr_profile_field }}</p>
+          <p class="mb-1">Expiry: {{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '—' }}{% if 'right_to_work' in expired_compliance_doc_types %} <span class="badge bg-danger">Expired</span>{% endif %}</p>
+          {% if profile.right_to_work_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='right_to_work', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card mb-4">
+        <div class="card-header">
+          <strong>DBS</strong>
+        </div>
+        <div class="card-body">
+          {% if dbs_update_service_enabled and profile.dbs_last_status_code == 'NEW_INFO' %}
+          <div class="alert alert-danger small py-2 mb-3 mb-md-3">Last CRSC result was <strong>NEW_INFO</strong>. Follow your organisation’s DBS / safeguarding process and Umbrella Body guidance.</div>
+          {% endif %}
+          <p class="mb-1">Level: {{ profile.dbs_level|hr_profile_field }} · Number: {{ profile.dbs_number or '—' }}</p>
+          <p class="mb-1">Expiry: {{ profile.dbs_expiry|string if profile.dbs_expiry else '—' }}</p>
+          {% if profile.dbs_document_path %}
+          <p class="mb-1 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='dbs', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+          <hr class="my-3">
+          {% if not dbs_update_service_enabled %}
+          <div class="alert alert-warning small py-2 mb-3">
+            <strong>CRSC lookups are disabled on this server.</strong> Unset or change <code class="small">DBS_UPDATE_SERVICE_ENABLED</code> if it is <code>0</code>, <code>false</code>, <code>no</code>, or <code>off</code>.
+          </div>
+          {% endif %}
+          <p class="small mb-1"><strong>Update Service</strong>
+            {% if profile.dbs_update_service_subscribed %}<span class="text-success">On — CRSC lookups allowed</span>{% else %}<span class="text-muted">Off</span>{% endif %}
+            {% if profile.dbs_certificate_ref %} · Ref: {{ profile.dbs_certificate_ref }}{% endif %}
+          </p>
+          <p class="small mb-1 text-muted">Consent recorded: {% if profile.dbs_update_consent_at %}{{ profile.dbs_update_consent_at }}{% else %}—{% endif %}</p>
+          <p class="small mb-0"><strong>Last CRSC check</strong>
+            {% if profile.dbs_last_check_at %}{{ profile.dbs_last_check_at }}{% else %}—{% endif %}
+            {% if profile.dbs_last_status_code %} · <span class="font-monospace">{{ profile.dbs_last_status_code }}</span>{% endif %}
+          </p>
+          <p class="small text-muted mt-2 mb-0">
+            {% if dbs_update_service_enabled %}
+            Mass-check schedule (HR People dashboard, opted-in employees only): <strong>{{ dbs_schedule_interval or 'off' }}</strong>
+            {% else %}
+            Mass checks inactive while CRSC is server-disabled.
+            {% endif %}
+          </p>
+          {% if hr_can_edit_employees %}
+          {% set _dbs_disclosure_ok = ((profile.dbs_certificate_ref or '')|trim) or ((profile.dbs_number or '')|trim) %}
+          {% set dbs_manual_check_ready = profile.dbs_update_service_subscribed and profile.dbs_update_consent_at and profile.date_of_birth and _dbs_disclosure_ok %}
+          <div class="mt-3 pt-2 border-top">
+            <p class="small text-muted mb-2 mb-md-2"><strong>Manual CRSC check</strong> — same request as scheduled checks; requires Update Service on, consent, date of birth, and DBS number or ref.</p>
+            {% if not dbs_update_service_enabled %}
+            <button type="button" class="btn btn-sm btn-secondary" disabled>Run manual check</button>
+            <p class="small text-muted mb-0 mt-2">CRSC is off at server level.</p>
+            {% elif dbs_manual_check_ready %}
+            <form method="post" action="{{ url_for('internal_hr.admin_contractor_dbs_check_now', cid=profile.id) }}" class="m-0">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-primary">Run manual check</button>
+            </form>
+            {% else %}
+            <button type="button" class="btn btn-sm btn-primary" disabled>Run manual check</button>
+            <p class="small text-muted mb-0 mt-2">In <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}">Edit profile</a>: turn on Update Service, confirm consent, set date of birth, and enter DBS number or certificate reference.</p>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if dbs_check_logs %}
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>When</th><th>Result</th><th>Channel</th><th>By</th><th></th></tr></thead>
+              <tbody>
+                {% for row in dbs_check_logs %}
+                <tr>
+                  <td class="small text-nowrap">{{ row.checked_at }}</td>
+                  <td class="small font-monospace">{{ row.result_type or '—' }}</td>
+                  <td class="small">{{ row.channel or '—' }}</td>
+                  <td class="small">{{ row.checker_label or row.checker_user_id or '—' }}</td>
+                  <td class="small text-muted">{% if row.error_message %}<span title="{{ row.error_message|e }}">Error</span>{% elif row.http_status %}{{ row.http_status }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>HPAC register</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Employer-held record only. Confirm current status on <a href="https://www.hpac-uk.org/check-the-register" target="_blank" rel="noopener">HPAC — Check the Register</a>. Automated polling is not available without a partner API from HPAC.</p>
+          <p class="mb-1"><strong>Registration number</strong> {{ profile.hpac_registration_number or '—' }}</p>
+          <p class="mb-1"><strong>Date registered</strong> {{ profile.hpac_registered_on|string if profile.hpac_registered_on else '—' }}</p>
+          <p class="mb-1"><strong>Grade on register</strong> {{ profile.hpac_register_grade or '—' }}</p>
+          <p class="mb-1"><strong>Status</strong> {{ profile.hpac_register_status|hr_hpac_register_status }}</p>
+          <p class="mb-1"><strong>Last verification</strong> {% if profile.hpac_register_last_checked_at %}{{ profile.hpac_register_last_checked_at }}{% else %}—{% endif %}</p>
+          {% if profile.hpac_register_check_notes %}
+          <p class="mb-0 small"><strong>Notes</strong> {{ profile.hpac_register_check_notes }}</p>
+          {% else %}
+          <p class="mb-0 small text-muted">No verification notes.</p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card mb-4">
+        <div class="card-header"><strong>HCPC register</strong></div>
+        <div class="card-body">
+          {% if not hcpc_register_api_enabled %}
+          <div class="alert alert-warning small py-2 mb-3">
+            <strong>HCPC lookups are disabled on this server.</strong> Unset or change <code class="small">HCPC_REGISTER_API_ENABLED</code> if it is <code>0</code>, <code>false</code>, <code>no</code>, or <code>off</code>.
+          </div>
+          {% endif %}
+          <p class="small text-muted mb-3">Check on <a href="https://www.hcpc-uk.org/check-the-register/" target="_blank" rel="noopener">HCPC — Check the Register</a> or use Sparrow’s live HCPC API check below. Multiple/scheduled runs use the same register data.</p>
+          <p class="mb-1"><strong>Registration number</strong> {{ profile.hcpc_registration_number or '—' }}</p>
+          <p class="mb-1"><strong>Date registered</strong> {{ profile.hcpc_registered_on|string if profile.hcpc_registered_on else '—' }}</p>
+          <p class="mb-1"><strong>Profession on register</strong> {{ profile.hcpc_register_profession or '—' }}</p>
+          <p class="mb-1"><strong>Status</strong> {{ profile.hcpc_register_status|hr_hcpc_register_status }}</p>
+          <p class="mb-1"><strong>Last verification</strong> {% if profile.hcpc_register_last_checked_at %}{{ profile.hcpc_register_last_checked_at }}{% else %}—{% endif %}</p>
+          <p class="small text-muted mt-2 mb-0">Mass-check schedule (HR People dashboard, employees with HCPC numbers only): <strong>{{ hcpc_schedule_interval or 'off' }}</strong></p>
+          {% if hr_can_edit_employees %}
+          <div class="mt-3 pt-2 border-top">
+            <p class="small text-muted mb-2"><strong>Manual HCPC check</strong> — runs a live register lookup using the registration number on this profile.</p>
+            {% if not hcpc_register_api_enabled %}
+            <button type="button" class="btn btn-sm btn-secondary" disabled>Run manual check</button>
+            {% elif profile.hcpc_registration_number %}
+            <form method="post" action="{{ url_for('internal_hr.admin_contractor_hcpc_check_now', cid=profile.id) }}" class="m-0">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-primary">Run manual check</button>
+            </form>
+            {% else %}
+            <button type="button" class="btn btn-sm btn-primary" disabled>Run manual check</button>
+            <p class="small text-muted mb-0 mt-2">Add an HCPC registration number in <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}">Edit profile</a> first.</p>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if profile.hcpc_register_check_notes %}
+          <p class="mb-0 mt-3 small"><strong>Notes</strong> {{ profile.hcpc_register_check_notes }}</p>
+          {% else %}
+          <p class="mb-0 mt-3 small text-muted">No verification notes.</p>
+          {% endif %}
+          {% if hcpc_check_logs %}
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>When</th><th>Result</th><th>Channel</th><th>By</th><th></th></tr></thead>
+              <tbody>
+                {% for row in hcpc_check_logs %}
+                <tr>
+                  <td class="small text-nowrap">{{ row.checked_at }}</td>
+                  <td class="small">{{ row.result_type or '—' }}</td>
+                  <td class="small">{{ row.channel or '—' }}</td>
+                  <td class="small">{{ row.checker_label or row.checker_user_id or '—' }}</td>
+                  <td class="small text-muted">{% if row.error_message %}<span title="{{ row.error_message|e }}">Error</span>{% elif row.http_status %}{{ row.http_status }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% if profile.custom_fields_items %}
+      <div class="card mb-4">
+        <div class="card-header"><strong>Additional fields</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Text notes and review dates only — use <strong>Documents</strong> above for file uploads.</p>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>Field</th><th>Value</th><th>Review date</th></tr></thead>
+              <tbody>
+                {% for it in profile.custom_fields_items %}
+                <tr>
+                  <td class="small fw-medium">{{ it.label }}</td>
+                  <td class="small">{{ it.value or '—' }}</td>
+                  <td class="small text-nowrap">
+                    {% if it.review_date %}
+                      {{ it.review_date }}
+                      {% if it.review_overdue %}<span class="badge bg-danger ms-1">Overdue</span>{% elif it.review_due_soon %}<span class="badge bg-warning text-dark ms-1">Due soon</span>{% endif %}
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+      {% set _gmc_any = profile.gmc_number or profile.gmc_registered_on or profile.gmc_register_status or profile.gmc_register_check_notes or profile.gmc_register_last_checked_at %}
+      {% if _gmc_any %}
+      <div class="card mb-4">
+        <div class="card-header"><strong>GMC register</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Employer-held record. Sparrow does not call the GMC automatically — use <a href="https://www.gmc-uk.org/registration-and-licensing/the-medical-register/search-the-register" target="_blank" rel="noopener">Search the medical register</a> or your organisation’s GMC data process.</p>
+          <p class="mb-1"><strong>GMC number</strong> {{ profile.gmc_number or '—' }}</p>
+          <p class="mb-1"><strong>Date registered</strong> {{ profile.gmc_registered_on|string if profile.gmc_registered_on else '—' }}</p>
+          <p class="mb-1"><strong>Status</strong> {{ profile.gmc_register_status|hr_generic_register_status }}</p>
+          <p class="mb-1"><strong>Last verification</strong> {% if profile.gmc_register_last_checked_at %}{{ profile.gmc_register_last_checked_at }}{% else %}—{% endif %}</p>
+          {% if profile.gmc_register_check_notes %}
+          <p class="mb-0 small"><strong>Notes</strong> {{ profile.gmc_register_check_notes }}</p>
+          {% else %}
+          <p class="mb-0 small text-muted">No verification notes.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% set _nmc_any = profile.nmc_pin or profile.nmc_registered_on or profile.nmc_register_status or profile.nmc_register_check_notes or profile.nmc_register_last_checked_at %}
+      {% if _nmc_any %}
+      <div class="card mb-4">
+        <div class="card-header"><strong>NMC register</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Employer-held record. Verify on <a href="https://www.nmc.org.uk/registration/search-the-register/" target="_blank" rel="noopener">NMC — Search the register</a>.</p>
+          <p class="mb-1"><strong>PIN</strong> {{ profile.nmc_pin or '—' }}</p>
+          <p class="mb-1"><strong>Date registered</strong> {{ profile.nmc_registered_on|string if profile.nmc_registered_on else '—' }}</p>
+          <p class="mb-1"><strong>Status</strong> {{ profile.nmc_register_status|hr_generic_register_status }}</p>
+          <p class="mb-1"><strong>Last verification</strong> {% if profile.nmc_register_last_checked_at %}{{ profile.nmc_register_last_checked_at }}{% else %}—{% endif %}</p>
+          {% if profile.nmc_register_check_notes %}
+          <p class="mb-0 small"><strong>Notes</strong> {{ profile.nmc_register_check_notes }}</p>
+          {% else %}
+          <p class="mb-0 small text-muted">No verification notes.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% set _gphc_any = profile.gphc_registration_number or profile.gphc_registered_on or profile.gphc_register_status or profile.gphc_register_check_notes or profile.gphc_register_last_checked_at %}
+      {% if _gphc_any %}
+      <div class="card mb-4">
+        <div class="card-header"><strong>GPhC register</strong></div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Employer-held record. Verify on <a href="https://www.pharmacyregulation.org/registers" target="_blank" rel="noopener">GPhC registers</a>.</p>
+          <p class="mb-1"><strong>Registration number</strong> {{ profile.gphc_registration_number or '—' }}</p>
+          <p class="mb-1"><strong>Date registered</strong> {{ profile.gphc_registered_on|string if profile.gphc_registered_on else '—' }}</p>
+          <p class="mb-1"><strong>Status</strong> {{ profile.gphc_register_status|hr_generic_register_status }}</p>
+          <p class="mb-1"><strong>Last verification</strong> {% if profile.gphc_register_last_checked_at %}{{ profile.gphc_register_last_checked_at }}{% else %}—{% endif %}</p>
+          {% if profile.gphc_register_check_notes %}
+          <p class="mb-0 small"><strong>Notes</strong> {{ profile.gphc_register_check_notes }}</p>
+          {% else %}
+          <p class="mb-0 small text-muted">No verification notes.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% if appraisal_tables_ready %}
+      <div class="card mb-4" id="appraisals">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <strong>Appraisals</strong>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('internal_hr.admin_appraisals_list', cid=profile.id) }}" class="btn btn-sm btn-outline-secondary">All for this person</a>
+            {% if hr_can_edit_employees %}
+            <a href="{{ url_for('internal_hr.admin_appraisal_new_form', cid=profile.id) }}" class="btn btn-sm btn-primary">New appraisal</a>
+            {% endif %}
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">Performance cycles, goals, signatures, and optional PDF or scan on file (HR-APPR-001).</p>
+          {% if contractor_appraisals %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>Cycle</th><th>Period</th><th>Status</th><th>Signed</th><th></th></tr></thead>
+              <tbody>
+                {% for a in contractor_appraisals %}
+                <tr>
+                  <td class="small">{{ a.cycle_label or '—' }}</td>
+                  <td class="small text-nowrap">{% if a.period_start %}{{ a.period_start }}{% else %}—{% endif %} – {% if a.period_end %}{{ a.period_end }}{% else %}—{% endif %}</td>
+                  <td class="small">{{ a.status|hr_appraisal_status }}</td>
+                  <td class="small">{% if a.employee_signed_at %}E{% else %}—{% endif %}{% if a.manager_signed_at %} / M{% endif %}</td>
+                  <td class="text-end"><a href="{{ url_for('internal_hr.admin_appraisal_detail', aid=a.id) }}" class="btn btn-sm btn-outline-primary">Open</a></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="small text-muted mb-0">No appraisals yet.{% if hr_can_edit_employees %} Use <strong>New appraisal</strong> to start a cycle.{% endif %}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      <div class="card mb-4">
+        <div class="card-header"><strong>Contract</strong></div>
+        <div class="card-body">
+          <p class="mb-1">Type: {{ profile.contract_type|hr_profile_field }}</p>
+          <p class="mb-1">Start: {{ profile.contract_start|string if profile.contract_start else '—' }} · End: {{ profile.contract_end|string if profile.contract_end else '—' }}{% if 'contract_end' in expired_compliance_doc_types %} <span class="badge bg-danger">Ended</span>{% endif %}</p>
+          {% if profile.contract_document_path %}
+          <p class="mb-0 small"><a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=profile.id, field='contract', disposition='inline') }}" target="_blank" rel="noopener">Linked file</a></p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h5 mt-4" id="documents">Document library</h2>
+  <p class="text-muted small">Scanned or uploaded files stored against this employee.</p>
+  {% if hr_can_library %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('internal_hr.admin_employee_document_upload', cid=profile.id) }}" enctype="multipart/form-data" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">File</label>
+          <input type="file" name="file" class="form-control form-control-sm" required>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Category</label>
+          <select name="category" id="doc_category_select" class="form-select form-select-sm">
+            {% for cat in doc_categories %}
+            <option value="{{ cat }}" {% if focus_cat and cat == focus_cat %}selected{% endif %}>{{ cat|hr_employee_doc_category }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Title</label>
+          <input type="text" name="title" class="form-control form-control-sm" placeholder="e.g. Passport scan">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Notes</label>
+          <input type="text" name="notes" class="form-control form-control-sm" placeholder="Optional">
+        </div>
+        <div class="col-md-1">
+          <button type="submit" class="btn btn-primary btn-sm w-100">Upload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+  {% if employee_documents %}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-bordered align-middle">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Category</th>
+          <th>Uploaded</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in employee_documents %}
+        <tr>
+          <td>{{ d.title }}</td>
+          <td><span class="badge bg-secondary">{{ d.category|hr_employee_doc_category }}</span></td>
+          <td class="small text-muted">{{ d.created_at|string if d.created_at else '—' }}</td>
+          <td class="text-nowrap">
+            <a href="{{ url_for('internal_hr.admin_employee_document_file', doc_id=d.id) }}" class="btn btn-sm btn-outline-primary">Download</a>
+            {% if hr_can_library %}
+            <form method="post" action="{{ url_for('internal_hr.admin_employee_document_delete', cid=profile.id, doc_id=d.id) }}" class="d-inline" onsubmit="return confirm('Delete this document?');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted small mb-4">No documents in the library yet.</p>
+  {% endif %}
+
+  <h2 class="h5 mt-4">Document requests</h2>
+  {% if requests_list %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Required by</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in requests_list %}
+        <tr>
+          <td>{{ r.title }}</td>
+          <td><span class="badge bg-secondary">{{ (r.request_type or 'other')|hr_request_type }}</span></td>
+          <td>{{ r.required_by_date|string if r.required_by_date else '—' }}</td>
+          <td><span class="badge {% if r.status == 'approved' %}bg-success{% elif r.status == 'rejected' %}bg-danger{% elif r.status == 'overdue' %}bg-danger{% else %}bg-warning text-dark{% endif %}">{{ r.status|hr_doc_request_status }}</span></td>
+          <td><a href="{{ url_for('internal_hr.admin_request_detail', rid=r.id) }}" class="btn btn-sm btn-outline-secondary">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No document requests.</p>
+  {% endif %}
+
+  {% if hr_can_edit_employees %}
+  <div class="card mb-4 border-primary border-opacity-25">
+    <div class="card-header"><strong>Portal login</strong></div>
+    <div class="card-body">
+      <p class="small text-muted mb-2">Portal login accepts this username or their work email. The username was set when the employee was created in HR (from full name, or from a core admin <code>username</code> when a matching email existed). It is not edited from this screen.</p>
+      <p class="mb-3"><strong>Login username</strong> <code class="user-select-all">{{ profile.username or '—' }}</code></p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_portal_password', cid=profile.id) }}" class="row g-2 align-items-end mb-4">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-5">
+          <label class="form-label small mb-1" for="new_password">Set / reset password</label>
+          <input class="form-control form-control-sm" type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="8" required placeholder="New password (min 8 characters)">
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-primary">Update password</button>
+        </div>
+      </form>
+      <hr class="my-3">
+      <p class="small text-danger mb-2"><strong>Delete employee</strong> removes their Sparrow contractor record (time sheets, HR profile data linked to this ID, etc. may be removed per database rules). This cannot be undone.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_delete', cid=profile.id) }}" class="row g-2 align-items-end" onsubmit="return confirm('Delete this employee permanently?');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6">
+          <label class="form-label small mb-1" for="confirm_email">Type work email to confirm</label>
+          <input class="form-control form-control-sm" type="email" id="confirm_email" name="confirm_email" required placeholder="{{ profile.email }}" autocomplete="off">
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-sm btn-outline-danger">Delete employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to employees</a>
+  <a href="{{ url_for('internal_hr.admin_contractors') }}" class="btn btn-outline-secondary btn-sm mt-3">Search</a>
+
+  {% if focus_cat %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var el = document.getElementById('documents');
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

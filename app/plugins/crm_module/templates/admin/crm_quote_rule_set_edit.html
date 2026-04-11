@@ -1,0 +1,162 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Edit rule set{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h4 mb-0"><i class="bi bi-sliders me-2 text-primary"></i>{{ rs.name }}</h1>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quote_rule_set_test', rs_id=rs.id) }}">Test harness</a>
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quote_rule_sets_list') }}">All rule sets</a>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Settings</h2>
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-6">
+            <label class="form-label" for="name">Name</label>
+            <input class="form-control" id="name" name="name" required maxlength="255" value="{{ rs.name }}">
+          </div>
+          <div class="col-md-3">
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" name="is_active" value="1" id="is_active" {% if rs.is_active %}checked{% endif %}>
+              <label class="form-check-label" for="is_active">Active</label>
+            </div>
+          </div>
+          <div class="col-md-3">
+            {% if can_edit %}
+            <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+            {% endif %}
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Rules <span class="text-muted fw-normal">(applied in order)</span></h2>
+      {% if rules %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>#</th>
+              <th>Type</th>
+              <th>Label</th>
+              <th>Amount</th>
+              <th>Rate</th>
+              <th>%</th>
+              <th>Conditions</th>
+              {% if can_edit %}<th class="text-end">Order / delete</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rules %}
+            <tr>
+              <td>{{ r.sort_order }}</td>
+              <td><span class="small">{{ r.rule_type }}</span></td>
+              <td>{{ r.label or '—' }}</td>
+              <td>{{ r.amount if r.amount is not none else '—' }}</td>
+              <td>{{ r.rate if r.rate is not none else '—' }}</td>
+              <td>{{ r.percent if r.percent is not none else '—' }}</td>
+              <td class="small">
+                {% if r.conditions_json %}
+                <code class="d-block text-break" style="max-width:12rem;font-size:0.65rem;">{{ r.conditions_json }}</code>
+                {% else %}
+                <span class="text-muted">Always</span>
+                {% endif %}
+                {% if can_edit %}
+                <form method="post" action="{{ url_for('crm_module.quote_rule_update_conditions', rs_id=rs.id, rule_id=r.id) }}" class="mt-1 border-top pt-1">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <div class="row g-1">
+                    <div class="col-6"><input class="form-control form-control-sm" name="cond_min_crowd" placeholder="min crowd"></div>
+                    <div class="col-6"><input class="form-control form-control-sm" name="cond_max_crowd" placeholder="max crowd"></div>
+                    <div class="col-6"><input class="form-control form-control-sm" name="cond_min_hours" placeholder="min hrs"></div>
+                    <div class="col-6"><input class="form-control form-control-sm" name="cond_max_hours" placeholder="max hrs"></div>
+                  </div>
+                  <button type="submit" class="btn btn-sm btn-outline-secondary mt-1 py-0">Set</button>
+                </form>
+                {% endif %}
+              </td>
+              {% if can_edit %}
+              <td class="text-end text-nowrap">
+                <form method="post" action="{{ url_for('crm_module.quote_rule_move', rs_id=rs.id, rule_id=r.id) }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="direction" value="up">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-1" title="Move up">↑</button>
+                </form>
+                <form method="post" action="{{ url_for('crm_module.quote_rule_move', rs_id=rs.id, rule_id=r.id) }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="direction" value="down">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-1" title="Move down">↓</button>
+                </form>
+                <form method="post" action="{{ url_for('crm_module.quote_rule_delete', rs_id=rs.id, rule_id=r.id) }}" class="d-inline" onsubmit="return confirm('Remove this rule?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">Delete</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No rules yet. Add at least one below.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if can_edit %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Add rule</h2>
+      <form method="post" action="{{ url_for('crm_module.quote_rule_add', rs_id=rs.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">Type</label>
+          <select class="form-select form-select-sm" name="rule_type" required>
+            {% for val, label in rule_types %}
+            <option value="{{ val }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Amount (£)</label>
+          <input class="form-control form-control-sm" name="amount" placeholder="0">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Rate</label>
+          <input class="form-control form-control-sm" name="rate" placeholder="0">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Percent</label>
+          <input class="form-control form-control-sm" name="percent" placeholder="0">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Label (optional)</label>
+          <input class="form-control form-control-sm" name="label" maxlength="255">
+        </div>
+        <div class="col-md-12 mt-2">
+          <span class="small text-muted d-block mb-1">Apply only when (optional — all blank = always run):</span>
+          <div class="row g-1">
+            <div class="col-md-2"><input class="form-control form-control-sm" name="cond_min_crowd" placeholder="Min crowd"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" name="cond_max_crowd" placeholder="Max crowd"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" name="cond_min_hours" placeholder="Min hours"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" name="cond_max_hours" placeholder="Max hours"></div>
+          </div>
+        </div>
+        <div class="col-md-1 mt-2">
+          <button type="submit" class="btn btn-primary btn-sm rounded-pill">Add</button>
+        </div>
+      </form>
+      <p class="small text-muted mt-2 mb-0">Use <strong>Amount</strong> for fixed add-on and minimum charge; <strong>Rate</strong> for per-head and per-hour; <strong>Percent</strong> for surcharge and VAT. Conditions are stored as internal JSON from these fields only.</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

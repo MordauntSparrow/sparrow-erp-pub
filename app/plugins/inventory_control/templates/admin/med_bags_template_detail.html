@@ -1,0 +1,75 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Template {{ template.code }} — Med bags{% endblock %}
+{% block content %}
+<div class="container-fluid py-4">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_templates_list') }}">Templates</a></li>
+      <li class="breadcrumb-item active">{{ template.code }}</li>
+    </ol>
+  </nav>
+
+  {% if can_edit %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_template_update', template_id=template.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-4"><label class="form-label small">Name</label><input class="form-control form-control-sm" name="name" value="{{ template.name }}" required></div>
+        <div class="col-md-2"><label class="form-label small">Kind</label>
+          <select class="form-select form-select-sm" name="bag_kind">{% for k in bag_kinds %}<option value="{{ k }}" {% if template.bag_kind == k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+        </div>
+        <div class="col-md-4"><label class="form-label small">Description</label><input class="form-control form-control-sm" name="description" value="{{ template.description or '' }}"></div>
+        <div class="col-md-2"><div class="form-check mt-4"><input class="form-check-input" type="checkbox" name="is_active" value="1" id="act" {% if template.is_active %}checked{% endif %}><label class="form-check-label small" for="act">Active</label></div>
+          <button type="submit" class="btn btn-primary btn-sm w-100 mt-1">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <h2 class="h5 mb-2">BOM lines</h2>
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('inventory_control_internal.med_bags_template_line_add', template_id=template.id) }}" class="row g-2 align-items-end border rounded p-2 mb-3 bg-light">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-5"><label class="form-label small">Catalogue item</label>
+      <select class="form-select form-select-sm" name="inventory_item_id" required>
+        <option value="">— Select —</option>
+        {% for it in items %}
+        <option value="{{ it.id }}">{{ it.sku }} — {{ it.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2"><label class="form-label small">Expected qty</label><input class="form-control form-control-sm" type="number" step="0.0001" name="expected_qty" value="1"></div>
+    <div class="col-md-2"><label class="form-label small">Sort</label><input class="form-control form-control-sm" type="number" name="sort_order" value="0"></div>
+    <div class="col-md-3"><button type="submit" class="btn btn-success btn-sm">Add line</button></div>
+  </form>
+  {% endif %}
+
+  <div class="table-responsive card">
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr><th>SKU</th><th>Item</th><th>Expected</th><th>Sort</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for l in lines %}
+        <tr>
+          <td>{{ l.sku }}</td>
+          <td>{{ l.item_name }}</td>
+          <td>{{ l.expected_qty }}</td>
+          <td>{{ l.sort_order }}</td>
+          {% if can_edit %}
+          <td>
+            <form method="post" action="{{ url_for('inventory_control_internal.med_bags_template_line_delete', line_id=l.id) }}" class="d-inline" onsubmit="return confirm('Remove line?');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="template_id" value="{{ template.id }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger py-0">Remove</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted small p-3">No lines yet — add catalogue SKUs above.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

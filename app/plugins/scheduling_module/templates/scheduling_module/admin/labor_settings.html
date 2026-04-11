@@ -1,0 +1,28 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Labor & budget – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Labor & budget</h1>
+<p class="text-muted small mb-3">Overtime threshold and weekly budget are shown in the week view (cost badge and overtime warning).</p>
+<form method="post" action="{{ url_for('internal_scheduling.admin_labor_settings_save') }}" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="row g-3">
+    <div class="col-md-4">
+      <label class="form-label">Overtime threshold (hours per week)</label>
+      <input type="number" name="overtime_hours_per_week" class="form-control" value="{{ overtime_hours_per_week }}" min="0" max="168">
+      <div class="form-text">Staff scheduled over this many hours in a week are flagged as overtime in the week view.</div>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Weekly budget (£)</label>
+      <input type="number" name="weekly_budget" class="form-control" value="{{ weekly_budget if weekly_budget is not none else '' }}" min="0" step="0.01" placeholder="Optional">
+      <div class="form-text">Leave blank to hide budget. Week view shows scheduled cost vs this budget.</div>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Assignment label</label>
+      <input type="text" name="assignment_label" class="form-control" value="{{ assignment_label|default('Client') }}" maxlength="64">
+      <div class="form-text">Label used in the UI for client/base/location (e.g. Client, Base, Location, Operating unit).</div>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary mt-3">Save</button>
+  <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-outline-secondary mt-3">Week view</a>
+</form>
+{% endblock %}

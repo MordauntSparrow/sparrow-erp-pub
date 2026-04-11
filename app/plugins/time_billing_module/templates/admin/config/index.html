@@ -1,0 +1,84 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-4">
+
+    <!-- Header -->
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <h4 class="mb-0 d-flex align-items-center">
+            <i class="bi bi-gear me-2"></i> Configuration
+        </h4>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">
+            <i class="bi bi-arrow-left me-1"></i> Dashboard
+        </a>
+    </div>
+
+    <p class="text-muted mb-4">Job types, wage rates, policies, and runsheet templates. Staff records: <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Employees</a>.</p>
+
+    <div class="row g-3">
+
+        <!-- Job Types -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title d-flex align-items-center">
+                        <i class="bi bi-tags me-2"></i> Job Types
+                    </h5>
+                    <p class="card-text text-muted small">Commercial, residential, etc. Used on runsheets, timesheets, and rate cards. Add, edit, or delete (rates for that type are removed).</p>
+                </div>
+                <div class="card-footer bg-transparent border-0 text-end">
+                    <a href="{{ url_for('internal_time_billing.job_types_page') }}" class="btn btn-primary btn-sm">Manage job types</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wage Rate Cards -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title d-flex align-items-center">
+                        <i class="bi bi-currency-pound me-2"></i> Wage Rate Cards
+                    </h5>
+                    <p class="card-text text-muted small">Pay rates per job type with effective dates. Used to compute contractor pay on timesheets.</p>
+                </div>
+                <div class="card-footer bg-transparent border-0 text-end">
+                    <a href="{{ url_for('internal_time_billing.wage_cards_page') }}" class="btn btn-outline-primary btn-sm">Open wage cards</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Policies -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title d-flex align-items-center">
+                        <i class="bi bi-diagram-3 me-2"></i> Calendar Policies
+                    </h5>
+                    <p class="card-text text-muted small">Weekend, bank holiday, night, overtime rules. Scoped by role, job type, or client.</p>
+                </div>
+                <div class="card-footer bg-transparent border-0 d-flex justify-content-end gap-2">
+                    <a href="{{ url_for('internal_time_billing.policies_list_page') }}" class="btn btn-outline-primary btn-sm">List</a>
+                    <a href="{{ url_for('internal_time_billing.policies_edit_page') }}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Runsheet Templates -->
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="card-title d-flex align-items-center">
+                        <i class="bi bi-columns-gap me-2"></i> Runsheet Templates
+                    </h5>
+                    <p class="card-text text-muted small">Dynamic fields and layout for runsheets. Define fields and preview.</p>
+                </div>
+                <div class="card-footer bg-transparent border-0 d-flex justify-content-end gap-2">
+                    <a href="{{ url_for('internal_time_billing.templates_list_page') }}" class="btn btn-outline-primary btn-sm">List</a>
+                    <a href="{{ url_for('internal_time_billing.templates_edit_page') }}" class="btn btn-outline-secondary btn-sm">Edit</a>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}

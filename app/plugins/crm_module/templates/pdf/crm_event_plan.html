@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ plan.title or 'Event plan' }} — {{ branding.company_name }}</title>
+  <style>
+    @page { margin: 18mm; }
+    body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 10pt; color: #222; }
+    .hdr { border-bottom: 2px solid #1a4a7a; padding-bottom: 8px; margin-bottom: 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .hdr h1 { margin: 0; font-size: 16pt; color: #1a4a7a; }
+    .logo { max-height: 48px; max-width: 200px; }
+    .muted { color: #555; font-size: 9pt; }
+    h2 { font-size: 11pt; color: #1a4a7a; margin: 14px 0 6px; border-bottom: 1px solid #ccc; }
+    table.meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    table.meta td { padding: 3px 6px; vertical-align: top; }
+    table.meta td:first-child { width: 28%; font-weight: bold; color: #444; }
+    .chk { margin: 4px 0; padding: 4px 0; border-bottom: 1px solid #eee; }
+    .disclaimer { margin-top: 20px; padding: 8px; background: #f5f5f5; font-size: 8pt; color: #444; }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div>
+      <h1>{{ plan.title or 'Medical event plan' }}</h1>
+      <div class="muted">{{ branding.company_name }} · Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+    </div>
+    {% if branding.logo_file_uri %}
+    <img class="logo" src="{{ branding.logo_file_uri }}" alt="">
+    {% endif %}
+  </div>
+
+  <h2>Event summary</h2>
+  <table class="meta">
+    <tr><td>Type</td><td>{{ plan.event_type or '—' }}</td></tr>
+    <tr><td>Start</td><td>{{ plan.start_datetime or '—' }}</td></tr>
+    <tr><td>End</td><td>{{ plan.end_datetime or '—' }}</td></tr>
+    <tr><td>Expected attendance</td><td>{{ plan.expected_attendance or '—' }}</td></tr>
+    <tr><td>Demographics / profile</td><td>{{ plan.demographics_notes or '—' }}</td></tr>
+    <tr><td>Environment</td><td>{{ plan.environment_notes or '—' }}</td></tr>
+  </table>
+
+  <h2>Location</h2>
+  <table class="meta">
+    <tr><td>Address</td><td>{{ plan.address_line1 or '—' }}</td></tr>
+    <tr><td>Postcode</td><td>{{ plan.postcode or '—' }}</td></tr>
+    <tr><td>what3words</td><td>{{ plan.what3words or '—' }}</td></tr>
+    <tr><td>Site notes</td><td>{{ plan.location_notes or '—' }}</td></tr>
+  </table>
+
+  <h2>Hospitals &amp; access</h2>
+  {% if hospital_facilities %}
+  <ul>
+    {% for h in hospital_facilities %}
+    <li>{{ h }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p>{{ plan.hospitals_notes or '—' }}</p>
+
+  <h2>Medical control &amp; ASHICE</h2>
+  <table class="meta">
+    <tr><td>Medical control</td><td>{{ clinical_handover.medical_control or '—' }}</td></tr>
+    <tr><td>A — Age</td><td>{{ clinical_handover.ashice.age or '—' }}</td></tr>
+    <tr><td>S — Sex</td><td>{{ clinical_handover.ashice.sex or '—' }}</td></tr>
+    <tr><td>H — History</td><td>{{ clinical_handover.ashice.history or '—' }}</td></tr>
+    <tr><td>I — Injuries / findings</td><td>{{ clinical_handover.ashice.injuries or '—' }}</td></tr>
+    <tr><td>C — Current condition</td><td>{{ clinical_handover.ashice.current or '—' }}</td></tr>
+    <tr><td>E — Expected</td><td>{{ clinical_handover.ashice.expected or '—' }}</td></tr>
+  </table>
+
+  <h2>Resources &amp; mitigations</h2>
+  <table class="meta">
+    <tr><td>Medics (planned)</td><td>{{ plan.resources_medics or '—' }}</td></tr>
+    <tr><td>Vehicles / equipment</td><td>{{ plan.resources_vehicles or '—' }}</td></tr>
+    <tr><td>Comms</td><td>{{ plan.resources_comms or '—' }}</td></tr>
+    <tr><td>Escalation</td><td>{{ plan.escalation_notes or '—' }}</td></tr>
+  </table>
+
+  <h2>Planning checklist</h2>
+  <p class="muted">Structured prompts aligned with typical event medical planning considerations. Not a substitute for licensed guidance or your organisation’s policies.</p>
+  {% for q in questions %}
+  <div class="chk">
+    <strong>{{ q.group_name }}</strong> — {{ q.question_text }}<br>
+    {% if q.help_url and (q.help_url.startswith('http://') or q.help_url.startswith('https://')) %}
+    <span class="muted">Reference: {{ q.help_url }}</span><br>
+    {% endif %}
+    <span>{{ answers.get(q.id|string, '—') }}</span>
+  </div>
+  {% endfor %}
+
+  <h2>Risk assessment</h2>
+  <p>{{ plan.risk_summary or '—' }}</p>
+  <p><strong>Score (optional):</strong> {{ plan.risk_score if plan.risk_score is not none else '—' }}</p>
+
+  <h2>Sign-off</h2>
+  <table class="meta">
+    <tr><td>Name</td><td>{{ plan.signoff_name or '—' }}</td></tr>
+    <tr><td>Role</td><td>{{ plan.signoff_role or '—' }}</td></tr>
+    <tr><td>Date/time</td><td>{{ plan.signoff_at or '—' }}</td></tr>
+  </table>
+
+  <div class="disclaimer">
+    This document is organisational planning output only. It does not constitute clinical or legal advice.
+    Verify arrangements with your medical director, insurer, and venue. For UK industry context on medical cover at events,
+    refer to official guidance such as The Purple Guide (medical chapter) where applicable to your jurisdiction.
+  </div>
+</body>
+</html>

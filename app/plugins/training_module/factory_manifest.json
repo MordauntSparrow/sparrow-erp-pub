@@ -1,0 +1,38 @@
+{
+  "repository": "official",
+  "system_name": "training_module",
+  "name": "Training",
+  "current_version": "0.0.2",
+  "compatible_with": ">=1.1.0",
+  "force_update": false,
+  "description": "View training and complete mandatory training.",
+  "dashboard_category": "Learning & compliance",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/training_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftraining_module%2Ftraining_module_v0.0.2.zip/raw?ref=main",
+  "dependencies": [
+    "website_module",
+    "employee_portal_module"
+  ],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "0.0.2",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftraining_module%2Ftraining_module_v0.0.2.zip/raw?ref=main",
+      "changes": [
+        "Maintenance release — upload training_module_v0.0.2.zip before clients update."
+      ]
+    },
+    {
+      "version": "0.0.1",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftraining_module%2Ftraining_module_v0.0.1.zip/raw?ref=main",
+      "changes": [
+        "Initial release (official repository): courses, lessons, quizzes, certificates, sign-off, audit; trn_* schema + legacy migration.",
+        "Upload training_module_v0.0.1.zip to plugins/training_module/ before remote installs."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{% if opening %}Edit opening{% else %}New opening{% endif %}{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-9">
+  <h1 class="h4 mb-3">{% if opening %}Edit opening{% else %}New opening{% endif %}</h1>
+  <p class="small mb-3"><a href="{{ url_for('internal_recruitment.admin_openings') }}">← Openings</a>
+  {% if opening %} · <a href="{{ url_for('internal_recruitment.admin_opening_rules', opening_id=opening.id) }}">Stage rules</a>{% endif %}
+  </p>
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label" for="job_role_id">Job role</label>
+      <select class="form-select" id="job_role_id" name="job_role_id" required>
+        {% for r in roles %}
+        <option value="{{ r.id }}" {% if opening and opening.job_role_id == r.id %}selected{% endif %}>{{ r.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="title">Listing title</label>
+      <input class="form-control" id="title" name="title" required value="{{ opening.title if opening else '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="slug">URL slug</label>
+      <input class="form-control" id="slug" name="slug" value="{{ opening.slug if opening else '' }}" placeholder="auto from title">
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="status">Status</label>
+      <select class="form-select" id="status" name="status">
+        {% for s in ['draft','open','closed'] %}
+        <option value="{{ s }}" {% if opening and opening.status == s %}selected{% elif not opening and s == 'draft' %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Only <strong>open</strong> appears on /vacancies.</div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="published_at">Published at (optional)</label>
+        <input class="form-control" type="datetime-local" id="published_at" name="published_at"
+          value="{{ opening.published_at.strftime('%Y-%m-%dT%H:%M') if opening and opening.published_at else '' }}">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="closes_at">Closes on (optional, date)</label>
+        <input class="form-control" type="date" id="closes_at" name="closes_at"
+          value="{{ opening.closes_at.strftime('%Y-%m-%d') if opening and opening.closes_at else '' }}">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="summary">Summary (short)</label>
+      <textarea class="form-control" id="summary" name="summary" rows="2">{{ opening.summary if opening else '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label" for="description">Full description</label>
+      <textarea class="form-control" id="description" name="description" rows="8">{{ opening.description if opening else '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+{% endblock %}

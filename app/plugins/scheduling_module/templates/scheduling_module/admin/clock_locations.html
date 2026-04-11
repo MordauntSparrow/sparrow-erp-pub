@@ -1,0 +1,99 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Clock locations (geofencing) – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Clock locations</h1>
+<p class="text-muted small mb-3">Set a GPS location and radius for each site. When set, staff must be within the radius to clock in/out for shifts at that site.</p>
+
+{% if clients %}
+<div class="card mb-4 {{ 'border-primary' if not sites else '' }}">
+  <div class="card-body">
+    <h2 class="h6 mb-2">{{ 'Add a site first' if not sites else 'Add another site' }}</h2>
+    {% if not sites %}
+    <p class="text-muted small mb-3">There are no sites yet. Add one below, then set its clock location.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('internal_scheduling.admin_clock_locations_add_site') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label small">Site name</label>
+          <input type="text" name="site_name" class="form-control form-control-sm" required aria-label="Site name">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">{{ assignment_label|default('Client') }}</label>
+          <select name="client_id" class="form-select form-select-sm" required aria-label="{{ assignment_label|default('Client') }}">
+            <option value="">Select…</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-primary btn-sm">Add site</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if not sites and not clients %}
+<div class="alert alert-info mb-4">
+  No clients or sites found. Add clients and sites (e.g. in Time Billing or your main admin) first, then return here to set clock locations.
+</div>
+{% endif %}
+
+<div class="card card-body mb-4">
+  <h2 class="h6 mb-2">Add or update location</h2>
+  {% if sites %}
+  <form method="post" action="{{ url_for('internal_scheduling.admin_clock_locations_save') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-2">
+      <div class="col-md-3">
+        <label class="form-label small">Site</label>
+        <select name="site_id" class="form-select form-select-sm" required aria-label="Site">
+          <option value="">Select site…</option>
+          {% for s in sites %}
+          <option value="{{ s.id }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Latitude</label>
+        <input type="text" name="latitude" class="form-control form-control-sm" required aria-label="Latitude">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Longitude</label>
+        <input type="text" name="longitude" class="form-control form-control-sm" required aria-label="Longitude">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small">Radius (m)</label>
+        <input type="number" name="radius_meters" class="form-control form-control-sm" value="100" min="20" max="2000" aria-label="Radius in metres">
+      </div>
+      <div class="col-md-2 d-flex align-items-end">
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </div>
+  </form>
+  {% else %}
+  <p class="text-muted small mb-0">Add a site using the form above, then you can set its clock location here.</p>
+  {% endif %}
+</div>
+
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead class="table-light"><tr><th>Site</th><th>Latitude</th><th>Longitude</th><th>Radius</th></tr></thead>
+    <tbody>
+      {% for loc in locations %}
+      <tr>
+        <td>{{ loc.site_name }}</td>
+        <td>{{ loc.latitude }}</td>
+        <td>{{ loc.longitude }}</td>
+        <td>{{ loc.radius_meters }} m</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted">No clock locations set. Add one above to require GPS when clocking in at that site.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

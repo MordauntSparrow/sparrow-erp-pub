@@ -12,8 +12,9 @@
 {% set _dash_ts = config.theme_settings|default({}, true) %}
 {% set dash_bg_mode = (_dash_ts.dashboard_background_mode|default('slideshow', true))|lower %}
 {% set dash_bg_color = _dash_ts.dashboard_background_color|default('#1e293b', true) %}
-{% set dash_bg_path = (_dash_ts.dashboard_background_image_path or '')|trim %}
-{% set dash_bg_image_url = url_for('static', filename=dash_bg_path) if dash_bg_path else '' %}
+{% set dash_bg_path = normalize_manifest_static_path(_dash_ts.dashboard_background_image_path|default('', true)) %}
+{# Trust normalized path for URL; existence check can false-negative (paths, mounts). Broken URLs show in browser; settings preview still warns if missing. #}
+{% set dash_bg_image_url = url_for('static', filename=dash_bg_path) if dash_bg_path and dash_bg_mode == 'image' else '' %}
 
 <style>
 /* Root container */

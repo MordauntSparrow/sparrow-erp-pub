@@ -1,0 +1,588 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}{{ asset.serial_number }}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+      <h1 class="h4 mb-0">{{ asset.public_asset_code or 'Asset' }} <span class="text-muted small">{{ asset.serial_number }}</span></h1>
+      <p class="text-muted mb-0">{{ asset.item_name }} ({{ asset.sku }}) · <span class="badge bg-secondary">{{ asset.status | equipment_status_label }}</span></p>
+      {% set op = asset.operational_state or 'operational' %}
+      <p class="small mb-0 mt-2">
+        {% if op == 'unserviceable' %}<span class="badge bg-danger">Unserviceable</span>
+        {% elif op == 'restricted' %}<span class="badge bg-warning text-dark">Restricted use</span>
+        {% else %}<span class="badge bg-success">Operational</span>{% endif %}
+        <span class="text-muted ms-2">Last service: {{ last_service_date or '—' }}</span>
+        <span class="text-muted ms-2">Next due: {{ asset.next_service_due_date or '—' }}</span>
+        {% if asset.service_interval_days %}<span class="text-muted ms-2">Interval: {{ asset.service_interval_days }} d</span>{% endif %}
+      </p>
+      {% if current_holder %}
+      <p class="small mb-0 mt-2">
+        {% if current_holder.holder_type == 'vehicle' %}
+        <i class="bi bi-truck-front text-primary"></i>
+        <span class="text-muted">Fleet vehicle:</span>
+        <a href="{{ url_for('fleet_management.vehicle_detail', vehicle_id=current_holder.vehicle_id) }}">{{ current_holder.holder_label }}</a>
+        {% elif current_holder.holder_type == 'user' %}
+        <i class="bi bi-person-badge text-primary"></i>
+        <span class="text-muted">User:</span> {{ current_holder.holder_label }} <code class="small">{{ current_holder.holder_id }}</code>
+        {% elif current_holder.holder_type == 'contractor' %}
+        <i class="bi bi-person-workspace text-primary"></i>
+        <span class="text-muted">Contractor:</span> {{ current_holder.holder_label }} <code class="small">{{ current_holder.holder_id }}</code>
+        {% elif current_holder.holder_type == 'location' %}
+        <i class="bi bi-geo-alt text-primary"></i>
+        <span class="text-muted">Location:</span> {{ current_holder.holder_label }}
+        {% else %}
+        <span class="text-muted">Assigned:</span> {{ current_holder.holder_label }}
+        {% endif %}
+        {% if current_holder.assigned_at %}<span class="text-muted">· since {{ current_holder.assigned_at }}</span>{% endif %}
+        {% if current_holder.assigned_by_user_id is not none %}<span class="text-muted">· signed out by user #{{ current_holder.assigned_by_user_id }}</span>{% endif %}
+      </p>
+      {% endif %}
+    </div>
+    {% if inventory_bp_available|default(false) %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory_control_internal.equipment_desk_page') }}">Back to equipment</a>
+    {% else %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('inventory_control_internal.equipment_servicing_dashboard') }}">Back</a>
+    {% endif %}
+  </div>
+
+  {% if can_assign %}
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold">Assign to fleet vehicle</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_assign_vehicle', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-4">
+          <label class="form-label small">Storeroom / issue location</label>
+          <select class="form-select form-select-sm" name="location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in inventory_locations %}
+            <option value="{{ loc.id }}">{{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label small">Vehicle</label>
+          <select class="form-select form-select-sm" name="vehicle_id" required>
+            <option value="">— Select —</option>
+            {% for fv in fleet_vehicles %}
+            <option value="{{ fv.id }}">{{ fv.registration }}{% if fv.internal_code %} ({{ fv.internal_code }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-sm btn-primary" type="submit" {% if asset.status not in ('in_stock',) %}disabled title="Asset must be in stock"{% endif %}>Sign out to vehicle</button>
+        </div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">Signs this asset out to a <strong>vehicle</strong>. The storeroom you pick must have stock for this item.</p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold">Assign to user or contractor</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_assign_holder', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">Storeroom / issue location</label>
+          <select class="form-select form-select-sm" name="location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in inventory_locations %}
+            <option value="{{ loc.id }}">{{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Assignee type</label>
+          <select class="form-select form-select-sm" name="assignee_type" required>
+            <option value="user">User (staff ID)</option>
+            <option value="contractor">Contractor</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Assignee ID</label>
+          <input class="form-control form-control-sm" name="assignee_id" required placeholder="Staff user id or contractor numeric id (tb_contractors.id)">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Display label</label>
+          <input class="form-control form-control-sm" name="assignee_label" placeholder="Name shown on reports">
+        </div>
+        <div class="col-md-2">
+          <button class="btn btn-sm btn-primary" type="submit" {% if asset.status not in ('in_stock',) %}disabled title="Asset must be in stock"{% endif %}>Sign out</button>
+        </div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">For clinicians or contractors carrying kit (e.g. AED). Use the same ID convention as elsewhere in inventory.</p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3 border-secondary border-opacity-25">
+    <div class="card-header fw-semibold">Sign out to holding / site (reconciliation)</div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">After an event, park kit in a <strong>holding</strong> or <strong>virtual</strong> location until someone verifies condition, where it will be stored, any faults from the job, and whether service is due — then <strong>return to storeroom</strong> from this record when ready.</p>
+      {% if assignee_site_locations %}
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_assign_to_location', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-4">
+          <label class="form-label small">Storeroom / issue from</label>
+          <select class="form-select form-select-sm" name="location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in inventory_locations %}
+            <option value="{{ loc.id }}">{{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label small">Holding or site location</label>
+          <select class="form-select form-select-sm" name="target_location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in assignee_site_locations %}
+            <option value="{{ loc.id }}">{% if loc.type == 'holding' %}[Holding]{% else %}[Site]{% endif %} {{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-sm btn-outline-primary" type="submit" {% if asset.status not in ('in_stock',) %}disabled title="Asset must be in stock"{% endif %}>Sign out to pool</button>
+        </div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">Creates an inventory <strong>out</strong> with assignee <code>location</code>. Add more targets under <strong>Inventory → Locations</strong> (types Holding or Virtual).</p>
+      {% else %}
+      <p class="small text-warning mb-0">No holding or virtual locations yet. Create one under <strong>Inventory → Locations</strong>, or Sparrow will offer a default when you sign kit into holding.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if current_holder and current_holder.holder_type == 'contractor' %}
+  <div class="card shadow-sm mb-3 border-info">
+    <div class="card-header fw-semibold">Contractor portal handoff</div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Authorize this contractor to <strong>record</strong> in the employee portal that they have returned the unit to a <strong>storeroom</strong> or placed it back on a <strong>specific vehicle</strong> (e.g. AED into ambulance kit). They only see the action after you create a task here. Choose the same <strong>issue location</strong> you use for normal sign-out (inventory balances use a return + re-issue when the target is a vehicle).</p>
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_portal_handoff_create', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">Destination</label>
+          <select class="form-select form-select-sm" name="handoff_kind" required id="handoffKind">
+            <option value="to_storeroom">Return to storeroom (in stock)</option>
+            <option value="to_vehicle">Install on fleet vehicle</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Storeroom / issue location</label>
+          <select class="form-select form-select-sm" name="inventory_location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in inventory_locations %}
+            <option value="{{ loc.id }}">{{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3" id="handoffVehicleWrap">
+          <label class="form-label small">Vehicle</label>
+          <select class="form-select form-select-sm" name="vehicle_id" id="handoffVehicle">
+            <option value="">— Select —</option>
+            {% for fv in fleet_vehicles %}
+            <option value="{{ fv.id }}">{{ fv.registration }}{% if fv.internal_code %} ({{ fv.internal_code }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-12">
+          <label class="form-label small">Note to contractor (optional)</label>
+          <input class="form-control form-control-sm" name="notes" placeholder="e.g. Put back in OOH bag on RFZ 1234">
+        </div>
+        <div class="col-12">
+          <button class="btn btn-sm btn-primary" type="submit" {% if not can_assign %}disabled{% endif %}>Create portal task</button>
+        </div>
+      </form>
+      <script>
+      (function(){
+        var k = document.getElementById('handoffKind');
+        var w = document.getElementById('handoffVehicleWrap');
+        var v = document.getElementById('handoffVehicle');
+        function sync(){ if(!k||!w||!v) return; var veh = k.value === 'to_vehicle'; w.style.display = veh ? '' : 'none'; v.required = veh; if(!veh) v.value=''; }
+        if(k){ k.addEventListener('change', sync); sync(); }
+      })();
+      </script>
+      {% if portal_handoffs_pending %}
+      <h3 class="h6 mt-4 mb-2">Pending portal tasks</h3>
+      <ul class="list-group list-group-sm">
+        {% for h in portal_handoffs_pending %}
+        <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <span class="small">
+            {% if h.handoff_kind == 'to_vehicle' %}<strong>To vehicle</strong>{% if h.vehicle_registration %} {{ h.vehicle_registration }}{% elif h.vehicle_id %} #{{ h.vehicle_id }}{% endif %}
+            {% else %}<strong>To storeroom</strong> (in stock){% endif %}
+            · location #{{ h.inventory_location_id }}
+            {% if h.notes %}<span class="text-muted">— {{ h.notes }}</span>{% endif %}
+          </span>
+          <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_portal_handoff_cancel', asset_id=asset.id, handoff_id=h.id) }}" class="m-0" onsubmit="return confirm('Cancel this portal task?');">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-secondary">Cancel</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.status in ('assigned', 'loaned') %}
+  <div class="card shadow-sm mb-3 border-warning">
+    <div class="card-header fw-semibold">Return to storeroom</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_return_to_stock', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if current_vehicle %}
+        <input type="hidden" name="from_vehicle_id" value="{{ current_vehicle.vehicle_id }}">
+        {% endif %}
+        <div class="col-md-6">
+          <label class="form-label small">Return into location</label>
+          <select class="form-select form-select-sm" name="location_id" required>
+            <option value="">— Select —</option>
+            {% for loc in inventory_locations %}
+            <option value="{{ loc.id }}">{{ loc.code or loc.name }} — {{ loc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-sm btn-warning" type="submit">Return to stock</button>
+        </div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">Records a <strong>return</strong> transaction and sets the asset to <strong>in stock</strong>.{% if current_vehicle %} Linked to the current vehicle for the movement log.{% elif current_holder and current_holder.holder_type != 'vehicle' %} Current holder: {{ current_holder.holder_type | equipment_holder_type_label }} — {{ current_holder.holder_label }}.{% endif %}</p>
+    </div>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <div class="card shadow-sm mb-3 border-primary border-opacity-25">
+    <div class="card-header fw-semibold">Kit consumables (lot / batch / expiry)</div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Track disposable or dated items carried <em>inside</em> this serialised unit (e.g. AED pads, razor, paediatric set). Status uses today’s date: <span class="badge bg-danger">Expired</span> past expiry, <span class="badge bg-warning text-dark">Due within 30 days</span>, <span class="badge bg-secondary">Used / depleted</span> after a job. Contractors signed out on this asset can update lines and raise <strong>field reports</strong> from the employee portal (<em>My equipment</em>). This is separate from main-store batches in Inventory.</p>
+      {% if consumables_have_discrepancy %}
+      <div class="alert alert-warning py-2 small mb-3"><i class="bi bi-exclamation-triangle me-1"></i>At least one line has an open <strong>field report</strong> from a contractor — review details below and clear the flag when the record is corrected.</div>
+      {% endif %}
+      {% if can_consumable_edit %}
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_consumable_add', asset_id=asset.id) }}" class="row g-2 align-items-end border rounded p-2 mb-3 bg-light">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Description</label>
+          <input class="form-control form-control-sm" name="label" required placeholder="e.g. Adult defib pads">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Inventory item (optional)</label>
+          <select class="form-select form-select-sm" name="inventory_item_id">
+            <option value="">— none —</option>
+            {% for it in consumable_items_select %}
+            <option value="{{ it.id }}">{{ it.sku }} — {{ it.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label small mb-0">Batch</label><input class="form-control form-control-sm" name="batch_number"></div>
+        <div class="col-md-2"><label class="form-label small mb-0">Lot</label><input class="form-control form-control-sm" name="lot_number"></div>
+        <div class="col-md-2"><label class="form-label small mb-0">Expiry</label><input class="form-control form-control-sm" type="date" name="expiry_date"></div>
+        <div class="col-md-1"><label class="form-label small mb-0">Qty</label><input class="form-control form-control-sm" name="quantity" type="number" step="0.01" value="1" min="0.01"></div>
+        <div class="col-md-12"><label class="form-label small mb-0">Notes</label><input class="form-control form-control-sm" name="notes" placeholder="Optional"></div>
+        <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Add line</button></div>
+      </form>
+      {% endif %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead><tr><th>Description</th><th>Catalog</th><th>Batch</th><th>Lot</th><th>Expiry</th><th>Qty</th><th>Status</th>{% if can_consumable_edit %}<th class="text-end">Actions</th>{% endif %}</tr></thead>
+          <tbody>
+            {% for c in consumable_lines %}
+            <tr class="{% if c.has_discrepancy %}table-warning{% endif %}">
+              <td class="fw-semibold">{{ c.label }}{% if c.has_discrepancy %} <span class="badge bg-info text-dark">Field report</span>{% endif %}</td>
+              <td class="small text-muted">{% if c.inventory_sku %}{{ c.inventory_sku }}<br>{{ c.inventory_item_name }}{% else %}—{% endif %}</td>
+              <td class="small">{{ c.batch_number or '—' }}</td>
+              <td class="small">{{ c.lot_number or '—' }}</td>
+              <td class="small text-nowrap">{{ c.expiry_date_iso or '—' }}</td>
+              <td class="small">{{ c.quantity }}</td>
+              <td><span class="badge bg-{{ c.consumable_badge_class }} {% if c.consumable_badge_class == 'light' %}text-dark border{% endif %}">{{ c.consumable_status_label }}</span>{% if c.discrepancy_details %}<div class="small text-danger mt-1">{{ c.discrepancy_details }}</div>{% endif %}</td>
+              {% if can_consumable_edit %}
+              <td class="text-end">
+                {% if not c.depleted and c.quantity > 0 %}
+                <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_consumable_deplete', asset_id=asset.id, consumable_id=c.id) }}" class="d-inline-flex flex-column align-items-end gap-1" onsubmit="return confirm('Mark this line as used / depleted?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <select class="form-select form-select-sm" name="usage_close_reason" style="max-width:11rem">
+                    <option value="used_in_call">Used on a call</option>
+                    <option value="wastage">Wastage</option>
+                    <option value="damaged">Damaged</option>
+                    <option value="expired_disposal">Expired — disposed</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <button type="submit" class="btn btn-sm btn-outline-secondary py-0">Mark used</button>
+                </form>
+                {% endif %}
+                <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_consumable_delete', asset_id=asset.id, consumable_id=c.id) }}" class="d-inline mt-1" onsubmit="return confirm('Remove this line?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger py-0">Remove</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% if can_consumable_edit %}
+            <tr class="table-light">
+              <td colspan="8">
+                <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_consumable_update', asset_id=asset.id, consumable_id=c.id) }}" class="row g-2 align-items-end">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <div class="col-md-2"><label class="form-label small mb-0">Description</label><input class="form-control form-control-sm" name="label" value="{{ c.label }}" required></div>
+                  <div class="col-md-2">
+                    <label class="form-label small mb-0">Inventory item</label>
+                    <select class="form-select form-select-sm" name="inventory_item_id">
+                      <option value="">— none —</option>
+                      {% for it in consumable_items_select %}
+                      <option value="{{ it.id }}" {% if c.inventory_item_id == it.id %}selected{% endif %}>{{ it.sku }} — {{ it.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-md-1"><label class="form-label small mb-0">Batch</label><input class="form-control form-control-sm" name="batch_number" value="{{ c.batch_number or '' }}"></div>
+                  <div class="col-md-1"><label class="form-label small mb-0">Lot</label><input class="form-control form-control-sm" name="lot_number" value="{{ c.lot_number or '' }}"></div>
+                  <div class="col-md-2"><label class="form-label small mb-0">Expiry</label><input class="form-control form-control-sm" type="date" name="expiry_date" value="{{ c.expiry_date_iso }}"></div>
+                  <div class="col-md-1"><label class="form-label small mb-0">Qty</label><input class="form-control form-control-sm" name="quantity" type="number" step="0.01" value="{{ c.quantity }}" min="0"></div>
+                  <div class="col-md-2"><label class="form-label small mb-0">Notes</label><input class="form-control form-control-sm" name="notes" value="{{ c.notes or '' }}"></div>
+                  <div class="col-md-1">
+                    <div class="form-check mt-3">
+                      <input class="form-check-input" type="checkbox" name="depleted" value="1" id="dep{{ c.id }}" {% if c.depleted %}checked{% endif %}>
+                      <label class="form-check-label small" for="dep{{ c.id }}">Depleted</label>
+                    </div>
+                  </div>
+                  {% if can_edit and c.has_discrepancy %}
+                  <div class="col-md-12">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="clear_discrepancy" value="1" id="clrdisc{{ c.id }}">
+                      <label class="form-check-label small" for="clrdisc{{ c.id }}">Clear field report (system record now matches reality)</label>
+                    </div>
+                  </div>
+                  {% endif %}
+                  <div class="col-md-12"><button class="btn btn-sm btn-outline-primary" type="submit">Save changes</button></div>
+                </form>
+              </td>
+            </tr>
+            {% endif %}
+            {% else %}
+            <tr><td colspan="{% if can_consumable_edit %}8{% else %}7{% endif %}" class="text-muted">No consumable lines yet. Add pads, blades, and other dated stock that lives inside this unit.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if can_records %}
+  <div class="card shadow-sm mb-3 border-secondary border-opacity-25">
+    <div class="card-header fw-semibold">Make, model &amp; manufacturer warranty</div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Set when the warranty <strong>clock starts</strong> (goods-in / delivery vs first install) and either enter the supplier <strong>end date</strong> or compute it from start + months.</p>
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_identity_warranty', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">Make</label>
+          <input class="form-control form-control-sm" name="make" value="{{ asset.make or '' }}" placeholder="Manufacturer">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Model</label>
+          <input class="form-control form-control-sm" name="model" value="{{ asset.model or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Purchase date</label>
+          <input class="form-control form-control-sm" type="date" name="purchase_date" value="{{ asset.purchase_date or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Warranty basis</label>
+          <select class="form-select form-select-sm" name="warranty_start_basis">
+            <option value="" {% if not asset.warranty_start_basis %}selected{% endif %}>—</option>
+            <option value="delivery" {% if asset.warranty_start_basis == 'delivery' %}selected{% endif %}>From delivery / goods-in</option>
+            <option value="install" {% if asset.warranty_start_basis == 'install' %}selected{% endif %}>From install / commissioning</option>
+            <option value="custom" {% if asset.warranty_start_basis == 'custom' %}selected{% endif %}>Custom / other</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Warranty start date</label>
+          <input class="form-control form-control-sm" type="date" name="warranty_start_date" value="{{ asset.warranty_start_date or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Months</label>
+          <input class="form-control form-control-sm" type="number" name="warranty_months" min="0" placeholder="e.g. 24" value="{{ asset.warranty_months or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Warranty end date</label>
+          <input class="form-control form-control-sm" type="date" name="warranty_expiry" value="{{ asset.warranty_expiry or '' }}">
+        </div>
+        <div class="col-md-4">
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" name="apply_warranty_months" value="1" id="applyWarrantyMonths">
+            <label class="form-check-label small" for="applyWarrantyMonths">Overwrite end date = start + months</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3">
+    <div class="card-header fw-semibold">Servicing plan</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_servicing_plan', asset_id=asset.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small">Next service due</label>
+          <input class="form-control form-control-sm" type="date" name="next_service_due_date" value="{{ asset.next_service_due_date or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small">Service interval (days)</label>
+          <input class="form-control form-control-sm" type="number" name="service_interval_days" min="1" placeholder="Optional" value="{{ asset.service_interval_days or '' }}">
+        </div>
+        <div class="col-md-3">
+          <button class="btn btn-sm btn-outline-primary" type="submit">Save plan</button>
+        </div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">Targets for inspections and manufacturer checks. Log completed work below in <strong>Add maintenance log</strong>.</p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-3 border-danger border-opacity-25">
+    <div class="card-header fw-semibold">Log equipment fault</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_issue_create', asset_id=asset.id) }}" class="row g-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-4"><label class="form-label small">Title</label><input class="form-control form-control-sm" name="title" required placeholder="e.g. Low battery warning"></div>
+        <div class="col-md-2"><label class="form-label small">Severity</label>
+          <select class="form-select form-select-sm" name="severity">
+            {% for sev in ['info','low','medium','high','critical'] %}
+            <option value="{{ sev }}" {% if sev == 'medium' %}selected{% endif %}>{{ sev | equipment_issue_severity_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3"><label class="form-label small">Initial status</label>
+          <select class="form-select form-select-sm" name="status">
+            {% for st in ['open','monitoring','fix_planned','off_service','sent_external'] %}
+            <option value="{{ st }}" {% if st == 'open' %}selected{% endif %}>{{ st | equipment_issue_status_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><label class="form-label small">Action / fix date</label><input class="form-control form-control-sm" type="date" name="scheduled_action_date"></div>
+        <div class="col-md-3"><label class="form-label small">External ref (RMA, job #)</label><input class="form-control form-control-sm" name="external_reference"></div>
+        <div class="col-md-12"><label class="form-label small">Description</label><textarea class="form-control form-control-sm" name="description" rows="2" placeholder="What happened, where the unit is…"></textarea></div>
+        <div class="col-12"><button class="btn btn-sm btn-danger" type="submit">Log issue</button></div>
+      </form>
+      <p class="small text-muted mb-0 mt-2">Open issues can drive <strong>operational state</strong> (restricted / unserviceable). Update status as repairs progress.</p>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold">Add maintenance log</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_add_maintenance', asset_id=asset.id) }}" class="row g-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-2"><label class="form-label small">Service date</label><input class="form-control form-control-sm" type="date" name="service_date" required></div>
+        <div class="col-md-2"><label class="form-label small">Type</label><input class="form-control form-control-sm" name="service_type" value="Inspection"></div>
+        <div class="col-md-2"><label class="form-label small">Cost</label><input class="form-control form-control-sm" name="cost" type="number" step="0.01"></div>
+        <div class="col-md-2"><label class="form-label small">Performed by</label><input class="form-control form-control-sm" name="performed_by"></div>
+        <div class="col-md-12"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes"></div>
+        <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Save</button></div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <h2 class="h6">Faults &amp; issues</h2>
+  <div class="table-responsive card shadow-sm mb-4">
+    <table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Logged</th><th>Title</th><th>Severity</th><th>Status</th><th>Next action</th><th>External ref</th></tr></thead>
+      <tbody>
+        {% for iss in equipment_issues %}
+        <tr>
+          <td class="small text-nowrap">{{ iss.created_at or '—' }}</td>
+          <td>{{ iss.title }}{% if iss.description %}<div class="small text-muted">{{ iss.description }}</div>{% endif %}</td>
+          <td><span class="badge bg-light text-dark border">{{ iss.severity | equipment_issue_severity_label }}</span></td>
+          <td><span class="badge bg-secondary">{{ iss.status | equipment_issue_status_label }}</span></td>
+          <td class="small">{{ iss.scheduled_action_date or '—' }}</td>
+          <td class="small">{{ iss.external_reference or '—' }}</td>
+        </tr>
+        {% if can_records and iss.status not in ('resolved','closed') %}
+        <tr class="table-light">
+          <td colspan="6">
+            <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_issue_update', asset_id=asset.id, issue_id=iss.id) }}" class="row g-2 align-items-end">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <div class="col-md-2">
+                <label class="form-label small mb-0">Status</label>
+                <select class="form-select form-select-sm" name="status">
+                  {% for st in ['open','monitoring','fix_planned','off_service','sent_external','resolved','closed'] %}
+                  <option value="{{ st }}" {% if iss.status == st %}selected{% endif %}>{{ st | equipment_issue_status_label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small mb-0">Action date</label>
+                <input class="form-control form-control-sm" type="date" name="scheduled_action_date" value="{{ iss.scheduled_action_date or '' }}">
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small mb-0">External ref</label>
+                <input class="form-control form-control-sm" name="external_reference" value="{{ iss.external_reference or '' }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small mb-0">Resolution notes</label>
+                <input class="form-control form-control-sm" name="resolution_notes" value="{{ iss.resolution_notes or '' }}">
+              </div>
+              <div class="col-md-2"><button class="btn btn-sm btn-outline-primary" type="submit">Update</button></div>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="6" class="text-muted">No issues logged.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="h6">Maintenance history</h2>
+  <div class="table-responsive card shadow-sm mb-4">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>By</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for m in maintenance_events %}
+        <tr>
+          <td>{{ m.service_date }}</td>
+          <td>{{ m.service_type }}</td>
+          <td>{{ m.cost or '—' }}</td>
+          <td>{{ m.performed_by or '—' }}</td>
+          <td>{{ m.notes or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted">No maintenance rows.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="h6">Equipment movement log</h2>
+  <p class="small text-muted">Assignments to vehicles or people, returns to storerooms, and other inventory lines for this serial.</p>
+  <div class="table-responsive card shadow-sm">
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Recorded by</th>
+          <th>Summary</th>
+          <th>Tx</th>
+          <th>Location</th>
+          <th>Assignee</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in movement_log %}
+        <tr>
+          <td class="text-nowrap small">{{ t.performed_at }}</td>
+          <td class="small text-muted">{{ t.recorded_by }}</td>
+          <td>{{ t.movement_summary }}</td>
+          <td><span class="badge bg-light text-dark">{{ t.transaction_type | inventory_tx_type_label }}</span></td>
+          <td class="small">{{ t.location_name or t.location_code or t.location_id or '—' }}</td>
+          <td class="small">{% if t.assignee_type %}{{ t.assignee_type | equipment_holder_type_label }}: {{ t.assignee_label or t.assignee_id }}{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-muted">No inventory movements recorded for this asset yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

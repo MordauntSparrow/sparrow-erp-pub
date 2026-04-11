@@ -1,0 +1,67 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h4 class="mb-0"><i class="bi bi-receipt me-2"></i>Contractor invoices</h4>
+    <a href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-graph-up me-1"></i> Totals &amp; analytics
+    </a>
+  </div>
+  <form class="row g-2 align-items-end mb-4" method="get" action="{{ url_for('internal_time_billing.admin_invoices_list_page') }}">
+    <div class="col-auto">
+      <label class="form-label small mb-0">Contractor</label>
+      <select name="contractor_id" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {% if filter_contractor_id == c.id %}selected{% endif %}>{{ c.name or c.email }} ({{ c.id }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">Status</label>
+      <select name="status" class="form-select form-select-sm">
+        <option value="" {% if not filter_status %}selected{% endif %}>All</option>
+        <option value="draft" {% if filter_status == 'draft' %}selected{% endif %}>draft</option>
+        <option value="sent" {% if filter_status == 'sent' %}selected{% endif %}>sent</option>
+        <option value="void" {% if filter_status == 'void' %}selected{% endif %}>void</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>ID</th>
+          <th>#</th>
+          <th>Contractor</th>
+          <th>Week</th>
+          <th class="text-end">Amount</th>
+          <th>Invoice</th>
+          <th>Timesheet</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in invoices %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ r.invoice_number }}</td>
+          <td>{{ r.contractor_name or r.contractor_email }} <span class="text-muted">({{ r.contractor_id }})</span></td>
+          <td><a href="{{ url_for('internal_time_billing.admin_week_page', user_id=r.contractor_id, week_id=r.timesheet_week_code) }}">{{ r.timesheet_week_code }}</a></td>
+          <td class="text-end">£{{ '%.2f' % (r.total_amount or 0) }}</td>
+          <td><span class="badge bg-secondary">{{ r.status }}</span></td>
+          <td><span class="badge bg-light text-dark">{{ r.timesheet_status }}</span></td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_time_billing.admin_invoice_detail_page', invoice_id=r.id) }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-muted">No invoices match.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

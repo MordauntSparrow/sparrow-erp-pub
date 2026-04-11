@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Import employees (CSV) · HR{% endblock %}
+{% block content %}
+<div class="hr-admin-surface">
+  {% include 'hr_module/admin/_hr_ui_styles.html' %}
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}" class="text-decoration-none">People</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_employees') }}" class="text-decoration-none">Employees</a></li>
+      <li class="breadcrumb-item active" aria-current="page">CSV import</li>
+    </ol>
+  </nav>
+
+  <h1 class="h3 fw-semibold text-dark mb-2">Import employees from CSV</h1>
+  <p class="text-muted small mb-4">
+    Upload a CSV file, then <strong>map each column</strong> to the right employee field. One import can create new people and fill HR profile details, or update existing records when you enable that option below.
+    <strong>Email</strong> must be mapped — it is how we match and de-duplicate people. For <strong>new</strong> rows, <strong>name</strong> is required.
+    <strong>Time Billing role</strong> is optional; if you leave it blank, a sensible default is applied and you can adjust it later.
+    New employees receive a <strong>welcome email</strong> with a temporary password and a link to the employee portal (your organisation must have email delivery set up on the server).
+    <a href="{{ url_for('internal_hr.admin_employees') }}" class="text-decoration-none">Back to directory</a>
+  </p>
+
+  {% if step == 1 %}
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header fw-semibold">1. Upload CSV</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('internal_hr.admin_employee_import_csv_upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label">CSV file</label>
+        <input class="form-control" type="file" name="file" accept=".csv,text/csv" required>
+        <p class="small text-muted mt-2 mb-0">UTF-8 or Excel CSV; comma, semicolon, or tab separated. Max ~2,500 rows, 6&nbsp;MB.</p>
+        <button class="btn btn-primary mt-3" type="submit">Continue to column mapping</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if step == 2 %}
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header fw-semibold">2. Map columns → Sparrow fields</div>
+    <div class="card-body">
+      <p class="small text-muted mb-1">File: <strong>{{ original_name }}</strong></p>
+      <p class="small text-muted mb-3">Match each spreadsheet column. Use <em>Ignore</em> for columns you do not need.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_employee_import_csv_commit') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle">
+            <thead class="table-light"><tr><th>Your column</th><th>Sparrow field</th></tr></thead>
+            <tbody>
+              {% for h in headers %}
+              <tr>
+                <td><code>{{ h }}</code></td>
+                <td>
+                  <select class="form-select form-select-sm" name="map_{{ loop.index0 }}">
+                    {% for key, label in fields %}
+                    <option value="{{ key }}">{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" value="1" name="update_existing" id="hr_upd">
+          <label class="form-check-label" for="hr_upd">Update existing employees matched by email (name, role, status, HR fields)</label>
+        </div>
+        <button class="btn btn-success" type="submit">Run import</button>
+        <a class="btn btn-outline-secondary ms-2" href="{{ url_for('internal_hr.admin_employee_import_csv') }}">Start over</a>
+      </form>
+    </div>
+  </div>
+
+  {% if preview_rows %}
+  <h2 class="h6 fw-semibold">Preview (first rows)</h2>
+  <div class="table-responsive card border-0 shadow-sm">
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr>{% for h in headers %}<th class="small">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>{% for h in headers %}<td class="small text-break">{{ row.get(h, '') }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

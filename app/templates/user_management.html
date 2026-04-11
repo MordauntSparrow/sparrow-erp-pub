@@ -5,6 +5,22 @@
 {% block content %}
 <div class="container mt-5">
   <h1 class="mb-4">User Management</h1>
+
+  <div class="alert alert-light border small mb-3" role="note">
+    <strong>How this screen behaves</strong>
+    <ul class="mb-0 ps-3">
+      <li><strong>Add New User</strong> is available to you as an organisation administrator: you can create <strong>staff</strong> and <strong>crew</strong> accounts.
+        {% if editor_may_assign_elevated %}
+        You may also assign <strong>admin</strong> or <strong>clinical lead</strong> when creating users.
+        {% else %}
+        To assign <strong>admin</strong> or <strong>clinical lead</strong>, a <strong>superuser</strong> (or an account with “Core — manage administrator accounts”) must create or promote those accounts.
+        {% endif %}
+      </li>
+      <li><strong>Permissions</strong> may look empty for <strong>admin</strong> (or similar) roles when access is implied by the role rather than a stored checklist — that is normal, not a fault.</li>
+      <li><strong>Edit / Delete</strong> on other <strong>administrator</strong> accounts (admin or clinical lead) is reserved for a <strong>superuser</strong>. If you only see blank actions for those rows, that is expected — not a broken deployment.</li>
+      <li><strong>Personal PIN</strong> — when you use <strong>Edit</strong> on <strong>your own</strong> row, you can set or change your 6-digit PIN (same rules as <a href="{{ url_for('routes.account_personal_pin') }}">Personal PIN</a> in the user menu). Editing someone else never shows PIN fields; admins cannot set another person’s PIN.</li>
+    </ul>
+  </div>
   
   <!-- Button to trigger the Add User modal -->
   <button type="button" class="btn btn-success mb-3" data-mdb-toggle="modal" data-mdb-target="#addUserModal">
@@ -40,7 +56,16 @@
           <td>{{ user.last_name }}</td>
           <td>{{ user.email }}</td>
           <td>{{ user.role }}</td>
-          <td class="small text-muted">{{ user.permissions | join(', ') }}</td>
+          <td class="small text-muted">
+            {% set _perm_joined = (user.permissions | join(', '))|trim %}
+            {% if _perm_joined %}
+              {{ _perm_joined }}
+            {% elif user.role|lower in ('admin', 'superuser', 'clinical_lead', 'support_break_glass') %}
+              <span class="text-muted">All module access (by role)</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
           <td>{{ user.created_at }}</td>
           <td>{{ user.last_login or "Never" }}</td>
           <td>
@@ -52,7 +77,9 @@
                     data-last-name="{{ user.last_name }}"
                     data-email="{{ user.email }}"
                     data-role="{{ user.role }}"
-                    data-permissions='{{ user.permissions|tojson }}'>
+                    data-permissions='{{ user.permissions|tojson }}'
+                    data-is-current-user="{% if user.id|string == current_user_id|string %}1{% else %}0{% endif %}"
+                    data-has-personal-pin="{% if user.has_personal_pin %}1{% else %}0{% endif %}">
               Edit
             </button>
             {% endif %}
@@ -63,6 +90,11 @@
                 Delete
               </button>
             </form>
+            {% endif %}
+            {% if not user.may_edit and not user.may_delete %}
+              {% if user.role|lower in ('admin', 'clinical_lead') and not editor_is_superuser %}
+              <span class="text-muted small" title="Only a superuser may edit or remove administrator accounts">Superuser only</span>
+              {% endif %}
             {% endif %}
           </td>
         </tr>
@@ -147,12 +179,6 @@
               {% endfor %}
             </div>
           </div>
-          <!-- Personal PIN -->
-          <div class="mb-3">
-            <label for="addPersonalPin" class="form-label">Personal PIN</label>
-            <input type="password" class="form-control" id="addPersonalPin" name="personal_pin" maxlength="6" placeholder="Enter 6-digit PIN (optional)">
-            <div class="form-text">Leave blank if not setting initially. Users must set a PIN before accessing sensitive sections.</div>
-          </div>
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-primary">Add User</button>
@@ -218,6 +244,21 @@
             <label for="modalConfirmNewPassword" class="form-label">Confirm New Password (optional)</label>
             <input type="password" class="form-control" id="modalConfirmNewPassword" name="confirm_new_password">
           </div>
+          <div class="mb-3 border-top pt-3" id="editSelfPinSection" style="display: none;">
+            <div class="small text-muted mb-2">Personal PIN (optional) — only when editing <strong>your</strong> account. Leave all blank to keep your current PIN.</div>
+            <div class="mb-3" id="editPinCurrentRow" style="display: none;">
+              <label for="modalCurrentPersonalPin" class="form-label">Current personal PIN</label>
+              <input type="password" class="form-control" id="modalCurrentPersonalPin" name="current_personal_pin" maxlength="6" inputmode="numeric" autocomplete="current-password" placeholder="6 digits">
+            </div>
+            <div class="mb-3">
+              <label for="modalPersonalPin" class="form-label">New personal PIN</label>
+              <input type="password" class="form-control" id="modalPersonalPin" name="personal_pin" maxlength="6" inputmode="numeric" autocomplete="new-password" placeholder="6 digits">
+            </div>
+            <div class="mb-3">
+              <label for="modalConfirmPersonalPin" class="form-label">Confirm new personal PIN</label>
+              <input type="password" class="form-control" id="modalConfirmPersonalPin" name="confirm_personal_pin" maxlength="6" inputmode="numeric" autocomplete="new-password" placeholder="6 digits">
+            </div>
+          </div>
           <!-- Permissions -->
           <div class="mb-3">
             <label class="form-label">Permissions</label>
@@ -236,15 +277,6 @@
               {% endfor %}
               {% endfor %}
             </div>
-          </div>
-          <!-- Personal PIN Reset Section for all users -->
-          <div class="mb-3">
-            <label for="modalPersonalPin" class="form-label">New Personal PIN (optional)</label>
-            <input type="password" class="form-control" id="modalPersonalPin" name="personal_pin" maxlength="6" placeholder="Enter new 6-digit PIN">
-          </div>
-          <div class="mb-3">
-            <label for="modalConfirmPersonalPin" class="form-label">Confirm New Personal PIN (optional)</label>
-            <input type="password" class="form-control" id="modalConfirmPersonalPin" name="confirm_personal_pin" maxlength="6" placeholder="Re-enter new PIN">
           </div>
         </div>
         <div class="modal-footer">
@@ -265,6 +297,8 @@ document.addEventListener("DOMContentLoaded", function() {
   // Precompute the base URL for the delete endpoint and CSRF token for dynamic forms.
   const deleteUserBaseUrl = "{{ url_for('routes.delete_user', user_id='') }}";
   const csrfToken = {{ csrf_token()|tojson }};
+  const currentUserId = {{ current_user_id|tojson }};
+  const editorIsSuperuser = {{ 'true' if editor_is_superuser else 'false' }};
   let ROLE_DEFAULTS = {};
   try {
     ROLE_DEFAULTS = JSON.parse(document.getElementById('roleDefaultPermissionsJson').textContent || '{}');
@@ -332,8 +366,23 @@ document.addEventListener("DOMContentLoaded", function() {
         permArr = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : [];
       } catch (e) { permArr = []; }
     }
-    const permCell = permArr.join(', ');
+    const permJoined = permArr.join(', ').trim();
+    const roleL = String(user.role || '').toLowerCase();
+    const elevatedRoles = ['admin', 'superuser', 'clinical_lead', 'support_break_glass'];
+    let permCell = permJoined;
+    if (!permJoined) {
+      permCell = elevatedRoles.includes(roleL)
+        ? '<span class="text-muted small">All module access (by role)</span>'
+        : '<span class="text-muted small">—</span>';
+    }
 
+    let actionsHint = '';
+    if (!user.may_edit && !user.may_delete && (roleL === 'admin' || roleL === 'clinical_lead') && !editorIsSuperuser) {
+      actionsHint = '<span class="text-muted small" title="Only a superuser may edit or remove administrator accounts">Superuser only</span>';
+    }
+
+    const isSelf = String(user.id) === String(currentUserId);
+    const hasPin = !!user.has_personal_pin;
     const editBtn = user.may_edit ? `
         <button class="btn btn-sm btn-primary edit-user-btn"
                 data-user-id="${user.id}"
@@ -342,7 +391,9 @@ document.addEventListener("DOMContentLoaded", function() {
                 data-last-name="${user.last_name}"
                 data-email="${user.email}"
                 data-role="${user.role}"
-                data-permissions='${JSON.stringify(permArr)}'>
+                data-permissions='${JSON.stringify(permArr)}'
+                data-is-current-user="${isSelf ? '1' : '0'}"
+                data-has-personal-pin="${hasPin ? '1' : '0'}">
           Edit
         </button>` : '';
 
@@ -358,6 +409,7 @@ document.addEventListener("DOMContentLoaded", function() {
       <td>
         ${editBtn}
         ${deleteButtonHtml}
+        ${actionsHint}
       </td>
     `;
     tbody.appendChild(tr);
@@ -373,8 +425,6 @@ document.addEventListener("DOMContentLoaded", function() {
   }
   const editUserModal = new mdb.Modal(editUserModalEl);
 
-  // Flag to indicate if the current editor is superuser.
-  const currentUserIsSuperuser = {{ 'true' if current_user.role|lower == 'superuser' else 'false' }};
   const editorMayAssignElevated = {{ 'true' if editor_may_assign_elevated else 'false' }};
 
   function ensureRoleOptionInModal(roleVal) {
@@ -393,7 +443,6 @@ document.addEventListener("DOMContentLoaded", function() {
   // Attach event listeners to all Edit buttons.
   function attachEditButtons() {
     const editButtons = document.querySelectorAll('.edit-user-btn');
-    console.log("Found edit buttons:", editButtons.length);
     editButtons.forEach(button => {
       button.addEventListener('click', function() {
         const userId = this.getAttribute('data-user-id');
@@ -419,12 +468,27 @@ document.addEventListener("DOMContentLoaded", function() {
         document.getElementById('modalFirstName').value = firstName;
         document.getElementById('modalLastName').value = lastName;
         setPermissionChecks('editPermissionsBox', permissions);
-        
+
+        const selfPin = document.getElementById('editSelfPinSection');
+        const curPinRow = document.getElementById('editPinCurrentRow');
+        const isSelf = this.getAttribute('data-is-current-user') === '1';
+        const hasPin = this.getAttribute('data-has-personal-pin') === '1';
+        if (selfPin) {
+          selfPin.style.display = isSelf ? 'block' : 'none';
+        }
+        if (curPinRow) {
+          curPinRow.style.display = (isSelf && hasPin) ? 'block' : 'none';
+        }
+        ['modalCurrentPersonalPin', 'modalPersonalPin', 'modalConfirmPersonalPin'].forEach(function(fid) {
+          const el = document.getElementById(fid);
+          if (el) el.value = '';
+        });
+
         // Only lock role for non-superuser editors when the account being edited is superuser.
         // (Disabled <select> does not submit "role", which would clear the role in the DB if not handled server-side.)
         const modalRoleSelect = document.getElementById('modalRole');
         const rnorm = (role || '').toLowerCase();
-        if (rnorm === "superuser" && !currentUserIsSuperuser) {
+        if (rnorm === "superuser" && !editorIsSuperuser) {
           modalRoleSelect.disabled = true;
         } else {
           modalRoleSelect.disabled = false;
@@ -432,7 +496,7 @@ document.addEventListener("DOMContentLoaded", function() {
         Array.from(modalRoleSelect.options).forEach(function(opt) {
           const v = opt.value;
           if (v === 'superuser') {
-            const allow = currentUserIsSuperuser && rnorm === 'superuser';
+            const allow = editorIsSuperuser && rnorm === 'superuser';
             opt.disabled = !allow;
             opt.hidden = !allow;
           } else if (v === 'admin' || v === 'clinical_lead') opt.disabled = !editorMayAssignElevated;

@@ -1,0 +1,51 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Edit question{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 720px;">
+  <h1 class="h4 mb-3">Edit checklist question</h1>
+  <p class="small text-muted">Type is fixed at <code>{{ question.answer_type }}</code>. Text changes are audited.</p>
+  <div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label">Group</label>
+          <input class="form-control" name="group_name" maxlength="128" value="{{ question.group_name or '' }}" {% if not can_edit %}readonly{% endif %}>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Question text</label>
+          <textarea class="form-control" name="question_text" rows="3" required {% if not can_edit %}readonly{% endif %}>{{ question.question_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label">Help URL (optional)</label>
+          <input class="form-control" name="help_url" maxlength="512" value="{{ question.help_url or '' }}" placeholder="https://…" {% if not can_edit %}readonly{% endif %}>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" name="is_active" value="1" id="is_active" {% if question.is_active %}checked{% endif %} {% if not can_edit %}disabled{% endif %}>
+          <label class="form-check-label" for="is_active">Active</label>
+        </div>
+        {% if can_edit %}
+        <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+        {% endif %}
+        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.event_plan_questions_list') }}">Back</a>
+      </form>
+    </div>
+  </div>
+  {% if audit %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Change history</h2>
+      <ul class="list-unstyled small mb-0">
+        {% for a in audit %}
+        <li class="mb-2 pb-2 border-bottom">
+          <div class="text-muted">{{ a.created_at }}{% if a.changed_by %} · {{ a.changed_by[:10] }}…{% endif %}</div>
+          <div><s>{{ a.previous_text }}</s></div>
+          <div class="fw-medium">{{ a.new_text }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

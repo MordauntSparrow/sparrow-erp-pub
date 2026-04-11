@@ -1,0 +1,272 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-person-gear me-2"></i>
+      Edit Contractor
+    </h4>
+    <div class="d-flex gap-2">
+      <a class="btn btn-secondary btn-sm" href="{{ url_for('internal_hr.admin_employees') }}">
+        <i class="bi bi-arrow-left me-1"></i> Back
+      </a>
+      <button id="btnSave" class="btn btn-primary btn-sm" type="button">
+        <i class="bi bi-save me-1"></i> Save
+      </button>
+    </div>
+  </div>
+
+  <!-- Contractor Form -->
+  <div class="card">
+    <div class="card-body">
+      <div class="row g-2">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Email</label>
+          <input id="email" class="form-control form-control-sm" disabled>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Login username</label>
+          <input id="username" class="form-control form-control-sm" type="text" readonly
+                 title="Generated from name when you save">
+          <div class="form-text">Auto-set as <strong>firstname.lastname</strong> from the name field (suffix if needed). Used for portal and <code>/api/login</code>.</div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Name</label>
+          <input id="name" class="form-control form-control-sm" required>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Status</label>
+          <select id="status" class="form-select form-select-sm" required>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Employment type</label>
+          <select id="employment_type" class="form-select form-select-sm">
+            <option value="self_employed">Self-employed</option>
+            <option value="paye">PAYE</option>
+          </select>
+          <div class="form-text">Self-employed can create invoices after approval. Stored here so HR is not required; if HR module exposes this field, it can override.</div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <label class="form-label">Invoice billing</label>
+          <select id="invoice_billing_frequency" class="form-select form-select-sm">
+            <option value="weekly">Weekly (invoice from each timesheet week)</option>
+            <option value="monthly">Monthly (combine weeks on My invoices)</option>
+          </select>
+          <div class="form-text">Monthly hides per-week “Create invoice” and expects combined invoices from the portal.</div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label">Staff role</label>
+          <div id="role_readout" class="form-control form-control-sm bg-light" style="min-height: 31px;">—</div>
+          <div class="form-text">Set in HR (employee edit profile).</div>
+        </div>
+
+        <div class="col-12 col-md-6">
+          <label class="form-label">Wage rate card</label>
+          <div id="wage_readout" class="form-control form-control-sm bg-light" style="min-height: 31px;">—</div>
+          <div class="form-text">Set in HR. Rates are defined on <a href="{{ url_for('internal_time_billing.wage_cards_page') }}">wage rate cards</a>.</div>
+        </div>
+
+        <div class="col-12">
+          <a id="hrPaySettingsLink" class="btn btn-outline-primary btn-sm" href="#">
+            <i class="bi bi-person-lines-fill me-1"></i> Edit staff role and wage card in HR
+          </a>
+        </div>
+      </div>
+
+      <hr>
+
+      <!-- Password Reset -->
+      <div class="row g-2">
+        <div class="col-12 col-md-6 col-lg-4">
+          <label class="form-label">Reset password</label>
+          <div class="input-group input-group-sm">
+            <input id="new_pw" type="password" class="form-control"
+                   placeholder="New password (min 8 chars)" autocomplete="new-password">
+            <button id="btnSetPw" class="btn btn-outline-secondary" type="button">Set</button>
+          </div>
+          <div class="form-text">This immediately overwrites the user’s password.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Message Modal -->
+<div class="modal fade" id="msgModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="msgTitle"></h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="msgBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+(function () {
+  "use strict";
+
+  const $ = (s) => document.querySelector(s);
+  const idMatch = location.hash.match(/edit-(\d+)/);
+  const userId = idMatch ? idMatch[1] : null;
+
+  const msgModalEl = document.getElementById('msgModal');
+  function getMsgModal() {
+    if (!window.mdb || !mdb.Modal) return null;
+    return mdb.Modal.getOrCreateInstance(msgModalEl);
+  }
+
+  function showMsg(title, body) {
+    document.getElementById('msgTitle').textContent = title;
+    document.getElementById('msgBody').textContent = body;
+    const m = getMsgModal();
+    if (m) m.show();
+    else alert(`${title}: ${body}`);
+  }
+
+  // Elements
+  const emailEl = $('#email');
+  const usernameEl = $('#username');
+  const nameEl = $('#name');
+  const statusEl = $('#status');
+  const employmentTypeEl = $('#employment_type');
+  const invoiceBillingFreqEl = $('#invoice_billing_frequency');
+  const roleReadoutEl = document.getElementById('role_readout');
+  const wageReadoutEl = document.getElementById('wage_readout');
+  const hrPayLinkEl = document.getElementById('hrPaySettingsLink');
+  const newPwEl = $('#new_pw');
+
+  function tbCsrfHeaders(h, method) {
+    return (typeof window.tbMergeCsrfHeaders === "function")
+      ? window.tbMergeCsrfHeaders(h || {}, method)
+      : (h || {});
+  }
+
+  // API paths: replace numeric id segment so URLs work regardless of app root or trailing slashes
+  const GET_TMPL = "{{ url_for('internal_time_billing.api_get_contractor', user_id=0) }}";
+  const PUT_TMPL = "{{ url_for('internal_time_billing.api_update_contractor', user_id=0) }}";
+  const SETPW_TMPL = "{{ url_for('internal_time_billing.api_contractor_set_password', user_id=0) }}";
+  const HR_EDIT_TMPL = "{{ url_for('internal_hr.admin_contractor_edit_form', cid=0) }}";
+
+  const GET_URL = (id) => GET_TMPL.replace(/\/[0-9]+$/, "/" + id);
+  const UPDATE_URL = (id) => PUT_TMPL.replace(/\/[0-9]+$/, "/" + id);
+  const SETPW_URL = (id) => SETPW_TMPL.replace(/\/[0-9]+\/set-password\/?$/, "/" + id + "/set-password");
+  const hrEditUrl = (id) => HR_EDIT_TMPL.replace(/\/0\/edit\/?$/, "/" + id + "/edit");
+
+  async function loadContractor() {
+    if (!userId) {
+      showMsg('Error', 'No user id provided');
+      return;
+    }
+
+    const r = await fetch(GET_URL(userId));
+    if (r.status === 404) {
+      showMsg('Error', 'User not found');
+      history.back();
+      return;
+    }
+    if (!r.ok) {
+      showMsg('Error', 'Failed to load user');
+      return;
+    }
+
+    const c = await r.json();
+    emailEl.value = c.email || '';
+    usernameEl.value = c.username || '';
+    nameEl.value = c.name || '';
+    statusEl.value = (c.status || 'active').toLowerCase();
+    employmentTypeEl.value = (c.employment_type || 'self_employed').toLowerCase();
+    if (invoiceBillingFreqEl) {
+      invoiceBillingFreqEl.value = (c.invoice_billing_frequency || 'weekly').toLowerCase();
+    }
+
+    const roleLabel = c.primary_role_label
+      || (c.role_id != null ? ('Role #' + c.role_id) : '—');
+    const wageLabel = c.wage_card_label
+      || (c.wage_rate_card_id != null ? ('Card #' + c.wage_rate_card_id) : 'None');
+    roleReadoutEl.textContent = roleLabel;
+    wageReadoutEl.textContent = wageLabel;
+    hrPayLinkEl.href = hrEditUrl(userId);
+  }
+
+  async function save() {
+    const name = (nameEl.value || '').trim();
+    const status = (statusEl.value || 'active').toLowerCase();
+    const employment_type = (employmentTypeEl.value || 'paye').toLowerCase();
+    const invoice_billing_frequency = invoiceBillingFreqEl
+      ? (invoiceBillingFreqEl.value || 'weekly').toLowerCase()
+      : 'weekly';
+
+    if (!name) return showMsg('Validation Error', 'Name cannot be empty');
+
+    const payload = { name, status, employment_type, invoice_billing_frequency };
+
+    const r = await fetch(UPDATE_URL(userId), {
+      method: 'PUT',
+      headers: tbCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
+      body: JSON.stringify(payload),
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'Save failed' }));
+      showMsg('Error', err.error || 'Save failed');
+      return;
+    }
+
+    const data = await r.json().catch(() => ({}));
+    if (data.username) usernameEl.value = data.username;
+    showMsg('Success', data.username
+      ? ('Saved. Login username is now ' + data.username + '.')
+      : 'Contractor updated successfully');
+  }
+
+  async function setPassword() {
+    const pw = newPwEl.value || '';
+    if (pw.length < 8) return showMsg('Validation Error', 'Password must be at least 8 characters');
+
+    const r = await fetch(SETPW_URL(userId), {
+      method: 'POST',
+      headers: tbCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
+      body: JSON.stringify({ password: pw }),
+    });
+
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'Password update failed' }));
+      showMsg('Error', err.error || 'Password update failed');
+      return;
+    }
+
+    newPwEl.value = '';
+    showMsg('Success', 'Password updated successfully');
+  }
+
+  document.getElementById('btnSave').addEventListener('click', save);
+  document.getElementById('btnSetPw').addEventListener('click', setPassword);
+
+  // Init
+  loadContractor().catch(err =>
+    showMsg('Error', err.message || 'Failed to initialize')
+  );
+
+})();
+</script>
+{% endblock %}

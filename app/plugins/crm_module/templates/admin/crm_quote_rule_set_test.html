@@ -1,0 +1,71 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Rule set test{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h4 mb-0">Test: {{ rs.name }}</h1>
+    <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quote_rule_set_edit', rs_id=rs.id) }}">Back to editor</a>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-3">Sample inputs</h2>
+          <form method="post">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-2">
+              <label class="form-label small">Line items subtotal (£)</label>
+              <input class="form-control" name="lines_subtotal" value="{{ line_sub if line_sub is not none else '' }}" placeholder="0">
+            </div>
+            <div class="mb-2">
+              <label class="form-label small">Crowd size</label>
+              <input class="form-control" name="crowd_size" value="{{ crowd_size if crowd_size is not none else '' }}" placeholder="0">
+            </div>
+            <div class="mb-3">
+              <label class="form-label small">Duration (hours)</label>
+              <input class="form-control" name="duration_hours" value="{{ duration_hours if duration_hours is not none else '' }}" placeholder="0">
+            </div>
+            <button type="submit" class="btn btn-primary rounded-pill">Calculate</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-3">Breakdown</h2>
+          {% if breakdown %}
+          <ul class="list-group list-group-flush">
+            {% for label, amt in breakdown %}
+            <li class="list-group-item d-flex justify-content-between px-0">
+              <span>{{ label }}</span>
+              <span class="font-monospace">£{{ amt }}</span>
+            </li>
+            {% endfor %}
+            <li class="list-group-item d-flex justify-content-between px-0 fw-bold border-top">
+              <span>Total</span>
+              <span class="font-monospace">£{{ total }}</span>
+            </li>
+          </ul>
+          {% else %}
+          <p class="text-muted small mb-0">Submit the form to see totals.</p>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-2">Rules in order</h2>
+          <ol class="small mb-0">
+            {% for r in rules %}
+            <li>{{ rule_type_labels.get(r.rule_type, r.rule_type) }}{% if r.label %} — {{ r.label }}{% endif %}</li>
+            {% else %}
+            <li class="text-muted">No rules defined.</li>
+            {% endfor %}
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

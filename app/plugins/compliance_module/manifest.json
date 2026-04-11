@@ -1,0 +1,14 @@
+{
+  "system_name": "compliance_module",
+  "name": "Compliance & Policies",
+  "description": "Organisational policies (H&S, safeguarding, etc.), staff acknowledgement, and employee portal todos.",
+  "version": "0.1.2",
+  "icon": "icon.png",
+  "settings": {},
+  "enabled": true,
+  "dependencies": ["employee_portal_module", "website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Admin dashboard (review due / overdue), configurable document types (policy, procedure, SOP, etc.), free-text topic/area, staff filter by type.",
+  "repository_token": ""
+}

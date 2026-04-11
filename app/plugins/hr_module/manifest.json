@@ -1,0 +1,73 @@
+{
+  "system_name": "hr_module",
+  "name": "HR",
+  "description": "Employee store: profiles, DBS, driving licence, right to work, contract metadata, document library, and portal requests.",
+  "version": "0.0.2",
+  "icon": "icon.png",
+  "settings": {
+    "dbs_crsc_mass_check_interval_days": {
+      "value": "0",
+      "editable": true,
+      "tooltip": "Mass DBS Update Service (CRSC) checks for all employees who are on the Update Service with consent and required fields. 0 = off, 1 = daily, or 2-90 = every N days. Set from HR People dashboard or here; applies within about an hour without restarting the app. If 0, optional legacy env DBS_STATUS_CHECK_INTERVAL (daily|weekly) still applies."
+    },
+    "hcpc_mass_check_interval_days": {
+      "value": "0",
+      "editable": true,
+      "tooltip": "Mass HCPC register checks for employees with an HCPC registration number on file. 0 = off, 1 = daily, or 2-90 = every N days. Set from HR People dashboard or here; applies within about an hour without restarting the app."
+    },
+    "appraisal_reminder_days": {
+      "value": "30,14,7,1,0",
+      "editable": true,
+      "tooltip": "Comma-separated days before period_end when open/draft appraisals appear in the daily reminder scan and digest email (e.g. 30,14,7,1,0). Overdue appraisals are included every day until complete or period extended."
+    },
+    "appraisal_digest_email_enabled": {
+      "value": "1",
+      "editable": true,
+      "tooltip": "When 1/true, the daily scan sends one digest email to HR_APPRAISAL_REMINDER_EMAILS or admin/superuser addresses (requires SMTP env). Logs still record the scan when email is off."
+    }
+  },
+  "enabled": true,
+  "access_permission": "hr_module.access",
+  "alternate_access_permissions": [
+    "hr_module.read",
+    "hr_module.edit_employees",
+    "hr_module.document_requests",
+    "hr_module.library",
+    "hr_module.view_staff_activity_log"
+  ],
+  "declared_permissions": [
+    {
+      "id": "hr_module.access",
+      "label": "HR - full access (view, edit profiles, document requests, library)"
+    },
+    {
+      "id": "hr_module.read",
+      "label": "HR - view employees, profiles, files, requests, reports (read-only)"
+    },
+    {
+      "id": "hr_module.edit_employees",
+      "label": "HR - create employees and edit staff profiles"
+    },
+    {
+      "id": "hr_module.document_requests",
+      "label": "HR - create and approve/reject document requests"
+    },
+    {
+      "id": "hr_module.library",
+      "label": "HR - upload or delete files in employee document libraries"
+    },
+    {
+      "id": "hr_module.view_staff_activity_log",
+      "label": "HR - view per-employee activity log (admin + contractor portal actions)"
+    }
+  ],
+  "dependencies": [
+    "website_module",
+    "employee_portal_module",
+    "time_billing_module"
+  ],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Employee directory, document library, date of birth, richer admin dashboard. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "repository_token": ""
+}

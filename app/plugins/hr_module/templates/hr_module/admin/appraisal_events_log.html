@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Appraisal activity &amp; reminders · HR{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_appraisals_list') }}">Appraisals</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Activity log</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h1 class="h3 mb-1">Appraisal activity &amp; reminders</h1>
+      <p class="text-muted small mb-0">Audit trail: saves, signatures, attachments, daily scans, digest emails, and per-item reminder lines.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="{{ url_for('internal_hr.admin_appraisals_list', attention=1) }}" class="btn btn-sm btn-outline-warning">Due / overdue</a>
+      <a href="{{ url_for('internal_hr.admin_appraisals_list') }}" class="btn btn-sm btn-outline-secondary">All appraisals</a>
+    </div>
+  </div>
+
+  {% if hr_can_edit_employees %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h2 class="h6">Run reminder scan</h2>
+      <p class="small text-muted mb-2">Normally the server runs one scan per day (hourly scheduler). Use this to log items and send the digest email immediately.</p>
+      <form method="post" action="{{ url_for('internal_hr.admin_appraisal_run_reminder_scan') }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-12 col-md-auto">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="force" value="1" id="force_scan">
+            <label class="form-check-label" for="force_scan">Force (even if today already scanned)</label>
+          </div>
+        </div>
+        <div class="col-auto">
+          <button type="submit" class="btn btn-primary btn-sm">Run scan now</button>
+        </div>
+      </form>
+      <p class="small text-muted mt-2 mb-0">CLI: <code class="small">flask hr-appraisal-reminders</code> / <code class="small">flask hr-appraisal-reminders-now</code>. Env: <code class="small">HR_APPRAISAL_REMINDER_EMAILS</code>, <code class="small">HR_APPRAISAL_REMINDERS_DISABLED</code>.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if filter_appraisal_id %}
+  <p class="small text-muted">Filtered to appraisal #{{ filter_appraisal_id }} · <a href="{{ url_for('internal_hr.admin_appraisal_events_log') }}">Show all</a></p>
+  {% endif %}
+
+  {% if events %}
+  <div class="table-responsive card">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>When</th>
+          <th>Type</th>
+          <th>Summary</th>
+          <th>Employee</th>
+          <th>Appraisal</th>
+          <th>Channel</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in events %}
+        <tr>
+          <td class="small text-nowrap">{{ e.created_at }}</td>
+          <td class="small">{{ e.event_type|hr_appraisal_event_type }}</td>
+          <td class="small">{{ e.summary }}</td>
+          <td class="small">{% if e.contractor_id and e.employee_name %}<a href="{{ url_for('internal_hr.admin_contractor_profile', cid=e.contractor_id) }}">{{ e.employee_name }}</a>{% elif e.contractor_id %}#{{ e.contractor_id }}{% else %}—{% endif %}</td>
+          <td class="small">{% if e.appraisal_id %}<a href="{{ url_for('internal_hr.admin_appraisal_detail', aid=e.appraisal_id) }}">#{{ e.appraisal_id }}</a>{% else %}—{% endif %}</td>
+          <td class="small text-muted">{{ e.channel or '—' }}</td>
+        </tr>
+        {% if e.detail %}
+        <tr class="border-0">
+          <td colspan="6" class="small text-muted border-0 pt-0 pb-2"><pre class="mb-0 small" style="white-space:pre-wrap;max-height:6rem;overflow:auto;">{{ e.detail }}</pre></td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No events yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

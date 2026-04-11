@@ -1,0 +1,97 @@
+{% extends "compliance_module/base_public.html" %}
+{% block title %}Published documents — Compliance{% endblock %}
+{% block content %}
+<h1 class="h5 mb-1">Published documents</h1>
+<p class="text-secondary small mb-3">Read and acknowledge mandatory items. Your confirmation records that you have read, understood, and agree to abide by each document.</p>
+
+{% if document_types %}
+<div class="d-flex flex-wrap gap-2 align-items-center mb-4">
+  <span class="small text-secondary me-1">View by type:</span>
+  <a href="{{ url_for('public_compliance.public_index') }}" class="btn btn-sm {% if not document_type_filter %}btn-primary{% else %}btn-outline-secondary{% endif %}">All</a>
+  {% for dt in document_types %}
+  <a href="{{ url_for('public_compliance.public_index', type=dt.id) }}" class="btn btn-sm {% if document_type_filter == dt.id %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ dt.label }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if pending_count > 0 %}
+<div class="alert alert-warning border-0 small mb-4">
+  <strong>{{ pending_count }} mandatory document(s)</strong> need your acknowledgement before you are fully cleared for work-related duties that depend on compliance (see HR / your manager).
+</div>
+{% endif %}
+
+<h2 class="h6 text-secondary text-uppercase mb-2">Action required</h2>
+{% if pending %}
+<div class="d-flex flex-column gap-3 mb-4">
+  {% for p in pending %}
+  <div class="card card-module p-3 border-warning border-opacity-50">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <div>
+        <a href="{{ url_for('public_compliance.public_policy_view', policy_id=p.id) }}" class="fw-semibold">{{ p.title }}</a>
+        <p class="small text-muted mb-0">
+          {{ p.document_type_label or 'Document' }}{% if p.category %} · {{ p.category }}{% endif %} · Version {{ p.version }}
+        </p>
+      </div>
+      <span class="badge bg-warning text-dark">Required</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-secondary small mb-4">No mandatory acknowledgements pending. Thank you.</p>
+{% endif %}
+
+{% if acknowledged_library %}
+<h2 class="h6 text-secondary text-uppercase mb-2">Your document library</h2>
+<p class="small text-muted mb-3">Mandatory items you have acknowledged — open anytime for reference. Version and review dates are set by your organisation.</p>
+<div class="d-flex flex-column gap-3 mb-4">
+  {% for p in acknowledged_library %}
+  <div class="card card-module p-3 border border-opacity-25">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+      <div class="flex-grow-1 min-w-0">
+        <a href="{{ url_for('public_compliance.public_policy_view', policy_id=p.id) }}" class="fw-semibold d-inline-block">{{ p.title }}</a>
+        <div class="small text-muted">{{ p.document_type_label or 'Document' }}{% if p.category %} · {{ p.category }}{% endif %}</div>
+      </div>
+      <span class="badge bg-secondary text-white flex-shrink-0">v{{ p.version }}</span>
+    </div>
+    <div class="row g-3 small">
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="text-secondary text-uppercase fw-semibold mb-1" style="font-size: 0.7rem; letter-spacing: 0.04em;">Last updated</div>
+        <div>{% if p.updated_at %}{{ p.updated_at }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="text-secondary text-uppercase fw-semibold mb-1" style="font-size: 0.7rem; letter-spacing: 0.04em;">Next review due</div>
+        <div>{% if p.next_review_date %}{{ p.next_review_date }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="text-secondary text-uppercase fw-semibold mb-1" style="font-size: 0.7rem; letter-spacing: 0.04em;">Last reviewed</div>
+        <div>{% if p.last_reviewed_date %}{{ p.last_reviewed_date }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="text-secondary text-uppercase fw-semibold mb-1" style="font-size: 0.7rem; letter-spacing: 0.04em;">You acknowledged</div>
+        <div>{% if p.my_acknowledged_at %}{{ p.my_acknowledged_at }}{% else %}—{% endif %}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if optional_policies %}
+<h2 class="h6 text-secondary text-uppercase mb-2">Other published documents</h2>
+<p class="small text-muted mb-2">Reference documents — read as needed.</p>
+<ul class="list-group list-group-flush mb-4">
+  {% for p in optional_policies %}
+  <li class="list-group-item bg-transparent px-0">
+    <a href="{{ url_for('public_compliance.public_policy_view', policy_id=p.id) }}">{{ p.title }}</a>
+    <span class="text-muted small">
+      · {{ p.document_type_label or 'Document' }}{% if p.category %} · {{ p.category }}{% endif %}
+      · v{{ p.version }}{% if p.updated_at %} · updated {{ p.updated_at }}{% endif %}{% if p.next_review_date %} · next review {{ p.next_review_date }}{% endif %}
+    </span>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<a href="{{ url_for('public_employee_portal.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to portal</a>
+{% endblock %}

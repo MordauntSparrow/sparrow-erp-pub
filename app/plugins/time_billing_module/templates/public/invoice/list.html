@@ -1,0 +1,211 @@
+{% extends "public/base_timesheet_billing_module.html" %}
+{% block title %}My invoices{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h3 class="mb-0">My invoices</h3>
+  <div class="d-flex flex-wrap gap-2">
+    {% if employment_type == 'self_employed' %}
+    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#tbCombinedInvoiceModal">
+      Create invoice
+    </button>
+    {% endif %}
+    <a href="{{ url_for('public_time_billing.public_billing_settings_page') }}" class="btn btn-outline-secondary btn-sm">Billing details</a>
+  </div>
+</div>
+{% if employment_type == 'self_employed' and invoice_billing_frequency == 'monthly' %}
+<p class="text-muted small">Monthly billing: combine <strong>approved</strong> weeks that are not yet on an invoice using <strong>Create invoice</strong>. You do not need to create an invoice from each timesheet week.</p>
+{% else %}
+<p class="text-muted small">Linked to your timesheet weeks. Voided rows stay in history if a week was rejected and re-invoiced.</p>
+{% endif %}
+<div class="table-responsive">
+  <table class="table table-sm align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Invoice #</th>
+        <th>Week(s)</th>
+        <th>Ending</th>
+        <th class="text-end">Amount</th>
+        <th>Invoice</th>
+        <th>Timesheet</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in invoices %}
+      <tr>
+        <td class="fw-semibold">{{ r.invoice_number }}</td>
+        <td>
+          {% set nweeks = (r.invoice_week_count or 1)|int %}
+          {% set codes = (r.invoice_week_codes or r.timesheet_week_code or '') %}
+          {% if nweeks > 1 and codes %}
+          <span class="fw-semibold">{{ codes }}</span>
+          <span class="badge bg-secondary ms-1">{{ nweeks }} weeks</span>
+          {% else %}
+          <a href="{{ url_for('public_time_billing.public_week_page', week_id=r.timesheet_week_code) }}" class="fw-semibold">{{ r.timesheet_week_code }}</a>
+          <span class="text-muted small d-none d-md-inline">ISO week</span>
+          {% endif %}
+        </td>
+        <td>{{ r.week_ending }}</td>
+        <td class="text-end">£{{ '%.2f' % (r.total_amount or 0) }}</td>
+        <td>
+          <span class="badge {% if r.status == 'sent' %}bg-primary{% elif r.status == 'draft' %}bg-secondary{% else %}bg-dark{% endif %}">{{ r.status }}</span>
+        </td>
+        <td>
+          <span class="badge {% if r.timesheet_status == 'approved' %}bg-success{% elif r.timesheet_status == 'rejected' %}bg-danger{% elif r.timesheet_status == 'invoiced' %}bg-success{% elif r.timesheet_status == 'submitted' %}bg-info text-dark{% else %}bg-secondary{% endif %}">{{ r.timesheet_status }}</span>
+        </td>
+        <td class="text-nowrap">
+          {% if nweeks > 1 %}
+          <a class="btn btn-sm btn-outline-secondary me-1" href="{{ url_for('public_time_billing.public_week_page', week_id=r.timesheet_week_code) }}" title="Open anchor timesheet week">Timesheet</a>
+          {% else %}
+          <a class="btn btn-sm btn-outline-secondary me-1" href="{{ url_for('public_time_billing.public_week_page', week_id=r.timesheet_week_code) }}" title="Open this timesheet week">Timesheet</a>
+          {% endif %}
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('public_time_billing.public_invoice_detail_page', invoice_id=r.id) }}">View</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted">No invoices yet.
+        {% if employment_type == 'self_employed' %}Use <strong>Create invoice</strong> to bill approved weeks.{% endif %}
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if employment_type == 'self_employed' %}
+<div class="modal fade" id="tbCombinedInvoiceModal" tabindex="-1" aria-labelledby="tbCombinedInvoiceLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="tbCombinedInvoiceLabel">Create invoice</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted">Select one or more <strong>approved</strong> weeks that are not yet linked to an invoice. Each shift line appears on the same invoice; totals are combined.</p>
+        <div class="mb-3">
+          <label class="form-label" for="tbCombInvNum">Invoice number</label>
+          <input type="text" class="form-control form-control-sm" id="tbCombInvNum" value="{{ suggested_next_invoice_number }}" autocomplete="off">
+        </div>
+        <div id="tbCombInvLoading" class="small text-muted d-none">Loading weeks…</div>
+        <div id="tbCombInvError" class="alert alert-danger small d-none py-2"></div>
+        <div id="tbCombInvEmpty" class="small text-muted d-none">No eligible weeks. Weeks must be approved and have uninvoiced entries.</div>
+        <div id="tbCombInvList" class="list-group small"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="tbCombInvSubmit" disabled>Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script data-cfasync="false">
+(function () {
+  const modalEl = document.getElementById('tbCombinedInvoiceModal');
+  if (!modalEl) return;
+  const urlEligible = "{{ url_for('public_time_billing.api_public_invoice_eligible_weeks') }}";
+  const urlCreate = "{{ url_for('public_time_billing.api_public_create_combined_invoice') }}";
+  const listEl = document.getElementById('tbCombInvList');
+  const loadingEl = document.getElementById('tbCombInvLoading');
+  const errEl = document.getElementById('tbCombInvError');
+  const emptyEl = document.getElementById('tbCombInvEmpty');
+  const submitBtn = document.getElementById('tbCombInvSubmit');
+  const numEl = document.getElementById('tbCombInvNum');
+
+  function tbCsrfHeaders(h, method) {
+    return (typeof window.tbMergeCsrfHeaders === 'function')
+      ? window.tbMergeCsrfHeaders(h || {}, method)
+      : (h || {});
+  }
+
+  function selectedIds() {
+    const boxes = listEl.querySelectorAll('input[type="checkbox"]:checked');
+    return Array.from(boxes).map(function (x) { return parseInt(x.value, 10); }).filter(Boolean);
+  }
+
+  function refreshSubmit() {
+    submitBtn.disabled = selectedIds().length === 0;
+  }
+
+  modalEl.addEventListener('show.bs.modal', async function () {
+    errEl.classList.add('d-none');
+    emptyEl.classList.add('d-none');
+    listEl.innerHTML = '';
+    loadingEl.classList.remove('d-none');
+    submitBtn.disabled = true;
+    try {
+      const r = await fetch(urlEligible, { headers: { 'Accept': 'application/json' } });
+      const data = await r.json().catch(function () { return {}; });
+      loadingEl.classList.add('d-none');
+      if (!r.ok || !data.ok) {
+        errEl.textContent = (data && data.message) ? data.message : 'Could not load weeks';
+        errEl.classList.remove('d-none');
+        return;
+      }
+      const weeks = data.weeks || [];
+      if (!weeks.length) {
+        emptyEl.classList.remove('d-none');
+        return;
+      }
+      weeks.forEach(function (w) {
+        const id = w.id;
+        const code = w.week_code || '';
+        const we = w.week_ending || '';
+        const tot = (w.line_total != null) ? Number(w.line_total).toFixed(2) : '0.00';
+        const label = document.createElement('label');
+        label.className = 'list-group-item d-flex align-items-center gap-2';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'form-check-input flex-shrink-0';
+        cb.value = String(id);
+        cb.addEventListener('change', refreshSubmit);
+        const span = document.createElement('span');
+        span.innerHTML = '<strong>' + code + '</strong> · ends ' + we + ' · £' + tot;
+        label.appendChild(cb);
+        label.appendChild(span);
+        listEl.appendChild(label);
+      });
+    } catch (e) {
+      loadingEl.classList.add('d-none');
+      errEl.textContent = e.message || 'Load failed';
+      errEl.classList.remove('d-none');
+    }
+  });
+
+  submitBtn.addEventListener('click', async function () {
+    const ids = selectedIds();
+    if (!ids.length) return;
+    errEl.classList.add('d-none');
+    submitBtn.disabled = true;
+    const payload = {
+      timesheet_week_ids: ids,
+      invoice_number: (numEl.value || '').trim(),
+    };
+    try {
+      const r = await fetch(urlCreate, {
+        method: 'POST',
+        headers: tbCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(function () { return {}; });
+      if (!r.ok || !data.ok) {
+        errEl.textContent = (data && data.message) ? data.message : 'Create failed';
+        errEl.classList.remove('d-none');
+        submitBtn.disabled = false;
+        return;
+      }
+      const inv = data.invoice || {};
+      if (inv.id) {
+        var _detailUrl = "{{ url_for('public_time_billing.public_invoice_detail_page', invoice_id=999001) }}";
+        window.location.href = _detailUrl.replace('999001', String(inv.id));
+      } else {
+        window.location.reload();
+      }
+    } catch (e) {
+      errEl.textContent = e.message || 'Create failed';
+      errEl.classList.remove('d-none');
+      submitBtn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

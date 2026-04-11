@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{% if policy %}Edit{% else %}New{% endif %} document{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-10">
+  <h1 class="h4 mb-3">{% if policy %}Edit document{% else %}New document{% endif %}</h1>
+  <p class="small mb-3"><a href="{{ url_for('internal_compliance.admin_index') }}">← Compliance</a>
+    · <a href="{{ url_for('internal_compliance.admin_document_types') }}">Document types</a></p>
+
+  <form method="post" enctype="multipart/form-data" class="mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">Title</label>
+      <input class="form-control" name="title" required value="{{ policy.title if policy else '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">URL slug (optional)</label>
+      <input class="form-control" name="slug" value="{{ policy.slug if policy else '' }}" placeholder="auto from title">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Document type</label>
+      {% if document_types %}
+      <select class="form-select" name="document_type_id" required>
+        {% for dt in document_types %}
+        <option value="{{ dt.id }}" {% if policy and policy.document_type_id == dt.id %}selected{% elif not policy and default_document_type_id == dt.id %}selected{% endif %}>{{ dt.label }}{% if not dt.active %} (inactive){% endif %}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <div class="alert alert-warning small mb-2">No document types in the database. Run <code>python app/plugins/compliance_module/install.py upgrade</code> (or install) on the server, then open <a href="{{ url_for('internal_compliance.admin_document_types') }}">Document types</a>.</div>
+      {% endif %}
+      <div class="form-text">What this item is (policy, procedure, SOP, etc.). Manage the list under <a href="{{ url_for('internal_compliance.admin_document_types') }}">Document types</a>.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Topic / area <span class="text-muted fw-normal">(optional)</span></label>
+      <input class="form-control" name="topic" value="{{ policy.category if policy else '' }}" maxlength="255" placeholder="e.g. Medicines management, Safeguarding, Fleet">
+      <div class="form-text">Free-text tag for browsing — not limited to a fixed list.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Summary (shown on portal)</label>
+      <textarea class="form-control" name="summary" rows="2">{{ policy.summary if policy else '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Full text (optional — in addition to PDF)</label>
+      <textarea class="form-control font-monospace small" name="body_text" rows="8">{{ policy.body_text if policy else '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Policy file (PDF, Word)</label>
+      <input class="form-control" type="file" name="file" accept=".pdf,.doc,.docx">
+      {% if policy and policy.file_path %}<p class="small text-muted mb-0 mt-1">Current: <code>{{ policy.file_path }}</code> — upload replaces.</p>{% endif %}
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="mandatory" value="1" id="mandatory" {% if not policy or policy.mandatory %}checked{% endif %}>
+      <label class="form-check-label" for="mandatory">Mandatory acknowledgement (portal to-do + blocks “cleared” counts)</label>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <label class="form-label" for="next_review_date">Next review due</label>
+        <input class="form-control" type="date" name="next_review_date" id="next_review_date"
+          value="{% if policy and policy.next_review_date %}{{ (policy.next_review_date|string)[:10] }}{% endif %}">
+        <div class="form-text">Shown to staff on the policy and in their library (e.g. scheduled governance review).</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="last_reviewed_date">Last reviewed (organisation)</label>
+        <input class="form-control" type="date" name="last_reviewed_date" id="last_reviewed_date"
+          value="{% if policy and policy.last_reviewed_date %}{{ (policy.last_reviewed_date|string)[:10] }}{% endif %}">
+        <div class="form-text">When content was last formally reviewed by the organisation.</div>
+      </div>
+    </div>
+    {% if policy and policy.updated_at %}
+    <p class="small text-muted mb-3">System <strong>last updated</strong> (auto): {{ policy.updated_at }}</p>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+
+  {% if policy %}
+  <hr>
+  <h2 class="h6">Publish</h2>
+  <p class="small text-muted">First issue publishes version 1 and creates portal tasks (if mandatory). Further issues increment the version, close old tasks, and notify everyone again.</p>
+  <form method="post" class="d-inline" onsubmit="return confirm('Issue this policy version to all active staff now?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="issue">
+    <button type="submit" class="btn btn-success btn-sm">Issue to all staff</button>
+  </form>
+  {% if policy.published %}
+  <form method="post" class="d-inline ms-2" onsubmit="return confirm('Unpublish? Staff will no longer see this policy until you issue again.');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="unpublish">
+    <button type="submit" class="btn btn-outline-secondary btn-sm">Unpublish</button>
+  </form>
+  {% endif %}
+
+  <h3 class="h6 mt-4">Recent acknowledgements</h3>
+  <div class="table-responsive border rounded small">
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr><th>Staff</th><th>Version</th><th>When</th></tr></thead>
+      <tbody>
+        {% for a in acknowledgements %}
+        <tr>
+          <td>{{ a.contractor_name or a.contractor_email }}</td>
+          <td>{{ a.version }}</td>
+          <td>{{ a.acknowledged_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-muted">None yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

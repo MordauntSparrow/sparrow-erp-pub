@@ -1,0 +1,79 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Guide &amp; wage mapping{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Guide &amp; wage mapping</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <h1 class="h4 mb-2">Event guide ↔ wage card job types</h1>
+  <p class="text-muted small mb-4">
+    Intake and opportunities use a <strong>staffing guide</strong> (counts only). Wage hints use £/h from Time &amp; Billing
+    <strong>job types</strong> on the active guide wage card. Map the two CRM lines below to your real <code>job_types</code> IDs
+    so naming differences (e.g. “Clinical officer” vs “Medic”) do not break costing.
+    Active card: {% if card_id %}<strong>#{{ card_id }}</strong> {{ card_name or '' }}{% else %}<span class="text-warning">none — add a card or set <code>SPARROW_CRM_GUIDE_WAGE_CARD_ID</code></span>{% endif %}.
+    Each mapped type must have an effective rate row on that card for today’s date.
+  </p>
+
+  {% set on_ids = job_types_on_card | map(attribute='id') | list %}
+
+  {% if can_edit %}
+  <form method="post" class="card border-0 shadow-sm mb-4">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="clinical_job_type_id">Clinical / medic line</label>
+          <select class="form-select" id="clinical_job_type_id" name="clinical_job_type_id">
+            <option value="">— Auto-detect from names (legacy) —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('clinical') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="driver_job_type_id">Driver / response crew line</label>
+          <select class="form-select" id="driver_job_type_id" name="driver_job_type_id">
+            <option value="">— Auto-detect from names (legacy) —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('driver') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary rounded-pill mt-3">Save mapping</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="text-muted small">You do not have CRM edit permission.</p>
+  {% endif %}
+
+  {% if preview_estimate %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Live preview (2 medics, 1 vehicle, 8 h)</h2>
+      {% if preview_estimate.tb_note %}
+      <div class="alert alert-warning small py-2">{{ preview_estimate.tb_note }}</div>
+      {% endif %}
+      {% if preview_estimate.lines %}
+      <ul class="list-group list-group-flush small">
+        {% for line in preview_estimate.lines %}
+        <li class="list-group-item d-flex justify-content-between px-0">
+          <span>{{ line.label }}<br><span class="text-muted">{{ line.detail }}</span></span>
+          <span class="fw-semibold">£{{ line.amount_gbp | float | round(2) }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="mb-0 mt-2 fw-bold">Total ≈ £{{ preview_estimate.total_gbp | float | round(2) }}</p>
+      {% else %}
+      <p class="small text-muted mb-0">No lines — configure wage card rates or mappings.</p>
+      {% endif %}
+      <p class="small text-muted mt-2 mb-0">
+        Using explicit CRM map — clinical: {{ 'yes' if preview_estimate.get('used_clinical_mapping') else 'no' }},
+        driver: {{ 'yes' if preview_estimate.get('used_driver_mapping') else 'no' }}.
+      </p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

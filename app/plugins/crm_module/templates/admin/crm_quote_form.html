@@ -1,0 +1,206 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if quote %}Quote #{{ quote.id }}{% else %}New quote{% endif %}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h4 mb-0">{% if quote %}Edit quote{% else %}New quote{% endif %}</h1>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quotes_list') }}">All quotes</a>
+      {% if quote and can_edit %}
+      <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', quote_id=quote.id) }}">Event plan</a>
+      <form method="post" action="{{ url_for('crm_module.quote_new_revision', quote_id=quote.id) }}" class="d-inline" onsubmit="return confirm('Create a new draft revision copying this quote?');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-primary btn-sm rounded-pill">New revision</button>
+      </form>
+      <form method="post" action="{{ url_for('crm_module.quote_delete', quote_id=quote.id) }}" class="d-inline" onsubmit="return confirm('Delete this quote permanently?');">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if quote and linked_event_plans %}
+  <div class="alert alert-light border small mb-3">
+    <strong>Event medical plans</strong> linked to this quote —
+    {% for ep in linked_event_plans %}
+    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('crm_module.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
+    <span class="text-muted small">({{ ep.status }})</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <p class="text-muted small mb-3">Customer total uses <strong>line items + rule set</strong> on the left. Staffing bands and internal wage hints sit on the <strong>linked opportunity</strong> (sidebar when an opportunity is selected).</p>
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <form method="post" id="crmQuoteForm">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <div class="card border-0 shadow-sm mb-3">
+          <div class="card-body">
+            <h2 class="h6 text-uppercase text-muted mb-3">Details</h2>
+            <div class="mb-2">
+              <label class="form-label" for="title">Title</label>
+              <input class="form-control" id="title" name="title" maxlength="255" value="{% if quote %}{{ quote.title }}{% elif quote_prefill %}{{ quote_prefill.title }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+            </div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label" for="account_id">Account</label>
+                <select class="form-select" id="account_id" name="account_id" {% if not can_edit %}disabled{% endif %}>
+                  <option value="">—</option>
+                  {% for a in accounts %}
+                  <option value="{{ a.id }}" {% if quote and quote.account_id == a.id %}selected{% elif not quote and quote_prefill and quote_prefill.account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="opportunity_id">Opportunity</label>
+                <select class="form-select" id="opportunity_id" name="opportunity_id" {% if not can_edit %}disabled{% endif %}>
+                  <option value="">—</option>
+                  {% for o in opportunities %}
+                  <option value="{{ o.id }}" {% if quote and quote.opportunity_id == o.id %}selected{% elif not quote and quote_prefill and quote_prefill.opportunity_id == o.id %}selected{% endif %}>{{ o.account_name }} — {{ o.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="row g-2 mt-1">
+              <div class="col-md-6">
+                <label class="form-label" for="rule_set_id">Rule set</label>
+                <select class="form-select" id="rule_set_id" name="rule_set_id" {% if not can_edit %}disabled{% endif %}>
+                  <option value="">— None —</option>
+                  {% for rs in rule_sets %}
+                  <option value="{{ rs.id }}" {% if quote and quote.rule_set_id == rs.id %}selected{% endif %}>{{ rs.name }}{% if rs.is_active is defined and not rs.is_active %} (inactive){% endif %}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="crowd_size">Crowd size</label>
+                <input class="form-control" id="crowd_size" name="crowd_size" inputmode="numeric" value="{% if quote and quote.crowd_size is not none %}{{ quote.crowd_size }}{% elif not quote and quote_prefill and quote_prefill.crowd_size is not none %}{{ quote_prefill.crowd_size }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="duration_hours">Hours</label>
+                <input class="form-control" id="duration_hours" name="duration_hours" inputmode="decimal" value="{% if quote and quote.duration_hours is not none %}{{ quote.duration_hours }}{% elif not quote and quote_prefill and quote_prefill.duration_hours is not none %}{{ quote_prefill.duration_hours }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+              </div>
+            </div>
+            <div class="mt-2">
+              <label class="form-label" for="internal_notes">Internal notes</label>
+              <textarea class="form-control" id="internal_notes" name="internal_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{% if quote and quote.internal_notes %}{{ quote.internal_notes }}{% elif not quote and quote_prefill and quote_prefill.internal_notes %}{{ quote_prefill.internal_notes }}{% endif %}</textarea>
+            </div>
+            {% if quote %}
+            <div class="row g-2 mt-2">
+              <div class="col-md-6">
+                <label class="form-label" for="status">Status</label>
+                <select class="form-select" id="status" name="status" {% if not can_edit %}disabled{% endif %}>
+                  {% for val, label in statuses %}
+                  <option value="{{ val }}" {% if quote.status == val %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="status_note">Status note <span class="text-muted small">(optional, logged on change)</span></label>
+                <input class="form-control" id="status_note" name="status_note" maxlength="512" {% if not can_edit %}readonly{% endif %}>
+              </div>
+            </div>
+            <p class="small text-muted mt-2 mb-0">Revision {{ quote.revision if quote else 1 }}</p>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mb-3">
+          <div class="card-body">
+            <h2 class="h6 text-uppercase text-muted mb-3">Line items</h2>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>Description</th>
+                    <th style="width:7rem">Qty</th>
+                    <th style="width:8rem">Unit £</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for line in lines %}
+                  <tr>
+                    <td><input class="form-control form-control-sm" name="line_description[]" value="{{ line.description or '' }}" {% if not can_edit %}readonly{% endif %}></td>
+                    <td><input class="form-control form-control-sm" name="line_quantity[]" value="{{ line.quantity }}" {% if not can_edit %}readonly{% endif %}></td>
+                    <td><input class="form-control form-control-sm" name="line_unit_price[]" value="{{ line.unit_price }}" {% if not can_edit %}readonly{% endif %}></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <p class="small text-muted mb-0">Leave unused rows blank. Totals refresh when you save.</p>
+          </div>
+        </div>
+
+        {% if can_edit %}
+        <button type="submit" class="btn btn-primary rounded-pill">Save quote</button>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="col-lg-4">
+      {% include 'partials/crm_quote_opportunity_staffing.html' %}
+      <div class="card border-0 shadow-sm mb-3 sticky-top" style="top:1rem;">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-3">Quote calculator</h2>
+          {% if total is not none %}
+          <ul class="list-group list-group-flush small">
+            {% for label, amt in breakdown %}
+            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+              <span>{{ label }}</span>
+              <span class="font-monospace">£{{ amt }}</span>
+            </li>
+            {% endfor %}
+            <li class="list-group-item d-flex justify-content-between px-0 pt-2 fw-bold border-top">
+              <span>Total</span>
+              <span class="font-monospace">£{{ total }}</span>
+            </li>
+          </ul>
+          {% else %}
+          <p class="text-muted small mb-0">Save the quote to persist totals. Preview uses current form values after save.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if quote and revisions|length > 1 %}
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-2">Revisions</h2>
+          <ul class="list-unstyled small mb-0">
+            {% for r in revisions %}
+            <li class="d-flex justify-content-between py-1 border-bottom">
+              <span>Rev {{ r.revision }} — {{ status_labels.get(r.status, r.status) }}</span>
+              {% if r.id != quote.id %}
+              <a href="{{ url_for('crm_module.quote_edit', quote_id=r.id) }}">Open</a>
+              {% else %}
+              <span class="text-primary fw-medium">Current</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+      {% if quote and history %}
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-3">Status history</h2>
+          <ul class="list-unstyled small mb-0">
+            {% for h in history %}
+            <li class="mb-2 pb-2 border-bottom">
+              <div class="fw-medium">{{ status_labels.get(h.new_status, h.new_status) }}</div>
+              <div class="text-muted">{{ h.created_at }}{% if h.changed_by %} · user {{ h.changed_by[:8] }}…{% endif %}</div>
+              {% if h.note %}<div class="mt-1">{{ h.note }}</div>{% endif %}
+              {% if h.previous_status %}<div class="text-muted">was {{ status_labels.get(h.previous_status, h.previous_status) }}</div>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

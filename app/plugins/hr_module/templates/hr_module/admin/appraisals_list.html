@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Appraisals · HR{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_hr.admin_index') }}">HR</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Appraisals</li>
+    </ol>
+  </nav>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">Staff appraisals</h1>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="{{ url_for('internal_hr.admin_appraisal_events_log') }}" class="btn btn-sm btn-outline-secondary">Activity &amp; reminders log</a>
+      <a href="{{ url_for('internal_hr.admin_appraisals_list', attention=1) }}" class="btn btn-sm btn-outline-warning">Due / overdue</a>
+      {% if filter_cid and hr_can_edit_employees %}
+      <a href="{{ url_for('internal_hr.admin_appraisal_new_form', cid=filter_cid) }}" class="btn btn-primary">New appraisal</a>
+      {% endif %}
+    </div>
+  </div>
+  {% if attention_only %}
+  <div class="alert alert-warning small py-2">Showing open/draft appraisals that are <strong>overdue</strong>, match a <strong>reminder day</strong> (see HR plugin settings), or are <strong>missing a period end</strong>.</div>
+  {% endif %}
+  {% if filter_cid %}
+  <p class="text-muted small">Filtered to <strong>{{ filter_employee_label or ('#' ~ filter_cid) }}</strong> · <a href="{{ url_for('internal_hr.admin_appraisals_list') }}">Show all</a></p>
+  {% elif not attention_only %}
+  <p class="text-muted small">Cycles, goals, signatures, daily reminder scans, and digest emails (HR-APPR-001). Open an employee profile to start an appraisal.</p>
+  {% endif %}
+
+  {% if appraisals %}
+  <div class="table-responsive card">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Employee</th>
+          <th>Cycle</th>
+          <th>Period</th>
+          <th>Manager</th>
+          <th>Status</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in appraisals %}
+        <tr>
+          <td>
+            <a href="{{ url_for('internal_hr.admin_contractor_profile', cid=a.contractor_id) }}">{{ a.employee_name or a.employee_email or ('#' ~ a.contractor_id) }}</a>
+          </td>
+          <td>{{ a.cycle_label or '—' }}</td>
+          <td class="text-nowrap small">{% if a.period_start %}{{ a.period_start }}{% else %}—{% endif %} – {% if a.period_end %}{{ a.period_end }}{% else %}—{% endif %}</td>
+          <td class="small">{{ a.manager_name or '—' }}</td>
+          <td><span class="badge bg-secondary bg-opacity-25 text-dark">{{ a.status|hr_appraisal_status }}</span></td>
+          <td class="small text-nowrap">{{ a.updated_at or '—' }}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_hr.admin_appraisal_detail', aid=a.id) }}">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="alert alert-light border">{% if attention_only %}No appraisals match the due / overdue filter.{% else %}No appraisals on file yet.{% endif %}</div>
+  {% endif %}
+</div>
+{% endblock %}

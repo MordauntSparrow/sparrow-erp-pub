@@ -1,0 +1,55 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if contact %}Edit contact{% else %}New contact{% endif %}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 720px;">
+  <h1 class="h4 mb-3">{% if contact %}Edit contact{% else %}New contact{% endif %}</h1>
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+          <label class="form-label" for="account_id">Account</label>
+          <select class="form-select" id="account_id" name="account_id">
+            <option value="">— None —</option>
+            {% for a in accounts %}
+            <option value="{{ a.id }}" {% if contact and contact.account_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="form-label" for="first_name">First name</label>
+            <input class="form-control" id="first_name" name="first_name" maxlength="128"
+              value="{{ contact.first_name if contact else '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="last_name">Last name</label>
+            <input class="form-control" id="last_name" name="last_name" maxlength="128"
+              value="{{ contact.last_name if contact else '' }}">
+          </div>
+        </div>
+        <p class="small text-muted mb-3">Provide at least first or last name.</p>
+        <div class="mb-3">
+          <label class="form-label" for="email">Email</label>
+          <input class="form-control" id="email" name="email" type="email" maxlength="255"
+            value="{{ contact.email if contact and contact.email else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="phone">Phone</label>
+          <input class="form-control" id="phone" name="phone" maxlength="64"
+            value="{{ contact.phone if contact and contact.phone else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="job_title">Job title</label>
+          <input class="form-control" id="job_title" name="job_title" maxlength="128"
+            value="{{ contact.job_title if contact and contact.job_title else '' }}">
+        </div>
+        <div class="d-flex gap-2">
+          <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.contacts_list') }}">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

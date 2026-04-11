@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Send message – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-3">Send message</h1>
+  <p class="text-muted">Send a portal message to one or more staff. They will see it on their dashboard.</p>
+
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_messages_send') }}" class="card card-body" style="max-width: 640px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label">Recipients</label>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="send_to" id="send_all" value="all">
+        <label class="form-check-label" for="send_all">All staff</label>
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="send_to" id="send_selected" value="selected" checked>
+        <label class="form-check-label" for="send_selected">Selected staff</label>
+      </div>
+      <select class="form-select" id="contractor_select" multiple size="8">
+        {% for c in contractors %}
+        <option value="{{ c.id }}">{{ c.name or c.email }} ({{ c.email }})</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="contractor_ids" id="contractor_ids" value="">
+      <p class="small text-muted mt-1">Hold Ctrl/Cmd to select multiple. If "All staff" is selected, the list is ignored.</p>
+    </div>
+    <div class="mb-3">
+      <label for="subject" class="form-label">Subject <span class="text-danger">*</span></label>
+      <input type="text" class="form-control" id="subject" name="subject" required maxlength="255" placeholder="Message subject">
+    </div>
+    <div class="mb-3">
+      <label for="body" class="form-label">Body (optional)</label>
+      <textarea class="form-control" id="body" name="body" rows="4" placeholder="Message body"></textarea>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Send</button>
+      <a href="{{ url_for('internal_employee_portal.admin_messages') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+  <script>
+  document.getElementById('send_all').addEventListener('change', function() {
+    document.getElementById('contractor_select').disabled = this.checked;
+  });
+  document.getElementById('send_selected').addEventListener('change', function() {
+    document.getElementById('contractor_select').disabled = !this.checked;
+  });
+  document.querySelector('form').addEventListener('submit', function() {
+    var sendTo = document.querySelector('input[name="send_to"]:checked').value;
+    if (sendTo === 'selected') {
+      var sel = document.getElementById('contractor_select');
+      var ids = [];
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].selected) ids.push(sel.options[i].value);
+      }
+      document.getElementById('contractor_ids').value = ids.join(',');
+    }
+  });
+  </script>
+</div>
+{% endblock %}

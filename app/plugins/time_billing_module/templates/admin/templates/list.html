@@ -1,0 +1,283 @@
+{% extends "admin/base_timesheet_billing_module.html" %}
+{% block content %}
+<div class="container py-3">
+
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h4 class="mb-0 d-flex align-items-center">
+      <i class="bi bi-ui-checks-grid me-2"></i> Runsheet Templates
+    </h4>
+    <button type="button" id="btnNewTpl" class="btn btn-primary btn-sm" data-mdb-toggle="modal" data-mdb-target="#createTplModal">
+      <i class="bi bi-plus-lg me-1"></i> New Template
+    </button>
+  </div>
+
+  <p class="text-muted small mb-3">
+    Templates define the form staff complete on a job. Link a <strong>job type</strong> so published runsheets create timesheet rows under that job type.
+    Add <strong>multiple contractors</strong> on the runsheet (crew) — each assignment gets their own timesheet line when you publish.
+  </p>
+
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Code</th>
+              <th>Job type</th>
+              <th>Client</th>
+              <th>Site</th>
+              <th>Ver.</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tplBody">
+            <tr><td colspan="8" class="text-center py-4 text-muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Create template (MDB modal) -->
+<div class="modal fade" id="createTplModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New runsheet template</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Template name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" id="ctName" placeholder="e.g. Commercial clean – site checklist" required>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Short code (optional)</label>
+            <input type="text" class="form-control form-control-sm" id="ctCode" placeholder="e.g. COMM_CHECK" maxlength="80">
+            <div class="form-text">Unique if set; used for integrations.</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Job type <span class="text-danger">*</span></label>
+            <select class="form-select form-select-sm" id="ctJobType" required>
+              <option value="">Loading…</option>
+            </select>
+            <div class="form-text">Timesheet rows use this job type when the runsheet is published.</div>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Default client (optional)</label>
+            <select class="form-select form-select-sm" id="ctClient">
+              <option value="">— Any / not set —</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label">Default site (optional)</label>
+            <select class="form-select form-select-sm" id="ctSite">
+              <option value="">— Any / not set —</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-mdb-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="ctSubmit">
+          <span class="ct-label">Create &amp; open editor</span>
+          <span class="spinner-border spinner-border-sm ms-1 d-none" role="status" aria-hidden="true"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+(function () {
+  const body = document.getElementById('tplBody');
+  const LIST_URL = "{{ url_for('internal_time_billing.list_templates') }}";
+  const CREATE_URL = "{{ url_for('internal_time_billing.create_template') }}";
+  const EDIT_BASE = "{{ url_for('internal_time_billing.templates_edit_page') }}";
+  const PREVIEW_BASE = "{{ url_for('internal_time_billing.templates_preview_page') }}";
+  const REF_JT = "{{ url_for('internal_time_billing.api_refs_job_types') }}";
+  const REF_CL = "{{ url_for('internal_time_billing.api_admin_refs_clients') }}";
+  const REF_SI = "{{ url_for('internal_time_billing.api_admin_refs_sites') }}";
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  }
+
+  async function loadRefsIntoModal() {
+    const jt = document.getElementById('ctJobType');
+    const cl = document.getElementById('ctClient');
+    const si = document.getElementById('ctSite');
+    jt.innerHTML = '<option value="">Loading…</option>';
+    cl.innerHTML = '<option value="">— Any / not set —</option>';
+    si.innerHTML = '<option value="">— Any / not set —</option>';
+    try {
+      const [rj, rc] = await Promise.all([
+        fetch(REF_JT, { headers: { 'Accept': 'application/json' } }),
+        fetch(REF_CL, { headers: { 'Accept': 'application/json' } })
+      ]);
+      const dj = rj.ok ? await rj.json() : { items: [] };
+      const dc = rc.ok ? await rc.json() : { items: [] };
+      const jitems = Array.isArray(dj.items) ? dj.items : [];
+      jt.innerHTML = '<option value="">Select job type…</option>' +
+        jitems.map(x => `<option value="${x.id}">${escapeHtml(x.name)}</option>`).join('');
+      const citems = Array.isArray(dc.items) ? dc.items : [];
+      citems.forEach(x => {
+        const o = document.createElement('option');
+        o.value = x.id;
+        o.textContent = x.name || ('Client #' + x.id);
+        cl.appendChild(o);
+      });
+    } catch (e) {
+      console.error(e);
+      jt.innerHTML = '<option value="">Failed to load job types</option>';
+    }
+  }
+
+  async function loadSitesForClient(clientId) {
+    const si = document.getElementById('ctSite');
+    si.innerHTML = '<option value="">— Any / not set —</option>';
+    if (!clientId) return;
+    try {
+      const u = new URL(REF_SI, window.location.origin);
+      u.searchParams.set('client_id', clientId);
+      const r = await fetch(u.pathname + u.search, { headers: { 'Accept': 'application/json' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      (Array.isArray(d.items) ? d.items : []).forEach(x => {
+        const o = document.createElement('option');
+        o.value = x.id;
+        o.textContent = x.name || ('Site #' + x.id);
+        si.appendChild(o);
+      });
+    } catch (e) { console.error(e); }
+  }
+
+  document.getElementById('ctClient').addEventListener('change', function () {
+    loadSitesForClient(this.value || '');
+  });
+
+  const createModalEl = document.getElementById('createTplModal');
+  createModalEl.addEventListener('show.mdb.modal', () => { loadRefsIntoModal(); });
+
+  function renderRows(data) {
+    body.innerHTML = '';
+    if (!data || !data.length) {
+      body.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No templates yet. Create one to design staff forms.</td></tr>';
+      return;
+    }
+    for (const t of data) {
+      const tr = document.createElement('tr');
+      const jt = escapeHtml(t.job_type_name || (t.job_type_id != null ? '#' + t.job_type_id : '—'));
+      const cl = escapeHtml(t.client_label || (t.client_id != null ? '#' + t.client_id : '—'));
+      const st = escapeHtml(t.site_label || (t.site_id != null ? '#' + t.site_id : '—'));
+      tr.innerHTML = `
+        <td>${t.id}</td>
+        <td>${escapeHtml(t.name)}</td>
+        <td><code class="small">${escapeHtml(t.code || '—')}</code></td>
+        <td>${jt}</td>
+        <td>${cl}</td>
+        <td>${st}</td>
+        <td>${t.version ?? 1}</td>
+        <td class="text-end">
+          <div class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-outline-primary" data-action="edit" data-id="${t.id}">Edit</button>
+            <button type="button" class="btn btn-outline-secondary" data-action="preview" data-id="${t.id}">Preview</button>
+          </div>
+        </td>`;
+      body.appendChild(tr);
+    }
+  }
+
+  async function load() {
+    body.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">Loading…</td></tr>';
+    try {
+      const resp = await fetch(LIST_URL, { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || ('HTTP ' + resp.status));
+      }
+      const data = await resp.json();
+      renderRows(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error(err);
+      body.innerHTML = '<tr><td colspan="8" class="text-center text-danger py-4">Error loading templates: ' + escapeHtml(err.message || 'unknown') + '</td></tr>';
+    }
+  }
+
+  body.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-id');
+    const action = btn.getAttribute('data-action');
+    if (action === 'edit') {
+      window.location.href = EDIT_BASE + '#edit-' + id;
+    } else if (action === 'preview') {
+      window.location.href = PREVIEW_BASE + '#preview-' + id;
+    }
+  });
+
+  document.getElementById('ctSubmit').addEventListener('click', async () => {
+    const name = document.getElementById('ctName').value.trim();
+    const job_type_id = document.getElementById('ctJobType').value;
+    if (!name) { alert('Template name is required'); return; }
+    if (!job_type_id) { alert('Job type is required'); return; }
+    const btn = document.getElementById('ctSubmit');
+    const sp = btn.querySelector('.spinner-border');
+    const lab = btn.querySelector('.ct-label');
+    const code = document.getElementById('ctCode').value.trim() || null;
+    const client_id = document.getElementById('ctClient').value ? parseInt(document.getElementById('ctClient').value, 10) : null;
+    const site_id = document.getElementById('ctSite').value ? parseInt(document.getElementById('ctSite').value, 10) : null;
+    btn.disabled = true;
+    sp.classList.remove('d-none');
+    lab.textContent = 'Creating…';
+    try {
+      const resp = await fetch(CREATE_URL, {
+        method: 'POST',
+        headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
+        body: JSON.stringify({
+          name,
+          code,
+          job_type_id: parseInt(job_type_id, 10),
+          client_id,
+          site_id,
+          active: 1,
+          version: 1
+        })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        alert(data.error || 'Failed to create template');
+        return;
+      }
+      const id = data.id;
+      const m = window.mdb && mdb.Modal ? mdb.Modal.getInstance(createModalEl) : null;
+      if (m) m.hide();
+      document.getElementById('ctName').value = '';
+      document.getElementById('ctCode').value = '';
+      if (id) {
+        window.location.href = EDIT_BASE + '#edit-' + id;
+        return;
+      }
+      load();
+    } catch (e) {
+      console.error(e);
+      alert('Error creating template');
+    } finally {
+      btn.disabled = false;
+      sp.classList.add('d-none');
+      lab.textContent = 'Create & open editor';
+    }
+  });
+
+  load();
+})();
+</script>
+{% endblock %}

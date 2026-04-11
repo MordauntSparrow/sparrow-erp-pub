@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+{% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+<title>{{ _site.get('company_name') or 'Sparrow ERP' }}</title>
+{% include 'partials/sparrow_date_locale.html' %}
+
+<!-- MDB UI Kit (includes Bootstrap 5) -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+<style>
+/* ===== Theme-aware base ===== */
+body {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #121212;
+    color: #ffffff;
+  {% elif config.theme_settings.theme == 'modern' %}
+    background-color: #f0f2f5;
+    color: #212529;
+  {% else %}
+    background-color: #ffffff;
+    color: #212529;
+  {% endif %}
+}
+
+{% include 'partials/sparrow_admin_nav_styles.html' %}
+
+/* ===== Links ===== */
+a { 
+  {% if config.theme_settings.theme == 'dark' %} color: #1e90ff; {% else %} color: #007bff; {% endif %} 
+}
+a:hover { 
+  {% if config.theme_settings.theme == 'dark' %} color: #87ceeb; {% else %} color: #0056b3; {% endif %} 
+  text-decoration: none;
+}
+
+/* ===== List groups ===== */
+.list-group {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border-bottom: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border-bottom: 1px solid #ced4da;
+  {% endif %}
+}
+.list-group-item:hover {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929;
+  {% else %}
+    background-color: #f8f9fa;
+  {% endif %}
+}
+
+/* ===== Buttons ===== */
+.btn-primary { background-color: {% if config.theme_settings.theme == 'dark' %} #1e90ff {% else %} #007bff {% endif %}; color: #fff; }
+.btn-danger { background-color: #dc3545; color: #fff; }
+.btn-warning { background-color: #ffc107; color: #212529; }
+.btn-secondary { background-color: #6c757d; color: #fff; }
+
+/* ===== Inputs (checkboxes/radios untouched) ===== */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.form-control:not([type="checkbox"]):not([type="radio"]) {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1f1f1f; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da;
+  {% endif %}
+}
+
+/* ===== Modals ===== */
+.modal-content {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff;
+  {% else %}
+    background-color: #fff; color: #212529;
+  {% endif %}
+}
+.modal-header, .modal-footer {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #292929; color: #fff;
+  {% else %}
+    background-color: #f8f9fa; color: #212529;
+  {% endif %}
+}
+
+/* ===== Cards ===== */
+.card {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #1e1e1e; color: #fff; border: 1px solid #444;
+  {% else %}
+    background-color: #fff; color: #212529; border: 1px solid #ced4da; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  {% endif %}
+}
+.card-header {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #252525; color: #e6e6e6; border-bottom: 1px solid #444;
+  {% else %}
+    background-color: #f8f9fa; color: #212529; border-bottom: 1px solid #ced4da;
+  {% endif %}
+}
+
+/* Card footers: theme-aware (no hardcoded bg-white) */
+.card-footer {
+  {% if config.theme_settings.theme == 'dark' %}
+    background-color: #252525; border-top: 1px solid #444;
+  {% else %}
+    background-color: #f8f9fa; border-top: 1px solid #ced4da;
+  {% endif %}
+}
+
+/* Footer separation */
+.footer { {% if config.theme_settings.theme != 'dark' %} border-top: 1px solid rgba(0,0,0,.06); {% endif %} }
+</style>
+{% include 'partials/sparrow_csrf_head.html' %}
+</head>
+<body>
+<!-- Modals & page logic: use MDB (mdb.min.js below). Per-page scripts go in block page_scripts. -->
+
+<!-- Navbar (aligned with core app/templates/base.html) -->
+<nav class="navbar navbar-expand-lg navbar-light sticky-top shadow-sm navbar-erp">
+<div class="container-fluid px-3">
+  {% if _site.get('branding') == 'logo' and _site.get('logo_path') %}
+<a class="navbar-brand py-2" href="/"><img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="Logo" height="48" style="max-height:48px"></a>
+{% else %}
+<a class="navbar-brand fw-semibold py-2" href="/">{{ _site.get('company_name') or 'Sparrow ERP' }}</a>
+{% endif %}
+
+  <button class="navbar-toggler" type="button" data-mdb-toggle="collapse" data-mdb-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+    <i class="fas fa-bars"></i>
+  </button>
+
+  <div class="collapse navbar-collapse" id="navbarNav">
+    <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1 nav-primary">
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3 {% if request.path == '/' %}active{% endif %}" href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>
+          <i class="bi bi-speedometer2 me-1"></i> Dashboard
+        </a>
+      </li>
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3 {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}" {% if request.path.startswith('/core/settings') %}aria-current="page"{% endif %}>
+          <i class="bi bi-sliders me-1"></i> Settings
+        </a>
+      </li>
+      {% endif %}
+      {% if current_user.is_authenticated and can_open_user_management() %}
+      <li class="nav-item">
+        <a class="nav-link py-2 px-3 {% if request.path.startswith('/users') %}active{% endif %}" href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>
+          <i class="bi bi-people me-1"></i> Users
+        </a>
+      </li>
+      {% endif %}
+      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
+      <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
+          <i class="bi bi-wrench-adjustable me-1"></i> System
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end shadow-3" aria-labelledby="systemAdminDropdown">
+          <li><span class="nav-label-muted">Install &amp; updates</span></li>
+          <li>
+            <a class="dropdown-item {% if request.path.startswith('/plugins') %}active{% endif %}" href="/plugins">
+              <i class="bi bi-box-seam me-2 text-primary"></i> Plugin library
+            </a>
+          </li>
+          <li>
+            <a class="dropdown-item {% if request.path == '/version' %}active{% endif %}" href="/version">
+              <i class="bi bi-arrow-down-circle me-2 text-primary"></i> Updates
+            </a>
+          </li>
+          <li><hr class="dropdown-divider"></li>
+          <li>
+            <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}">
+              <i class="bi bi-gear me-2 text-secondary"></i> Core settings
+            </a>
+          </li>
+        </ul>
+      </li>
+      {% endif %}
+      <li class="w-100 d-lg-none my-2"><hr class="my-0"></li>
+      <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle py-2 px-3 d-flex align-items-center" href="#" id="userDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
+          <i class="bi bi-person-circle me-1"></i>
+          <span class="text-truncate" style="max-width:160px">{{ session.get('first_name') or session.get('site_settings', {}).get('user_name', 'User') }}</span>
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+          <li><h6 class="dropdown-header d-flex align-items-center"><i class="bi bi-person-badge me-2"></i> {{ current_user.username if current_user.is_authenticated else 'Account' }}</h6></li>
+          <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+</div>
+</nav>
+
+<!-- Module subnav: Shift Timesheets -->
+<nav class="nav-module erp-module-subnav border-bottom py-2 px-3">
+  <div class="container-fluid px-3">
+    <div class="d-flex flex-wrap align-items-center gap-1">
+      <a class="nav-link {% if request.endpoint == 'internal_time_billing.admin_dashboard_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">
+        <i class="bi bi-speedometer2 me-1"></i> Dashboard
+      </a>
+      <a class="nav-link {% if 'runsheets' in request.path and 'edit' not in request.path and 'staffing-overview' not in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_page') }}">
+        <i class="bi bi-clipboard2-check me-1"></i> Runsheets
+      </a>
+      <a class="nav-link {% if 'staffing-overview' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}">
+        <i class="bi bi-calendar2-check me-1"></i> Staffing overview
+      </a>
+      <a class="nav-link {% if 'timesheets' in request.path or 'week' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.timesheets_overview_page') }}">
+        <i class="bi bi-table me-1"></i> Timesheets
+      </a>
+      <a class="nav-link {% if 'wage' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.wage_cards_page') }}">
+        <i class="bi bi-currency-pound me-1"></i> Wage
+      </a>
+      <a class="nav-link {% if 'staff-roles' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.tb_staff_roles_page') }}">
+        <i class="bi bi-person-badge me-1"></i> Staff roles
+      </a>
+      <a class="nav-link {% if 'policies' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.policies_list_page') }}">
+        <i class="bi bi-diagram-3 me-1"></i> Policies
+      </a>
+      <a class="nav-link {% if 'templates' in request.path and 'policy' not in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.templates_list_page') }}">
+        <i class="bi bi-columns-gap me-1"></i> Templates
+      </a>
+      <a class="nav-link {% if 'config' in request.path or 'job-types' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.config_page') }}">
+        <i class="bi bi-gear me-1"></i> Configuration
+      </a>
+      <a class="nav-link" href="{{ url_for('internal_hr.admin_employees') }}" title="Staff directory and profiles (HR)">
+        <i class="bi bi-people me-1"></i> Staff
+      </a>
+      <a class="nav-link {% if request.endpoint == 'internal_time_billing.admin_invoices_list_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}">
+        <i class="bi bi-receipt me-1"></i> Invoices
+      </a>
+      <a class="nav-link {% if request.endpoint == 'internal_time_billing.admin_invoices_analytics_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}">
+        <i class="bi bi-graph-up me-1"></i> Invoice totals
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Page Content -->
+<main class="container-fluid">{% block content %}{% endblock %}</main>
+
+<!-- Footer -->
+<footer class="footer text-center py-3 mt-4">
+<div class="container">
+  <div class="row gy-2 align-items-center">
+    <div class="col-12 col-md-6 order-2 order-md-1"><p class="mb-0">&copy; {{ current_year }} {{ _site.get('company_name') or 'Sparrow ERP' }}.</p></div>
+    <div class="col-12 col-md-6 order-1 order-md-2"><p class="mb-0">Powered by <strong>Sparrow ERP</strong></p></div>
+  </div>
+</div>
+</footer>
+
+<!-- MDB JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+<script>
+// Auto-collapse menu on mobile when following a real link — not when opening a dropdown
+document.addEventListener('click', function(e){
+  const target = e.target.closest('.navbar .nav-link, .navbar .dropdown-item');
+  if (!target) return;
+  if (target.classList.contains('dropdown-toggle')) return;
+  if ((target.getAttribute('data-mdb-toggle') || '') === 'dropdown') return;
+  const navbarCollapse = document.getElementById('navbarNav');
+  const toggler = document.querySelector('.navbar-toggler');
+  if (navbarCollapse && toggler && window.getComputedStyle(toggler).display !== 'none') {
+    const collapseInstance = mdb.Collapse.getInstance(navbarCollapse) || new mdb.Collapse(navbarCollapse);
+    collapseInstance.hide();
+  }
+}, false);
+</script>
+
+{# Runs after MDB so mdb.Modal / mdb.Collapse are available (avoids bootstrap vs MDB mix). #}
+{% block page_scripts %}{% endblock %}
+
+</body>
+</html>

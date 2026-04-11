@@ -1,0 +1,54 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Shift swaps – Scheduling{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3">Shift swaps</h1>
+<form method="get" class="mb-3">
+  <select name="status" class="form-select form-select-sm d-inline-block w-auto" onchange="this.form.submit()">
+    <option value="">All</option>
+    <option value="open" {{ 'selected' if status == 'open' else '' }}>Open</option>
+    <option value="claimed" {{ 'selected' if status == 'claimed' else '' }}>Claimed</option>
+    <option value="approved" {{ 'selected' if status == 'approved' else '' }}>Approved</option>
+    <option value="rejected" {{ 'selected' if status == 'rejected' else '' }}>Rejected</option>
+  </select>
+</form>
+<div class="table-responsive">
+  <table class="table table-sm">
+    <thead class="table-light">
+      <tr>
+        <th>Date</th>
+        <th>{{ assignment_label|default('Client') }}</th>
+        <th>Requester</th>
+        <th>Claimer</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in swaps %}
+      <tr>
+        <td>{{ r.work_date.isoformat() if r.work_date else '—' }}</td>
+        <td>{{ r.client_name or '—' }}</td>
+        <td>{{ r.requester_name or '—' }}</td>
+        <td>{{ r.claimer_name or '—' }}</td>
+        <td><span class="badge bg-{{ 'warning' if r.status == 'open' else 'info' if r.status == 'claimed' else 'success' if r.status == 'approved' else 'secondary' }}">{{ r.status }}</span></td>
+        <td>
+          {% if r.status == 'claimed' %}
+          <form method="post" action="{{ url_for('internal_scheduling.admin_swap_approve', swap_id=r.id) }}" class="d-inline">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-success btn-sm">Approve</button>
+          </form>
+          <form method="post" action="{{ url_for('internal_scheduling.admin_swap_reject', swap_id=r.id) }}" class="d-inline">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-danger btn-sm">Reject</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-muted">No swap requests.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<a href="{{ url_for('internal_scheduling.admin_index') }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
+{% endblock %}

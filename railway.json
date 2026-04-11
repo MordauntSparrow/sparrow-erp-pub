@@ -2,13 +2,13 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "/Dockerfile",
+    "dockerfilePath": "Dockerfile",
     "buildEnvironment": "V3"
   },
   "deploy": {
     "runtime": "V2",
     "numReplicas": 1,
-    "startCommand": "/usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf",
+    "startCommand": "/app/docker-entrypoint.sh",
     "preDeployCommand": [
   "python -m app.setup.init_db"
 ],

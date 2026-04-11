@@ -1,0 +1,18 @@
+{% extends "employee_portal_module/base_public.html" %}
+{% block title %}Message – {{ ((config or {}).get('site_settings') or {}).get('company_name') or 'Employee Portal' }}{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="mb-3">
+  <a href="{{ url_for('public_employee_portal.dashboard') }}" class="text-secondary small"><i class="bi bi-arrow-left me-1"></i>Back to dashboard</a>
+</nav>
+<article class="ep-card p-4" aria-labelledby="message-subject">
+  <header class="mb-3">
+    <span class="badge bg-secondary">{{ message.source_module|replace('_module','') }}</span>
+    <span class="small text-secondary ms-2">{{ message.created_at.strftime('%d %b %Y at %H:%M') if message.created_at else '' }}</span>
+    <h1 id="message-subject" class="h5 mt-2 mb-0">{{ message.subject }}</h1>
+  </header>
+  <div class="message-body" style="white-space: pre-wrap;">{{ message.body or 'No content.' }}</div>
+</article>
+<p class="mt-3">
+  <a href="{{ url_for('public_employee_portal.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+</p>
+{% endblock %}
