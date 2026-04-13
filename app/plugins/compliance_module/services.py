@@ -17,6 +17,104 @@ logger = logging.getLogger(__name__)
 SOURCE_MODULE = "compliance_module"
 REF_TYPE_POLICY_ACK = "policy_ack"
 
+# Document lifecycle (admin). Kept in sync with `published` for portal queries.
+LIFECYCLE_DRAFT = "draft"
+LIFECYCLE_ACTIVE = "active"
+LIFECYCLE_RETIRED = "retired"
+LIFECYCLE_CHOICES = (LIFECYCLE_DRAFT, LIFECYCLE_ACTIVE, LIFECYCLE_RETIRED)
+LIFECYCLE_LABELS = {
+    LIFECYCLE_DRAFT: "Draft — not visible to staff",
+    LIFECYCLE_ACTIVE: "Active — visible on the staff portal",
+    LIFECYCLE_RETIRED: "Retired — hidden (archived)",
+}
+
+
+def normalize_lifecycle(raw: Optional[str]) -> str:
+    s = (raw or "").strip().lower()
+    if s in LIFECYCLE_CHOICES:
+        return s
+    return LIFECYCLE_DRAFT
+
+
+def row_is_portal_active(row: Optional[Dict[str, Any]]) -> bool:
+    if not row:
+        return False
+    ls = (row.get("lifecycle_status") or "").strip().lower()
+    if ls == LIFECYCLE_ACTIVE:
+        return True
+    if ls in (LIFECYCLE_DRAFT, LIFECYCLE_RETIRED):
+        return False
+    return int(row.get("published") or 0) == 1
+
+
+def _effective_lifecycle_from_row(row: Optional[Dict[str, Any]]) -> str:
+    if not row:
+        return LIFECYCLE_DRAFT
+    raw = row.get("lifecycle_status")
+    if raw is not None and str(raw).strip() != "":
+        return normalize_lifecycle(raw)
+    return LIFECYCLE_ACTIVE if int(row.get("published") or 0) == 1 else LIFECYCLE_DRAFT
+
+
+def policy_effective_lifecycle_state(row: Optional[Dict[str, Any]]) -> str:
+    """Stable lifecycle label for a policy row (routes / staff audit)."""
+    return _effective_lifecycle_from_row(row)
+
+
+def lifecycle_audit_reason_required(old_ls: str, new_ls: str) -> bool:
+    """CQC-style trail: require a narrative when removing from active or marking retired."""
+    if old_ls == new_ls:
+        return False
+    if new_ls == LIFECYCLE_RETIRED:
+        return True
+    if old_ls == LIFECYCLE_ACTIVE and new_ls == LIFECYCLE_DRAFT:
+        return True
+    return False
+
+
+def _insert_lifecycle_audit_cur(
+    cur,
+    policy_id: int,
+    from_status: str,
+    to_status: str,
+    reason: str,
+    actor_label: Optional[str] = None,
+) -> None:
+    cur.execute(
+        """
+        INSERT INTO comp_policy_lifecycle_audit
+        (policy_id, from_status, to_status, reason, actor_label)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (
+            int(policy_id),
+            from_status[:16],
+            to_status[:16],
+            (reason or "").strip()[:8000] or "—",
+            ((actor_label or "").strip()[:255] or None),
+        ),
+    )
+
+
+def admin_list_policy_lifecycle_audit(policy_id: int, limit: int = 200) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT * FROM comp_policy_lifecycle_audit
+            WHERE policy_id = %s
+            ORDER BY created_at ASC, id ASC
+            LIMIT %s
+            """,
+            (int(policy_id), int(limit)),
+        )
+        return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
 # Legacy enum-era labels (DB `category` is now free-text topic; old rows were migrated on install).
 _LEGACY_CATEGORY_LABELS = {
     "health_safety": "Health & safety",
@@ -199,36 +297,41 @@ def admin_compliance_dashboard_metrics() -> Dict[str, Any]:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM comp_policies WHERE published = 0")
+        cur.execute(
+            "SELECT COUNT(*) FROM comp_policies WHERE lifecycle_status = %s", (LIFECYCLE_DRAFT,)
+        )
         draft = int(cur.fetchone()[0])
 
-        cur.execute("SELECT COUNT(*) FROM comp_policies WHERE published = 1")
+        cur.execute(
+            "SELECT COUNT(*) FROM comp_policies WHERE lifecycle_status = %s", (LIFECYCLE_ACTIVE,)
+        )
         published = int(cur.fetchone()[0])
 
         cur.execute(
             """
             SELECT COUNT(*) FROM comp_policies
-            WHERE published = 1 AND next_review_date IS NOT NULL AND next_review_date < %s
+            WHERE lifecycle_status = %s AND next_review_date IS NOT NULL AND next_review_date < %s
             """,
-            (today,),
+            (LIFECYCLE_ACTIVE, today),
         )
         review_overdue = int(cur.fetchone()[0])
 
         cur.execute(
             """
             SELECT COUNT(*) FROM comp_policies
-            WHERE published = 1 AND next_review_date IS NOT NULL
+            WHERE lifecycle_status = %s AND next_review_date IS NOT NULL
               AND next_review_date >= %s AND next_review_date <= %s
             """,
-            (today, horizon),
+            (LIFECYCLE_ACTIVE, today, horizon),
         )
         review_due_30 = int(cur.fetchone()[0])
 
         cur.execute(
             """
             SELECT COUNT(*) FROM comp_policies
-            WHERE published = 1 AND next_review_date IS NULL
-            """
+            WHERE lifecycle_status = %s AND next_review_date IS NULL
+            """,
+            (LIFECYCLE_ACTIVE,),
         )
         review_unscheduled = int(cur.fetchone()[0])
 
@@ -459,13 +562,14 @@ def acknowledge_policy(
     policy_id: int,
     remote_addr: Optional[str] = None,
     user_agent: Optional[str] = None,
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, Optional[int]]:
+    """Returns (ok, message, version_inserted). version_inserted is set only on a new acknowledgement row."""
     row = get_published_policy(policy_id)
     if not row:
-        return False, "Policy not found or not published."
+        return False, "Policy not found or not published.", None
     ver = int(row["version"])
     if contractor_has_acknowledged(contractor_id, policy_id, ver):
-        return True, "Already recorded."
+        return True, "Already recorded.", None
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -486,7 +590,7 @@ def acknowledge_policy(
         conn.commit()
     except Exception as e:
         conn.rollback()
-        return False, str(e)
+        return False, str(e), None
     finally:
         cur.close()
         conn.close()
@@ -499,7 +603,7 @@ def acknowledge_policy(
     except Exception as e:
         logger.warning("Compliance: could not complete portal todo: %s", e)
 
-    return True, "ok"
+    return True, "ok", ver
 
 
 def _list_active_contractor_ids() -> List[int]:
@@ -584,22 +688,27 @@ def admin_list_policies(
 
     rf = (review_filter or "").strip().lower()
     if rf == "overdue":
-        clauses.append("p.published = 1")
+        clauses.append("p.lifecycle_status = %s")
+        params.append(LIFECYCLE_ACTIVE)
         clauses.append("p.next_review_date IS NOT NULL")
         clauses.append("p.next_review_date < %s")
         params.append(today)
     elif rf == "due30":
-        clauses.append("p.published = 1")
+        clauses.append("p.lifecycle_status = %s")
+        params.append(LIFECYCLE_ACTIVE)
         clauses.append("p.next_review_date IS NOT NULL")
         clauses.append("p.next_review_date >= %s")
         clauses.append("p.next_review_date <= %s")
         params.extend([today, horizon])
     elif rf == "draft":
-        clauses.append("p.published = 0")
+        clauses.append("p.lifecycle_status = %s")
+        params.append(LIFECYCLE_DRAFT)
     elif rf == "published":
-        clauses.append("p.published = 1")
+        clauses.append("p.lifecycle_status = %s")
+        params.append(LIFECYCLE_ACTIVE)
     elif rf == "unscheduled":
-        clauses.append("p.published = 1")
+        clauses.append("p.lifecycle_status = %s")
+        params.append(LIFECYCLE_ACTIVE)
         clauses.append("p.next_review_date IS NULL")
 
     where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
@@ -628,7 +737,7 @@ def admin_list_policies(
         rows = cur.fetchall() or []
         for row in rows:
             row["review_badge"] = None
-            if not int(row.get("published") or 0):
+            if not row_is_portal_active(row):
                 continue
             nrd = row.get("next_review_date")
             if not nrd:
@@ -691,22 +800,48 @@ def admin_save_policy(
     slug: Optional[str] = None,
     next_review_date: Optional[str] = None,
     last_reviewed_date: Optional[str] = None,
+    lifecycle_status: Optional[str] = None,
+    lifecycle_change_reason: Optional[str] = None,
+    actor_label: Optional[str] = None,
 ) -> Tuple[bool, str, Optional[int]]:
     title = (title or "").strip()
     if not title:
         return False, "Title required", None
-    dtid = _parse_document_type_id(document_type_id)
+    existing: Optional[Dict[str, Any]] = None
     current_dtid = None
     if policy_id:
         existing = admin_get_policy(int(policy_id))
         if existing:
             current_dtid = existing.get("document_type_id")
+    dtid = _parse_document_type_id(document_type_id)
     if dtid is None or not _valid_document_type_choice(dtid, current_dtid):
         return False, "Choose a document type from the list (configure types under Document types).", None
+    if lifecycle_status is not None:
+        ls = normalize_lifecycle(lifecycle_status)
+    elif existing:
+        ls = normalize_lifecycle(existing.get("lifecycle_status"))
+    else:
+        ls = LIFECYCLE_DRAFT
+    new_pub = 1 if ls == LIFECYCLE_ACTIVE else 0
     topic_clean = (topic or "").strip()[:255]
     slug = (slug or "").strip() or _slugify(title)
     nrd = _parse_optional_date(next_review_date)
     lrd = _parse_optional_date(last_reviewed_date)
+    reason_in = (lifecycle_change_reason or "").strip()
+    old_ls = _effective_lifecycle_from_row(existing) if existing else LIFECYCLE_DRAFT
+    if not policy_id and ls == LIFECYCLE_RETIRED and not reason_in:
+        return (
+            False,
+            "Enter an audit reason when creating a document already marked Retired (inspection trail).",
+            None,
+        )
+    if policy_id and old_ls != ls:
+        if lifecycle_audit_reason_required(old_ls, ls) and not reason_in:
+            return (
+                False,
+                "Enter an audit reason when taking this document off the portal (Draft or Retired) or when retiring it. Inspectors may ask why the change was made.",
+                None,
+            )
     conn = get_db_connection()
     cur = conn.cursor()
     try:
@@ -715,7 +850,9 @@ def admin_save_policy(
                 """
                 UPDATE comp_policies
                 SET title=%s, slug=%s, category=%s, document_type_id=%s, summary=%s, body_text=%s, mandatory=%s,
-                    next_review_date=%s, last_reviewed_date=%s
+                    next_review_date=%s, last_reviewed_date=%s,
+                    lifecycle_status=%s, published=%s,
+                    published_at = IF(%s = 1 AND published_at IS NULL, NOW(), published_at)
                 WHERE id=%s
                 """,
                 (
@@ -728,17 +865,27 @@ def admin_save_policy(
                     1 if mandatory else 0,
                     nrd,
                     lrd,
+                    ls,
+                    new_pub,
+                    new_pub,
                     int(policy_id),
                 ),
             )
+            if old_ls != ls:
+                audit_note = reason_in or "Status change (no optional note supplied)."
+                _insert_lifecycle_audit_cur(
+                    cur, int(policy_id), old_ls, ls, audit_note, actor_label
+                )
             conn.commit()
             return True, "ok", int(policy_id)
+        published_at_val = datetime.now() if new_pub == 1 else None
         cur.execute(
             """
             INSERT INTO comp_policies
-            (title, slug, category, document_type_id, summary, body_text, mandatory, published, version,
+            (title, slug, category, document_type_id, summary, body_text, mandatory,
+             published, lifecycle_status, version, published_at,
              next_review_date, last_reviewed_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 0, 1, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
             """,
             (
                 title[:255],
@@ -748,12 +895,25 @@ def admin_save_policy(
                 summary or None,
                 body_text or None,
                 1 if mandatory else 0,
+                new_pub,
+                ls,
+                published_at_val,
                 nrd,
                 lrd,
             ),
         )
+        new_id = cur.lastrowid
+        if new_id and ls == LIFECYCLE_RETIRED and reason_in:
+            _insert_lifecycle_audit_cur(
+                cur,
+                int(new_id),
+                LIFECYCLE_DRAFT,
+                LIFECYCLE_RETIRED,
+                reason_in,
+                actor_label,
+            )
         conn.commit()
-        return True, "ok", cur.lastrowid
+        return True, "ok", new_id
     except Exception as e:
         conn.rollback()
         return False, str(e), None
@@ -777,7 +937,9 @@ def admin_set_policy_file(policy_id: int, relative_path: Optional[str]) -> bool:
         conn.close()
 
 
-def admin_issue_policy_to_staff(policy_id: int) -> Tuple[bool, str, Dict[str, Any]]:
+def admin_issue_policy_to_staff(
+    policy_id: int, actor_label: Optional[str] = None
+) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Publish or publish a new version: bump version if already published,
     create portal todos for all active contractors, retire old version todos.
@@ -785,6 +947,7 @@ def admin_issue_policy_to_staff(policy_id: int) -> Tuple[bool, str, Dict[str, An
     row = admin_get_policy(policy_id)
     if not row:
         return False, "Policy not found", {}
+    old_ls = _effective_lifecycle_from_row(row)
     old_version = int(row.get("version") or 1)
     was_published = int(row.get("published") or 0) == 1
     new_version = old_version + 1 if was_published else old_version
@@ -797,10 +960,19 @@ def admin_issue_policy_to_staff(policy_id: int) -> Tuple[bool, str, Dict[str, An
         cur.execute(
             """
             UPDATE comp_policies
-            SET version = %s, published = 1, published_at = NOW()
+            SET version = %s, published = 1, lifecycle_status = %s,
+                published_at = IF(published_at IS NULL, NOW(), published_at)
             WHERE id = %s
             """,
-            (new_version, int(policy_id)),
+            (new_version, LIFECYCLE_ACTIVE, int(policy_id)),
+        )
+        audit_reason = (
+            f"Re-issued version {new_version} to all active staff (portal / to-dos as configured)."
+            if was_published
+            else f"First issue: version {new_version} published to all active staff (portal / to-dos as configured)."
+        )
+        _insert_lifecycle_audit_cur(
+            cur, int(policy_id), old_ls, LIFECYCLE_ACTIVE, audit_reason, actor_label
         )
         conn.commit()
     except Exception as e:
@@ -822,17 +994,38 @@ def admin_issue_policy_to_staff(policy_id: int) -> Tuple[bool, str, Dict[str, An
     return True, msg, {"version": new_version, "todos_created": n}
 
 
-def admin_unpublish_policy(policy_id: int) -> Tuple[bool, str]:
+def admin_unpublish_policy(
+    policy_id: int,
+    reason: Optional[str] = None,
+    actor_label: Optional[str] = None,
+) -> Tuple[bool, str]:
+    r = (reason or "").strip()
+    if not r:
+        return (
+            False,
+            "Enter an audit reason for unpublishing (e.g. why staff should no longer see this document).",
+        )
+    row = admin_get_policy(policy_id)
+    if not row:
+        return False, "Document not found."
+    old_ls = _effective_lifecycle_from_row(row)
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute(
-            "UPDATE comp_policies SET published = 0 WHERE id = %s",
-            (int(policy_id),),
+            "UPDATE comp_policies SET published = 0, lifecycle_status = %s WHERE id = %s",
+            (LIFECYCLE_DRAFT, int(policy_id)),
+        )
+        _insert_lifecycle_audit_cur(
+            cur, int(policy_id), old_ls, LIFECYCLE_DRAFT, r[:8000], actor_label
         )
         conn.commit()
         return True, "ok"
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         return False, str(e)
     finally:
         cur.close()

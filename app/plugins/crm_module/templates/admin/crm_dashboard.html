@@ -10,8 +10,13 @@
         <p class="text-white-50 crm-upper-tight mb-1">Customer relationship management</p>
         <h1 class="h2 fw-semibold mb-2">Overview</h1>
         <p class="mb-0 opacity-90 small">
-          At-a-glance pipeline, recents, and quick actions. Standard CRM practice: keep opportunities and activities current,
-          tie quotes to accounts, and use medical event plans once scope is agreed — separate from the public organiser enquiry form.
+          At-a-glance pipeline, recents, and quick actions. Standard CRM practice: keep opportunities and activities current
+          and tie quotes to accounts.
+          {% if industry_visible('medical') %}
+          Use medical event plans once scope is agreed — separate from the public organiser enquiry form.
+          {% else %}
+          Final pricing follows agreed scope and your quote rules.
+          {% endif %}
         </p>
         <form method="get" action="{{ url_for('crm_module.crm_search') }}" class="d-flex gap-2 mt-3" role="search">
           <input type="search" name="q" class="form-control form-control-sm" placeholder="Search accounts, contacts, deals, quotes…" minlength="2" maxlength="200" style="max-width:22rem;">
@@ -25,11 +30,13 @@
           <a href="{{ url_for('crm_module.opportunity_intake') }}" class="btn btn-light btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-telephone me-1"></i>Intake</a>
           <a href="{{ url_for('crm_module.opportunities_board') }}" class="btn btn-light btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-kanban me-1"></i>Board</a>
           <a href="{{ url_for('crm_module.quote_new') }}" class="btn btn-success btn-sm shadow-sm rounded-pill px-3 fw-semibold"><i class="bi bi-receipt me-1"></i>New quote</a>
+          {% if industry_visible('medical') %}
           <a href="{{ url_for('crm_module.event_plan_new') }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2"><i class="bi bi-clipboard2-pulse me-1"></i>New event plan</a>
+          {% endif %}
           {% endif %}
           <a href="{{ url_for('crm_module.accounts_list') }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2"><i class="bi bi-building me-1"></i>Accounts</a>
           {% if public_enquiry_url %}
-          <a href="{{ public_enquiry_url }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2" target="_blank" rel="noopener noreferrer" title="Opens public organiser form (separate from internal event plans)"><i class="bi bi-box-arrow-up-right me-1"></i>Public enquiry</a>
+          <a href="{{ public_enquiry_url }}" class="btn btn-outline-light btn-sm rounded-pill px-3 fw-semibold border-2" target="_blank" rel="noopener noreferrer" title="Opens public event enquiry form{% if industry_visible('medical') %} (separate from internal event plans){% endif %}"><i class="bi bi-box-arrow-up-right me-1"></i>Public enquiry</a>
           {% endif %}
         </div>
       </div>
@@ -108,11 +115,17 @@
             <div class="card-body">
               <h2 class="h6 text-uppercase text-muted crm-upper-tight">Delivery &amp; setup</h2>
               <p class="mb-1"><span class="display-6">{{ n_activities }}</span> <span class="text-muted small">activities</span></p>
+              {% if industry_visible('medical') %}
               <p class="mb-3"><span class="fs-3 fw-semibold">{{ n_event_plans }}</span> <span class="text-muted small">event plans</span>
                 {% if n_event_plans_draft %}<span class="badge bg-secondary bg-opacity-10 text-secondary ms-1">{{ n_event_plans_draft }} draft</span>{% endif %}
               </p>
+              {% else %}
+              <p class="mb-3 text-muted small">Log activities to keep delivery visibility on accounts and deals.</p>
+              {% endif %}
               <a href="{{ url_for('crm_module.activities_list') }}" class="btn btn-outline-primary btn-sm rounded-pill">Activities</a>
+              {% if industry_visible('medical') %}
               <a href="{{ url_for('crm_module.event_plans_list') }}" class="btn btn-outline-secondary btn-sm rounded-pill ms-1">Plans</a>
+              {% endif %}
             </div>
           </div>
         </div>

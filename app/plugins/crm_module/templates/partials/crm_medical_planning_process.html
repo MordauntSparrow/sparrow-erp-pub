@@ -1,4 +1,5 @@
 {# Shared copy: MNA / event medical plan before binding quote. theme: 'public' | 'admin' #}
+{% if industry_visible('medical') %}
 {% set t = theme|default('admin') %}
 {% if t == 'public' %}
 <div class="crm-pu-card p-4 mb-0 border border-2 border-light">
@@ -56,4 +57,5 @@
     <strong>Takeaway:</strong> avoid binding prices from guide numbers alone — under- or over-resourcing both harm the organiser. Use CRM event plans and quote revisions once assessment is recorded.
   </p>
 </div>
+{% endif %}
 {% endif %}

@@ -12,11 +12,46 @@
     {% endif %}
   </p>
   <p class="small text-white-50 mb-4 px-md-5 mx-auto" style="max-width: 42rem;">
+    {% if industry_visible('medical') %}
     A <strong>medical needs assessment</strong> and <strong>event medical plan</strong> are normally completed before a binding quote and final resource levels.
     Indicative bands are risk-led (not attendance alone) and do not replace your own risk assessment or multi-agency expectations (e.g. SAG).
+    {% else %}
+    A binding quote and final resource levels follow agreed scope and our pricing process.
+    Indicative bands are risk-led (not attendance alone) and do not replace your own risk assessment.
+    {% endif %}
   </p>
   <p class="small text-white-50 mb-0">Reference: opportunity #{{ opportunity_id }} (internal)</p>
 </div>
+{% set pg = lead_meta.risk.get('purple_guide') if lead_meta and lead_meta.get('risk') is mapping else none %}
+{% if pg is mapping and pg %}
+<div class="container py-4" style="max-width: 48rem;">
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h5 fw-bold mb-3">Indicative planning summary</h2>
+      <p class="small text-muted mb-2">Planning score: <strong>{{ pg.purple_score }}</strong> · Tier: <strong>{{ pg.tier }}</strong> — {{ pg.tier_title or '' }}</p>
+      <p class="small mb-3">{{ pg.tier_summary or '' }}</p>
+      {% set cr = pg.conversion_row or {} %}
+      <h3 class="h6 text-uppercase text-muted mb-2">Conversion band {{ cr.score_range or '—' }} (indicative staffing)</h3>
+      <ul class="small mb-3">
+        <li>First responders: <strong>{{ cr.first_responder }}</strong></li>
+        <li>Ambulances / crew (indicative): <strong>{{ cr.ambulances }}</strong> / <strong>{{ cr.ambulance_crew }}</strong></li>
+        <li>Doctors / nurses (indicative): <strong>{{ cr.doctor }}</strong> / <strong>{{ cr.nurse }}</strong></li>
+        <li>NHS ambulance liaison (where applicable): <strong>{{ cr.nhs_ambulance_manager }}</strong></li>
+        <li>Support unit: <strong>{{ cr.support_unit }}</strong></li>
+      </ul>
+      {% if pg.cqc_compliance %}
+      <h3 class="h6 text-uppercase text-muted mb-2">CQC &amp; medical post</h3>
+      <ul class="small text-muted ps-3 mb-0">
+        {% for line in pg.cqc_compliance %}
+        <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <p class="small text-muted mt-3 mb-0">{{ pg.disclaimer or '' }}</p>
+    </div>
+  </div>
+</div>
+{% endif %}
 <div class="text-center mt-4">
   <a class="btn btn-light rounded-pill px-4" href="{{ url_for('crm_public.public_event_risk_calculator') }}">Submit another event</a>
 </div>

@@ -1,0 +1,96 @@
+{# vars: xf (int), ax (dict with form_id, title, portal_roles, sections) #}
+<div class="extra-xf-block card border-info mb-4" data-xf-block="{{ xf }}">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span class="small fw-semibold">Contractor portal form</span>
+    <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-xf-block">Remove form</button>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 mb-3">
+      <div class="col-md-3">
+        <label class="form-label small mb-0">Form id (slug)</label>
+        <input class="form-control form-control-sm" data-xf-meta="form_id" name="xf_{{ xf }}_form_id" value="{{ ax.form_id or '' }}" maxlength="64" placeholder="predelivery" required>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label small mb-0">Title (shown in portal)</label>
+        <input class="form-control form-control-sm" data-xf-meta="form_title" name="xf_{{ xf }}_form_title" value="{{ ax.title or '' }}" maxlength="120" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small mb-0">Portal role hints <span class="text-danger">*</span></label>
+        {% if ax.portal_roles is string %}
+          {% set xf_pr = ax.portal_roles %}
+        {% else %}
+          {% set xf_pr = (ax.portal_roles or [])|join(', ') %}
+        {% endif %}
+        {% with hidden_name='xf_' ~ xf|string ~ '_portal_roles', hidden_value=xf_pr, compact=true, data_xf_meta='portal_roles' %}
+        {% include 'admin/partials/fleet_safety_role_picker.html' %}
+        {% endwith %}
+        <div class="form-text">At least one role or hint. Search the list or press Enter for a custom substring.</div>
+      </div>
+    </div>
+    <div class="xf-sections-root" data-role="xf-sections-root" data-xf-index="{{ xf }}">
+      {% if ax.sections and ax.sections|length > 0 %}{% set secs = ax.sections %}{% else %}{% set secs = [None] %}{% endif %}
+      {% for sec in secs %}
+      <div class="section-block card shadow-sm mb-3" data-role="section">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="small fw-semibold">Section</span>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-section">Remove section</button>
+        </div>
+        <div class="card-body">
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Section id <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="id" value="{{ sec.id if sec else '' }}" maxlength="64">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-0">Section heading</label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="title" value="{{ sec.title if sec else '' }}" maxlength="120" required>
+            </div>
+          </div>
+          <div class="fields-container border rounded p-2 bg-light bg-opacity-50" data-role="fields-container">
+            {% for field in (sec.fields if sec and sec.fields else [None]) %}
+            <div class="field-row border-bottom pb-2 mb-2" data-role="field">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Field id</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="id" value="{{ field.id if field else '' }}" maxlength="64">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Type</label>
+                  <select class="form-select form-select-sm" data-field-input="type" data-field-type-select>
+                    <option value="text" {% if not field or (field.type or 'text') == 'text' %}selected{% endif %}>Short text</option>
+                    <option value="number" {% if field and field.type == 'number' %}selected{% endif %}>Number</option>
+                    <option value="mileage" {% if field and field.type == 'mileage' %}selected{% endif %}>Odometer</option>
+                    <option value="bool" {% if field and field.type == 'bool' %}selected{% endif %}>Yes / No</option>
+                    <option value="photo" {% if field and field.type == 'photo' %}selected{% endif %}>Photo upload</option>
+                  </select>
+                </div>
+                <div class="col-md-5">
+                  <label class="form-label small mb-0">Question / label</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="label" value="{{ field.label if field else '' }}" maxlength="255" required>
+                </div>
+                <div class="col-md-2">
+                  <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" value="1" data-field-input="required" {% if field and field.required %}checked{% endif %}>
+                    <label class="form-check-label small">Required</label>
+                  </div>
+                </div>
+                <div class="col-md-1 text-end">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-action="remove-field" title="Remove">&times;</button>
+                </div>
+              </div>
+              <div class="row g-2 mt-1 number-opts" data-role="number-opts"{% if not field or (field.type or 'text')|lower not in ['number', 'mileage'] %} style="display:none"{% endif %}>
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Min</label><input type="text" class="form-control form-control-sm" data-field-input="min" value="{{ field.min if field and field.min is defined else '' }}"></div>
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Max</label><input type="text" class="form-control form-control-sm" data-field-input="max" value="{{ field.max if field and field.max is defined else '' }}"></div>
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Step</label><input type="text" class="form-control form-control-sm" data-field-input="step" value="{{ field.step if field and field.step is defined else '' }}"></div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-field">Add field</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary" data-action="xf-add-section">Add section</button>
+  </div>
+</div>

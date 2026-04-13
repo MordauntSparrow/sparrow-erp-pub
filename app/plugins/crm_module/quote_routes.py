@@ -991,6 +991,68 @@ def register_crm_quote_routes(crm_bp):
             can_edit=can_edit(),
         )
 
+    @crm_bp.route("/quotes/<int:quote_id>/accept-for-cura", methods=["POST"])
+    @login_required
+    @crm_access_required
+    @crm_edit_required
+    def quote_accept_for_cura(quote_id: int):
+        """One-step Accepted status so event plans can Send to Cura (client agreed pricing)."""
+        return_plan_raw = (request.form.get("return_plan_id") or "").strip()
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SELECT id, status FROM crm_quotes WHERE id=%s", (quote_id,))
+            q = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        if not q:
+            flash("Quote not found.", "danger")
+            return redirect(url_for("crm_module.quotes_list"))
+        prev = (q.get("status") or "").strip().lower()
+        if prev == "accepted":
+            flash("This quote is already Accepted.", "info")
+            if return_plan_raw.isdigit():
+                return redirect(
+                    url_for(
+                        "crm_module.event_plan_edit",
+                        plan_id=int(return_plan_raw),
+                        step=8,
+                    )
+                )
+            return redirect(url_for("crm_module.quote_edit", quote_id=quote_id))
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "UPDATE crm_quotes SET status=%s WHERE id=%s",
+                ("accepted", quote_id),
+            )
+            _append_status_history(
+                conn,
+                quote_id,
+                q.get("status"),
+                "accepted",
+                "Client agreed to pricing (ready for Cura / operations handoff)",
+            )
+        finally:
+            cur.close()
+            conn.close()
+        flash(
+            "Quote marked Accepted. You can return to the event plan and use Send to Cura.",
+            "success",
+        )
+        if return_plan_raw.isdigit():
+            return redirect(
+                url_for(
+                    "crm_module.event_plan_edit",
+                    plan_id=int(return_plan_raw),
+                    step=8,
+                )
+            )
+        return redirect(url_for("crm_module.quote_edit", quote_id=quote_id))
+
     @crm_bp.route("/quotes/<int:quote_id>/new-revision", methods=["POST"])
     @login_required
     @crm_access_required

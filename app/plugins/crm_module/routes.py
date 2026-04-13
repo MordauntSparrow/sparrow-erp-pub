@@ -9,7 +9,13 @@ from flask_login import login_required
 
 from app.objects import get_db_connection
 
-from .crm_common import can_edit, crm_access_required, crm_edit_required, uid
+from .crm_common import (
+    can_edit,
+    crm_access_required,
+    crm_edit_required,
+    crm_medical_surface_available,
+    uid,
+)
 from .crm_event_plan_links import fetch_plans_for_opportunity
 from .crm_event_risk import enrich_lead_meta_with_staffing_breakdown, parse_public_calculator_form
 from .crm_guide_staffing_costs import estimate_guide_staffing_costs
@@ -337,12 +343,13 @@ def dashboard():
             cur.execute("SELECT COUNT(*) FROM crm_activities")
             row = cur.fetchone()
             n_activities = int(row[0]) if row else 0
-            cur.execute("SELECT COUNT(*) FROM crm_event_plans")
-            row = cur.fetchone()
-            n_event_plans = int(row[0]) if row else 0
-            cur.execute("SELECT COUNT(*) FROM crm_event_plans WHERE status='draft'")
-            row = cur.fetchone()
-            n_event_plans_draft = int(row[0]) if row else 0
+            if crm_medical_surface_available():
+                cur.execute("SELECT COUNT(*) FROM crm_event_plans")
+                row = cur.fetchone()
+                n_event_plans = int(row[0]) if row else 0
+                cur.execute("SELECT COUNT(*) FROM crm_event_plans WHERE status='draft'")
+                row = cur.fetchone()
+                n_event_plans_draft = int(row[0]) if row else 0
         except Exception:
             pass
         finally:

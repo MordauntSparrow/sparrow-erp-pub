@@ -79,6 +79,40 @@ Timesheet – Week {{ data.week.week_id }}
   </div>
   {% endif %}
 
+  {% if data.employment_type == 'self_employed' and (data.invoice_billing_frequency or 'weekly')|lower != 'monthly' %}
+  <div class="modal fade" id="tb-post-submit-invoice-modal" tabindex="-1" aria-labelledby="tb-post-submit-invoice-label" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-success" style="border-width:2px;">
+        <div class="modal-header bg-success text-white">
+          <h5 class="modal-title d-flex align-items-center gap-2" id="tb-post-submit-invoice-label">
+            <i class="bi bi-check2-circle fs-4"></i> Timesheet sent — next: your invoice
+          </h5>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2 fw-semibold">Your shifts are with the office for checking. <strong>We also need your invoice</strong> for this same week so both can be approved together.</p>
+          <p class="small text-muted mb-3">Tap the green button below and we will <strong>create your invoice for you</strong> with the same lines as this timesheet. You can then check the total and invoice number.</p>
+          <div id="tb-post-submit-invoice-err" class="alert alert-danger small py-2 d-none" role="alert"></div>
+          <div id="tb-post-submit-invoice-spinner" class="text-center py-3 d-none">
+            <div class="spinner-border text-success" role="status"><span class="visually-hidden">Loading…</span></div>
+            <div class="small text-muted mt-2">Creating your invoice…</div>
+          </div>
+        </div>
+        <div class="modal-footer flex-column flex-sm-row gap-2 align-items-stretch">
+          <button type="button" class="btn btn-success btn-lg order-0" id="tb-post-submit-create-auto" style="min-height:48px">
+            <i class="bi bi-receipt me-1"></i> Create my invoice now
+          </button>
+          <a class="btn btn-outline-secondary order-1" id="tb-post-submit-create-manual" href="{{ url_for('public_time_billing.public_week_invoice_page', week_id=data.week.week_id) }}" style="min-height:44px">
+            Show me the form first
+          </a>
+          <button type="button" class="btn btn-link text-muted order-2" id="tb-post-submit-invoice-later" style="min-height:44px">
+            I’ll do it later
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Totals by job type -->
   <div class="card mb-3" id="jobTypeBreakdownCard" style="display:none;">
     <div class="card-header py-2">
@@ -260,6 +294,14 @@ Timesheet – Week {{ data.week.week_id }}
   let jobTypes = [];
   let weekUpdatedAt = window.INIT_WEEK_UPDATED_AT || null; // optionally set from server
   let entriesCache = window.INIT_ENTRIES || []; // optionally set from server
+  /** After submit/refresh, editing shifts is locked unless draft/rejected. */
+  let tsActionsLocked = {{ ((data.week.status or 'draft')|string|lower not in ['draft', 'rejected']) | tojson }};
+
+  const postSubmitModalEl = document.getElementById("tb-post-submit-invoice-modal");
+  const postSubmitModal =
+    postSubmitModalEl && typeof bootstrap !== "undefined"
+      ? new bootstrap.Modal(postSubmitModalEl)
+      : null;
 
   // Elements
   const tbody       = document.getElementById("ts-tbody-desktop");
@@ -393,6 +435,23 @@ Timesheet – Week {{ data.week.week_id }}
     fillJobTypes();
   }
 
+  function setWeekStatusBadge(st) {
+    if (!statusEl) return;
+    const s = String(st || "draft").toLowerCase();
+    statusEl.textContent = s === "invoiced" ? "Invoiced (paid)" : (st || "draft");
+    const map = { approved: "bg-success", invoiced: "bg-success", submitted: "bg-primary", rejected: "bg-danger" };
+    statusEl.className = "badge " + (map[s] || "bg-secondary");
+  }
+
+  function applyWeekLockFromPayload(d) {
+    const st = String((d && d.week && d.week.status) || "draft").toLowerCase();
+    tsActionsLocked = st !== "draft" && st !== "rejected";
+    const sub = document.getElementById("btn-submit-week");
+    const add = document.getElementById("btn-add-entry");
+    if (sub) sub.disabled = tsActionsLocked;
+    if (add) add.disabled = tsActionsLocked;
+  }
+
   async function refreshWeek() {
     const d = await fetchJSON(`/time-billing/api/weeks/${weekId}`);
     entriesCache           = d.entries || [];
@@ -400,9 +459,11 @@ Timesheet – Week {{ data.week.week_id }}
     renderMobile(entriesCache);
     setTotals(d.totals || { hours: 0, pay: 0, travel: 0 });
     renderJobTypeBreakdown(d.summaries_by_job_type || []);
-    statusEl.textContent   = d.week.status;
+    setWeekStatusBadge(d.week.status);
+    applyWeekLockFromPayload(d);
     weekUpdatedAt          = d.week.updated_at;
     updatedEl.textContent  = weekUpdatedAt || "—";
+    return d;
   }
 
   async function upsertEntries(entryList) {
@@ -448,11 +509,13 @@ Timesheet – Week {{ data.week.week_id }}
 
   async function refreshHeaderOnly() {
     const d = await fetchJSON(`/time-billing/api/weeks/${weekId}`);
-    statusEl.textContent   = d.week.status;
+    setWeekStatusBadge(d.week.status);
+    applyWeekLockFromPayload(d);
     setTotals(d.totals || { hours: 0, pay: 0, travel: 0 });
     renderJobTypeBreakdown(d.summaries_by_job_type || []);
     weekUpdatedAt          = d.week.updated_at;
     updatedEl.textContent  = weekUpdatedAt || "—";
+    return d;
   }
 
   async function deleteEntry(id) {
@@ -466,33 +529,117 @@ Timesheet – Week {{ data.week.week_id }}
     }
   }
 
+  async function postCreateInvoiceDraft() {
+    const url = `/time-billing/api/weeks/${encodeURIComponent(weekId)}/invoice`;
+    const headers = typeof window.tbMergeCsrfHeaders === "function"
+      ? window.tbMergeCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }, "POST")
+      : { "Content-Type": "application/json", Accept: "application/json" };
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ invoice_number: "" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error((data && data.message) || ("HTTP " + res.status));
+    }
+    return data;
+  }
+
   async function submitWeek() {
     const res = await fetchJSON(`/time-billing/api/weeks/${weekId}/submit`, { method: "POST" });
-    if (res.ok) {
-    // Update header (optional)
-    await refreshHeaderOnly();
-    // Notify then redirect
-    showToast("Timesheet submitted. Redirecting…", "success", 1800);
-    setTimeout(() => {
-    window.location.assign("/time-billing/");
-    }, 1800);
-    } else {
-    showToast("Submit failed. Please try again.", "danger", 2500);
+    if (!res.ok) {
+      showToast("Submit failed. Please try again.", "danger", 2500);
+      return false;
     }
+    const d = await refreshWeek();
+    showToast("Timesheet submitted.", "success", 2000);
+
+    const guideWeekly =
+      d.employment_type === "self_employed" &&
+      String(d.invoice_billing_frequency || "weekly").toLowerCase() !== "monthly" &&
+      d.can_show_invoice_prompt === true;
+
+    if (guideWeekly) {
+      if (postSubmitModal) {
+        postSubmitModal.show();
+      } else {
+        window.location.assign(
+          "{{ url_for('public_time_billing.public_week_invoice_page', week_id=data.week.week_id) }}"
+        );
+      }
+      return true;
+    }
+
+    showToast("Redirecting…", "info", 1200);
+    setTimeout(() => {
+      window.location.assign("/time-billing/");
+    }, 1200);
+    return true;
   }
 
   document.getElementById("btn-submit-week").addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
     try {
-    await submitWeek();
+      await submitWeek();
     } catch (err) {
-    showToast(err.message || "Submit failed", "danger", 2500);
+      showToast(err.message || "Submit failed", "danger", 2500);
     } finally {
-    // It will redirect on success; if not, re-enable
-    btn.disabled = false;
+      if (!tsActionsLocked) btn.disabled = false;
     }
-    });
+  });
+
+  (function wirePostSubmitInvoiceModal() {
+    if (!postSubmitModalEl) return;
+    const errEl = document.getElementById("tb-post-submit-invoice-err");
+    const spinEl = document.getElementById("tb-post-submit-invoice-spinner");
+    const btnAuto = document.getElementById("tb-post-submit-create-auto");
+    const btnLater = document.getElementById("tb-post-submit-invoice-later");
+
+    function showErr(msg) {
+      if (!errEl) return;
+      errEl.textContent = msg || "Something went wrong.";
+      errEl.classList.remove("d-none");
+    }
+    function hideErr() {
+      if (errEl) errEl.classList.add("d-none");
+    }
+
+    if (btnAuto) {
+      btnAuto.addEventListener("click", async () => {
+        hideErr();
+        btnAuto.disabled = true;
+        if (btnLater) btnLater.disabled = true;
+        if (spinEl) spinEl.classList.remove("d-none");
+        try {
+          const out = await postCreateInvoiceDraft();
+          const inv = out.invoice || {};
+          const iid = inv.id;
+          if (iid) {
+            window.location.assign("/time-billing/invoices/" + encodeURIComponent(iid));
+            return;
+          }
+          showErr("Invoice created but no id returned. Use “Show me the form first”.");
+        } catch (ex) {
+          showErr(ex.message || "Could not create invoice.");
+        } finally {
+          if (spinEl) spinEl.classList.add("d-none");
+          btnAuto.disabled = false;
+          if (btnLater) btnLater.disabled = false;
+        }
+      });
+    }
+
+    if (btnLater) {
+      btnLater.addEventListener("click", () => {
+        if (postSubmitModal && typeof postSubmitModal.hide === "function") {
+          postSubmitModal.hide();
+        }
+        window.location.reload();
+      });
+    }
+  })();
 
   // ============================
   // DOM helpers
@@ -626,8 +773,8 @@ Timesheet – Week {{ data.week.week_id }}
         <td>${(e.notes || "").replace(/</g, "&lt;")}</td>
         <td>
           <div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-primary ts-edit {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Edit</button>
-            <button class="btn btn-outline-danger ts-delete {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Delete</button>
+            <button class="btn btn-outline-primary ts-edit" ${tsActionsLocked ? "disabled" : ""}>Edit</button>
+            <button class="btn btn-outline-danger ts-delete" ${tsActionsLocked ? "disabled" : ""}>Delete</button>
           </div>
         </td>
       `;
@@ -679,8 +826,8 @@ Timesheet – Week {{ data.week.week_id }}
             ${e.notes ? `<div class="mt-1"><span class="text-muted">Notes:</span> ${(e.notes || "").replace(/</g, "&lt;")}</div>` : ""}
           </div>
           <div class="mt-2 d-flex gap-2">
-            <button class="btn btn-sm btn-outline-primary ts-edit w-50 {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Edit</button>
-            <button class="btn btn-sm btn-outline-danger ts-delete w-50 {% if data.week.status != 'draft' and data.week.status != 'rejected' %} disabled {% endif %}">Delete</button>
+            <button class="btn btn-sm btn-outline-primary ts-edit w-50" ${tsActionsLocked ? "disabled" : ""}>Edit</button>
+            <button class="btn btn-sm btn-outline-danger ts-delete w-50" ${tsActionsLocked ? "disabled" : ""}>Delete</button>
           </div>
         </div>
       `;

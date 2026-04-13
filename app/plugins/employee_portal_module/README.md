@@ -50,6 +50,14 @@ VALUES (123, 'compliance_module', 'View and sign Health & Safety policy', '/comp
 - **Redirect safety** – The `next` parameter after login is validated to allow only relative paths (no open redirect). Profile picture paths are validated before use in static URLs (no path traversal).
 - **API behaviour** – Mark-read and todo-complete APIs return 400 for invalid ids, 401 when not authenticated, 404 when the resource is not found or not owned by the current user, and 500 on server errors. Front-end handles non-OK responses with user feedback.
 
+## Tenant industry profile (Core settings)
+
+Core → **General** → **Industry & categories** sets `organization_profile.industries`. The **website** app loads the same list into `app.config["organization_industries"]` and exposes Jinja helpers `organization_industries` and `industry_visible(...)` on contractor-facing templates.
+
+- **Dashboard module links** (`get_module_links`): optional per-row `industry_slugs` in `services.py` (OR semantics). Example: **Fleet** is shown only when the tenant includes `medical`, `security`, or `cleaning` (hidden for hospitality-only).
+- **Default meta description** in `base_public.html` uses neutral copy unless `medical` is selected.
+- **Portal assistant** (`portal_ai.py`) appends the tenant’s industry slugs to the system prompt so replies are not assumed to be clinical.
+
 ## PWA and Web Push
 
 - The portal registers a **scoped** service worker under `/employee-portal/` only (`/employee-portal/sw.js`). Manifest: `/employee-portal/manifest.webmanifest`. Replace default icons in `static/pwa/` if you want branded tiles (or run `python app/plugins/employee_portal_module/scripts/gen_pwa_icons.py` to regenerate placeholders).

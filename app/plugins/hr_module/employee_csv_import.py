@@ -319,7 +319,7 @@ def import_hr_employee_rows(
             else:
                 email_warnings.append(
                     f"Row {idx} ({email}): account created but welcome email not sent — {send_msg} "
-                    "Set a password in Time Billing or use password reset if available."
+                    "Set a portal password in HR (employee profile) or use your organisation’s reset flow if available."
                 )
         except Exception as e:
             errors.append(f"Row {idx} ({email}): {e}")

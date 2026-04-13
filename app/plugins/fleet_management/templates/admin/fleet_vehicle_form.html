@@ -1,0 +1,68 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% import "partials/fleet_status_macros.html" as fs %}
+{% block page_title %}New vehicle{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width:720px">
+  <div class="fleet-page-hero mb-3">
+    <h1 class="h4 mb-0"><i class="bi bi-truck-front text-primary me-2"></i>New vehicle</h1>
+    <p class="fleet-page-hero__sub mb-0">Unit name, optional registration (e.g. quads/buggies), type, and compliance.</p>
+  </div>
+  <form method="post" class="card card-body shadow-sm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {% if uk_gov_lookup_available %}{% include 'admin/partials/fleet_uk_reg_lookup.html' %}{% endif %}
+    <div class="mb-3">
+      <label class="form-label">Unit name / callsign</label>
+      <input class="form-control" name="internal_code" maxlength="64" placeholder="e.g. Alpha-7, Quad-3 (leave blank to auto-assign FLEET-####)">
+      <div class="form-text">How this asset appears in lists; must be unique. Not the number plate.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Registration (optional)</label>
+      <input class="form-control" name="registration" maxlength="32" placeholder="UK plate if road-registered; leave blank for unregistered kit">
+    </div>
+    <div class="mb-3"><label class="form-label">VIN</label><input class="form-control" name="vin" placeholder="Vehicle identification number" maxlength="64"></div>
+    <div class="row">
+      <div class="col-md-6 mb-3"><label class="form-label">Make</label><input class="form-control" name="make"></div>
+      <div class="col-md-6 mb-3"><label class="form-label">Model</label><input class="form-control" name="model"></div>
+    </div>
+    <div class="row">
+      <div class="col-md-4 mb-3"><label class="form-label">Year</label><input class="form-control" type="number" name="year"></div>
+      <div class="col-md-8 mb-3"><label class="form-label">Fuel</label>
+        <select class="form-select" name="fuel_type">
+          <option value="">—</option>
+          <option value="petrol">Petrol</option>
+          <option value="diesel">Diesel</option>
+          <option value="electric">Electric</option>
+          <option value="hybrid">Hybrid</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="mb-3"><label class="form-label">Status</label>
+      {{ fs.admin_status_select('active') }}
+    </div>
+    <div class="mb-3"><label class="form-label">Vehicle type</label>
+      <select class="form-select" name="vehicle_type_id">
+        <option value="">—</option>
+        {% for t in vehicle_types %}
+        <option value="{{ t.id }}">{{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="row">
+      <div class="col-md-4 mb-3"><label class="form-label">MOT expiry</label><input class="form-control" type="date" name="mot_expiry"></div>
+      <div class="col-md-4 mb-3"><label class="form-label">Tax expiry</label><input class="form-control" type="date" name="tax_expiry"></div>
+      <div class="col-md-4 mb-3"><label class="form-label">Insurance expiry</label><input class="form-control" type="date" name="insurance_expiry"></div>
+    </div>
+    <p class="small text-muted mb-2">Optional: record planned servicing targets now or later on the vehicle page.</p>
+    <div class="row">
+      <div class="col-md-3 mb-3"><label class="form-label">Last service date</label><input class="form-control" type="date" name="last_service_date"></div>
+      <div class="col-md-3 mb-3"><label class="form-label">Last service mileage</label><input class="form-control" type="number" name="last_service_mileage" min="0"></div>
+      <div class="col-md-3 mb-3"><label class="form-label">Next due (date)</label><input class="form-control" type="date" name="next_service_due_date"></div>
+      <div class="col-md-3 mb-3"><label class="form-label">Next due (mileage)</label><input class="form-control" type="number" name="next_service_due_mileage" min="0"></div>
+    </div>
+    <div class="mb-3"><label class="form-label">Notes</label><textarea class="form-control" name="notes" rows="2"></textarea></div>
+    <button class="btn btn-primary" type="submit">Create</button>
+    <a class="btn btn-link" href="{{ url_for('fleet_management.vehicles_list') }}">Cancel</a>
+  </form>
+</div>
+{% endblock %}

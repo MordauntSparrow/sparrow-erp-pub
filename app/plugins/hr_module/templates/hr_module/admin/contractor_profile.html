@@ -442,6 +442,7 @@
           {% endif %}
         </div>
       </div>
+      {% if industry_visible('medical') %}
       <div class="card mb-4">
         <div class="card-header"><strong>HPAC register</strong></div>
         <div class="card-body">
@@ -514,6 +515,7 @@
           {% endif %}
         </div>
       </div>
+      {% endif %}
       {% if profile.custom_fields_items %}
       <div class="card mb-4">
         <div class="card-header"><strong>Additional fields</strong></div>
@@ -544,7 +546,7 @@
       </div>
       {% endif %}
       {% set _gmc_any = profile.gmc_number or profile.gmc_registered_on or profile.gmc_register_status or profile.gmc_register_check_notes or profile.gmc_register_last_checked_at %}
-      {% if _gmc_any %}
+      {% if industry_visible('medical') and _gmc_any %}
       <div class="card mb-4">
         <div class="card-header"><strong>GMC register</strong></div>
         <div class="card-body">
@@ -562,7 +564,7 @@
       </div>
       {% endif %}
       {% set _nmc_any = profile.nmc_pin or profile.nmc_registered_on or profile.nmc_register_status or profile.nmc_register_check_notes or profile.nmc_register_last_checked_at %}
-      {% if _nmc_any %}
+      {% if industry_visible('medical') and _nmc_any %}
       <div class="card mb-4">
         <div class="card-header"><strong>NMC register</strong></div>
         <div class="card-body">
@@ -580,7 +582,7 @@
       </div>
       {% endif %}
       {% set _gphc_any = profile.gphc_registration_number or profile.gphc_registered_on or profile.gphc_register_status or profile.gphc_register_check_notes or profile.gphc_register_last_checked_at %}
-      {% if _gphc_any %}
+      {% if industry_visible('medical') and _gphc_any %}
       <div class="card mb-4">
         <div class="card-header"><strong>GPhC register</strong></div>
         <div class="card-body">

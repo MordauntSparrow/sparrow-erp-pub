@@ -56,6 +56,23 @@ def build_lead_meta(
 ) -> dict[str, Any]:
     vt = (parsed.get("venue_type") or "indoor").strip().lower()
     cp = (parsed.get("crowd_profile") or "mixed").strip().lower()
+    pg = risk.get("purple_guide") if isinstance(risk.get("purple_guide"), dict) else {}
+    gq: dict[str, Any] = {
+        "venue_type": vt,
+        "venue_label": _VENUE_LABELS.get(vt, vt.replace("_", " ").title()),
+        "crowd_profile": cp,
+        "crowd_profile_label": _CROWD_LABELS.get(cp, cp.replace("_", " ").title()),
+        "alcohol_served": bool(parsed.get("alcohol")),
+        "late_finish": bool(parsed.get("late_finish")),
+        "activity_risk": parsed.get("activity_risk"),
+        "duration_span": parsed.get("duration_span"),
+        "drug_risk": parsed.get("drug_risk"),
+        "hospital_referrals": parsed.get("hospital_referrals"),
+        "alcohol_level": parsed.get("alcohol_level"),
+    }
+    if pg:
+        gq["purple_tier"] = pg.get("tier")
+        gq["purple_score"] = pg.get("purple_score")
     return {
         "source": source,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
@@ -70,14 +87,7 @@ def build_lead_meta(
         "duration_hours": str(parsed.get("duration_hours") or ""),
         "message": parsed.get("message"),
         "risk": risk,
-        "guide_questions": {
-            "venue_type": vt,
-            "venue_label": _VENUE_LABELS.get(vt, vt.replace("_", " ").title()),
-            "crowd_profile": cp,
-            "crowd_profile_label": _CROWD_LABELS.get(cp, cp.replace("_", " ").title()),
-            "alcohol_served": bool(parsed.get("alcohol")),
-            "late_finish": bool(parsed.get("late_finish")),
-        },
+        "guide_questions": gq,
     }
 
 
@@ -106,6 +116,12 @@ def create_opportunity_with_contact(
         r = lead_meta.get("risk") or {}
         if r.get("label"):
             notes_lines.append(f"Risk band: {r.get('label')} (score {r.get('score')})")
+        pg = r.get("purple_guide") if isinstance(r.get("purple_guide"), dict) else {}
+        if pg.get("tier") is not None:
+            notes_lines.append(
+                f"Purple Guide–style tier (indicative): {pg.get('tier')} "
+                f"(planning score {pg.get('purple_score')})"
+            )
         if r.get("suggested_medics"):
             notes_lines.append(
                 f"Guide — suggested medic team size (indicative): {r.get('suggested_medics')}"
@@ -200,6 +216,11 @@ def intake_from_parsed_form(
         alcohol=bool(parsed.get("alcohol")),
         late_finish=bool(parsed.get("late_finish")),
         crowd_profile=str(parsed.get("crowd_profile") or "mixed"),
+        activity_risk=parsed.get("activity_risk"),
+        drug_risk=parsed.get("drug_risk"),
+        duration_span=parsed.get("duration_span"),
+        hospital_referrals=parsed.get("hospital_referrals"),
+        alcohol_level=parsed.get("alcohol_level"),
     )
     lead_meta = build_lead_meta(source=source, parsed=parsed, risk=risk)
     acc_name = (account_name_override or org).strip()

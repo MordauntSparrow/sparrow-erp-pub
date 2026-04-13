@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import flash, redirect, url_for
+from flask import current_app, flash, redirect, url_for
 from flask_login import current_user
 
 from app.objects import has_permission
+from app.organization_profile import (
+    normalize_organization_industries,
+    tenant_matches_industry,
+)
 
 PERM_ACCESS = "crm_module.access"
 PERM_EDIT = "crm_module.edit"
@@ -51,6 +55,28 @@ def crm_edit_required(f):
     def wrapper(*args, **kwargs):
         if not can_edit():
             flash("You do not have permission to change CRM records.", "danger")
+            return redirect(url_for("crm_module.dashboard"))
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+def crm_medical_surface_available() -> bool:
+    """Event medical plans, Cura handoff, and related CRM surfaces (tenant industry profile)."""
+    raw = current_app.config.get("organization_industries")
+    ids = normalize_organization_industries(raw)
+    return tenant_matches_industry(ids, "medical")
+
+
+def crm_medical_surface_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not crm_medical_surface_available():
+            flash(
+                "Event medical plans are available when Medical is enabled under "
+                "Core settings → General (Industry & categories).",
+                "info",
+            )
             return redirect(url_for("crm_module.dashboard"))
         return f(*args, **kwargs)
 

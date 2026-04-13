@@ -19,7 +19,7 @@
     <p class="text-muted small mb-3">
         Use this screen to fix data or create a runsheet <strong>on behalf of</strong> crew (enter numeric <strong>Contractor ID</strong> per row).
         Day-to-day crew selection and template forms belong on the <strong>contractor</strong> time-billing UI (crew search API: <code>/time-billing/api/refs/contractors?q=</code>).
-        <strong>Publish / resync</strong> runs the same server step every time: upserts each contractor’s timesheet row from this runsheet (assignments with <code>payroll_included = 1</code> only). Use after fixing times, after crew reactivate, or after <strong>Ventus sign-off</strong> updated <code>actual_end</code> but timesheets still show old data.
+        <strong>Publish / resync</strong> runs the same server step every time: upserts each contractor’s timesheet row from this runsheet (assignments with <code>payroll_included = 1</code> only). Use when timesheets look stale: after fixing times, after reactivating crew{% if industry_visible('medical') %}, or after <strong>Ventus sign-off</strong> updates <code>actual_end</code>{% endif %}.
     </p>
 
     <div id="rsForm" class="card">
@@ -85,6 +85,7 @@
             <p class="text-muted small mb-0">To assign someone below the ladder, tick <strong>Override</strong> and enter a reason (audited).</p>
             <hr>
 
+            {% if industry_visible('medical') %}
             <h6 class="mb-2">Cura operational event (Medical Records)</h6>
             <div class="row g-2 align-items-end mb-2">
                 <div class="col-12 col-md-3">
@@ -101,6 +102,7 @@
                 </div>
             </div>
             <div id="curaPreview" class="small text-muted border rounded p-2 mb-3" style="display:none;"></div>
+            {% endif %}
 
             <div class="d-flex align-items-center justify-content-between mb-2">
                 <h6 class="mb-0">Assignments (contractor IDs)</h6>
@@ -140,6 +142,7 @@
         const rsId = hashMatch ? (hashMatch[1] === 'new' ? null : hashMatch[1]) : null;
         const isNew = !rsId;
         const q = (sel) => document.querySelector(sel);
+        const SHOW_CURA = {{ industry_visible('medical')|tojson }};
         const URL_CURA_APPLY = "{{ url_for('internal_time_billing.api_runsheet_cura_apply_details', rs_id=999999) }}";
         const URL_CURA_SYNC = "{{ url_for('internal_time_billing.api_runsheet_cura_sync_roster', rs_id=999999) }}";
 
@@ -211,9 +214,11 @@
             q('#shift_address_line2').value = d.shift_address_line2 || '';
             q('#shift_city').value = d.shift_city || '';
             q('#shift_postcode').value = d.shift_postcode || '';
-            const ce = q('#cura_operational_event_id');
-            if (ce) ce.value = d.cura_operational_event_id != null ? d.cura_operational_event_id : '';
-            renderCuraPreview(d.cura_operational_event);
+            if (SHOW_CURA) {
+                const ce = q('#cura_operational_event_id');
+                if (ce) ce.value = d.cura_operational_event_id != null ? d.cura_operational_event_id : '';
+                renderCuraPreview(d.cura_operational_event);
+            }
 
             const tbody = q('#assignTbl tbody');
             tbody.innerHTML = '';
@@ -221,6 +226,7 @@
         }
 
         function renderCuraPreview(bundle) {
+            if (!SHOW_CURA) return;
             const box = q('#curaPreview');
             if (!box) return;
             if (!bundle || !bundle.name) {
@@ -247,7 +253,8 @@
             const rr = (q('#required_role_id').value || '').trim();
             const ssr = (q('#shift_staff_role_id').value || '').trim();
             const pr = (q('#shift_pay_rate').value || '').trim();
-            const curaRaw = (q('#cura_operational_event_id').value || '').trim();
+            const curaEl = SHOW_CURA ? q('#cura_operational_event_id') : null;
+            const curaRaw = (curaEl && curaEl.value) ? curaEl.value.trim() : '';
             const curaParsed = curaRaw ? parseInt(curaRaw, 10) : NaN;
             const payload = {
                 client_id: cRaw ? parseInt(cRaw, 10) : null,
@@ -262,9 +269,11 @@
                 shift_address_line2: (q('#shift_address_line2').value || '').trim() || null,
                 shift_city: (q('#shift_city').value || '').trim() || null,
                 shift_postcode: (q('#shift_postcode').value || '').trim() || null,
-                cura_operational_event_id: Number.isFinite(curaParsed) ? curaParsed : null,
                 assignments: []
             };
+            if (SHOW_CURA) {
+                payload.cura_operational_event_id = Number.isFinite(curaParsed) ? curaParsed : null;
+            }
             q('#assignTbl tbody').querySelectorAll('tr').forEach(tr => {
                 const get = (f) => {
                     const el = tr.querySelector(`.js[data-field="${f}"]`);
@@ -341,6 +350,7 @@
         }
 
         async function curaApply() {
+            if (!SHOW_CURA) return;
             if (!rsId) { alert('Save the run sheet first (need an ID).'); return; }
             const r = await fetch(URL_CURA_APPLY.replace('999999', String(rsId)), {
                 method: 'POST',
@@ -352,6 +362,7 @@
             else alert(j.error || 'Apply failed');
         }
         async function curaSync() {
+            if (!SHOW_CURA) return;
             if (!rsId) { alert('Save the run sheet first (need an ID).'); return; }
             if (!confirm('Add missing crew from the Cura event expected roster? Existing rows are kept.')) return;
             const r = await fetch(URL_CURA_SYNC.replace('999999', String(rsId)), {
@@ -372,10 +383,12 @@
         document.getElementById('btnAddAssign').addEventListener('click', () => addAssignmentRow());
         document.getElementById('btnSave').addEventListener('click', save);
         document.getElementById('btnPublish').addEventListener('click', publish);
-        const btnCuraA = document.getElementById('btnCuraApply');
-        const btnCuraS = document.getElementById('btnCuraSync');
-        if (btnCuraA) btnCuraA.addEventListener('click', curaApply);
-        if (btnCuraS) btnCuraS.addEventListener('click', curaSync);
+        if (SHOW_CURA) {
+            const btnCuraA = document.getElementById('btnCuraApply');
+            const btnCuraS = document.getElementById('btnCuraSync');
+            if (btnCuraA) btnCuraA.addEventListener('click', curaApply);
+            if (btnCuraS) btnCuraS.addEventListener('click', curaSync);
+        }
 
         if (rsId) load();
     })();

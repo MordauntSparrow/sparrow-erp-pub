@@ -42,9 +42,13 @@ def get_site_branding(app=None) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Relative to static root — use with WeasyPrint ``base_url`` = static dir file URI + "/"
+    logo_pdf_src = logo_rel.replace("\\", "/") if logo_rel else None
+
     return {
         "company_name": name,
         "logo_path": logo_rel,
         "logo_abs_path": logo_abs,
         "logo_file_uri": logo_uri,
+        "logo_pdf_src": logo_pdf_src,
     }

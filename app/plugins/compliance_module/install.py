@@ -12,11 +12,12 @@ for p in (str(HERE.parent.parent.parent), str(HERE)):
 from app.objects import get_db_connection  # noqa: E402
 
 MIGRATIONS_TABLE = "comp_migrations"
-# Drop order (reversed): acknowledgements → policies → document types → migrations
+# Drop order (reversed): acknowledgements → lifecycle audit → policies → document types → migrations
 MODULE_TABLES = [
     MIGRATIONS_TABLE,
     "comp_document_types",
     "comp_policies",
+    "comp_policy_lifecycle_audit",
     "comp_policy_acknowledgements",
 ]
 
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS comp_policies (
   file_path VARCHAR(512) DEFAULT NULL,
   version INT NOT NULL DEFAULT 1,
   published TINYINT(1) NOT NULL DEFAULT 0,
+  lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft',
   mandatory TINYINT(1) NOT NULL DEFAULT 1,
   published_at DATETIME DEFAULT NULL,
   next_review_date DATE DEFAULT NULL,
@@ -64,6 +66,20 @@ CREATE TABLE IF NOT EXISTS comp_policies (
   KEY idx_comp_category (category),
   KEY idx_comp_document_type (document_type_id),
   CONSTRAINT fk_comp_policy_document_type FOREIGN KEY (document_type_id) REFERENCES comp_document_types(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+SQL_CREATE_POLICY_LIFECYCLE_AUDIT = """
+CREATE TABLE IF NOT EXISTS comp_policy_lifecycle_audit (
+  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  policy_id INT NOT NULL,
+  from_status VARCHAR(16) NOT NULL,
+  to_status VARCHAR(16) NOT NULL,
+  reason TEXT NOT NULL,
+  actor_label VARCHAR(255) DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_comp_pla_policy_created (policy_id, created_at),
+  CONSTRAINT fk_comp_pla_policy FOREIGN KEY (policy_id) REFERENCES comp_policies(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
@@ -87,6 +103,7 @@ CREATES = [
     SQL_CREATE_MIGRATIONS,
     SQL_CREATE_DOCUMENT_TYPES,
     SQL_CREATE_POLICIES,
+    SQL_CREATE_POLICY_LIFECYCLE_AUDIT,
     SQL_CREATE_ACKS,
 ]
 
@@ -266,12 +283,48 @@ def _ensure_document_types_schema(conn):
         cur.close()
 
 
+def _ensure_policy_lifecycle_status(conn):
+    """draft | active | retired — kept in sync with published in application code."""
+    cur = conn.cursor()
+    try:
+        added = False
+        if not _column_exists(conn, "comp_policies", "lifecycle_status"):
+            cur.execute(
+                "ALTER TABLE comp_policies ADD COLUMN lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft' AFTER published"
+            )
+            added = True
+        if added:
+            cur.execute(
+                "UPDATE comp_policies SET lifecycle_status = IF(published = 1, 'active', 'draft')"
+            )
+        else:
+            cur.execute(
+                "UPDATE comp_policies SET published = 1 WHERE lifecycle_status = 'active' AND published = 0"
+            )
+            cur.execute(
+                """
+                UPDATE comp_policies SET published = 0
+                WHERE lifecycle_status IN ('draft', 'retired') AND published = 1
+                """
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _ensure_policy_lifecycle_audit_table(conn):
+    if not _table_exists(conn, "comp_policy_lifecycle_audit"):
+        _run_sql(conn, SQL_CREATE_POLICY_LIFECYCLE_AUDIT)
+
+
 def install():
     conn = get_db_connection()
     try:
         ensure_tables(conn)
         _ensure_comp_policy_review_columns(conn)
         _ensure_document_types_schema(conn)
+        _ensure_policy_lifecycle_status(conn)
+        _ensure_policy_lifecycle_audit_table(conn)
     finally:
         conn.close()
 

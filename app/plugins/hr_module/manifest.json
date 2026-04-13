@@ -63,11 +63,10 @@
   ],
   "dependencies": [
     "website_module",
-    "employee_portal_module",
-    "time_billing_module"
+    "employee_portal_module"
   ],
   "repository": "official",
   "download_url": "",
-  "changelog": "Employee directory, document library, date of birth, richer admin dashboard. Public base: contractor theme toggle posts to sparrow_shared_contractor_ui (/contractor-ui/set-theme).",
+  "changelog": "No longer declares a dependency on Time Billing (TB now depends on HR). Contractor records remain in tb_contractors; TB username helpers are imported at runtime only.",
   "repository_token": ""
 }

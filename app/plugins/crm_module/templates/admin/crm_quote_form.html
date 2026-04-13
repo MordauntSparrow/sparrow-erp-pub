@@ -2,11 +2,23 @@
 {% block page_title %}{% if quote %}Quote #{{ quote.id }}{% else %}New quote{% endif %}{% endblock %}
 {% block content %}
 <div class="container-fluid py-3">
+  {% if quote and can_edit and (quote.status or '')|lower != 'accepted' %}
+  <div class="alert alert-info border-0 shadow-sm mb-3 d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+      <p class="fw-semibold mb-1">Cura handoff — client agreed?</p>
+      <p class="small mb-0">When the organiser has agreed this revision’s pricing, mark the quote <strong>Accepted</strong> (below) and save, or use the green button. Moving the deal to <strong>Won</strong> on the Kanban does <em>not</em> do this — event plans need quote status Accepted before <strong>Send to Cura</strong>.</p>
+    </div>
+    <form method="post" action="{{ url_for('crm_module.quote_accept_for_cura', quote_id=quote.id) }}" class="flex-shrink-0">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-success rounded-pill px-3">Mark quote accepted</button>
+    </form>
+  </div>
+  {% endif %}
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <h1 class="h4 mb-0">{% if quote %}Edit quote{% else %}New quote{% endif %}</h1>
     <div class="d-flex gap-2">
       <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quotes_list') }}">All quotes</a>
-      {% if quote and can_edit %}
+      {% if quote and can_edit and industry_visible('medical') %}
       <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', quote_id=quote.id) }}">Event plan</a>
       <form method="post" action="{{ url_for('crm_module.quote_new_revision', quote_id=quote.id) }}" class="d-inline" onsubmit="return confirm('Create a new draft revision copying this quote?');">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -20,7 +32,7 @@
     </div>
   </div>
 
-  {% if quote and linked_event_plans %}
+  {% if quote and linked_event_plans and industry_visible('medical') %}
   <div class="alert alert-light border small mb-3">
     <strong>Event medical plans</strong> linked to this quote —
     {% for ep in linked_event_plans %}

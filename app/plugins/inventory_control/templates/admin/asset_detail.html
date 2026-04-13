@@ -154,7 +154,7 @@
   <div class="card shadow-sm mb-3 border-info">
     <div class="card-header fw-semibold">Contractor portal handoff</div>
     <div class="card-body">
-      <p class="small text-muted mb-3">Authorize this contractor to <strong>record</strong> in the employee portal that they have returned the unit to a <strong>storeroom</strong> or placed it back on a <strong>specific vehicle</strong> (e.g. AED into ambulance kit). They only see the action after you create a task here. Choose the same <strong>issue location</strong> you use for normal sign-out (inventory balances use a return + re-issue when the target is a vehicle).</p>
+      <p class="small text-muted mb-3">Authorize this contractor to <strong>record</strong> in the employee portal that they have returned the unit to a <strong>storeroom</strong> or placed it back on a <strong>specific vehicle</strong>.{% if industry_visible('medical') %} For example, returning an AED to an ambulance kit location.{% endif %} They only see the action after you create a task here. Choose the same <strong>issue location</strong> you use for normal sign-out (inventory balances use a return + re-issue when the target is a vehicle).</p>
       <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_portal_handoff_create', asset_id=asset.id) }}" class="row g-2 align-items-end">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="col-md-3">

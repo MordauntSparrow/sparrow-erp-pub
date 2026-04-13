@@ -2,9 +2,12 @@
     "system_name": "time_billing_module",
     "name": "Shift Timesheets",
     "description": "Captures weekly contractor timesheets with auto rates, travel, and billing variance rollups.",
-    "version": "0.0.19",
-    "changelog": "Admin timesheet: Mark paid/closed without a portal invoice (PAYE/off-system/legacy) sets week to invoiced and blocks self-serve invoicing; optional audit fields (migration 019). Reopen to approved when no draft/sent portal invoice. Uninvoiced-entry queries respect invoiced weeks.",
+    "version": "0.0.21",
+    "changelog": "Depends on HR: enable Time Billing only with HR enabled. Contractor create/update/password/status APIs removed — use HR → Employees / Edit profile. Staff role APIs unchanged.",
     "icon": "icon.png",
+    "dependencies": [
+        "hr_module"
+    ],
     "enabled": true,
     "installed": true,
     "update_available": false,

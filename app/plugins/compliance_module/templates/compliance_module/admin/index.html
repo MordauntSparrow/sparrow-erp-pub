@@ -78,9 +78,9 @@
       <a href="{{ url_for('internal_compliance.admin_index', review='published', type=document_type_filter) }}" class="text-decoration-none">
         <div class="card h-100 border-success border-opacity-25 shadow-sm">
           <div class="card-body">
-            <div class="text-muted small fw-medium">Published</div>
+            <div class="text-muted small fw-medium">Active</div>
             <div class="h3 fw-semibold text-success mb-0">{{ metrics.published_count or 0 }}</div>
-            <div class="small text-muted mt-1">Live for staff</div>
+            <div class="small text-muted mt-1">Live on portal</div>
           </div>
         </div>
       </a>
@@ -130,7 +130,11 @@
           </td>
           <td class="small">{% if p.last_reviewed_date %}{{ p.last_reviewed_date }}{% else %}—{% endif %}</td>
           <td class="small">
-            {% if p.published %}<span class="badge bg-success">Published</span>{% else %}<span class="badge bg-secondary">Draft</span>{% endif %}
+            {% set pls = p.lifecycle_status|default('') %}
+            {% if not pls %}{% set pls = 'active' if p.published|default(0)|int == 1 else 'draft' %}{% endif %}
+            {% if pls == 'active' %}<span class="badge bg-success">Active</span>
+            {% elif pls == 'retired' %}<span class="badge bg-dark">Retired</span>
+            {% else %}<span class="badge bg-secondary">Draft</span>{% endif %}
             {% if p.mandatory %}<span class="badge bg-warning text-dark">Mandatory</span>{% else %}<span class="badge bg-light text-dark border">Info</span>{% endif %}
           </td>
           <td>{{ p.ack_count or 0 }}</td>

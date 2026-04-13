@@ -74,12 +74,35 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """You are the Employee Portal assistant. You help staff with:
+SYSTEM_PROMPT_BASE = """You are the Employee Portal assistant. You help staff with:
 - What they need to do: policies to sign, training to complete, HR document requests, to-dos, and unread messages.
 - Where to find things in the portal (Time & Billing, HR, Compliance, Training, Scheduling, etc.).
 - General navigation and next steps.
 
 Always act only for the logged-in staff member. Be concise and friendly. When you use get_my_summary, summarize the result in plain language and suggest the relevant links (Compliance, Training, HR, Portal dashboard). Don't make up data—use the tool to get their real summary."""
+
+
+def _system_prompt_with_tenant_context() -> str:
+    """Append organisation industry profile so the model does not assume medical/clinical for every tenant."""
+    extra = ""
+    try:
+        from flask import current_app, has_app_context
+
+        from app.organization_profile import normalize_organization_industries
+
+        if has_app_context():
+            slugs = normalize_organization_industries(
+                current_app.config.get("organization_industries")
+            )
+            if slugs:
+                extra = (
+                    " Organisation industry profile (admin setting): "
+                    + ", ".join(slugs)
+                    + ". Use wording that fits these sectors only; do not assume clinical, patient, or ambulance context unless medical is listed."
+                )
+    except Exception:
+        pass
+    return SYSTEM_PROMPT_BASE + extra
 
 
 def _execute_tool(contractor_id: int, name: str, args: Dict[str, Any]) -> str:
@@ -105,7 +128,7 @@ def assistant_chat(contractor_id: int, messages: List[Dict[str, str]]) -> Option
     try:
         client = build_openai_client()
         all_messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _system_prompt_with_tenant_context()},
             *messages,
         ]
         max_iterations = 5

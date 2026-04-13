@@ -28,8 +28,11 @@
         <a class="nav-link {% if request.endpoint == ep_dash %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_index') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
         <a class="nav-link {% if request.endpoint == ep_week %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_schedule_week') }}"><i class="bi bi-calendar-week me-1"></i>Week view</a>
         <a class="nav-link {% if request.endpoint == ep_month %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_schedule_month') }}"><i class="bi bi-calendar3 me-1"></i>Month view</a>
+        {% if industry_visible('medical') %}
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_cura_event_planning' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_cura_event_planning') }}"><i class="bi bi-calendar-event me-1"></i>Cura events</a>
+        {% endif %}
         <a class="nav-link {% if request.endpoint in shifts_endpoints %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_shifts') }}"><i class="bi bi-list-task me-1"></i>Shifts</a>
+        <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_team_event_new' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_team_event_new') }}"><i class="bi bi-people-fill me-1"></i>Team event</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_templates' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_templates') }}"><i class="bi bi-journal-bookmark me-1"></i>Templates</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_open_shift_claims' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_open_shift_claims') }}"><i class="bi bi-person-check me-1"></i>Open claims</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_time_off' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_time_off') }}"><i class="bi bi-calendar-x me-1"></i>Time off</a>

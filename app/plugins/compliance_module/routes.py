@@ -21,6 +21,11 @@ from app.objects import PluginManager
 from app.portal_session import contractor_id_from_tb_user
 
 from . import services as comp_svc
+from .audit_bridge import (
+    note_document_type_admin_action,
+    note_policy_admin_action,
+    note_policy_contractor_acknowledge,
+)
 
 _plugin_manager = PluginManager(os.path.abspath("app/plugins"))
 _core_manifest = _plugin_manager.get_core_manifest() or {}
@@ -88,6 +93,20 @@ def _save_policy_file(file_storage) -> Optional[str]:
     rel = os.path.join("uploads", "compliance_policies", safe_name).replace("\\", "/")
     file_storage.save(os.path.join(_app_static_dir(), rel.replace("/", os.sep)))
     return rel
+
+
+def _compliance_actor_label() -> Optional[str]:
+    try:
+        if not current_user.is_authenticated:
+            return None
+    except Exception:
+        return None
+    for attr in ("email", "name", "username"):
+        v = getattr(current_user, attr, None)
+        if v:
+            return str(v)[:255]
+    uid = getattr(current_user, "id", None)
+    return f"user_id:{uid}" if uid is not None else None
 
 
 # =============================================================================
@@ -165,12 +184,20 @@ def public_policy_acknowledge(policy_id):
     if not request.form.get("confirm") == "1":
         flash("You must tick the box to confirm you have read and agree to abide by this policy.", "error")
         return redirect(url_for("public_compliance.public_policy_view", policy_id=policy_id))
-    ok, msg = comp_svc.acknowledge_policy(
+    ok, msg, ver_inserted = comp_svc.acknowledge_policy(
         cid,
         policy_id,
         remote_addr=request.remote_addr,
         user_agent=request.headers.get("User-Agent"),
     )
+    if ok and ver_inserted is not None:
+        prow = comp_svc.get_published_policy(policy_id)
+        note_policy_contractor_acknowledge(
+            policy_id=int(policy_id),
+            policy_title=(prow.get("title") or "") if prow else "",
+            contractor_id=int(cid),
+            version=int(ver_inserted),
+        )
     flash("Your acknowledgement has been recorded. Thank you." if ok else msg, "success" if ok else "error")
     return redirect(url_for("public_compliance.public_index"))
 
@@ -229,11 +256,17 @@ def admin_document_types():
     if request.method == "POST":
         action = (request.form.get("action") or "").strip().lower()
         if action == "add":
-            ok, msg, _tid = comp_svc.admin_create_document_type(
+            ok, msg, new_tid = comp_svc.admin_create_document_type(
                 request.form.get("label"),
                 request.form.get("slug") or None,
             )
             flash(msg if ok else msg, "success" if ok else "error")
+            if ok and new_tid:
+                note_document_type_admin_action(
+                    "create",
+                    type_id=int(new_tid),
+                    label=request.form.get("label") or "",
+                )
         elif action == "save":
             tid = _int_or_none(request.form.get("type_id"))
             if tid:
@@ -248,6 +281,12 @@ def admin_document_types():
                     request.form.get("active") == "1",
                 )
                 flash("Saved." if ok else msg, "success" if ok else "error")
+                if ok:
+                    note_document_type_admin_action(
+                        "update",
+                        type_id=int(tid),
+                        label=request.form.get("label") or "",
+                    )
             else:
                 flash("Invalid type.", "error")
         return redirect(url_for("internal_compliance.admin_document_types"))
@@ -275,13 +314,27 @@ def admin_policy_new():
             request.form.get("slug") or None,
             request.form.get("next_review_date") or None,
             request.form.get("last_reviewed_date") or None,
+            request.form.get("lifecycle_status"),
+            lifecycle_change_reason=request.form.get("lifecycle_change_reason"),
+            actor_label=_compliance_actor_label(),
         )
         if ok and pid:
             f = request.files.get("file")
             rel = _save_policy_file(f)
             if rel:
                 comp_svc.admin_set_policy_file(pid, rel)
-            flash("Document saved. Use “Issue to all staff” when ready to publish.", "success")
+            pr = comp_svc.admin_get_policy(pid)
+            note_policy_admin_action(
+                "create",
+                policy_id=int(pid),
+                policy_title=(pr.get("title") if pr else None) or request.form.get("title") or "",
+                lifecycle_to=comp_svc.normalize_lifecycle(request.form.get("lifecycle_status")),
+                version=int((pr or {}).get("version") or 1),
+            )
+            flash(
+                "Document saved. Open it again to set status (Draft / Active / Retired) or use “Save & publish to staff”.",
+                "success",
+            )
             return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=pid))
         flash(msg, "error")
     type_rows = comp_svc.list_document_types_for_policy_form()
@@ -297,6 +350,8 @@ def admin_policy_new():
         policy=None,
         document_types=type_rows,
         default_document_type_id=default_dt,
+        lifecycle_labels=comp_svc.LIFECYCLE_LABELS,
+        lifecycle_audit=[],
         config=_core_manifest,
     )
 
@@ -310,44 +365,107 @@ def admin_policy_edit(policy_id):
         flash("Policy not found.", "error")
         return redirect(url_for("internal_compliance.admin_index"))
     if request.method == "POST":
-        action = request.form.get("action")
-        if action == "issue":
-            ok, msg, meta = comp_svc.admin_issue_policy_to_staff(policy_id)
-            flash(msg, "success" if ok else "error")
-            return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
-        if action == "unpublish":
-            ok, msg = comp_svc.admin_unpublish_policy(policy_id)
-            flash(msg, "success" if ok else "error")
-            return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
-        ok, msg, _ = comp_svc.admin_save_policy(
-            policy_id,
-            request.form.get("title"),
-            request.form.get("document_type_id"),
-            request.form.get("topic"),
-            request.form.get("summary"),
-            request.form.get("body_text"),
-            request.form.get("mandatory") == "1",
-            request.form.get("slug") or None,
-            request.form.get("next_review_date") or None,
-            request.form.get("last_reviewed_date") or None,
-        )
-        if ok:
+        admin_action = (request.form.get("admin_action") or "save").strip().lower()
+
+        def _save_from_form(lifecycle_override=None):
+            return comp_svc.admin_save_policy(
+                policy_id,
+                request.form.get("title"),
+                request.form.get("document_type_id"),
+                request.form.get("topic"),
+                request.form.get("summary"),
+                request.form.get("body_text"),
+                request.form.get("mandatory") == "1",
+                request.form.get("slug") or None,
+                request.form.get("next_review_date") or None,
+                request.form.get("last_reviewed_date") or None,
+                lifecycle_override
+                if lifecycle_override is not None
+                else request.form.get("lifecycle_status"),
+                lifecycle_change_reason=request.form.get("lifecycle_change_reason"),
+                actor_label=_compliance_actor_label(),
+            )
+
+        def _save_uploaded_file():
             f = request.files.get("file")
             rel = _save_policy_file(f)
             if rel:
                 comp_svc.admin_set_policy_file(policy_id, rel)
+
+        if admin_action == "unpublish":
+            ok, msg, _ = _save_from_form(lifecycle_override=comp_svc.LIFECYCLE_DRAFT)
+            if not ok:
+                flash(msg, "error")
+                return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
+            _save_uploaded_file()
+            pr_un = comp_svc.admin_get_policy(policy_id)
+            note_policy_admin_action(
+                "unpublish",
+                policy_id=int(policy_id),
+                policy_title=(pr_un.get("title") if pr_un else None) or row.get("title") or "",
+                lifecycle_from=comp_svc.policy_effective_lifecycle_state(row),
+                lifecycle_to=comp_svc.LIFECYCLE_DRAFT,
+                version=int((pr_un or row).get("version") or 1),
+                admin_action="unpublish",
+            )
+            flash(
+                "Unpublished — status is now Draft (staff cannot see this document until you publish again).",
+                "success",
+            )
+            return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
+
+        if admin_action == "issue":
+            ok, msg, _ = _save_from_form()
+            if not ok:
+                flash(msg, "error")
+                return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
+            _save_uploaded_file()
+            ok_i, msg_i, meta = comp_svc.admin_issue_policy_to_staff(
+                policy_id, _compliance_actor_label()
+            )
+            if ok_i:
+                pr_is = comp_svc.admin_get_policy(policy_id)
+                note_policy_admin_action(
+                    "issue_to_staff",
+                    policy_id=int(policy_id),
+                    policy_title=(pr_is.get("title") if pr_is else None) or row.get("title") or "",
+                    lifecycle_from=comp_svc.policy_effective_lifecycle_state(row),
+                    lifecycle_to=comp_svc.LIFECYCLE_ACTIVE,
+                    version=int((meta or {}).get("version") or (pr_is or row).get("version") or 1),
+                    admin_action="issue",
+                )
+            flash(msg_i, "success" if ok_i else "error")
+            return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
+
+        ok, msg, _ = _save_from_form()
+        if ok:
+            _save_uploaded_file()
+            pr = comp_svc.admin_get_policy(policy_id)
+            new_ls = comp_svc.normalize_lifecycle(request.form.get("lifecycle_status"))
+            note_policy_admin_action(
+                "update",
+                policy_id=int(policy_id),
+                policy_title=(pr.get("title") if pr else None) or "",
+                lifecycle_from=comp_svc.policy_effective_lifecycle_state(row),
+                lifecycle_to=new_ls,
+                version=int((pr or {}).get("version") or row.get("version") or 1),
+                admin_action="save",
+            )
             flash("Saved.", "success")
         else:
             flash(msg, "error")
         return redirect(url_for("internal_compliance.admin_policy_edit", policy_id=policy_id))
     acks = comp_svc.admin_list_acknowledgements_for_policy(policy_id)
+    lifecycle_audit = comp_svc.admin_list_policy_lifecycle_audit(policy_id)
     type_rows = comp_svc.list_document_types_for_policy_form(row.get("document_type_id"))
     return render_template(
         "compliance_module/admin/policy_form.html",
         policy=row,
         acknowledgements=acks,
+        lifecycle_audit=lifecycle_audit,
         document_types=type_rows,
         default_document_type_id=row.get("document_type_id"),
+        lifecycle_labels=comp_svc.LIFECYCLE_LABELS,
         config=_core_manifest,
     )
 

@@ -5,7 +5,7 @@ import re
 import secrets
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from app.objects import get_db_connection
 from app.public_base import EMPLOYEE_PORTAL_PUBLIC_PATH, resolve_public_base_url
@@ -688,6 +688,39 @@ def admin_list_time_billing_roles_for_select(limit: int = 200) -> List[Dict[str,
         conn.close()
 
 
+def admin_staff_role_display_names_ordered(
+    tb_roles: Sequence[Dict[str, Any]],
+) -> List[str]:
+    """Unique Time Billing role names (pay / training), preserving first-seen order."""
+    seen: Set[str] = set()
+    out: List[str] = []
+    for r in tb_roles or ():
+        n = (r.get("name") or "").strip()
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def hr_job_title_preset_form_value(
+    job_title: Optional[str],
+    tb_role_name: Optional[str],
+    tb_roles: Sequence[Dict[str, Any]],
+) -> str:
+    """
+    Value for the job-title quick-pick <select>: '' (custom), '__sync_pay__', or an exact
+    staff role name from ``tb_roles``.
+    """
+    jt = (job_title or "").strip()
+    pay = (tb_role_name or "").strip()
+    names = set(admin_staff_role_display_names_ordered(tb_roles))
+    if pay and (not jt or jt == pay):
+        return "__sync_pay__"
+    if jt and jt in names:
+        return jt
+    return ""
+
+
 def admin_list_wage_rate_cards_for_select(limit: int = 250) -> List[Dict[str, Any]]:
     """Time Billing wage_rate_cards for HR edit form (optional module)."""
     conn = get_db_connection()
@@ -882,6 +915,7 @@ def admin_hr_update_contractor_core(
     employment_type: Optional[str] = None,
     role_id_raw: Optional[str] = None,
     wage_rate_card_id_raw: Optional[str] = None,
+    invoice_billing_frequency: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
     Update tb_contractors identity + primary Time Billing role / wage card from HR.
@@ -1027,6 +1061,19 @@ def admin_hr_update_contractor_core(
                     )
                 except mysql.connector.Error:
                     pass
+
+            ibf = (invoice_billing_frequency or "weekly").strip().lower()
+            if ibf not in ("weekly", "monthly"):
+                ibf = "weekly"
+            try:
+                cur2.execute(
+                    """
+                    UPDATE tb_contractors SET invoice_billing_frequency = %s WHERE id = %s
+                    """,
+                    (ibf, cid),
+                )
+            except mysql.connector.Error:
+                pass
 
             if role_id is not None:
                 cur2.execute(
@@ -1753,6 +1800,7 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                 """
                 SELECT c.id, c.name, c.email, c.username, c.initials, c.status, c.profile_picture_path,
                        COALESCE(c.employment_type, 'self_employed') AS employment_type,
+                       COALESCE(c.invoice_billing_frequency, 'weekly') AS invoice_billing_frequency,
                        c.role_id AS tb_role_id, c.wage_rate_card_id AS tb_wage_rate_card_id,
                        r.name AS tb_role_name
                 FROM tb_contractors c
@@ -1770,6 +1818,7 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                 cur.execute(
                     """
                     SELECT c.id, c.name, c.email, c.initials, c.status, c.profile_picture_path,
+                           COALESCE(c.invoice_billing_frequency, 'weekly') AS invoice_billing_frequency,
                            c.role_id AS tb_role_id, c.wage_rate_card_id AS tb_wage_rate_card_id,
                            r.name AS tb_role_name
                     FROM tb_contractors c
@@ -1792,6 +1841,21 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
         row = cur.fetchone()
         if not row:
             return None
+        if "invoice_billing_frequency" not in row:
+            row["invoice_billing_frequency"] = "weekly"
+            try:
+                cur.execute(
+                    """
+                    SELECT COALESCE(invoice_billing_frequency, 'weekly') AS ibf
+                    FROM tb_contractors WHERE id = %s
+                    """,
+                    (contractor_id,),
+                )
+                one = cur.fetchone()
+                if one and one.get("ibf"):
+                    row["invoice_billing_frequency"] = one["ibf"]
+            except Exception:
+                pass
         try:
             cur.execute(
                 """
@@ -1856,7 +1920,8 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
             }
             for x in cf_items
         ]
-        while len(form_rows) < 10:
+        # One blank row for the next entry (or the only row if none saved); "Add field" adds more.
+        if len(form_rows) < 80:
             form_rows.append({"label": "", "value": "", "review_date": ""})
         row["custom_fields_form_rows"] = form_rows[:80]
         if "username" not in row:
@@ -2684,6 +2749,25 @@ HR_ONBOARDING_PACKS: Dict[str, List[Tuple[str, str]]] = {
         ("right_to_work", "Right to work evidence"),
         ("contract", "Signed contract or written terms"),
     ],
+    # Industry-tagged seeds (mirror install.py — used if DB row missing)
+    "regulated_health_clinical": [
+        ("right_to_work", "Right to work evidence"),
+        ("dbs", "DBS certificate"),
+        ("other", "Professional registration evidence (e.g. HCPC, GMC, NMC)"),
+    ],
+    "security_licence_hr": [
+        ("right_to_work", "Right to work evidence"),
+        ("dbs", "DBS certificate (if required)"),
+        ("other", "Security licence evidence (e.g. SIA)"),
+    ],
+    "hospitality_guest_facing": [
+        ("right_to_work", "Right to work evidence"),
+        ("profile_picture", "Uniform or ID photo"),
+    ],
+    "cleaning_facilities": [
+        ("right_to_work", "Right to work evidence"),
+        ("dbs", "DBS certificate (if required)"),
+    ],
 }
 
 
@@ -2763,6 +2847,10 @@ def hr_onboarding_pack_choices() -> List[Dict[str, str]]:
         "office_standard": "Office / standard",
         "field_based": "Field / mobile",
         "minimal": "Minimal (right to work + contract)",
+        "regulated_health_clinical": "Clinical / regulated roles",
+        "security_licence_hr": "Security / guarding",
+        "hospitality_guest_facing": "Hospitality / guest-facing",
+        "cleaning_facilities": "Cleaning / facilities",
     }
     return [
         {"key": k, "label": labels.get(k, k.replace("_", " ").title())}

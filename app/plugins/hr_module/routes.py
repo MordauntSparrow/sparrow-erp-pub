@@ -333,6 +333,44 @@ def _core_user_id_for_db():
     return str(uid)
 
 
+def _hr_medical_industry_for_hcpc() -> bool:
+    """HCPC register features are scoped to tenants with Medical industry (Core settings)."""
+    from flask import current_app
+
+    from app.organization_profile import (
+        normalize_organization_industries,
+        tenant_matches_industry,
+    )
+
+    ids = normalize_organization_industries(
+        current_app.config.get("organization_industries")
+    )
+    return tenant_matches_industry(ids, "medical")
+
+
+_HR_REGULATED_FIELD_PREFIXES = (
+    "hpac_",
+    "hcpc_",
+    "gmc_",
+    "nmc_",
+    "gphc_",
+)
+
+
+def _hr_preserve_regulated_profile_fields_when_not_medical(
+    data: dict, profile: dict
+) -> None:
+    """
+    When Medical industry UI is hidden, regulated register fields are not posted;
+    copy existing profile values so a save does not clear stored data.
+    """
+    if _hr_medical_industry_for_hcpc():
+        return
+    for key in list(data.keys()):
+        if any(key.startswith(p) for p in _HR_REGULATED_FIELD_PREFIXES):
+            data[key] = profile.get(key)
+
+
 @internal_bp.get("/")
 @login_required
 @_hr_require_view
@@ -391,6 +429,13 @@ def admin_hr_dbs_mass_interval_save():
 @login_required
 @_hr_require(HR_EDIT)
 def admin_hr_hcpc_mass_interval_save():
+    if not _hr_medical_industry_for_hcpc():
+        flash(
+            "HCPC register scheduling is only available when **Medical** is enabled under "
+            "Core settings → General → Industry & categories.",
+            "warning",
+        )
+        return redirect(url_for("internal_hr.admin_index"))
     raw = (request.form.get("interval_days") or "0").strip()
     try:
         days = int(raw)
@@ -410,6 +455,13 @@ def admin_hr_hcpc_mass_interval_save():
 @login_required
 @_hr_require(HR_EDIT)
 def admin_hr_hcpc_mass_check_now():
+    if not _hr_medical_industry_for_hcpc():
+        flash(
+            "HCPC mass checks are only available when **Medical** is enabled under "
+            "Core settings → General → Industry & categories.",
+            "warning",
+        )
+        return redirect(url_for("internal_hr.admin_index"))
     if not is_hcpc_register_api_enabled():
         flash(
             "HCPC HTTP checks are turned off on this server (HCPC_REGISTER_API_ENABLED=0/false/no/off).",
@@ -916,11 +968,21 @@ def admin_contractor_edit_form(cid):
         limit=800) if int(c["id"]) != int(cid)]
     tb_roles = hr_services.admin_list_time_billing_roles_for_select()
     wage_cards = hr_services.admin_list_wage_rate_cards_for_select()
+    staff_role_display_names = hr_services.admin_staff_role_display_names_ordered(
+        tb_roles
+    )
+    job_title_preset_value = hr_services.hr_job_title_preset_form_value(
+        profile.get("job_title"),
+        profile.get("tb_role_name"),
+        tb_roles,
+    )
     return render_template(
         "hr_module/admin/contractor_edit.html",
         profile=profile,
         manager_choices=manager_choices,
         tb_roles=tb_roles,
+        staff_role_display_names=staff_role_display_names,
+        job_title_preset_value=job_title_preset_value,
         wage_cards=wage_cards,
         request_types=hr_services.REQUEST_TYPES,
         dbs_update_service_enabled=is_dbs_update_service_enabled(),
@@ -951,6 +1013,7 @@ def admin_contractor_edit_save(cid):
         employment_type=request.form.get("employment_type"),
         role_id_raw=request.form.get("tb_role_id"),
         wage_rate_card_id_raw=wage_raw,
+        invoice_billing_frequency=request.form.get("invoice_billing_frequency"),
     )
     if not ok_core:
         flash(core_msg or "Could not save name, email, or Time Billing settings.", "error")
@@ -1051,6 +1114,7 @@ def admin_contractor_edit_save(cid):
     if not dbs_sub:
         data["dbs_update_consent_at"] = None
         data["dbs_update_service_subscribed"] = False
+    _hr_preserve_regulated_profile_fields_when_not_medical(data, profile)
     if hr_services.admin_update_staff_profile(cid, data):
         flash("Profile saved.", "success")
     else:
@@ -1149,6 +1213,13 @@ def admin_contractor_hcpc_check_now(cid):
     if not profile:
         flash("Employee not found.", "error")
         return redirect(url_for("internal_hr.admin_employees"))
+    if not _hr_medical_industry_for_hcpc():
+        flash(
+            "HCPC register checks are only available when **Medical** is enabled under "
+            "Core settings → General → Industry & categories.",
+            "warning",
+        )
+        return redirect(url_for("internal_hr.admin_contractor_profile", cid=cid))
     if not is_hcpc_register_api_enabled():
         flash(
             "HCPC HTTP checks are turned off on this server (HCPC_REGISTER_API_ENABLED=0/false/no/off).",

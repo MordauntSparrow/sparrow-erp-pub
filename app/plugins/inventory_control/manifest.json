@@ -2,7 +2,7 @@
     "system_name": "inventory_control",
     "name": "Inventory Control",
     "description": "Inventory, costing, invoice control, and serial equipment (servicing, assignments, kit consumables).",
-    "version": "0.0.10",
+    "version": "0.0.11",
     "icon": "icon.png",
     "settings": {
         "default_cost_method": {

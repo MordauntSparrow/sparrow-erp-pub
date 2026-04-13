@@ -183,6 +183,22 @@ def hcpc_mass_run_is_due(interval_days: int) -> bool:
 def run_scheduled_hcpc_register_checks_if_due() -> None:
     if not is_hcpc_register_api_enabled():
         return
+    try:
+        from flask import current_app, has_app_context
+
+        from app.organization_profile import (
+            normalize_organization_industries,
+            tenant_matches_industry,
+        )
+
+        if has_app_context():
+            ids = normalize_organization_industries(
+                current_app.config.get("organization_industries")
+            )
+            if not tenant_matches_industry(ids, "medical"):
+                return
+    except Exception:
+        pass
     days = get_hcpc_mass_check_interval_days_from_manifest()
     if days <= 0 or not hcpc_mass_run_is_due(days):
         return

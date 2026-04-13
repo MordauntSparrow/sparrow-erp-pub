@@ -5,6 +5,14 @@ import math
 from decimal import Decimal
 from typing import Any
 
+from .crm_purple_guide import (
+    CQC_COMPLIANCE_LINES,
+    TIER_GUIDANCE,
+    conversion_row_for_purple_score,
+    compute_purple_score,
+    infer_tier_from_signals,
+)
+
 
 def _i(raw: str | None, default: int = 0) -> int:
     t = (raw or "").strip()
@@ -23,6 +31,32 @@ def _dec(raw: str | None) -> Decimal | None:
         return None
 
 
+def _default_activity_risk(crowd_profile: str, n: int) -> str:
+    cp = (crowd_profile or "mixed").strip().lower()
+    if cp in ("family", "corporate") and n < 800:
+        return "low"
+    return "moderate"
+
+
+def _infer_duration_span(hours: float, explicit: str | None) -> str:
+    e = (explicit or "").strip().lower()
+    if e in ("few_hours", "single_day", "multi_day"):
+        return e
+    if hours <= 5.5:
+        return "few_hours"
+    if hours <= 24:
+        return "single_day"
+    return "multi_day"
+
+
+def _default_hospital_referrals(n: int) -> str:
+    if n >= 5000:
+        return "likely"
+    if n >= 2000:
+        return "possible"
+    return "unlikely"
+
+
 def compute_event_risk_assessment(
     *,
     expected_attendees: int,
@@ -31,13 +65,36 @@ def compute_event_risk_assessment(
     alcohol: bool,
     late_finish: bool,
     crowd_profile: str,
+    activity_risk: str | None = None,
+    drug_risk: str | None = None,
+    duration_span: str | None = None,
+    hospital_referrals: str | None = None,
+    alcohol_level: str | None = None,
 ) -> dict[str, Any]:
     """
-    Returns score 1–5, human label, factor list, and rough resource hints for quoting.
+    Returns score 1–5, Purple Guide–style purple_score (0–100+), indicative tier 1–5,
+    conversion-table row, factor list, and resource hints for quoting (not an MNA).
     """
     n = max(0, int(expected_attendees))
     hours = float(duration_hours) if duration_hours is not None else 6.0
-    hours = max(1.0, min(hours, 36.0))
+    hours = max(1.0, min(hours, 72.0))
+
+    cp = (crowd_profile or "mixed").strip().lower()
+    ar = (activity_risk or "").strip().lower() or _default_activity_risk(cp, n)
+    if ar not in ("low", "moderate", "significant", "high"):
+        ar = "moderate"
+    dr = (drug_risk or "none").strip().lower()
+    if dr not in ("none", "isolated", "likely", "expected"):
+        dr = "none"
+    dspan = _infer_duration_span(hours, duration_span)
+    hr = (hospital_referrals or "").strip().lower() or _default_hospital_referrals(n)
+    if hr not in ("unlikely", "possible", "likely"):
+        hr = "unlikely"
+    alvl_raw = (alcohol_level or "").strip().lower()
+    if alvl_raw not in ("none", "social", "likely", "expected"):
+        alvl = "social" if alcohol else "none"
+    else:
+        alvl = alvl_raw
 
     score = 1.0
     factors: list[str] = []
@@ -71,13 +128,46 @@ def compute_event_risk_assessment(
         score += 0.4
         factors.append("Late finish (after 23:00)")
 
-    cp = (crowd_profile or "mixed").strip().lower()
     if cp in ("young_adult", "young adult", "nightlife"):
         score += 0.35
         factors.append("Higher-energy crowd profile")
     elif cp in ("family", "corporate"):
         score += 0.0
         factors.append("Family / corporate weighted profile (baseline)")
+
+    if ar == "high":
+        score += 0.38
+        factors.append("Purple Guide–style factor: high activity risk")
+    elif ar == "significant":
+        score += 0.24
+        factors.append("Purple Guide–style factor: significant activity risk")
+    elif ar == "moderate":
+        score += 0.12
+        factors.append("Purple Guide–style factor: moderate activity risk")
+
+    if dr == "expected":
+        score += 0.38
+        factors.append("Purple Guide–style factor: drug intoxication expected")
+    elif dr == "likely":
+        score += 0.24
+        factors.append("Purple Guide–style factor: drug intoxication likely")
+    elif dr == "isolated":
+        score += 0.08
+        factors.append("Purple Guide–style factor: isolated drug use possible")
+
+    if dspan == "multi_day":
+        score += 0.34
+        factors.append("Multi-day / overnight programme (higher tier expectations)")
+    elif dspan == "few_hours":
+        score -= 0.04
+        factors.append("Short programme (few hours)")
+
+    if hr == "likely":
+        score += 0.28
+        factors.append("Hospital transfers likely — ambulance & governance planning")
+    elif hr == "possible":
+        score += 0.12
+        factors.append("Some hospital transfers possible")
 
     score = max(1.0, min(5.0, score))
     band = int(round(score))
@@ -90,11 +180,45 @@ def compute_event_risk_assessment(
     }
     label = labels.get(band, "Moderate")
 
-    # Rough planning hints (sales / resourcing — adjust per SOP)
+    purple_score, purple_factors = compute_purple_score(
+        expected_attendees=n,
+        duration_hours=hours,
+        venue_outdoor=venue_outdoor,
+        alcohol=alcohol,
+        late_finish=late_finish,
+        crowd_profile=cp,
+        activity_risk=ar,
+        drug_risk=dr,
+        duration_span=dspan,
+        hospital_referrals=hr,
+        alcohol_level=alvl,
+    )
+    tier = infer_tier_from_signals(
+        purple_score=purple_score,
+        expected_attendees=n,
+        duration_span=dspan,
+        activity_risk=ar,
+        drug_risk=dr,
+        alcohol_level=alvl,
+        hospital_referrals=hr,
+    )
+    conversion = conversion_row_for_purple_score(purple_score)
+    tier_info = TIER_GUIDANCE.get(tier, TIER_GUIDANCE[3])
+
     medic_floor = 2 if band >= 3 else 1
     medic_from_crowd = max(1, math.ceil(n / 2500)) if n else 1
     suggested_medics = max(medic_floor, medic_from_crowd, math.ceil(band * 1.5))
     suggested_vehicles = max(1, min(12, math.ceil(suggested_medics / 3)))
+
+    fr = conversion.get("first_responder", 0)
+    doc = conversion.get("doctor", 0)
+    nur = conversion.get("nurse", 0)
+    if isinstance(fr, int) and isinstance(doc, int) and isinstance(nur, int):
+        table_floor = doc + nur + max(2, fr // 4)
+        suggested_medics = max(suggested_medics, min(220, table_floor))
+    amb = conversion.get("ambulances", 0)
+    if isinstance(amb, int):
+        suggested_vehicles = max(suggested_vehicles, min(24, max(1, amb)))
 
     inputs: dict[str, Any] = {
         "expected_attendees": n,
@@ -103,6 +227,11 @@ def compute_event_risk_assessment(
         "alcohol": alcohol,
         "late_finish": late_finish,
         "crowd_profile": cp or "mixed",
+        "activity_risk": ar,
+        "drug_risk": dr,
+        "duration_span": dspan,
+        "hospital_referrals": hr,
+        "alcohol_level": alvl,
     }
     staffing_breakdown = build_staffing_breakdown(
         suggested_medics=suggested_medics,
@@ -114,16 +243,43 @@ def compute_event_risk_assessment(
         alcohol=alcohol,
         late_finish=late_finish,
     )
+    sb_intro = staffing_breakdown.get("intro") or ""
+    staffing_breakdown = {
+        **staffing_breakdown,
+        "intro": (
+            (sb_intro + " " if sb_intro else "")
+            + "Indicative Purple Guide tier "
+            + str(tier)
+            + " and conversion-table row are for planning only — confirm with your medical needs assessment."
+        ).strip(),
+    }
+
+    merged_factors = list(dict.fromkeys([*factors, *purple_factors]))
+    if not merged_factors:
+        merged_factors = ["Baseline event medical planning considerations"]
 
     return {
         "score": round(score, 2),
         "band": band,
         "label": label,
-        "factors": factors or ["Baseline festival / mass gathering considerations"],
+        "factors": merged_factors,
         "suggested_medics": suggested_medics,
         "suggested_vehicles": suggested_vehicles,
         "staffing_breakdown": staffing_breakdown,
         "inputs": inputs,
+        "purple_guide": {
+            "purple_score": purple_score,
+            "tier": tier,
+            "tier_title": tier_info.get("title"),
+            "tier_summary": tier_info.get("summary"),
+            "tier_cover_points": tier_info.get("cover"),
+            "conversion_row": conversion,
+            "cqc_compliance": list(CQC_COMPLIANCE_LINES),
+            "disclaimer": (
+                "Indicative only — not a substitute for a formal medical needs assessment, "
+                "your medical director, insurer, venue, or Safety Advisory Group (SAG) expectations."
+            ),
+        },
     }
 
 
@@ -335,6 +491,26 @@ def parse_public_calculator_form(form: Any) -> dict[str, Any]:
     venue_type = (form.get("venue_type") or "indoor").strip().lower()
     if venue_type not in ("indoor", "outdoor", "both"):
         venue_type = "indoor"
+
+    def _opt(name: str, allowed: frozenset[str]) -> str | None:
+        v = (form.get(name) or "").strip().lower()
+        return v if v in allowed else None
+
+    activity_risk = _opt(
+        "activity_risk", frozenset({"low", "moderate", "significant", "high"})
+    )
+    drug_risk = _opt(
+        "drug_risk", frozenset({"none", "isolated", "likely", "expected"})
+    )
+    duration_span = _opt(
+        "duration_span", frozenset({"few_hours", "single_day", "multi_day"})
+    )
+    hospital_referrals = _opt(
+        "hospital_referrals", frozenset({"unlikely", "possible", "likely"})
+    )
+    alcohol_level = _opt(
+        "alcohol_level", frozenset({"none", "social", "likely", "expected"})
+    )
     return {
         "organisation_name": org,
         "contact_name": contact,
@@ -349,6 +525,11 @@ def parse_public_calculator_form(form: Any) -> dict[str, Any]:
         "alcohol": alcohol,
         "late_finish": late_finish,
         "crowd_profile": crowd_profile,
+        "activity_risk": activity_risk,
+        "drug_risk": drug_risk,
+        "duration_span": duration_span,
+        "hospital_referrals": hospital_referrals,
+        "alcohol_level": alcohol_level,
     }
 
 

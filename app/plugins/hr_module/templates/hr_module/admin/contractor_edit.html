@@ -96,10 +96,27 @@
       </select>
       <div class="form-text">Stored on the Time Billing contractor record; controls whether invoicing appears in the contractor portal.</div>
     </div>
+    <div class="mb-4">
+      <label class="form-label" for="invoice_billing_frequency">Invoice billing frequency</label>
+      <select class="form-select" id="invoice_billing_frequency" name="invoice_billing_frequency">
+        <option value="weekly" {% if (profile.invoice_billing_frequency or 'weekly')|lower == 'weekly' %}selected{% endif %}>Weekly — one invoice per timesheet week (default)</option>
+        <option value="monthly" {% if (profile.invoice_billing_frequency or '')|lower == 'monthly' %}selected{% endif %}>Monthly — combine weeks from <strong>My invoices</strong> in the portal</option>
+      </select>
+      <div class="form-text">Applies when employment type is <strong>Self-employed</strong>. Weekly shows per-week “Create invoice” after submit; monthly hides that and expects a combined invoice.</div>
+    </div>
     <div class="row">
-      <div class="col-md-6 mb-3">
-        <label class="form-label" for="job_title">Job title / role</label>
-        <input type="text" class="form-control" id="job_title" name="job_title" value="{{ profile.job_title or '' }}" placeholder="e.g. Senior engineer" maxlength="128">
+      <div class="col-md-6 mb-3" id="hr-job-title-block" data-pay-role-name="{{ (profile.tb_role_name or '')|e }}">
+        <label class="form-label" for="job_title_preset">Job title (HR display)</label>
+        <select class="form-select form-select-sm mb-2" id="job_title_preset" aria-describedby="jobTitleHelp">
+          <option value="" {% if job_title_preset_value == '' %}selected{% endif %}>Custom title — type below</option>
+          <option value="__sync_pay__" {% if job_title_preset_value == '__sync_pay__' %}selected{% endif %}>Same as pay role (Time Billing){% if profile.tb_role_name %} — {{ profile.tb_role_name }}{% endif %}</option>
+          {% for rn in staff_role_display_names %}
+          <option value="{{ rn|e }}" {% if job_title_preset_value == rn %}selected{% endif %}>{{ rn|e }}</option>
+          {% endfor %}
+        </select>
+        <label class="form-label" for="job_title">Title text</label>
+        <input type="text" class="form-control" id="job_title" name="job_title" value="{{ profile.job_title or '' }}" placeholder="e.g. Fleet Manager (pay role can stay Manager)" maxlength="128" autocomplete="organization-title">
+        <div id="jobTitleHelp" class="form-text">This is what people see on the directory and profile. Use the list to copy a <strong>staff role</strong> name, <strong>Same as pay role</strong> to match the dropdown above, or type anything (e.g. Fleet Manager while pay role remains Manager). You can change the preset and edit the text anytime.</div>
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label" for="department">Department</label>
@@ -251,7 +268,7 @@
       </div>
       <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
         <button type="button" class="btn btn-sm btn-outline-primary" id="hr-custom-fields-add">Add field</button>
-        <span class="small text-muted">Up to 80 rows. Leave a label empty to skip a row. No rows with labels clears stored additional fields.</span>
+        <span class="small text-muted">Up to 80 fields. One spare row is shown; use <strong>Add field</strong> for more. Leave a label empty to skip that row. If no row has a label, saved additional fields are cleared.</span>
       </div>
     </div>
     <script>
@@ -284,6 +301,7 @@
     })();
     </script>
 
+    {% if industry_visible('medical') %}
     <div class="border rounded p-3 mb-4 bg-light bg-opacity-50">
       <h3 class="h6">HPAC register (pre-hospital / emergency care)</h3>
       <p class="small text-muted mb-3">Record the registrant number and when they joined the register. Sparrow does not call HPAC automatically — there is no published employer API for register status. Verify on <a href="https://www.hpac-uk.org/check-the-register" target="_blank" rel="noopener">Check the Register</a> (HPAC) or your organisation portal, then update status here.</p>
@@ -472,6 +490,7 @@
         <label class="form-check-label" for="gphc_record_verification">Record verification time as now (updates “last checked” when you save)</label>
       </div>
     </div>
+    {% endif %}
 
     <h3 class="h6 mt-3">Contract</h3>
     <div class="row">
@@ -499,4 +518,50 @@
     </div>
   </form>
 </div>
+<script>
+(function () {
+  var preset = document.getElementById('job_title_preset');
+  var jt = document.getElementById('job_title');
+  var tb = document.getElementById('tb_role_id');
+  var block = document.getElementById('hr-job-title-block');
+  if (!preset || !jt || !tb || !block) return;
+
+  function payRoleLabel() {
+    var opt = tb.options[tb.selectedIndex];
+    return (opt && opt.text) ? String(opt.text).trim() : '';
+  }
+
+  function dataPayFallback() {
+    return (block.getAttribute('data-pay-role-name') || '').trim();
+  }
+
+  function applyPreset() {
+    var v = preset.value;
+    if (v === '__sync_pay__') {
+      var p = payRoleLabel() || dataPayFallback();
+      if (p) jt.value = p;
+    } else if (v !== '') {
+      jt.value = v;
+    }
+  }
+
+  preset.addEventListener('change', applyPreset);
+  tb.addEventListener('change', function () {
+    if (preset.value === '__sync_pay__') applyPreset();
+    block.setAttribute('data-pay-role-name', payRoleLabel());
+  });
+
+  function boot() {
+    if (preset.value === '__sync_pay__' && !jt.value.trim()) {
+      var p = payRoleLabel() || dataPayFallback();
+      if (p) jt.value = p;
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
 {% endblock %}

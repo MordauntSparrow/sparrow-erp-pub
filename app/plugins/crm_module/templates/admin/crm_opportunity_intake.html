@@ -11,7 +11,13 @@
     <div>
       <p class="text-muted small text-uppercase fw-semibold mb-1">Pipeline</p>
       <h1 class="h4 mb-0"><i class="bi bi-telephone me-2 text-primary"></i>Call / desk intake</h1>
-      <p class="text-muted small mb-0 mt-1">Same fields as the public event guide — creates an account (if needed), contact, and opportunity. Use for early discussion; formal medical needs assessment and plan still precede binding quotes.</p>
+      <p class="text-muted small mb-0 mt-1">Same fields as the public event guide — creates an account (if needed), contact, and opportunity. Use for early discussion;
+        {% if industry_visible('medical') %}
+        formal medical needs assessment and plan still precede binding quotes.
+        {% else %}
+        binding quotes follow agreed scope and your quote rules.
+        {% endif %}
+      </p>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Board</a>
@@ -79,7 +85,7 @@
           </div>
           <div class="col-md-6">
             <label class="form-label" for="duration_hours">Hours on site</label>
-            <input class="form-control" type="number" min="1" max="36" step="0.5" id="duration_hours" name="duration_hours" value="6">
+            <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours" value="6">
           </div>
           <div class="col-md-6">
             <label class="form-label" for="venue_type">Venue</label>
@@ -97,6 +103,7 @@
               <option value="young_adult">Young adult / evening-led</option>
             </select>
           </div>
+          {% include 'partials/crm_event_calculator_fields.html' %}
           <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes">

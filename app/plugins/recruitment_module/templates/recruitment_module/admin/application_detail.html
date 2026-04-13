@@ -232,7 +232,7 @@
   <div class="card mt-3">
     <div class="card-header fw-semibold">Pre-hire compliance (applicant portal)</div>
     <div class="card-body small">
-      <p class="text-muted">Request right-to-work, DBS, contract, policy confirmation, etc. The applicant uploads on <strong>their</strong> login — not the employee portal. After you <strong>approve</strong> each row, use <em>Authorise contractor creation</em> above.</p>
+      <p class="text-muted">Request right to work, contracts, policy confirmation, and supporting documents. The applicant uploads on <strong>their</strong> login — not the employee portal. After you <strong>approve</strong> each row, use <em>Authorise contractor creation</em> above.{% if industry_visible('medical', 'security', 'cleaning') %} <span class="d-block mt-1">A <strong>DBS</strong> request type is available for regulated care, security vetting, and similar roles.</span>{% endif %}</p>
       {% if rec_can_manage_applications %}
       <form method="post" class="row g-2 align-items-end border-bottom pb-3 mb-3">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -244,7 +244,7 @@
         <div class="col-md-3">
           <label class="form-label small">Type</label>
           <select class="form-select form-select-sm" name="prehire_type">
-            {% for k, lab in prehire_type_labels.items() %}
+            {% for k, lab in prehire_type_add_choices %}
             <option value="{{ k }}">{{ lab }}</option>
             {% endfor %}
           </select>
@@ -293,7 +293,7 @@
         </table>
       </div>
       {% else %}
-      <p class="text-muted mb-0">No pre-hire requests yet. Add types such as right to work, DBS, or contract.</p>
+      <p class="text-muted mb-0">No pre-hire requests yet. Add types such as right to work{% if industry_visible('medical', 'security', 'cleaning') %}, DBS,{% endif %} or contract.</p>
       {% endif %}
     </div>
   </div>

@@ -13,7 +13,7 @@
   </div>
 </div>
 {% if employment_type == 'self_employed' and invoice_billing_frequency == 'monthly' %}
-<p class="text-muted small">Monthly billing: combine <strong>approved</strong> weeks that are not yet on an invoice using <strong>Create invoice</strong>. You do not need to create an invoice from each timesheet week.</p>
+<p class="text-muted small">Monthly billing: combine <strong>submitted or approved</strong> weeks that are not yet on an invoice using <strong>Create invoice</strong>. The invoice stays a <strong>draft</strong> until every selected week is approved; then it becomes sent (or staff approval can finalise it). If a week is rejected, linked invoices are voided automatically.</p>
 {% else %}
 <p class="text-muted small">Linked to your timesheet weeks. Voided rows stay in history if a week was rejected and re-invoiced.</p>
 {% endif %}
@@ -64,7 +64,7 @@
       </tr>
       {% else %}
       <tr><td colspan="7" class="text-muted">No invoices yet.
-        {% if employment_type == 'self_employed' %}Use <strong>Create invoice</strong> to bill approved weeks.{% endif %}
+        {% if employment_type == 'self_employed' %}Use <strong>Create invoice</strong> to bill submitted or approved weeks.{% endif %}
       </td></tr>
       {% endfor %}
     </tbody>
@@ -80,14 +80,14 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted">Select one or more <strong>approved</strong> weeks that are not yet linked to an invoice. Each shift line appears on the same invoice; totals are combined.</p>
+        <p class="small text-muted">Select one or more <strong>submitted or approved</strong> weeks that are not yet linked to an invoice. If any week is still submitted, the invoice is saved as a <strong>draft</strong> until all of those weeks are approved.</p>
         <div class="mb-3">
           <label class="form-label" for="tbCombInvNum">Invoice number</label>
           <input type="text" class="form-control form-control-sm" id="tbCombInvNum" value="{{ suggested_next_invoice_number }}" autocomplete="off">
         </div>
         <div id="tbCombInvLoading" class="small text-muted d-none">Loading weeks…</div>
         <div id="tbCombInvError" class="alert alert-danger small d-none py-2"></div>
-        <div id="tbCombInvEmpty" class="small text-muted d-none">No eligible weeks. Weeks must be approved and have uninvoiced entries.</div>
+        <div id="tbCombInvEmpty" class="small text-muted d-none">No eligible weeks. Weeks must be submitted or approved with uninvoiced entries.</div>
         <div id="tbCombInvList" class="list-group small"></div>
       </div>
       <div class="modal-footer">

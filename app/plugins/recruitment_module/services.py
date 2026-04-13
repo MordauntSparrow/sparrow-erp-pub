@@ -12,9 +12,14 @@ import shutil
 import string
 import uuid
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from app.objects import AuthManager, get_db_connection
+from app.organization_profile import (
+    load_tenant_industries_for_install,
+    normalize_organization_industries,
+    tenant_matches_industry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,49 @@ PREHIRE_REQUEST_TYPE_LABELS = {
 }
 
 PREHIRE_DOC_STATUSES = ("pending", "uploaded", "approved", "rejected", "overdue")
+
+
+def recruitment_tenant_industry_slugs(
+    explicit: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """
+    Normalised industry list for gating pre-hire types and other recruitment UI.
+    Uses Flask config when in a request; otherwise Core manifest (install / scripts).
+    """
+    if explicit is not None:
+        return normalize_organization_industries(list(explicit))
+    try:
+        from flask import current_app, has_request_context
+
+        if has_request_context() and current_app:
+            return normalize_organization_industries(
+                current_app.config.get("organization_industries")
+            )
+    except Exception:
+        pass
+    return load_tenant_industries_for_install()
+
+
+def allowed_prehire_request_types(
+    tenant_industries: Optional[Sequence[str]] = None,
+) -> Tuple[str, ...]:
+    """
+    Pre-hire document types admins may add for this tenant.
+    DBS is UK sector-heavy (care, security vetting, regulated cleaning); hidden for
+    hospitality-only tenants — they can still use \"Other\" with a custom title.
+    """
+    ids = recruitment_tenant_industry_slugs(
+        list(tenant_industries) if tenant_industries is not None else None
+    )
+    show_dbs = tenant_matches_industry(ids, "medical", "security", "cleaning")
+    return tuple(t for t in PREHIRE_REQUEST_TYPES if t != "dbs" or show_dbs)
+
+
+def prehire_type_add_choices(
+    tenant_industries: Optional[Sequence[str]] = None,
+) -> List[Tuple[str, str]]:
+    """Ordered (slug, label) pairs for the admin pre-hire type dropdown."""
+    return [(k, PREHIRE_REQUEST_TYPE_LABELS[k]) for k in allowed_prehire_request_types(tenant_industries)]
 
 
 def _recruitment_static_root() -> str:
@@ -189,6 +237,13 @@ def admin_create_prehire_request(
     rt = (request_type or "other").strip().lower()
     if rt not in PREHIRE_REQUEST_TYPES:
         rt = "other"
+    allowed = frozenset(allowed_prehire_request_types())
+    if rt not in allowed:
+        return (
+            False,
+            "That document type is not enabled for your organisation's industry profile. "
+            "Choose another type or use “Other” with a clear title.",
+        )
     conn = get_db_connection()
     cur = conn.cursor()
     try:

@@ -4,42 +4,307 @@
   <meta charset="utf-8">
   <title>{{ plan.title or 'Event plan' }} — {{ branding.company_name }}</title>
   <style>
-    @page { margin: 18mm; }
-    body { font-family: DejaVu Sans, Arial, sans-serif; font-size: 10pt; color: #222; }
-    .hdr { border-bottom: 2px solid #1a4a7a; padding-bottom: 8px; margin-bottom: 14px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-    .hdr h1 { margin: 0; font-size: 16pt; color: #1a4a7a; }
-    .logo { max-height: 48px; max-width: 200px; }
-    .muted { color: #555; font-size: 9pt; }
-    h2 { font-size: 11pt; color: #1a4a7a; margin: 14px 0 6px; border-bottom: 1px solid #ccc; }
-    table.meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-    table.meta td { padding: 3px 6px; vertical-align: top; }
-    table.meta td:first-child { width: 28%; font-weight: bold; color: #444; }
-    .chk { margin: 4px 0; padding: 4px 0; border-bottom: 1px solid #eee; }
-    .disclaimer { margin-top: 20px; padding: 8px; background: #f5f5f5; font-size: 8pt; color: #444; }
+    @page {
+      size: A4;
+      margin: 14mm 16mm 18mm 16mm;
+      @bottom-center {
+        content: counter(page);
+        font-size: 9pt;
+        color: #555;
+      }
+    }
+    @page :first {
+      margin: 18mm;
+      @bottom-center { content: none; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
+      font-size: 9.5pt;
+      line-height: 1.35;
+      color: #1a1a1a;
+      counter-reset: page;
+    }
+    .cover {
+      min-height: 240mm;
+      page-break-after: always;
+      text-align: center;
+      padding-top: 6mm;
+    }
+    .cover .logo-wrap {
+      margin-bottom: 8mm;
+      min-height: 26mm;
+    }
+    .cover .logo-wrap img {
+      max-height: 24mm;
+      max-width: 85%;
+      object-fit: contain;
+    }
+    .cover h1 {
+      font-size: 19pt;
+      font-weight: 700;
+      color: #0f2940;
+      margin: 0 0 4mm;
+      line-height: 1.15;
+    }
+    .cover .tagline {
+      font-size: 10pt;
+      color: #444;
+      margin-bottom: 6mm;
+    }
+    .cover .meta-block {
+      text-align: left;
+      display: inline-block;
+      width: 100%;
+      max-width: 168mm;
+      margin: 0 auto;
+      border: 1px solid #c5d4e0;
+      border-radius: 4px;
+      padding: 7mm;
+      background: #f7fafc;
+    }
+    .cover .meta-block table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+    .cover .meta-block td { padding: 1.8mm 2mm; vertical-align: top; }
+    .cover .meta-block td.k { width: 34%; font-weight: 700; color: #345; }
+    .cover .genstamp {
+      margin-top: 10mm;
+      font-size: 8pt;
+      color: #666;
+    }
+    .toc-page { page-break-after: always; }
+    .toc-page h2 {
+      font-size: 14pt;
+      color: #0f2940;
+      border-bottom: 2px solid #1a5f8a;
+      padding-bottom: 3mm;
+      margin: 0 0 6mm;
+    }
+    .toc { list-style: none; padding: 0; margin: 0; }
+    .toc li { margin: 0 0 2.5mm; }
+    .toc a {
+      color: #0f2940;
+      text-decoration: none;
+      display: block;
+      position: relative;
+    }
+    .toc a::after {
+      content: leader('.') target-counter(attr(href), page);
+      float: right;
+      padding-left: 2mm;
+      background: white;
+    }
+    h2.sec {
+      font-size: 12pt;
+      color: #0f2940;
+      margin: 9mm 0 3mm;
+      padding-bottom: 2mm;
+      border-bottom: 1px solid #bcd;
+      page-break-after: avoid;
+    }
+    h3.sub {
+      font-size: 10pt;
+      color: #234;
+      margin: 4mm 0 2mm;
+      page-break-after: avoid;
+    }
+    table.meta { width: 100%; border-collapse: collapse; margin-bottom: 4mm; font-size: 9pt; }
+    table.meta td { border: 1px solid #d0d8e0; padding: 2.5mm 3mm; vertical-align: top; }
+    table.meta td:first-child { width: 30%; font-weight: 700; background: #f0f4f8; color: #2a3f55; }
+    table.roster, table.risk {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8.2pt;
+      margin: 3mm 0 5mm;
+    }
+    table.roster th, table.roster td, table.risk th, table.risk td {
+      border: 1px solid #aab;
+      padding: 2mm 2.5mm;
+      vertical-align: top;
+    }
+    table.roster th, table.risk th {
+      background: #1a5f8a;
+      color: #fff;
+      font-weight: 700;
+      text-align: left;
+    }
+    table.roster tr:nth-child(even) td, table.risk tr:nth-child(even) td { background: #f8fafb; }
+    .count-pill {
+      display: inline-block;
+      margin: 1mm 2mm 0 0;
+      padding: 1mm 3mm;
+      background: #e8f0f7;
+      border-radius: 2mm;
+      font-size: 8.5pt;
+      font-weight: 600;
+    }
+    .about-box {
+      border-left: 4px solid #1a5f8a;
+      padding: 4mm 5mm;
+      margin: 4mm 0 6mm;
+      background: #f7fafc;
+      white-space: pre-wrap;
+      font-size: 9pt;
+    }
+    .pdf-block {
+      margin: 2mm 0 4mm;
+      font-size: 9pt;
+    }
+    .chk { margin: 0 0 3mm; padding: 2mm 0; border-bottom: 1px solid #e8e8e8; page-break-inside: avoid; }
+    .muted { color: #555; font-size: 8.5pt; }
+    ul.hosp { margin: 2mm 0 4mm; padding-left: 5mm; }
+    .disclaimer {
+      margin-top: 8mm;
+      padding: 4mm;
+      border: 1px solid #ccc;
+      background: #f5f5f5;
+      font-size: 7.5pt;
+      color: #444;
+      page-break-inside: avoid;
+    }
+    .map-wrap {
+      margin: 4mm 0 6mm;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+    .map-wrap img {
+      max-width: 100%;
+      height: auto;
+      max-height: 220mm;
+      object-fit: contain;
+      border: 1px solid #c5d4e0;
+    }
+    .map-caption {
+      margin-top: 3mm;
+      font-size: 9pt;
+      color: #333;
+      text-align: left;
+    }
   </style>
 </head>
 <body>
-  <div class="hdr">
-    <div>
-      <h1>{{ plan.title or 'Medical event plan' }}</h1>
-      <div class="muted">{{ branding.company_name }} · Generated {{ generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+
+{% macro pdf_nl(text) -%}
+{% if text %}<div class="pdf-block">{{ text | e | replace('\n', '<br>') | safe }}</div>{% endif %}
+{%- endmacro %}
+
+  {# ——— Cover (SAG-style control sheet) ——— #}
+  <div class="cover">
+    <div class="logo-wrap">
+      {% if branding.logo_pdf_src %}
+      <img src="{{ branding.logo_pdf_src }}" alt="{{ branding.company_name }}">
+      {% elif branding.logo_file_uri %}
+      <img src="{{ branding.logo_file_uri }}" alt="{{ branding.company_name }}">
+      {% endif %}
     </div>
-    {% if branding.logo_file_uri %}
-    <img class="logo" src="{{ branding.logo_file_uri }}" alt="">
+    <h1>{{ plan.title or 'Event medical plan' }}</h1>
+    {% if crm_pdf.get('event_plan_pdf_tagline') %}
+    <p class="tagline">{{ crm_pdf.get('event_plan_pdf_tagline') }}</p>
     {% endif %}
+    <div class="meta-block">
+      <table>
+        {% if doc_version_label %}
+        <tr><td class="k">Document version</td><td>v{{ doc_version_label }} <span class="muted">(auto — bumps each PDF generation)</span></td></tr>
+        {% endif %}
+        {% if plan.plan_document_release_date %}
+        <tr><td class="k">Date of release</td><td>{{ plan.plan_document_release_date }}</td></tr>
+        {% endif %}
+        {% if plan.plan_pdf_status %}
+        <tr><td class="k">Status</td><td>{{ plan.plan_pdf_status }}</td></tr>
+        {% endif %}
+        {% if plan.plan_written_by %}
+        <tr><td class="k">Written by</td><td>{{ plan.plan_written_by }}</td></tr>
+        {% endif %}
+        {% if plan.plan_distribution %}
+        <tr><td class="k">Distribution</td><td style="white-space:pre-wrap">{{ plan.plan_distribution | e }}</td></tr>
+        {% endif %}
+        <tr><td class="k">Provider</td><td>{{ branding.company_name }}</td></tr>
+        {% if pdf_labels.pdf_account_name %}
+        <tr><td class="k">Client / account</td><td>{{ pdf_labels.pdf_account_name }}</td></tr>
+        {% endif %}
+        {% if pdf_labels.pdf_opportunity_name %}
+        <tr><td class="k">Opportunity</td><td>{{ pdf_labels.pdf_opportunity_name }}</td></tr>
+        {% endif %}
+        {% if pdf_labels.pdf_quote_label %}
+        <tr><td class="k">Linked quote</td><td>{{ pdf_labels.pdf_quote_label }}</td></tr>
+        {% endif %}
+        <tr><td class="k">Event type</td><td>{{ plan.event_type or '—' }}</td></tr>
+        <tr><td class="k">Start</td><td>{{ plan.start_datetime or '—' }}</td></tr>
+        <tr><td class="k">End</td><td>{{ plan.end_datetime or '—' }}</td></tr>
+        <tr><td class="k">Expected attendance</td><td>{{ plan.expected_attendance if plan.expected_attendance is not none else '—' }}</td></tr>
+        {% if plan.attendance_by_day_text %}
+        <tr><td class="k">Attendance by day</td><td style="white-space:pre-wrap">{{ plan.attendance_by_day_text | e }}</td></tr>
+        {% endif %}
+        <tr><td class="k">Staff deployed (roster)</td><td>{{ roster_headcount }}</td></tr>
+      </table>
+    </div>
+    <p class="genstamp">Generated {{ generated_at.strftime('%d %b %Y %H:%M') }} UTC · Plan ID {{ plan.id }} · Page numbers in footer</p>
   </div>
 
-  <h2>Event summary</h2>
+  {# ——— Contents (aligned with full medical plan templates) ——— #}
+  <div class="toc-page">
+    <h2>Contents</h2>
+    <ul class="toc">
+      {% if crm_pdf.get('event_plan_pdf_about_us') %}<li><a href="#sec-about">Information about the provider</a></li>{% endif %}
+      {% if plan.plan_purpose %}<li><a href="#sec-purpose">Purpose</a></li>{% endif %}
+      <li><a href="#sec-summary">Event summary</a></li>
+      <li><a href="#sec-location">Site &amp; access</a></li>
+      {% if event_map_pdf_src %}<li><a href="#sec-event-map">Site map</a></li>{% endif %}
+      {% if plan.access_egress_text %}<li><a href="#sec-access">Access &amp; egress</a></li>{% endif %}
+      {% if plan.rendezvous_text %}<li><a href="#sec-rvp">Rendezvous points</a></li>{% endif %}
+      <li><a href="#sec-risk">Risk factors</a></li>
+      {% if plan.health_safety_work_text %}<li><a href="#sec-hsw">Health &amp; safety at work</a></li>{% endif %}
+      <li><a href="#sec-roster">Resources &amp; staffing (roster)</a></li>
+      <li><a href="#sec-resources-meta">Resources summary</a></li>
+      {% if plan.staff_transport_text %}<li><a href="#sec-transport">Staff transportation</a></li>{% endif %}
+      {% if plan.command_control_text %}<li><a href="#sec-command">Command, control &amp; support</a></li>{% endif %}
+      {% if plan.uniform_ppe_text %}<li><a href="#sec-uniform">Uniform &amp; PPE</a></li>{% endif %}
+      {% if plan.privacy_ipc_text %}<li><a href="#sec-privacy">Privacy, dignity &amp; IPC</a></li>{% endif %}
+      {% if plan.incident_reporting_text %}<li><a href="#sec-incident">Incident reporting</a></li>{% endif %}
+      {% if equipment_kit_url %}<li><a href="#sec-kit-manifest">Equipment manifest (live list)</a></li>{% endif %}
+      {% if plan.equipment_detail_text %}<li><a href="#sec-equipment">Equipment narrative</a></li>{% endif %}
+      {% if diagram_pdf_rows %}<li><a href="#sec-diagrams">Diagrams</a></li>{% endif %}
+      {% if plan.resources_comms %}<li><a href="#sec-comms">Communications</a></li>{% endif %}
+      <li><a href="#sec-hospitals">Receiving hospitals &amp; clinical handover</a></li>
+      {% if plan.major_incident_text %}<li><a href="#sec-major">Major incidents</a></li>{% endif %}
+      {% if questions %}<li><a href="#sec-checklist">Planning checklist</a></li>{% endif %}
+      {% if plan.welfare_text %}<li><a href="#sec-welfare">Welfare arrangements</a></li>{% endif %}
+      {% if plan.safeguarding_text %}<li><a href="#sec-safeguard">Safeguarding</a></li>{% endif %}
+      {% if plan.ambulance_trust_text %}<li><a href="#sec-trust">Local ambulance trust awareness</a></li>{% endif %}
+      {% if plan.other_event_specific_text %}<li><a href="#sec-other">Other event-specific notes</a></li>{% endif %}
+      <li><a href="#sec-signoff">Sign-off</a></li>
+    </ul>
+  </div>
+
+  {% if crm_pdf.get('event_plan_pdf_about_us') %}
+  <h2 class="sec" id="sec-about">Information about the provider</h2>
+  <div class="about-box">{{ crm_pdf.get('event_plan_pdf_about_us') }}</div>
+  {% endif %}
+
+  {% if plan.plan_purpose %}
+  <h2 class="sec" id="sec-purpose">Purpose</h2>
+  {{ pdf_nl(plan.plan_purpose) }}
+  {% endif %}
+
+  <h2 class="sec" id="sec-summary">Event summary</h2>
   <table class="meta">
     <tr><td>Type</td><td>{{ plan.event_type or '—' }}</td></tr>
-    <tr><td>Start</td><td>{{ plan.start_datetime or '—' }}</td></tr>
-    <tr><td>End</td><td>{{ plan.end_datetime or '—' }}</td></tr>
-    <tr><td>Expected attendance</td><td>{{ plan.expected_attendance or '—' }}</td></tr>
-    <tr><td>Demographics / profile</td><td>{{ plan.demographics_notes or '—' }}</td></tr>
+    <tr><td>Start / end</td><td>{{ plan.start_datetime or '—' }} — {{ plan.end_datetime or '—' }}</td></tr>
+    {% if plan.event_organiser %}<tr><td>Organiser(s)</td><td>{{ plan.event_organiser }}</td></tr>{% endif %}
+    <tr><td>Location (address)</td><td>{{ plan.address_line1 or '—' }}{% if plan.postcode %} · {{ plan.postcode }}{% endif %}</td></tr>
+    {% if plan.event_content_summary %}<tr><td>Event content / programme</td><td>{{ plan.event_content_summary | e | replace('\n', '<br>') | safe }}</td></tr>{% endif %}
+    <tr><td>Expected attendance</td><td>{{ plan.expected_attendance if plan.expected_attendance is not none else '—' }}</td></tr>
+    {% if plan.attendance_by_day_text %}
+    <tr><td>Attendance by day</td><td style="white-space:pre-wrap">{{ plan.attendance_by_day_text | e }}</td></tr>
+    {% endif %}
+    <tr><td>Audience / demographics</td><td>{{ plan.demographics_notes or '—' }}</td></tr>
     <tr><td>Environment</td><td>{{ plan.environment_notes or '—' }}</td></tr>
+    {% if plan.purple_guide_tier %}<tr><td>Purple Guide tier / level</td><td>{{ plan.purple_guide_tier }}</td></tr>{% endif %}
+    {% if plan.operational_timings %}
+    <tr><td>Key timings</td><td>{{ plan.operational_timings | e | replace('\n', '<br>') | safe }}</td></tr>
+    {% endif %}
   </table>
 
-  <h2>Location</h2>
+  <h2 class="sec" id="sec-location">Site &amp; access</h2>
   <table class="meta">
     <tr><td>Address</td><td>{{ plan.address_line1 or '—' }}</td></tr>
     <tr><td>Postcode</td><td>{{ plan.postcode or '—' }}</td></tr>
@@ -47,62 +312,230 @@
     <tr><td>Site notes</td><td>{{ plan.location_notes or '—' }}</td></tr>
   </table>
 
-  <h2>Hospitals &amp; access</h2>
+  {% if event_map_pdf_src %}
+  <h2 class="sec" id="sec-event-map">Site map</h2>
+  <div class="map-wrap">
+    <img src="{{ event_map_pdf_src }}" alt="Site map">
+    {% if event_map_caption %}<p class="map-caption">{{ event_map_caption }}</p>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if plan.access_egress_text %}
+  <h2 class="sec" id="sec-access">Access &amp; egress</h2>
+  {{ pdf_nl(plan.access_egress_text) }}
+  {% endif %}
+
+  {% if plan.rendezvous_text %}
+  <h2 class="sec" id="sec-rvp">Rendezvous points</h2>
+  {{ pdf_nl(plan.rendezvous_text) }}
+  {% endif %}
+
+  <h2 class="sec" id="sec-risk">Risk factors</h2>
+  {% if risk_register_rows %}
+  <table class="risk">
+    <thead>
+      <tr>
+        <th style="width:28%">Risk type / topic</th>
+        <th style="width:14%">Level</th>
+        <th>Comment</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in risk_register_rows %}
+      <tr>
+        <td>{{ r.risk_type or '—' }}</td>
+        <td>{{ r.risk_level or '—' }}</td>
+        <td>{{ r.risk_comment or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <p class="muted">Narrative summary{% if plan.risk_score is not none %} · optional score: {{ plan.risk_score }}{% endif %}</p>
+  {{ pdf_nl(plan.risk_summary) }}
+
+  {% if plan.health_safety_work_text %}
+  <h2 class="sec" id="sec-hsw">Health &amp; safety at work</h2>
+  {{ pdf_nl(plan.health_safety_work_text) }}
+  {% endif %}
+
+  <h2 class="sec" id="sec-roster">Resources &amp; staffing — deployment roster</h2>
+  <p class="muted" style="margin-bottom:3mm;"><strong>{{ roster_headcount }}</strong> named post{{ 's' if roster_headcount != 1 else '' }}{% if roster_headcount == 0 %} — add rows in the plan editor{% endif %}.</p>
+  {% if roster_role_counts %}
+  <p class="muted" style="margin-bottom:2mm;">Headcount by role / grade:</p>
+  <p>
+    {% for role, cnt in roster_role_counts %}
+    <span class="count-pill">{{ cnt }}× {{ role }}</span>
+    {% endfor %}
+  </p>
+  {% endif %}
+  {% if plan.resources_medics %}
+  <p class="muted" style="margin-bottom:2mm;">Staffing summary</p>
+  {{ pdf_nl(plan.resources_medics) }}
+  {% endif %}
+  {% if staff_roster %}
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:9%">Callsign</th>
+        <th style="width:12%">Name</th>
+        <th style="width:14%">Role / grade</th>
+        <th style="width:16%">Post</th>
+        <th style="width:12%">Shift</th>
+        <th style="width:11%">Phone</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in staff_roster %}
+      <tr>
+        <td>{{ row.get('callsign') or '—' }}</td>
+        <td>{{ row.get('name') or '—' }}</td>
+        <td>{{ row.get('role_grade') or '—' }}</td>
+        <td>{{ row.get('post_assignment') or '—' }}</td>
+        <td>{{ row.get('shift') or '—' }}</td>
+        <td>{{ row.get('phone') or '—' }}</td>
+        <td>{{ row.get('notes') or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No structured roster rows — use the Resources step in the plan editor.</p>
+  {% endif %}
+
+  <h2 class="sec" id="sec-resources-meta">Resources — vehicles, escalation</h2>
+  <table class="meta">
+    <tr><td>Vehicles / major assets</td><td>{% if plan.resources_vehicles %}{{ plan.resources_vehicles | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td></tr>
+    <tr><td>Escalation</td><td>{% if plan.escalation_notes %}{{ plan.escalation_notes | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td></tr>
+  </table>
+
+  {% if plan.staff_transport_text %}
+  <h2 class="sec" id="sec-transport">Staff transportation</h2>
+  {{ pdf_nl(plan.staff_transport_text) }}
+  {% endif %}
+
+  {% if plan.command_control_text %}
+  <h2 class="sec" id="sec-command">Command, control &amp; support</h2>
+  {{ pdf_nl(plan.command_control_text) }}
+  {% endif %}
+
+  {% if plan.uniform_ppe_text %}
+  <h2 class="sec" id="sec-uniform">Uniform &amp; PPE</h2>
+  {{ pdf_nl(plan.uniform_ppe_text) }}
+  {% endif %}
+
+  {% if plan.privacy_ipc_text %}
+  <h2 class="sec" id="sec-privacy">Privacy, dignity &amp; IPC</h2>
+  {{ pdf_nl(plan.privacy_ipc_text) }}
+  {% endif %}
+
+  {% if plan.incident_reporting_text %}
+  <h2 class="sec" id="sec-incident">Incident reporting</h2>
+  {{ pdf_nl(plan.incident_reporting_text) }}
+  {% endif %}
+
+  {% if equipment_kit_url %}
+  <h2 class="sec" id="sec-kit-manifest">Equipment manifest (inventory)</h2>
+  <p class="pdf-block">Serialised kit linked to this plan is listed for staff in the employee portal (updates when allocations change):<br><span class="muted" style="word-break:break-all;">{{ equipment_kit_url | e }}</span></p>
+  {% endif %}
+
+  {% if plan.equipment_detail_text %}
+  <h2 class="sec" id="sec-equipment">Equipment — narrative / load lists</h2>
+  {{ pdf_nl(plan.equipment_detail_text) }}
+  {% endif %}
+
+  {% if diagram_pdf_rows %}
+  <h2 class="sec" id="sec-diagrams">Diagrams</h2>
+  {% for d in diagram_pdf_rows %}
+  <div class="map-wrap">
+    <img src="{{ d.pdf_image_src }}" alt="Diagram {{ loop.index }}">
+    {% if d.caption %}<p class="map-caption">{{ d.caption | e }}</p>{% elif d.template_title %}<p class="map-caption text-muted">{{ d.template_title | e }}</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  {% if plan.resources_comms %}
+  <h2 class="sec" id="sec-comms">Communications</h2>
+  {{ pdf_nl(plan.resources_comms) }}
+  {% endif %}
+
+  <h2 class="sec" id="sec-hospitals">Receiving hospitals &amp; clinical handover</h2>
   {% if hospital_facilities %}
-  <ul>
+  <ul class="hosp">
     {% for h in hospital_facilities %}
     <li>{{ h }}</li>
     {% endfor %}
   </ul>
   {% endif %}
-  <p>{{ plan.hospitals_notes or '—' }}</p>
-
-  <h2>Medical control &amp; ASHICE</h2>
+  {{ pdf_nl(plan.hospitals_notes) }}
+  <h3 class="sub">Medical control / comms</h3>
   <table class="meta">
     <tr><td>Medical control</td><td>{{ clinical_handover.medical_control or '—' }}</td></tr>
+  </table>
+  <h3 class="sub">ASHICE (pre-alert)</h3>
+  <table class="meta">
     <tr><td>A — Age</td><td>{{ clinical_handover.ashice.age or '—' }}</td></tr>
     <tr><td>S — Sex</td><td>{{ clinical_handover.ashice.sex or '—' }}</td></tr>
     <tr><td>H — History</td><td>{{ clinical_handover.ashice.history or '—' }}</td></tr>
-    <tr><td>I — Injuries / findings</td><td>{{ clinical_handover.ashice.injuries or '—' }}</td></tr>
-    <tr><td>C — Current condition</td><td>{{ clinical_handover.ashice.current or '—' }}</td></tr>
-    <tr><td>E — Expected</td><td>{{ clinical_handover.ashice.expected or '—' }}</td></tr>
+    <tr><td>I — Injuries / illness</td><td>{{ clinical_handover.ashice.injuries or '—' }}</td></tr>
+    <tr><td>C — Condition</td><td>{{ clinical_handover.ashice.current or '—' }}</td></tr>
+    <tr><td>E — Expected / ETA</td><td>{{ clinical_handover.ashice.expected or '—' }}</td></tr>
   </table>
 
-  <h2>Resources &amp; mitigations</h2>
-  <table class="meta">
-    <tr><td>Medics (planned)</td><td>{{ plan.resources_medics or '—' }}</td></tr>
-    <tr><td>Vehicles / equipment</td><td>{{ plan.resources_vehicles or '—' }}</td></tr>
-    <tr><td>Comms</td><td>{{ plan.resources_comms or '—' }}</td></tr>
-    <tr><td>Escalation</td><td>{{ plan.escalation_notes or '—' }}</td></tr>
-  </table>
+  {% if plan.major_incident_text %}
+  <h2 class="sec" id="sec-major">Major incidents</h2>
+  {{ pdf_nl(plan.major_incident_text) }}
+  {% endif %}
 
-  <h2>Planning checklist</h2>
-  <p class="muted">Structured prompts aligned with typical event medical planning considerations. Not a substitute for licensed guidance or your organisation’s policies.</p>
+  {% if questions %}
+  <h2 class="sec" id="sec-checklist">Planning checklist</h2>
+  <p class="muted">Structured prompts — supplement to your medical needs assessment and policies.</p>
   {% for q in questions %}
   <div class="chk">
     <strong>{{ q.group_name }}</strong> — {{ q.question_text }}<br>
     {% if q.help_url and (q.help_url.startswith('http://') or q.help_url.startswith('https://')) %}
-    <span class="muted">Reference: {{ q.help_url }}</span><br>
+    <span class="muted">Ref: {{ q.help_url }}</span><br>
     {% endif %}
     <span>{{ answers.get(q.id|string, '—') }}</span>
   </div>
   {% endfor %}
+  {% endif %}
 
-  <h2>Risk assessment</h2>
-  <p>{{ plan.risk_summary or '—' }}</p>
-  <p><strong>Score (optional):</strong> {{ plan.risk_score if plan.risk_score is not none else '—' }}</p>
+  {% if plan.welfare_text %}
+  <h2 class="sec" id="sec-welfare">Welfare arrangements</h2>
+  {{ pdf_nl(plan.welfare_text) }}
+  {% endif %}
 
-  <h2>Sign-off</h2>
+  {% if plan.safeguarding_text %}
+  <h2 class="sec" id="sec-safeguard">Safeguarding</h2>
+  {{ pdf_nl(plan.safeguarding_text) }}
+  {% endif %}
+
+  {% if plan.ambulance_trust_text %}
+  <h2 class="sec" id="sec-trust">Local ambulance trust awareness</h2>
+  {{ pdf_nl(plan.ambulance_trust_text) }}
+  {% endif %}
+
+  {% if plan.other_event_specific_text %}
+  <h2 class="sec" id="sec-other">Other event-specific intentions</h2>
+  {{ pdf_nl(plan.other_event_specific_text) }}
+  {% endif %}
+
+  <h2 class="sec" id="sec-signoff">Sign-off</h2>
   <table class="meta">
     <tr><td>Name</td><td>{{ plan.signoff_name or '—' }}</td></tr>
     <tr><td>Role</td><td>{{ plan.signoff_role or '—' }}</td></tr>
-    <tr><td>Date/time</td><td>{{ plan.signoff_at or '—' }}</td></tr>
+    <tr><td>Date / time</td><td>{{ plan.signoff_at or '—' }}</td></tr>
   </table>
+
+  <p class="muted" style="margin-top:6mm;text-align:center;font-size:9pt;"><strong>End of document</strong></p>
 
   <div class="disclaimer">
     This document is organisational planning output only. It does not constitute clinical or legal advice.
-    Verify arrangements with your medical director, insurer, and venue. For UK industry context on medical cover at events,
-    refer to official guidance such as The Purple Guide (medical chapter) where applicable to your jurisdiction.
+    Verify arrangements with your medical director, insurer, and venue. For UK event medical context, refer to official guidance
+    such as the HSE Event Safety Guide (Purple Guide) where applicable. Ambulances used for patient transport may require
+    appropriate regulatory registration (e.g. CQC in England); treatment should not rely on ambulances as static treatment rooms.
   </div>
 </body>
 </html>

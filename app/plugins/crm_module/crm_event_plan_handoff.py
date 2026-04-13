@@ -222,8 +222,10 @@ def handoff_blocked_reason(plan: dict[str, Any]) -> str | None:
     st = (row.get("status") or "").strip().lower()
     if st != "accepted":
         return (
-            "Send to Cura is enabled after the linked quote is set to Accepted "
-            "(when the client has agreed pricing). Open the quote, set status to Accepted, save, then try again."
+            "Send to Cura stays off until this plan’s linked quote is set to Accepted "
+            "(the client agreed this revision’s pricing). "
+            "Moving the opportunity to Won on the Kanban does not change quote status — "
+            "open the quote, choose Accepted in Status, save, or use “Mark quote accepted” on the quote or below."
         )
     return None
 

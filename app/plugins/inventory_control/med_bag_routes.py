@@ -6,10 +6,20 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import flash, g, jsonify, redirect, render_template, request, url_for
+from flask import (
+    current_app,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_login import current_user, login_required
 
 from app.objects import has_permission
+from app.organization_profile import normalize_organization_industries, tenant_matches_industry
 
 from .med_bag_service import (
     BAG_KINDS,
@@ -97,6 +107,38 @@ def register_med_bag_routes(bp):
     svc = get_med_bag_service()
     inv = get_inventory_service()
 
+    def med_bag_medical_industry_required(f):
+        """Med / drug bag register is a medical-industry surface (PRD: organisation_profile)."""
+
+        @wraps(f)
+        def w(*a, **kw):
+            ids = normalize_organization_industries(
+                current_app.config.get("organization_industries")
+            )
+            if tenant_matches_industry(ids, "medical"):
+                return f(*a, **kw)
+            ep = getattr(request, "endpoint", None) or ""
+            if "api_med_bags" in ep:
+                return _json_safe(
+                    {
+                        "ok": False,
+                        "error": "feature_disabled",
+                        "message": (
+                            "Med bag APIs require Medical in Core → Settings → "
+                            "General → Industry & categories."
+                        ),
+                    },
+                    403,
+                )
+            flash(
+                "Med and drug bag features are shown when Medical is selected in "
+                "organisation industry settings (Core → General).",
+                "warning",
+            )
+            return redirect(url_for("inventory_control_internal.dashboard"))
+
+        return w
+
     def med_bag_ui_required(f):
         @wraps(f)
         def w(*a, **kw):
@@ -119,6 +161,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates")
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_templates_list():
         rows = svc.list_templates(active_only=False)
@@ -126,6 +169,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates/new", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_template_create():
         name = (request.form.get("name") or "").strip()
@@ -148,6 +192,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates/<int:template_id>")
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_template_detail(template_id: int):
         t = svc.get_template(template_id)
@@ -171,6 +216,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates/<int:template_id>/update", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_template_update(template_id: int):
         nm = (request.form.get("name") or "").strip()
@@ -189,6 +235,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates/<int:template_id>/lines/add", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_template_line_add(template_id: int):
         raw = (request.form.get("inventory_item_id") or "").strip()
@@ -213,6 +260,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/templates/lines/<int:line_id>/delete", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_template_line_delete(line_id: int):
         tid = request.form.get("template_id")
@@ -226,6 +274,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances")
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_instances_list():
         st = (request.args.get("status") or "").strip() or None
@@ -243,6 +292,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/new", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_create():
         raw = (request.form.get("template_id") or "").strip()
@@ -279,6 +329,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>")
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_instance_detail(instance_id: int):
         row = svc.get_instance(instance_id)
@@ -311,6 +362,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>/status", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_status(instance_id: int):
         st = (request.form.get("status") or "").strip()
@@ -344,6 +396,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>/tamper-seal", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_tamper_seal(instance_id: int):
         perf = str(getattr(current_user, "username", "") or getattr(current_user, "id", ""))
@@ -365,6 +418,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>/sign-out", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_sign_out(instance_id: int):
         """Drug bag sign-out: issue to assignee with tamper check."""
@@ -404,6 +458,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>/sign-in", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_sign_in(instance_id: int):
         """Drug bag sign-in: return to store with tamper check; clears assignee."""
@@ -440,6 +495,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/lines/<int:line_id>/trace", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_line_trace(line_id: int):
         iid = request.form.get("instance_id")
@@ -467,6 +523,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/lines/return-status", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_instance_line_return_post():
         try:
@@ -491,6 +548,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/restock", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_restock_post():
         if not _inv_transact():
@@ -533,6 +591,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/instances/<int:instance_id>/parent", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_instance_parent_set(instance_id: int):
         if request.form.get("detach") == "1":
@@ -564,6 +623,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/witness-rules")
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_ui_required
     def med_bags_witness_rules():
         if not _inv_edit():
@@ -574,6 +634,7 @@ def register_med_bag_routes(bp):
 
     @bp.route("/med-bags/witness-rules/save", methods=["POST"])
     @login_required
+    @med_bag_medical_industry_required
     @med_bag_edit_required
     def med_bags_witness_rules_save():
         for key in (
@@ -594,6 +655,7 @@ def register_med_bag_routes(bp):
 
     # --- JSON: CURA / integration (CURA-DRUG-INV-001) ---
     @bp.route("/api/med-bags/consumption", methods=["POST"])
+    @med_bag_medical_industry_required
     @inv_routes.api_inventory_transact_required
     def api_med_bags_consumption():
         data = request.get_json(silent=True)
@@ -648,6 +710,7 @@ def register_med_bag_routes(bp):
         return _json_safe(out, code)
 
     @bp.route("/api/med-bags/instances/<int:instance_id>", methods=["GET"])
+    @med_bag_medical_industry_required
     @inv_routes.api_inventory_access_required
     def api_med_bags_instance_get(instance_id: int):
         row = svc.get_instance(instance_id)

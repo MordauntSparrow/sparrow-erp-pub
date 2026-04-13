@@ -1,0 +1,37 @@
+{% extends "employee_portal_module/base_public.html" %}
+{% block title %}Event kit — {{ plan_title }}{% endblock %}
+{% block meta_description %}Equipment manifest for a scheduled event (from CRM event plan).{% endblock %}
+{% block content %}
+<h1 class="h4 mb-2"><i class="bi bi-bag-check me-2" aria-hidden="true"></i>Event equipment</h1>
+<p class="text-secondary small mb-1"><strong>{{ plan_title }}</strong></p>
+<p class="text-secondary small mb-4">This list is maintained in the CRM event plan. It reflects serial assets currently linked to the plan (not necessarily signed out to you).</p>
+
+{% if kit_rows %}
+<div class="table-responsive ep-card p-0">
+  <table class="table table-sm mb-0 align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Item</th>
+        <th>Serial</th>
+        <th>Code</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in kit_rows %}
+      <tr>
+        <td class="small">{{ r.item_name or '—' }}</td>
+        <td class="small text-secondary">{{ r.serial_number or '—' }}</td>
+        <td class="small"><code>{{ r.public_asset_code or r.id }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="ep-card p-4 text-center text-secondary small">
+  <p class="mb-0">No equipment is linked to this plan yet.</p>
+</div>
+{% endif %}
+
+<p class="mt-4 mb-0"><a href="{{ url_for('public_employee_portal.dashboard') }}">← Back to dashboard</a></p>
+{% endblock %}

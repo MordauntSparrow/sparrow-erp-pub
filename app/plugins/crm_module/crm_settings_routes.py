@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, request, url_for
 from flask_login import login_required
 
 from app.objects import get_db_connection
 
 from .crm_common import can_edit, crm_access_required
+from .crm_manifest_settings import get_crm_module_settings, update_crm_module_settings
 from .crm_guide_staffing_costs import (
     _resolve_wage_card_id,
     estimate_guide_staffing_costs,
@@ -72,5 +73,36 @@ def register_crm_settings_routes(crm_bp):
             all_job_types=all_types,
             slot_map=slot_map,
             preview_estimate=preview,
+            can_edit=can_edit(),
+        )
+
+    @crm_bp.route("/settings/event-plan-pdf", methods=["GET", "POST"])
+    @login_required
+    @crm_access_required
+    def event_plan_pdf_settings():
+        app = current_app._get_current_object()
+        if request.method == "POST" and not can_edit():
+            flash("You do not have permission to change CRM settings.", "danger")
+            return redirect(url_for("crm_module.event_plan_pdf_settings"))
+
+        if request.method == "POST" and can_edit():
+            update_crm_module_settings(
+                app,
+                {
+                    "event_plan_pdf_tagline": (
+                        request.form.get("event_plan_pdf_tagline") or ""
+                    ).strip()[:500],
+                    "event_plan_pdf_about_us": (
+                        request.form.get("event_plan_pdf_about_us") or ""
+                    ).strip()[:20000],
+                },
+            )
+            flash("Event plan PDF cover text saved to core manifest.", "success")
+            return redirect(url_for("crm_module.event_plan_pdf_settings"))
+
+        settings = get_crm_module_settings(app)
+        return render_template(
+            "admin/crm_event_plan_pdf_settings.html",
+            settings=settings,
             can_edit=can_edit(),
         )

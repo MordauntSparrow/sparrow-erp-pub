@@ -12,6 +12,8 @@ from flask import (
     session,
     flash,
     send_file,
+    current_app,
+    has_request_context,
 )
 from flask_login import current_user, login_required
 from app.objects import PluginManager, get_db_connection
@@ -42,6 +44,40 @@ def _ensure_scheduling_tables():
     except Exception:
         pass
 _core_manifest = _plugin_manager.get_core_manifest() or {}
+
+
+def _flash_sling(message: str, *, ok: bool = True) -> None:
+    """Queue a flash shown only on the Sling sync page (not the core admin shell)."""
+    flash(message, "sling_success" if ok else "sling_warning")
+
+
+def _scheduling_tenant_industries():
+    """Normalised industry slugs: runtime config when in a request, else Core manifest on disk."""
+    try:
+        from app.organization_profile import normalize_organization_industries
+
+        if has_request_context():
+            return normalize_organization_industries(
+                current_app.config.get("organization_industries")
+            )
+    except Exception:
+        pass
+    from app.organization_profile import industries_from_manifest
+
+    return industries_from_manifest(_core_manifest)
+
+
+def _require_medical_industry_for_cura():
+    """Cura / Medical Records integration is medical-sector UI."""
+    from app.organization_profile import tenant_matches_industry
+
+    if tenant_matches_industry(_scheduling_tenant_industries(), "medical"):
+        return None
+    flash(
+        "Cura planning is only shown when **Medical** is enabled under Core settings → Industry & categories.",
+        "warning",
+    )
+    return redirect(url_for("internal_scheduling.admin_index"))
 
 
 def _get_website_settings():
@@ -1498,6 +1534,9 @@ def admin_cura_event_planning():
     """
     Planned staffing vs Cura Event Manager roster (not timesheet / billing actuals).
     """
+    gate = _require_medical_industry_for_cura()
+    if gate:
+        return gate
     _ensure_scheduling_tables()
     df_s = request.args.get("from")
     dt_s = request.args.get("to")
@@ -2280,6 +2319,116 @@ def admin_shift_create():
         return redirect(url_for("internal_scheduling.admin_shift_new"))
 
 
+def _scheduling_rota_eligibility_context():
+    """Allow run sheet crew assignment outside role ladder when admin creates team events (ROTA-ROLE-001)."""
+    uid = None
+    try:
+        if getattr(current_user, "is_authenticated", False):
+            uid = getattr(current_user, "id", None)
+    except Exception:
+        pass
+    return {"allow_admin_override": True, "staff_user_id": uid}
+
+
+@internal_bp.get("/team-event")
+@_admin_required_scheduling
+def admin_team_event_new():
+    _ensure_scheduling_tables()
+    clients, sites = ScheduleService.list_clients_and_sites()
+    job_types = ScheduleService.list_job_types()
+    contractors = ScheduleService.list_contractors()
+    default_date = request.args.get("date") or date.today().isoformat()
+    return render_template(
+        "scheduling_module/admin/team_event_form.html",
+        clients=clients,
+        sites=sites,
+        job_types=job_types,
+        contractors=contractors,
+        default_date=default_date,
+        default_start="09:00",
+        default_end="17:00",
+        runsheets_admin_url=_safe_url_for("internal_time_billing.runsheets_edit_page"),
+        config=_core_manifest,
+    )
+
+
+@internal_bp.post("/team-event")
+@_admin_required_scheduling
+def admin_team_event_create():
+    _ensure_scheduling_tables()
+    client_id = request.form.get("client_id", type=int)
+    site_id = request.form.get("site_id", type=int) or None
+    job_type_id = request.form.get("job_type_id", type=int)
+    work_date_s = (request.form.get("work_date") or "").strip()
+    scheduled_start = (request.form.get("scheduled_start") or "").strip() or None
+    scheduled_end = (request.form.get("scheduled_end") or "").strip() or None
+    notes = (request.form.get("notes") or "").strip() or None
+    contractor_ids = [
+        int(x) for x in request.form.getlist("contractor_ids") if x and str(x).strip().isdigit()
+    ]
+    if not contractor_ids:
+        flash("Select at least one staff member for the team event.", "error")
+        return redirect(url_for("internal_scheduling.admin_team_event_new"))
+    shift_status = (request.form.get("shift_status") or "published").strip().lower()
+    if shift_status not in ("draft", "published"):
+        shift_status = "published"
+    publish_runsheet = (request.form.get("publish_runsheet") or "") == "1"
+    cura_eid_raw = (request.form.get("cura_operational_event_id") or "").strip()
+    cura_operational_event_id = int(cura_eid_raw) if cura_eid_raw.isdigit() else None
+    lead_user_id = request.form.get("lead_user_id", type=int) or None
+
+    if (
+        not client_id
+        or not job_type_id
+        or not work_date_s
+        or not scheduled_start
+        or not scheduled_end
+    ):
+        flash("Please fill in client, job type, date, start and end times.", "error")
+        return redirect(url_for("internal_scheduling.admin_team_event_new"))
+    try:
+        work_date = date.fromisoformat(work_date_s)
+    except (TypeError, ValueError):
+        flash("Invalid date.", "error")
+        return redirect(url_for("internal_scheduling.admin_team_event_new"))
+
+    uid = getattr(current_user, "id", None)
+    uname = getattr(current_user, "username", None) or getattr(current_user, "email", None)
+
+    try:
+        out = ScheduleService.create_team_event_with_runsheet(
+            client_id=client_id,
+            site_id=site_id,
+            job_type_id=job_type_id,
+            work_date=work_date,
+            scheduled_start=scheduled_start,
+            scheduled_end=scheduled_end,
+            contractor_ids=contractor_ids,
+            notes=notes,
+            shift_status=shift_status,
+            publish_runsheet=publish_runsheet,
+            cura_operational_event_id=cura_operational_event_id,
+            lead_user_id=lead_user_id,
+            actor_user_id=uid,
+            actor_username=uname,
+            eligibility_context=_scheduling_rota_eligibility_context(),
+        )
+    except Exception as e:
+        flash(str(e), "error")
+        return redirect(url_for("internal_scheduling.admin_team_event_new"))
+
+    n = len(out.get("shift_ids") or [])
+    flash(
+        f"Team event created: run sheet #{out['runsheet_id']} with {n} linked schedule shifts. "
+        "Staff enter actual times on their run sheet in the employee portal; timesheets update automatically.",
+        "success",
+    )
+    monday = work_date - timedelta(days=work_date.weekday())
+    return redirect(
+        url_for("internal_scheduling.admin_schedule_week") + "?week=" + monday.strftime("%Y-%m-%d")
+    )
+
+
 @internal_bp.get("/shifts/<int:shift_id>/edit")
 @_admin_required_scheduling
 def admin_shift_edit(shift_id):
@@ -3029,6 +3178,7 @@ def admin_sling_sync():
     except Exception:
         creds = None
     credentials_saved = bool(creds)
+    recent_runs = SlingSyncService.list_recent_sync_runs(20)
 
     return render_template(
         "scheduling_module/admin/sling_sync.html",
@@ -3039,10 +3189,15 @@ def admin_sling_sync():
         default_client_id=settings.get("default_client_id"),
         default_site_id=settings.get("default_site_id"),
         cancel_missing=bool(settings.get("cancel_missing", 1)),
+        import_filter_mode=settings.get("import_filter_mode") or "all",
+        import_filter_patterns_raw=settings.get("import_filter_patterns_raw") or "",
         credentials_saved=credentials_saved,
         stored_email=(creds or {}).get("email") if creds else "",
+        stored_org_id=(creds or {}).get("org_id") if creds else None,
         date_from=date_from.isoformat(),
         date_to=date_to.isoformat(),
+        discover_url=url_for("internal_scheduling.admin_sling_discover"),
+        recent_runs=recent_runs,
         config=_core_manifest,
     )
 
@@ -3053,11 +3208,22 @@ def admin_sling_sync_save_credentials():
     _ensure_scheduling_tables()
     email = (request.form.get("email") or "").strip()
     password = request.form.get("password") or ""
+    org_id = None
+    org_raw = (request.form.get("org_id") or "").strip()
+    if org_raw:
+        try:
+            org_id = int(org_raw)
+        except ValueError:
+            _flash_sling(
+                "Sling organisation ID must be a whole number, or leave the field blank.",
+                ok=False,
+            )
+            return redirect(url_for("internal_scheduling.admin_sling_sync"))
     try:
-        SlingSyncService.save_credentials(email=email, password=password)
-        flash("Sling credentials saved.", "success")
+        SlingSyncService.save_credentials(email=email, password=password, org_id=org_id)
+        _flash_sling("Sling credentials saved.", ok=True)
     except Exception as e:
-        flash(f"Unable to save Sling credentials: {e}", "warning")
+        _flash_sling(f"Unable to save Sling credentials: {e}", ok=False)
     return redirect(url_for("internal_scheduling.admin_sling_sync"))
 
 
@@ -3073,6 +3239,10 @@ def admin_sling_sync_save_settings():
     default_site_id = None
 
     cancel_missing = (request.form.get("cancel_missing") or "") == "1"
+    import_filter_mode = (request.form.get("import_filter_mode") or "all").strip().lower()
+    if import_filter_mode not in ("all", "include", "exclude"):
+        import_filter_mode = "all"
+    import_filter_patterns = request.form.get("import_filter_patterns") or ""
 
     try:
         SlingSyncService.update_sling_settings(
@@ -3080,10 +3250,12 @@ def admin_sling_sync_save_settings():
             default_client_id=default_client_id,
             default_site_id=default_site_id,
             cancel_missing=cancel_missing,
+            import_filter_mode=import_filter_mode,
+            import_filter_patterns=import_filter_patterns,
         )
-        flash("Sling sync settings saved.", "success")
+        _flash_sling("Sling sync settings saved.", ok=True)
     except Exception as e:
-        flash(f"Unable to save Sling settings: {e}", "warning")
+        _flash_sling(f"Unable to save Sling settings: {e}", ok=False)
 
     return redirect(url_for("internal_scheduling.admin_sling_sync"))
 
@@ -3101,20 +3273,111 @@ def admin_sling_sync_run():
         date_from = date.fromisoformat(date_from_s)
         date_to = date.fromisoformat(date_to_s)
         if date_to < date_from:
-            flash("Invalid date range.", "warning")
+            _flash_sling("Invalid date range.", ok=False)
             return redirect(url_for("internal_scheduling.admin_sling_sync"))
 
-        res = SlingSyncService.sync_published_shifts(date_from=date_from, date_to=date_to, dry_run=dry_run)
+        actor = (
+            (getattr(current_user, "username", None) or getattr(current_user, "email", None) or "")
+            .strip()
+            or None
+        )
+        res = SlingSyncService.sync_published_shifts(
+            date_from=date_from,
+            date_to=date_to,
+            dry_run=dry_run,
+            actor_username=actor,
+        )
+        sk = int(res.get("skipped_by_filter") or 0)
+        sk_part = f" Skipped by filter: {sk}." if sk else ""
         if dry_run:
-            flash(f"Dry run complete: {res.get('processed_shifts')} shifts processed.", "success")
+            _flash_sling(
+                f"Dry run complete: {res.get('processed_shifts')} shifts would be written.{sk_part}",
+                ok=True,
+            )
         else:
-            flash(
-                f"Sync complete: created {res.get('created')}, updated {res.get('updated')}, cancelled {res.get('cancelled')}.",
-                "success",
+            rid = res.get("sync_run_id")
+            rev_part = f" Run #{rid} can be reverted below if needed." if rid else ""
+            _flash_sling(
+                f"Sync complete: created {res.get('created')}, updated {res.get('updated')}, "
+                f"cancelled {res.get('cancelled')}.{sk_part}{rev_part}",
+                ok=True,
             )
     except Exception as e:
-        flash(f"Sling sync failed: {e}", "warning")
+        _flash_sling(f"Sling sync failed: {e}", ok=False)
 
+    return redirect(url_for("internal_scheduling.admin_sling_sync"))
+
+
+@internal_bp.post("/sling-sync/test-connection")
+@_admin_required_scheduling
+def admin_sling_sync_test_connection():
+    _ensure_scheduling_tables()
+    try:
+        res = SlingSyncService.test_connection()
+        if res.get("ok"):
+            _flash_sling(res.get("message") or "Sling connection OK.", ok=True)
+        else:
+            _flash_sling(res.get("error") or "Connection failed.", ok=False)
+    except Exception as e:
+        _flash_sling(f"Sling connection test failed: {e}", ok=False)
+    return redirect(url_for("internal_scheduling.admin_sling_sync"))
+
+
+@internal_bp.post("/sling-sync/discover")
+@_admin_required_scheduling
+def admin_sling_discover():
+    _ensure_scheduling_tables()
+    date_from_s = (request.form.get("date_from") or "").strip()
+    date_to_s = (request.form.get("date_to") or "").strip()
+    try:
+        date_from = date.fromisoformat(date_from_s)
+        date_to = date.fromisoformat(date_to_s)
+        if date_to < date_from:
+            return jsonify({"ok": False, "error": "Invalid date range."}), 400
+        out = SlingSyncService.discover_shifts(date_from=date_from, date_to=date_to)
+        return jsonify(out)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid dates."}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@internal_bp.post("/sling-sync/save-position-mapping")
+@_admin_required_scheduling
+def admin_sling_sync_save_position_mapping():
+    _ensure_scheduling_tables()
+    sling_position_id = (request.form.get("sling_position_id") or "").strip()
+    sling_position_name = (request.form.get("sling_position_name") or "").strip() or None
+    job_type_id = request.form.get("job_type_id", type=int)
+    try:
+        if not job_type_id:
+            raise ValueError("Job type is required.")
+        SlingSyncService.upsert_position_job_type_mapping(
+            sling_position_id=sling_position_id,
+            job_type_id=int(job_type_id),
+            sling_position_name=sling_position_name,
+        )
+        _flash_sling("Position → job type mapping saved.", ok=True)
+    except Exception as e:
+        _flash_sling(f"Could not save mapping: {e}", ok=False)
+    return redirect(url_for("internal_scheduling.admin_sling_sync"))
+
+
+@internal_bp.post("/sling-sync/revert/<int:run_id>")
+@_admin_required_scheduling
+def admin_sling_sync_revert(run_id: int):
+    _ensure_scheduling_tables()
+    try:
+        out = SlingSyncService.revert_sync_run(int(run_id))
+        _flash_sling(
+            "Revert complete: "
+            f"removed {out.get('deleted_shifts', 0)} shift(s) created in that run, "
+            f"restored {out.get('restored_updates', 0)} update(s) and "
+            f"{out.get('restored_status', 0)} cancelled shift(s).",
+            ok=True,
+        )
+    except Exception as e:
+        _flash_sling(f"Revert failed: {e}", ok=False)
     return redirect(url_for("internal_scheduling.admin_sling_sync"))
 
 

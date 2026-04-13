@@ -4,12 +4,17 @@ python app/plugins/recruitment_module/install.py install
 """
 import sys
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 for p in (str(HERE.parent.parent.parent), str(HERE)):
     if p not in sys.path:
         sys.path.insert(0, p)
 from app.objects import get_db_connection  # noqa: E402
+from app.organization_profile import (  # noqa: E402
+    load_tenant_industries_for_install,
+    tenant_matches_industry,
+)
 
 MIGRATIONS_TABLE = "rec_migrations"
 MODULE_TABLES = [
@@ -346,6 +351,96 @@ def _ensure_rec_job_roles_time_billing_columns(conn):
         cur.close()
 
 
+def _rec_job_role_count(conn) -> int:
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COUNT(*) FROM rec_job_roles")
+        row = cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        cur.close()
+
+
+def _seed_recruitment_job_roles_if_empty(conn) -> None:
+    """
+    First-time neutral + industry-tagged job families (Core manifest industries).
+    Idempotent via slug UNIQUE + ON DUPLICATE KEY UPDATE.
+    """
+    if _rec_job_role_count(conn) > 0:
+        return
+    industries = load_tenant_industries_for_install()
+    rows: List[Tuple[str, str, str, Optional[str]]] = [
+        (
+            "General role",
+            "general-role",
+            "Starter job family — rename, duplicate, or add roles to match your business.",
+            None,
+        ),
+    ]
+    if tenant_matches_industry(industries, "medical"):
+        rows.append(
+            (
+                "Care assistant",
+                "care-assistant",
+                "Care delivery and patient-facing vacancies.",
+                "Care",
+            )
+        )
+        rows.append(
+            (
+                "Clinical support",
+                "clinical-support",
+                "Clinical and allied health support roles.",
+                "Clinical",
+            )
+        )
+    if tenant_matches_industry(industries, "security"):
+        rows.append(
+            (
+                "Security officer",
+                "security-officer",
+                "Guarding, patrol, and site security vacancies.",
+                "Security",
+            )
+        )
+    if tenant_matches_industry(industries, "cleaning"):
+        rows.append(
+            (
+                "Cleaning operative",
+                "cleaning-operative",
+                "Contract and facilities cleaning roles.",
+                "Facilities",
+            )
+        )
+    if tenant_matches_industry(industries, "hospitality"):
+        rows.append(
+            (
+                "Front of house",
+                "front-of-house",
+                "Guest-facing service, reception, and venue operations.",
+                "Operations",
+            )
+        )
+    cur = conn.cursor()
+    try:
+        for title, slug, description, department in rows:
+            cur.execute(
+                """
+                INSERT INTO rec_job_roles (title, slug, description, department, active)
+                VALUES (%s, %s, %s, %s, 1)
+                ON DUPLICATE KEY UPDATE
+                  title = VALUES(title),
+                  description = VALUES(description),
+                  department = VALUES(department),
+                  active = 1
+                """,
+                (title, slug, description, department),
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def install():
     conn = get_db_connection()
     try:
@@ -354,6 +449,7 @@ def install():
         _ensure_rec_application_profile_columns(conn)
         _ensure_rec_application_interview_columns(conn)
         _ensure_rec_job_roles_time_billing_columns(conn)
+        _seed_recruitment_job_roles_if_empty(conn)
     finally:
         conn.close()
 

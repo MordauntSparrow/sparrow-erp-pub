@@ -121,10 +121,12 @@
   </div>
 </div>
 
+{% if industry_visible('medical') %}
 <div class="card mb-3" id="curaOpsCard" style="display:none;">
   <div class="card-header py-2"><strong>Operational event (Cura)</strong></div>
   <div class="card-body small" id="curaOpsBody"></div>
 </div>
+{% endif %}
 
 <div class="card mb-3" id="payloadCard" style="display:none;">
   <div class="card-header py-2"><strong>Form</strong> <span class="text-muted small">(from template)</span></div>
@@ -179,6 +181,7 @@
   const URL_ROLES = "{{ url_for('public_time_billing.api_refs_roles') }}";
   const WITHDRAW_TMPL = "{{ url_for('public_time_billing.api_my_runsheets_assignment_withdraw', rs_id=999001, ra_id=999002) }}";
   const REACT_TMPL = "{{ url_for('public_time_billing.api_my_runsheets_assignment_reactivate', rs_id=999001, ra_id=999002) }}";
+  const SHOW_CURA = {{ industry_visible('medical')|tojson }};
 
   let rsId = RS_ID_INITIAL;
   let rsData = null;
@@ -811,9 +814,9 @@
 
     document.getElementById('btnPublish').disabled = !lead;
 
-    const curaCard = document.getElementById('curaOpsCard');
-    const curaBody = document.getElementById('curaOpsBody');
-    if (curaCard && curaBody) {
+    const curaCard = SHOW_CURA ? document.getElementById('curaOpsCard') : null;
+    const curaBody = SHOW_CURA ? document.getElementById('curaOpsBody') : null;
+    if (SHOW_CURA && curaCard && curaBody) {
       const b = rsData.cura_operational_event;
       if (b && b.name) {
         curaCard.style.display = '';

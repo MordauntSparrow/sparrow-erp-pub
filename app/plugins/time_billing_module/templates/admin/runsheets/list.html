@@ -9,7 +9,7 @@
                 <i class="bi bi-clipboard2-check me-2"></i> Runsheets
             </h4>
             <p class="text-muted small mb-0 mt-1">Plan and publish shifts; filter by client, job type, or week.
-                <strong>Publish</strong> on a row pushes crew lines to timesheets — use again after edits or Ventus sign-off to <strong>resync</strong>.</p>
+                <strong>Publish</strong> on a row pushes crew lines to timesheets — use again after edits{% if industry_visible('medical') %} or Ventus sign-off{% endif %} to <strong>resync</strong>.</p>
         </div>
         <a class="btn btn-primary btn-sm" href="#" id="btnNew">
             <i class="bi bi-plus-lg me-1"></i> New runsheet
@@ -136,6 +136,7 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
     // Publish: use base + id to avoid Jinja int converter errors
     const PUBLISH_BASE = "{{ url_for('internal_time_billing.api_publish_runsheet', rs_id=0) }}".replace(/0\/publish$/, "");
     const EDIT_PAGE = "{{ url_for('internal_time_billing.runsheets_edit_page') }}";
+    const SHOW_CURA = {{ industry_visible('medical')|tojson }};
 
     function pad2(n) { return String(n).padStart(2, '0'); }
     function isoDate(d) {
@@ -208,20 +209,23 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
                     const jtBadge = jt ? `<span class="badge" style="background-color:${col};color:#fff">${jt}</span>` : '';
                     const hdr = document.createElement('div');
                     hdr.className = 'tb-staffing-event-hd';
-                    const curaName = (ev.cura_event_name || '').trim();
-                    const curaLoc = (ev.cura_location_summary || '').trim();
-                    const curaNotes = (ev.cura_notes_preview || '').trim();
-                    const curaVeh = (ev.cura_event_vehicles || []).map(v => {
-                        const s = (v.summary || '').trim();
-                        const rl = (v.role_label || '').trim();
-                        return escHtml(s) + (rl ? ' (' + escHtml(rl) + ')' : '');
-                    }).filter(Boolean).join('; ');
-                    const curaLine = [
-                        curaName ? `<span class="text-dark">${escHtml(curaName)}</span>` : '',
-                        curaLoc ? `<span class="text-muted">${escHtml(curaLoc)}</span>` : '',
-                        curaNotes ? `<span class="text-muted">${escHtml(curaNotes)}${curaNotes.length >= 160 ? '…' : ''}</span>` : '',
-                        curaVeh ? `<span class="text-muted">Vehicles: ${curaVeh}</span>` : ''
-                    ].filter(Boolean).join(' · ');
+                    let curaLine = '';
+                    if (SHOW_CURA) {
+                        const curaName = (ev.cura_event_name || '').trim();
+                        const curaLoc = (ev.cura_location_summary || '').trim();
+                        const curaNotes = (ev.cura_notes_preview || '').trim();
+                        const curaVeh = (ev.cura_event_vehicles || []).map(v => {
+                            const s = (v.summary || '').trim();
+                            const rl = (v.role_label || '').trim();
+                            return escHtml(s) + (rl ? ' (' + escHtml(rl) + ')' : '');
+                        }).filter(Boolean).join('; ');
+                        curaLine = [
+                            curaName ? `<span class="text-dark">${escHtml(curaName)}</span>` : '',
+                            curaLoc ? `<span class="text-muted">${escHtml(curaLoc)}</span>` : '',
+                            curaNotes ? `<span class="text-muted">${escHtml(curaNotes)}${curaNotes.length >= 160 ? '…' : ''}</span>` : '',
+                            curaVeh ? `<span class="text-muted">Vehicles: ${curaVeh}</span>` : ''
+                        ].filter(Boolean).join(' · ');
+                    }
                     hdr.innerHTML = `
                         <div class="me-2" style="min-width:0">
                             <div class="fw-semibold text-truncate" title="${ev.title || ''}">${ev.title || '—'}</div>

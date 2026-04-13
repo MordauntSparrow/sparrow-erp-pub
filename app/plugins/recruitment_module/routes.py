@@ -18,6 +18,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from app.objects import PluginManager
+from app.organization_profile import normalize_organization_industries
 
 from . import services as rec_svc
 
@@ -37,6 +38,21 @@ public_site_bp = Blueprint(
     url_prefix="",
     template_folder=_template,
 )
+
+
+@public_site_bp.record_once
+def _recruitment_public_register_asset_url(state):
+    """Careers pages use the same asset resolver as the website module (logo, theme CSS)."""
+    app = state.app
+    if app.jinja_env.globals.get("website_public_asset_url"):
+        return
+    try:
+        from app.plugins.website_module.routes import website_public_asset_url
+
+        app.jinja_env.globals["website_public_asset_url"] = website_public_asset_url
+    except Exception:
+        pass
+
 
 SESSION_APPLICANT = "rec_applicant"
 # Public careers site only — keeps core/admin flashes off job & applicant pages
@@ -64,6 +80,7 @@ def _get_website_settings():
         pass
     _keys = (
         "favicon_path",
+        "theme_color",
         "default_og_image",
         "schema_json",
         "cookie_bar_colors",
@@ -377,6 +394,7 @@ def applicant_register():
         title="Applicant register",
         config=_core_manifest,
         website_settings=_get_website_settings(),
+        applicant=None,
     )
 
 
@@ -1282,6 +1300,10 @@ def admin_application_detail(application_id):
         tb_roles_hire = rec_svc.time_billing_roles_for_select()
         wage_cards_hire = rec_svc.time_billing_wage_cards_for_select()
     interview_presets = rec_svc.list_interview_location_presets(active_only=True)
+    _ind_ids = normalize_organization_industries(
+        current_app.config.get("organization_industries")
+    )
+    prehire_type_add_choices = rec_svc.prehire_type_add_choices(_ind_ids)
     return render_template(
         "recruitment_module/admin/application_detail.html",
         application=row,
@@ -1290,6 +1312,7 @@ def admin_application_detail(application_id):
         templates=templates,
         prehire_requests=prehire,
         prehire_type_labels=rec_svc.PREHIRE_REQUEST_TYPE_LABELS,
+        prehire_type_add_choices=prehire_type_add_choices,
         hire_precheck_ok=hire_ok,
         hire_precheck_message=hire_msg,
         hire_preview=hire_preview,

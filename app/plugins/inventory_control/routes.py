@@ -2702,6 +2702,29 @@ def inventory_contractor_kit_request_resolve(rid):
 
 # --- OpenAPI registration (for AI/docs integration) ---
 def _register_openapi():
+    from app.organization_profile import tenant_matches_industry
+
+    from app.plugins.inventory_control.industry_install import (
+        load_tenant_industries_for_install,
+    )
+
+    med_bag_openapi = []
+    if tenant_matches_industry(load_tenant_industries_for_install(), "medical"):
+        med_bag_openapi = [
+            (
+                BASE_PATH + "/api/med-bags/consumption",
+                "POST",
+                "inventory_med_bags_consumption",
+                "Med bag: EPCR-linked consumption (JSON body; idempotency_key; Bearer or session)",
+            ),
+            (
+                BASE_PATH + "/api/med-bags/instances/{instance_id}",
+                "GET",
+                "inventory_med_bags_instance_get",
+                "Med bag: instance metadata and line quantities (JSON)",
+            ),
+        ]
+
     for path, method, op_id, summary in [
         (BASE_PATH + "/api/health", "GET", "inventory_health", "Health check"),
         (BASE_PATH + "/api/dashboard", "GET", "inventory_dashboard", "Dashboard metrics"),
@@ -2752,9 +2775,7 @@ def _register_openapi():
         (BASE_PATH + "/api/export/transactions", "GET", "inventory_export_transactions", "Export transactions CSV/JSON"),
         (BASE_PATH + "/api/export/stock_levels", "GET", "inventory_export_stock_levels", "Export stock levels CSV/JSON"),
         (BASE_PATH + "/api/export/batches", "GET", "inventory_export_batches", "Export batches CSV/JSON"),
-        (BASE_PATH + "/api/med-bags/consumption", "POST", "inventory_med_bags_consumption", "Med bag: EPCR-linked consumption (JSON body; idempotency_key; Bearer or session)"),
-        (BASE_PATH + "/api/med-bags/instances/{instance_id}", "GET", "inventory_med_bags_instance_get", "Med bag: instance metadata and line quantities (JSON)"),
-    ]:
+    ] + med_bag_openapi:
         register_path(BLUEPRINT_NAME, path, method, op_id, summary, tags=["inventory_control"])
 
 

@@ -52,7 +52,7 @@
   </div>
   {% endif %}
 
-  {% if not hcpc_register_api_enabled %}
+  {% if industry_visible('medical') and not hcpc_register_api_enabled %}
   <div class="alert alert-secondary small mb-4">
     <strong>HCPC register checks</strong> — HTTP lookups are disabled (<code class="small">HCPC_REGISTER_API_ENABLED</code> is <code>0</code>, <code>false</code>, <code>no</code>, or <code>off</code>).
   </div>
@@ -89,10 +89,11 @@
     </div>
   </div>
 
+  {% if industry_visible('medical') %}
   <div class="card border mb-4">
     <div class="card-body">
       <h2 class="h6 card-title">HCPC register — mass checks</h2>
-      <p class="small text-muted mb-3">Run register checks for every employee with an HCPC registration number on file. Scheduled runs use the same live HCPC API as the manual profile button.</p>
+      <p class="small text-muted mb-3">Run register checks for every employee with an HCPC registration number on file. Scheduled runs use the same live HCPC API as the manual profile button. Shown because <strong>Medical</strong> is enabled in Core settings → Industry.</p>
       <div class="d-flex flex-wrap gap-3 align-items-end">
         <form method="post" action="{{ url_for('internal_hr.admin_hr_hcpc_mass_interval_save') }}" class="row g-2 align-items-end flex-wrap m-0">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -124,6 +125,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
   {% endif %}
 
   {% if overview is defined %}

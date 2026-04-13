@@ -1,0 +1,71 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% block page_title %}Fleet issues{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="fleet-page-hero d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h1 class="h5 mb-1"><i class="bi bi-kanban text-primary me-2"></i>Issue tracker</h1>
+      <p class="fleet-page-hero__sub mb-0">Move cards through the workflow. <strong>VOR</strong> and <strong>Workshop</strong> mean the vehicle must not go on active service. <strong>Pending road test</strong> is a controlled step before full service.</p>
+    </div>
+    <a class="btn btn-sm btn-outline-primary rounded-pill px-3 align-self-center" href="{{ url_for('fleet_management.dashboard') }}"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a>
+  </div>
+
+  <div class="row flex-nowrap overflow-auto pb-3 g-2" style="min-height:480px">
+    {% for stage in stages %}
+    <div class="col fleet-kanban-col" style="min-width:220px">
+      <div class="fleet-kanban-col__title">{{ stage|replace('_', ' ') }}</div>
+      {% for it in issues_by_stage[stage] %}
+      <div class="card shadow-sm mb-2">
+        <div class="card-body p-2 small">
+          <div class="fw-semibold">{{ it.title }}</div>
+          <div class="text-muted">{{ vehicle_regs.get(it.vehicle_id|int, '?') }}</div>
+          {% if it.vehicle_marked_vor or it.vehicle_marked_workshop %}
+          <div class="mt-1 small">
+            {% if it.vehicle_marked_vor %}<span class="badge bg-danger">VOR flagged</span>{% endif %}
+            {% if it.vehicle_marked_workshop %}<span class="badge bg-warning text-dark">Workshop flagged</span>{% endif %}
+          </div>
+          {% endif %}
+          {% if it.description %}<p class="mb-1 mt-1">{{ it.description[:120] }}{% if it.description|length > 120 %}…{% endif %}</p>{% endif %}
+          {% if it.scheduled_service_date %}<div class="text-info"><i class="bi bi-calendar-event"></i> {{ it.scheduled_service_date }}</div>{% endif %}
+          {% if it.manager_notes %}<div class="fst-italic mt-1">{{ it.manager_notes[:100] }}{% if it.manager_notes|length > 100 %}…{% endif %}</div>{% endif %}
+          {% if it.completed_at %}
+          <div class="text-success small mt-1">Done {{ it.completed_at }}</div>
+          {% else %}
+          <form method="post" class="mt-2 border-top pt-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="issue_id" value="{{ it.id }}">
+            <label class="form-label small mb-0">Move to</label>
+            <input class="form-control form-control-sm mb-1" name="resolution_summary" placeholder="Resolution if moving to Done">
+            <div class="input-group input-group-sm mb-1">
+              <select class="form-select form-select-sm" name="kanban_stage">
+                {% for s in stages %}
+                <option value="{{ s }}" {% if it.kanban_stage == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-outline-primary" type="submit" name="action" value="move">Go</button>
+            </div>
+            <div class="mb-1">
+              <input class="form-control form-control-sm mb-1" type="date" name="scheduled_service_date" value="{{ it.scheduled_service_date or '' }}" placeholder="Service date">
+              <textarea class="form-control form-control-sm" name="manager_notes" rows="2" placeholder="Manager notes">{{ it.manager_notes or '' }}</textarea>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary w-100 mb-1" type="submit" name="action" value="notes">Save notes / date</button>
+            <div class="btn-group btn-group-sm w-100 mb-1 flex-wrap" role="group">
+              <button class="btn btn-outline-danger" type="submit" name="action" value="vor" title="Vehicle off road (VOR)">VOR</button>
+              <button class="btn btn-outline-warning" type="submit" name="action" value="workshop" title="Maintenance / workshop — not in active service">Workshop</button>
+              <button class="btn btn-outline-info" type="submit" name="action" value="pending_rt">Road test</button>
+              <button class="btn btn-outline-success" type="submit" name="action" value="active">In service</button>
+            </div>
+            <input class="form-control form-control-sm mb-1" name="resolution_summary" placeholder="Resolution (when completing)">
+            <button class="btn btn-sm btn-success w-100" type="submit" name="action" value="complete">Complete &amp; archive</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <p class="text-muted small">No items.</p>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,36 +1,62 @@
 {% extends "public/crm_public_base.html" %}
-{% block crm_public_title %}Event risk guide &amp; enquiry{% endblock %}
+{% block crm_public_title %}{% if industry_visible('medical') %}Event medical risk guide &amp; enquiry{% else %}Event enquiry{% endif %}{% endblock %}
 {% block crm_public_body %}
 {% set fv = form_values or {} %}
 <div class="crm-pu-hero p-4 p-md-5 mb-4">
   <p class="crm-pu-pill mb-2">For professional event organisers</p>
-  <h1 class="h2 fw-bold mb-3">Event risk guide &amp; quoting enquiry</h1>
+  {% if industry_visible('medical') %}
+  <h1 class="h2 fw-bold mb-3">Event medical risk guide &amp; enquiry</h1>
   <p class="mb-0 opacity-90 lead">
-    Walk through <strong>risk</strong> factors (not attendance alone), see <strong>indicative</strong> resourcing hints,
-    then send an enquiry. This supports early conversation only — a <strong>medical needs assessment</strong> and
-    <strong>event medical plan</strong> are normally required before we can commit to binding cover and pricing.
-    Not clinical advice or a substitute for your own event risk assessment.
+    This guide follows <strong>Purple Guide</strong>–style tiering and an indicative <strong>HSE-style planning score</strong> (not a licensed medical needs assessment).
+    It highlights <strong>CQC</strong> themes for patient-transport ambulances and why ambulances must not replace a proper medical post.
+    A formal <strong>medical needs assessment</strong> and <strong>event medical plan</strong> are still required before binding cover and pricing.
   </p>
+  {% else %}
+  <h1 class="h2 fw-bold mb-3">Event planning enquiry</h1>
+  <p class="mb-0 opacity-90 lead">
+    Tell us about your event and contact details. We use risk factors (not attendance alone) for indicative resourcing hints.
+    A formal quote follows agreed scope and your organisation’s pricing rules.
+  </p>
+  {% endif %}
 </div>
+
+{% if industry_visible('medical') %}
+<div class="crm-pu-card p-4 mb-4">
+  <h2 class="h5 fw-bold mb-3">Compliance context (UK — indicative)</h2>
+  <ul class="small ps-3 mb-3">
+    <li class="mb-2"><strong>CQC:</strong> Vehicles used to transport patients to hospital are regulated; providers offering ambulances for transfers should be appropriately registered where the law applies.</li>
+    <li class="mb-2"><strong>HSE / Purple Guide themes:</strong> Ambulances should not be used as the main treatment area — plan a dedicated first aid / medical post so vehicles stay available for emergencies and transfers.</li>
+    <li class="mb-0"><strong>Tiering:</strong> Tiers 1–5 summarise typical expectations from published event-medical tier guidance (duration, crowd, alcohol/drugs, activity risk, transfers). Your SAG or licensing authority may expect a written MNA.</li>
+  </ul>
+  <p class="small text-muted mb-0">Numbers below are a planning aid only — not clinical advice, not a substitute for your own risk assessment, insurer, or medical director sign-off.</p>
+</div>
+{% endif %}
 
 <div class="row g-4">
   <div class="col-lg-5 order-lg-2">
     <div class="crm-pu-card p-4 mb-4">
       <h2 class="h5 fw-bold mb-3"><i class="bi bi-signpost-2 me-2 text-primary"></i>How this helps</h2>
       <ul class="small crm-pu-guide ps-3 mb-0">
-        <li>Structures what we need to scope cover for crowds and time on site.</li>
-        <li>Surfaces common risk amplifiers (outdoor, alcohol, late finish, profile).</li>
-        <li>Builds a <strong>pipeline card</strong> for our team — aligned with risk-led planning (e.g. Purple Guide thinking).</li>
-        <li>May pre-fill high-level fields if you move to a quote — final fees follow formal needs assessment.</li>
+        <li>Structures crowd size, duration, venue, activity risk, alcohol/drugs, and transfer expectations.</li>
+        <li>Produces a <strong>planning score</strong> mapped to an indicative <strong>conversion table</strong> (first responders, ambulances, clinical grades — industry-style).</li>
+        {% if industry_visible('medical') %}
+        <li>Surfaces <strong>tier 1–5</strong> narrative aligned with common Purple Guide tier descriptions.</li>
+        <li>Builds a pipeline card for our team; final fees follow formal MNA and plan.</li>
+        {% else %}
+        <li>Builds a pipeline card for our team for follow-up.</li>
+        {% endif %}
       </ul>
     </div>
     {% with theme='public' %}
     {% include 'partials/crm_medical_planning_process.html' %}
     {% endwith %}
-    <div class="crm-pu-card p-4 border border-2 border-light" id="liveRiskPanel">
-      <h3 class="h6 fw-bold text-uppercase text-muted mb-2">Indicative band</h3>
-      <p class="display-6 fw-bold mb-0 text-primary" id="riskBandLabel">—</p>
-      <p class="small text-muted mt-2 mb-0" id="riskBandHint">Enter attendance to see a live guide.</p>
+    <div class="crm-pu-card p-4 border border-2 border-light mb-3" id="liveRiskPanel">
+      <h3 class="h6 fw-bold text-uppercase text-muted mb-2">Live planning score</h3>
+      <p class="display-6 fw-bold mb-0 text-primary" id="purpleScoreVal">—</p>
+      <p class="small text-muted mt-1 mb-2">Indicative 0–100+ score (maps to conversion bands).</p>
+      <p class="fw-semibold mb-1">Band: <span id="riskBandLabel" class="text-primary">—</span></p>
+      <p class="small text-muted mb-2" id="tierLine">—</p>
+      <p class="small text-muted mb-0" id="riskBandHint">Enter attendance to see a live guide.</p>
     </div>
   </div>
   <div class="col-lg-7 order-lg-1">
@@ -70,7 +96,7 @@
           </div>
           <div class="col-md-6">
             <label class="form-label" for="duration_hours">Hours on site (cover window)</label>
-            <input class="form-control" type="number" min="1" max="36" step="0.5" id="duration_hours" name="duration_hours"
+            <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours"
                    value="{{ fv.get('duration_hours', '6') }}">
           </div>
           <div class="col-md-6">
@@ -91,6 +117,7 @@
               <option value="young_adult" {% if cp == 'young_adult' %}selected{% endif %}>Young adult / evening-led</option>
             </select>
           </div>
+          {% include 'partials/crm_event_calculator_fields.html' %}
           <div class="col-12">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes"
@@ -121,37 +148,126 @@
 {% block crm_public_scripts %}
 <script>
 (function () {
-  function score() {
+  var medicalSurface = {{ 'true' if industry_visible('medical') else 'false' }};
+  var tierTitles = {
+    1: 'Tier 1 — smallest / simplest',
+    2: 'Tier 2 — local-licensing scale',
+    3: 'Tier 3 — larger / more presentations',
+    4: 'Tier 4 — complex / high attendance',
+    5: 'Tier 5 — mass gathering / highest risk'
+  };
+  function tierFromSignals(ps, n, dspan, ar, dr, al, hr) {
+    if (n > 10000 || ps >= 72) return 5;
+    if (n > 5000 || ps >= 58) return 4;
+    if (n > 2000 || ps >= 44 || (dspan === 'multi_day' && (al === 'likely' || al === 'expected' || dr === 'likely' || dr === 'expected')) || hr === 'likely') return 3;
+    if (n > 500 || ps >= 28 || al === 'social' || al === 'likely' || al === 'expected' || ar === 'significant' || ar === 'high') return 2;
+    return 1;
+  }
+  function purpleScore() {
     var n = parseInt(document.getElementById('expected_attendees').value, 10) || 0;
     var hours = parseFloat(document.getElementById('duration_hours').value) || 6;
-    hours = Math.max(1, Math.min(36, hours));
+    hours = Math.max(1, Math.min(72, hours));
+    var vt = document.getElementById('venue_type').value;
+    var outdoor = vt === 'outdoor' || vt === 'both';
+    var alcoholChk = document.getElementById('alcohol_served').checked;
+    var late = document.getElementById('late_finish').checked;
+    var cp = document.getElementById('crowd_profile').value;
+    var ar = (document.getElementById('activity_risk') || {}).value || 'moderate';
+    var dr = (document.getElementById('drug_risk') || {}).value || 'none';
+    var dsel = (document.getElementById('duration_span') || {}).value || '';
+    var dspan = dsel;
+    if (!dspan) {
+      if (hours <= 5.5) dspan = 'few_hours';
+      else if (hours <= 24) dspan = 'single_day';
+      else dspan = 'multi_day';
+    }
+    var alSel = (document.getElementById('alcohol_level') || {}).value || '';
+    var al = alSel;
+    if (!al) al = alcoholChk ? 'social' : 'none';
+    var hrSel = (document.getElementById('hospital_referrals') || {}).value || '';
+    var hr = hrSel;
+    if (!hr) {
+      if (n >= 5000) hr = 'likely';
+      else if (n >= 2000) hr = 'possible';
+      else hr = 'unlikely';
+    }
+    var ps = 0;
+    if (n >= 10000) ps += 34;
+    else if (n >= 5000) ps += 28;
+    else if (n >= 2000) ps += 20;
+    else if (n >= 500) ps += 12;
+    else if (n > 0) ps += 4;
+    if (dspan === 'multi_day') ps += 22;
+    else if (dspan === 'few_hours') ps += 2;
+    else ps += 8;
+    if (hours > 24 && dspan !== 'multi_day') ps += 6;
+    if (ar === 'high') ps += 24;
+    else if (ar === 'significant') ps += 14;
+    else if (ar === 'moderate') ps += 6;
+    if (al === 'expected') ps += 18;
+    else if (al === 'likely') ps += 12;
+    else if (al === 'social') ps += 6;
+    if (dr === 'expected') ps += 18;
+    else if (dr === 'likely') ps += 12;
+    else if (dr === 'isolated') ps += 5;
+    if (outdoor) ps += 7;
+    if (late) ps += 9;
+    if (cp === 'young_adult') ps += 7;
+    if (hr === 'likely') ps += 16;
+    else if (hr === 'possible') ps += 8;
+    ps = Math.max(0, Math.min(120, Math.round(ps)));
+    var tier = tierFromSignals(ps, n, dspan, ar, dr, al, hr);
     var s = 1;
     if (n >= 5000) s += 1.2;
     else if (n >= 1500) s += 0.7;
     else if (n >= 500) s += 0.35;
     if (hours >= 10) s += 0.5;
     else if (hours >= 6) s += 0.25;
-    var vt = document.getElementById('venue_type').value;
-    if (vt === 'outdoor' || vt === 'both') s += 0.45;
-    if (document.getElementById('alcohol_served').checked) s += 0.55;
-    if (document.getElementById('late_finish').checked) s += 0.4;
-    var cp = document.getElementById('crowd_profile').value;
+    if (outdoor) s += 0.45;
+    if (alcoholChk) s += 0.55;
+    if (late) s += 0.4;
     if (cp === 'young_adult') s += 0.35;
+    if (ar === 'high') s += 0.38;
+    else if (ar === 'significant') s += 0.24;
+    else if (ar === 'moderate') s += 0.12;
+    if (dr === 'expected') s += 0.38;
+    else if (dr === 'likely') s += 0.24;
+    else if (dr === 'isolated') s += 0.08;
+    if (dspan === 'multi_day') s += 0.34;
+    else if (dspan === 'few_hours') s -= 0.04;
+    if (hr === 'likely') s += 0.28;
+    else if (hr === 'possible') s += 0.12;
     s = Math.max(1, Math.min(5, s));
     var band = Math.round(s);
     var labels = {1:'Low',2:'Low–moderate',3:'Moderate',4:'Elevated',5:'High'};
-    return { band: band, label: labels[band] || 'Moderate', medics: Math.max(band >= 3 ? 2 : 1, Math.ceil(n / 2500) || 1, Math.ceil(band * 1.5)) };
+    var medics = Math.max(band >= 3 ? 2 : 1, Math.ceil(n / 2500) || 1, Math.ceil(band * 1.5));
+    return { purple: ps, band: band, label: labels[band] || 'Moderate', medics: medics, tier: tier };
   }
   function refresh() {
     var el = document.getElementById('riskBandLabel');
     var hint = document.getElementById('riskBandHint');
+    var psEl = document.getElementById('purpleScoreVal');
+    var tierEl = document.getElementById('tierLine');
     var n = parseInt(document.getElementById('expected_attendees').value, 10);
-    if (!n && n !== 0) { el.textContent = '—'; hint.textContent = 'Enter attendance to see a live guide.'; return; }
-    var r = score();
+    if (!n && n !== 0) {
+      el.textContent = '—';
+      psEl.textContent = '—';
+      tierEl.textContent = '—';
+      hint.textContent = 'Enter attendance to see a live guide.';
+      return;
+    }
+    var r = purpleScore();
+    psEl.textContent = String(r.purple);
     el.textContent = r.label;
-    hint.textContent = 'Indicative medic team size (pre-assessment only): ~' + r.medics + ' — subject to medical needs assessment before any binding quote.';
+    tierEl.textContent = tierTitles[r.tier] || ('Tier ' + r.tier);
+    if (medicalSurface) {
+      hint.textContent = 'Indicative medic team size (pre-assessment only): ~' + r.medics + ' — subject to medical needs assessment before any binding quote.';
+    } else {
+      hint.textContent = 'Indicative on-site team size for planning only: ~' + r.medics + ' — subject to agreed scope before any binding quote.';
+    }
   }
-  ['expected_attendees','duration_hours','venue_type','crowd_profile','alcohol_served','late_finish'].forEach(function (id) {
+  var ids = ['expected_attendees','duration_hours','venue_type','crowd_profile','alcohol_served','late_finish','activity_risk','duration_span','alcohol_level','drug_risk','hospital_referrals'];
+  ids.forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener('change', refresh);
     if (el && el.type === 'checkbox') el.addEventListener('click', refresh);

@@ -4,7 +4,7 @@
   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
     <div>
       <h1 class="h4 mb-1"><i class="bi bi-calendar2-check text-primary me-2"></i>Staffing overview</h1>
-      <p class="text-muted small mb-0">Run sheets in the next few days vs positions to cover (Cura expected roster when linked, otherwise at least one crew). <strong>Labour (planning)</strong> uses median wage-card rates among active contractors for that job type, run-sheet window hours (or 8h default), and any posted shift pay. Figures are indicative only.</p>
+      <p class="text-muted small mb-0">Run sheets in the next few days vs positions to cover{% if industry_visible('medical') %} (Cura expected roster when linked, otherwise at least one crew){% else %} (expected crew vs assigned where configured){% endif %}. <strong>Labour (planning)</strong> uses median wage-card rates among active contractors for that job type, run-sheet window hours (or 8h default), and any posted shift pay. Figures are indicative only.</p>
     </div>
     <div class="d-flex flex-wrap gap-2 align-items-center">
       <label class="small text-muted mb-0">Ahead (days)</label>
@@ -106,10 +106,12 @@
         <div class="card-header bg-transparent py-2"><strong><i class="bi bi-calendar3 me-2"></i>By day</strong></div>
         <div class="card-body py-2" id="byDayBody" style="max-height:280px;overflow-y:auto"></div>
       </div>
+      {% if industry_visible('medical') %}
       <div class="card border-0 shadow-sm">
         <div class="card-header bg-transparent py-2"><strong><i class="bi bi-link-45deg me-2"></i>Upcoming Cura-linked events</strong></div>
         <div class="card-body py-2 small" id="curaBody" style="max-height:220px;overflow-y:auto"></div>
       </div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -152,6 +154,7 @@
   const API = "{{ url_for('internal_time_billing.api_runsheets_staffing_overview') }}";
   const UPLIFT_TMPL = "{{ url_for('internal_time_billing.api_runsheet_scheduler_uplift', rs_id=999999) }}";
   const EDIT_PAGE = "{{ url_for('internal_time_billing.runsheets_edit_page') }}";
+  const SHOW_CURA = {{ industry_visible('medical')|tojson }};
 
   function esc(s) {
     const d = document.createElement('div');
@@ -206,7 +209,7 @@
         if (g.is_urgent) tr.classList.add('table-warning');
         if (g.is_past_gap) tr.classList.add('table-danger');
         const pay = (g.shift_pay_model || 'inherit') + (g.shift_pay_rate != null && g.shift_pay_rate !== '' ? ' · £' + g.shift_pay_rate : '');
-        const cura = g.cura_event_name ? '<div class="small text-muted">' + esc(g.cura_event_name) + '</div>' : '';
+        const cura = (SHOW_CURA && g.cura_event_name) ? '<div class="small text-muted">' + esc(g.cura_event_name) + '</div>' : '';
         const L = g.labour || {};
         const wc = L.wage_card || {};
         let labourHtml = '<span class="text-muted">—</span>';
@@ -254,23 +257,27 @@
       });
     }
 
-    const cura = data.upcoming_cura_events || [];
-    const cb = document.getElementById('curaBody');
-    cb.innerHTML = '';
-    if (!cura.length) {
-      cb.innerHTML = '<p class="text-muted mb-0">No Cura-linked run sheets in the upcoming slice, or Medical Records not installed.</p>';
-    } else {
-      cura.forEach(c => {
-        const el = document.createElement('div');
-        el.className = 'mb-2 pb-2 border-bottom';
-        const short = (c.required_positions > c.assigned_count)
-          ? '<span class="text-danger">' + c.assigned_count + '/' + c.required_positions + ' crew</span>'
-          : '<span class="text-success">' + c.assigned_count + '/' + c.required_positions + ' crew</span>';
-        el.innerHTML = `<div class="fw-semibold">${esc(c.cura_event_name)}</div>
-          <div class="text-muted">${esc(c.work_date)} · ${short}
-          <a href="${EDIT_PAGE}#edit-${c.runsheet_id}" class="ms-1">Edit</a></div>`;
-        cb.appendChild(el);
-      });
+    if (SHOW_CURA) {
+      const cb = document.getElementById('curaBody');
+      if (cb) {
+        const cura = data.upcoming_cura_events || [];
+        cb.innerHTML = '';
+        if (!cura.length) {
+          cb.innerHTML = '<p class="text-muted mb-0">No Cura-linked run sheets in the upcoming slice, or Medical Records not installed.</p>';
+        } else {
+          cura.forEach(c => {
+            const el = document.createElement('div');
+            el.className = 'mb-2 pb-2 border-bottom';
+            const short = (c.required_positions > c.assigned_count)
+              ? '<span class="text-danger">' + c.assigned_count + '/' + c.required_positions + ' crew</span>'
+              : '<span class="text-success">' + c.assigned_count + '/' + c.required_positions + ' crew</span>';
+            el.innerHTML = `<div class="fw-semibold">${esc(c.cura_event_name)}</div>
+              <div class="text-muted">${esc(c.work_date)} · ${short}
+              <a href="${EDIT_PAGE}#edit-${c.runsheet_id}" class="ms-1">Edit</a></div>`;
+            cb.appendChild(el);
+          });
+        }
+      }
     }
   }
 

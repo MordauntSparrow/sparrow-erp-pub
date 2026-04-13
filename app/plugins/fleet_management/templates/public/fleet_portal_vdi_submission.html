@@ -1,0 +1,35 @@
+{% extends "public/fleet_base_public.html" %}
+{% block title %}Inspection #{{ submission.id }}{% endblock %}
+{% block content %}
+<div class="ep-card p-3">
+  <h1 class="h5 mb-1">Inspection recorded</h1>
+  <p class="text-muted small">#{{ submission.id }} · {% if vehicle %}{{ vehicle.registration or vehicle.internal_code }}{% endif %} · {{ submission.created_at }}</p>
+  {% if submission.mileage_reported is not none %}
+  <p class="small"><strong>Odometer:</strong> {{ submission.mileage_reported }}</p>
+  {% endif %}
+  <div class="border rounded p-3 mb-3 small">
+    <div class="fw-semibold mb-2">Responses</div>
+    <dl class="row mb-0">
+      {% for sec in schema.sections|default([]) %}
+        {% for field in sec.fields|default([]) %}
+          {% set fid = field.id %}
+          {% if submission.responses and fid in submission.responses %}
+          <dt class="col-5">{{ field.label|default(fid) }}</dt>
+          <dd class="col-7">{{ submission.responses[fid] }}</dd>
+          {% endif %}
+        {% endfor %}
+      {% endfor %}
+    </dl>
+  </div>
+  {% if submission.photo_paths %}
+  <div class="row g-2 mb-3">
+    {% for p in submission.photo_paths %}
+    <div class="col-6">
+      <img src="{{ url_for('static', filename='uploads/' + p) }}" class="img-fluid rounded border" alt="">
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <a href="{{ url_for('public_fleet.fleet_portal_index') }}" class="btn btn-outline-primary">Back</a>
+</div>
+{% endblock %}

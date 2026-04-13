@@ -94,7 +94,7 @@
     <div class="container">
       {% if (config.site_settings or {}).branding == 'logo' and (config.site_settings or {}).logo_path %}
         <a class="navbar-brand d-flex align-items-center" href="{{ url_for('public_employee_portal.dashboard') }}">
-          <img src="{{ url_for('static', filename=(config.site_settings or {}).logo_path) }}" alt="{{ (config.site_settings or {}).company_name }}" height="40">
+          <img src="{{ url_for('static', filename=normalize_manifest_static_path((config.site_settings or {}).logo_path)) }}" alt="{{ (config.site_settings or {}).company_name }}" style="{{ navbar_logo_inline_style(config.site_settings or {}) }}">
         </a>
       {% else %}
         <a class="navbar-brand fw-semibold" href="{{ url_for('public_employee_portal.dashboard') }}">

@@ -26,9 +26,11 @@
         <a href="{{ url_for('internal_scheduling.admin_schedule_month') }}" class="btn btn-outline-light btn-lg">
           <i class="bi bi-calendar3 me-1"></i>Month
         </a>
+        {% if industry_visible('medical') %}
         <a href="{{ url_for('internal_scheduling.admin_cura_event_planning') }}" class="btn btn-outline-light btn-lg">
           <i class="bi bi-calendar-event me-1"></i>Cura planning
         </a>
+        {% endif %}
         <a href="{{ url_for('internal_scheduling.admin_shift_new') }}" class="btn btn-success btn-lg shadow-sm fw-semibold">
           <i class="bi bi-plus-lg me-1"></i>New shift
         </a>
@@ -37,6 +39,7 @@
   </div>
 </div>
 
+{% if industry_visible('medical') %}
 <div class="mb-3">
   <h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing: 0.06em;">Cura &amp; operational staffing</h2>
   <p class="small text-muted mb-3">
@@ -70,7 +73,7 @@
           </div>
           <div class="flex-grow-1">
             <h3 class="h6 card-title mb-1">Run sheets · staffing board</h3>
-            <p class="card-text small text-muted mb-0">By date: Cura event name, expected vs assigned crew, vehicles. Same data as run sheet edit.</p>
+            <p class="card-text small text-muted mb-0">By date: linked event context, expected vs assigned crew, vehicles. Same data as run sheet edit.</p>
           </div>
           <i class="bi bi-box-arrow-up-right ms-auto text-muted small"></i>
         </div>
@@ -86,7 +89,7 @@
           </div>
           <div class="flex-grow-1">
             <h3 class="h6 card-title mb-1">Staffing overview</h3>
-            <p class="card-text small text-muted mb-0">Gaps vs Cura expected roster, pay uplift, urgent rows.</p>
+            <p class="card-text small text-muted mb-0">Gaps vs expected roster, pay uplift, urgent rows.</p>
           </div>
           <i class="bi bi-chevron-right ms-auto text-muted"></i>
         </div>
@@ -112,6 +115,46 @@
   </div>
 {% endif %}
 </div>
+{% elif url_tb_runsheets_board or url_tb_staffing_overview %}
+<div class="mb-3">
+  <h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing: 0.06em;">Run sheets &amp; staffing</h2>
+  <p class="small text-muted mb-3">Time Billing tools for crewed jobs and coverage (no clinical event linking).</p>
+  <div class="row g-3">
+    {% if url_tb_runsheets_board %}
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_tb_runsheets_board }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0 border-start border-4" style="border-color:#0d9488!important;">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(13,148,136,0.12)!important;">
+            <i class="bi bi-people fs-3" style="color:#0d9488;"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Run sheets · staffing board</h3>
+            <p class="card-text small text-muted mb-0">By date: assignments, crew, and vehicles where configured.</p>
+          </div>
+          <i class="bi bi-box-arrow-up-right ms-auto text-muted small"></i>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+    {% if url_tb_staffing_overview %}
+    <div class="col-md-6 col-lg-4">
+      <a href="{{ url_tb_staffing_overview }}" class="card sched-metric-card text-decoration-none text-dark h-100 border-0">
+        <div class="card-body d-flex align-items-center">
+          <div class="rounded-3 p-3 me-3" style="background: rgba(245,158,11,0.15);">
+            <i class="bi bi-exclamation-triangle fs-3 text-warning"></i>
+          </div>
+          <div class="flex-grow-1">
+            <h3 class="h6 card-title mb-1">Staffing overview</h3>
+            <p class="card-text small text-muted mb-0">Coverage gaps, pay uplift, and urgent rows.</p>
+          </div>
+          <i class="bi bi-chevron-right ms-auto text-muted"></i>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 <div class="row g-3">
   <div class="col-md-6 col-lg-4">

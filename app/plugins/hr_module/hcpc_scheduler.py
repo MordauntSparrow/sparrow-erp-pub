@@ -32,6 +32,19 @@ def init_hcpc_status_scheduler(app) -> None:
 
     if not is_hcpc_register_api_enabled():
         return
+    try:
+        from app.organization_profile import (
+            normalize_organization_industries,
+            tenant_matches_industry,
+        )
+
+        _inds = normalize_organization_industries(
+            app.config.get("organization_industries")
+        )
+        if not tenant_matches_industry(_inds, "medical"):
+            return
+    except Exception:
+        pass
 
     try:
         _scheduler = BackgroundScheduler()

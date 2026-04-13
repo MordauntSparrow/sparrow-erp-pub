@@ -1230,7 +1230,7 @@ class TimesheetService:
                     if str(invoice_billing_frequency).lower() == "monthly":
                         invoice_banner = {
                             "level": "info",
-                            "text": "Self-employed (monthly billing): submit this week when ready. When your pay period ends, open My invoices and use Create invoice to combine approved weeks.",
+                            "text": "Self-employed (monthly billing): submit this week when ready. When your pay period ends, open My invoices and use Create invoice to combine submitted or approved weeks (draft invoice until all selected weeks are approved).",
                         }
                     else:
                         invoice_banner = {
@@ -1887,18 +1887,11 @@ class TimesheetService:
                 (user_id, wk["id"], wk["id"]),
             )
             draft_rows = cur.fetchall() or []
+            promoted_any = False
             if draft_rows:
                 now_inv = datetime.utcnow()
                 for dr in draft_rows:
                     inv_id = dr.get("id")
-                    cur.execute(
-                        """
-                        UPDATE contractor_invoices
-                        SET status='sent', sent_at=%s
-                        WHERE id=%s AND status='draft'
-                        """,
-                        (now_inv, inv_id),
-                    )
                     week_ids_to_close: List[int] = []
                     try:
                         cur.execute(
@@ -1916,13 +1909,40 @@ class TimesheetService:
                     ar = cur.fetchone()
                     if ar and ar.get("timesheet_week_id"):
                         week_ids_to_close.append(int(ar["timesheet_week_id"]))
-                    for wid in sorted(set(week_ids_to_close)):
+                    week_ids_to_close = sorted(set(week_ids_to_close))
+                    if not week_ids_to_close:
+                        continue
+                    all_linked_approved = True
+                    for wid in week_ids_to_close:
+                        cur.execute(
+                            "SELECT status FROM tb_timesheet_weeks WHERE id=%s",
+                            (wid,),
+                        )
+                        rw = cur.fetchone()
+                        if not rw or str(rw.get("status") or "").lower() != "approved":
+                            all_linked_approved = False
+                            break
+                    if not all_linked_approved:
+                        continue
+                    cur.execute(
+                        """
+                        UPDATE contractor_invoices
+                        SET status='sent', sent_at=%s
+                        WHERE id=%s AND status='draft'
+                        """,
+                        (now_inv, inv_id),
+                    )
+                    if cur.rowcount == 0:
+                        continue
+                    for wid in week_ids_to_close:
                         cur.execute(
                             "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
                             (wid,),
                         )
-                conn.commit()
-                week_marked_invoiced = True
+                    promoted_any = True
+                if promoted_any:
+                    conn.commit()
+                week_marked_invoiced = promoted_any
 
             # Generate PDF
             pdf_bytes, filename = ExportService.export_week_pdf(
@@ -1962,7 +1982,7 @@ class TimesheetService:
     def reject_week(admin_id: int, user_id: int, week_id: str, reason: str) -> None:
         """
         Reject a contractor's week with a reason and optionally email them.
-        If the week had an invoice (sent), it is voided so the contractor can create a new one after re-approval.
+        Voids any linked portal invoice (draft or sent) so lines are free to re-invoice after re-approval.
 
         Args:
             reason: Mandatory rejection reason
@@ -2460,7 +2480,7 @@ class InvoiceService:
 
     @staticmethod
     def list_eligible_weeks_for_combined_invoice(contractor_id: int) -> List[Dict[str, Any]]:
-        """Approved weeks with at least one uninvoiced entry (self-service combine invoice)."""
+        """Submitted or approved weeks with uninvoiced lines (combine invoice — same as per-week flow)."""
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
@@ -2471,7 +2491,7 @@ class InvoiceService:
                        COALESCE(SUM(e.pay + COALESCE(e.travel_parking, 0)), 0) AS line_total
                 FROM tb_timesheet_weeks w
                 JOIN tb_timesheet_entries e ON e.week_id = w.id AND e.user_id = w.user_id
-                WHERE w.user_id = %s AND LOWER(w.status) = 'approved'
+                WHERE w.user_id = %s AND LOWER(w.status) IN ('submitted', 'approved')
                   AND (
                     e.invoice_id IS NULL
                     OR EXISTS (
@@ -2505,8 +2525,10 @@ class InvoiceService:
         mark_sent: bool = True,
     ) -> dict:
         """
-        One invoice spanning multiple approved weeks; each entry becomes a line on the same invoice.
-        timesheet_week_pks are tb_timesheet_weeks.id values.
+        One invoice spanning multiple weeks; each entry becomes a line on the same invoice.
+        Weeks may be **submitted** or **approved**. Invoice is **draft** until every selected
+        week is approved (matches per-week behaviour). Only when all are approved and
+        ``mark_sent`` is true do we set status **sent** and weeks **invoiced**.
         """
         if not invoice_number or not str(invoice_number).strip():
             raise ValueError("Invoice number is required.")
@@ -2528,9 +2550,10 @@ class InvoiceService:
                 wk = cur.fetchone()
                 if not wk or int(wk["user_id"]) != int(contractor_id):
                     raise ValueError("Invalid or inaccessible timesheet week.")
-                if str(wk.get("status") or "").lower() != "approved":
+                st = str(wk.get("status") or "").lower()
+                if st not in ("submitted", "approved"):
                     raise ValueError(
-                        "Each selected week must be approved before it can be invoiced."
+                        "Each selected week must be submitted or approved (not draft or rejected)."
                     )
                 weeks_ordered.append(wk)
             weeks_ordered.sort(key=lambda r: (r.get("week_ending") or date.min, int(r["id"])))
@@ -2549,6 +2572,10 @@ class InvoiceService:
             )
             entry_ids = [e["id"] for e in all_entries]
             anchor_week_id = int(weeks_ordered[0]["id"])
+            all_weeks_approved = all(
+                str(w.get("status") or "").lower() == "approved" for w in weeks_ordered
+            )
+            effective_sent = bool(mark_sent) and all_weeks_approved
 
             cur.execute(
                 """
@@ -2561,8 +2588,8 @@ class InvoiceService:
                     anchor_week_id,
                     str(invoice_number).strip(),
                     total,
-                    "sent" if mark_sent else "draft",
-                    datetime.utcnow() if mark_sent else None,
+                    "sent" if effective_sent else "draft",
+                    datetime.utcnow() if effective_sent else None,
                 ),
             )
             inv_id = cur.lastrowid
@@ -2582,7 +2609,7 @@ class InvoiceService:
                 f"UPDATE tb_timesheet_entries SET invoice_id=%s WHERE id IN ({placeholders})",
                 [inv_id] + entry_ids,
             )
-            if mark_sent:
+            if effective_sent:
                 for wk in weeks_ordered:
                     cur.execute(
                         "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
@@ -2593,7 +2620,7 @@ class InvoiceService:
                 "id": inv_id,
                 "invoice_number": str(invoice_number).strip(),
                 "total_amount": round(total, 2),
-                "status": "sent" if mark_sent else "draft",
+                "status": "sent" if effective_sent else "draft",
                 "timesheet_week_ids": [int(w["id"]) for w in weeks_ordered],
             }
         finally:
@@ -2642,6 +2669,36 @@ class InvoiceService:
             if not inv:
                 return None
             inv_id = int(inv["id"])
+            week_pks_check: List[int] = []
+            try:
+                cur.execute(
+                    "SELECT timesheet_week_id FROM contractor_invoice_weeks WHERE invoice_id=%s",
+                    (inv_id,),
+                )
+                for r in cur.fetchall() or []:
+                    week_pks_check.append(int(r["timesheet_week_id"]))
+            except Exception:
+                pass
+            cur.execute(
+                "SELECT timesheet_week_id FROM contractor_invoices WHERE id=%s",
+                (inv_id,),
+            )
+            anch = cur.fetchone()
+            if anch and anch.get("timesheet_week_id"):
+                week_pks_check.append(int(anch["timesheet_week_id"]))
+            if not week_pks_check:
+                week_pks_check = [int(timesheet_week_pk)]
+            for wid in sorted(set(week_pks_check)):
+                cur.execute(
+                    "SELECT status FROM tb_timesheet_weeks WHERE id=%s",
+                    (wid,),
+                )
+                rw = cur.fetchone()
+                if not rw or str(rw.get("status") or "").lower() != "approved":
+                    raise ValueError(
+                        "Every timesheet week on this draft invoice must be approved before you can finalize. "
+                        "Wait until all linked weeks are approved, or ask staff to review any week still submitted."
+                    )
             cur.execute(
                 """
                 UPDATE contractor_invoices
@@ -2653,24 +2710,8 @@ class InvoiceService:
             if cur.rowcount == 0:
                 conn.rollback()
                 return None
-            week_pks: List[int] = []
-            try:
-                cur.execute(
-                    "SELECT timesheet_week_id FROM contractor_invoice_weeks WHERE invoice_id=%s",
-                    (inv_id,),
-                )
-                for r in cur.fetchall() or []:
-                    week_pks.append(int(r["timesheet_week_id"]))
-            except Exception:
-                week_pks = []
-            cur.execute(
-                "SELECT timesheet_week_id FROM contractor_invoices WHERE id=%s",
-                (inv_id,),
-            )
-            anchor = cur.fetchone()
-            if anchor and anchor.get("timesheet_week_id"):
-                week_pks.append(int(anchor["timesheet_week_id"]))
-            for wid in sorted(set(week_pks)):
+            week_pks = list(sorted(set(week_pks_check)))
+            for wid in week_pks:
                 cur.execute(
                     "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
                     (wid,),
@@ -6199,6 +6240,116 @@ class RunsheetService:
         return f"{iso_year}{iso_week:02d}"
 
     @staticmethod
+    def sync_schedule_shift_to_time_billing(shift_id: int) -> None:
+        """
+        Push ``schedule_shifts`` actual times into the linked run sheet assignment and
+        matching ``tb_timesheet_entries`` (source=runsheet).
+
+        If the shift has no run sheet yet, creates one via ``create_and_publish_runsheet_for_shift``.
+        Safe when ``schedule_shifts`` is missing (no scheduling module). Does not depend on work_module.
+        """
+        conn = None
+        cur = None
+        closed_early = False
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(dictionary=True)
+
+            cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+            if not cur.fetchone():
+                return
+
+            cur.execute(
+                """
+                SELECT id, contractor_id, client_id, site_id, job_type_id, work_date,
+                       actual_start, actual_end, notes, runsheet_id, runsheet_assignment_id
+                FROM schedule_shifts WHERE id = %s
+                """,
+                (shift_id,),
+            )
+            shift = cur.fetchone()
+            if not shift:
+                return
+            if not shift.get("runsheet_id"):
+                cur.close()
+                cur = None
+                conn.close()
+                conn = None
+                closed_early = True
+                RunsheetService.create_and_publish_runsheet_for_shift(shift_id)
+                return
+            if not shift.get("runsheet_assignment_id"):
+                return
+            ra_id = shift["runsheet_assignment_id"]
+            rs_id = shift["runsheet_id"]
+            work_date = shift.get("work_date")
+            actual_start = shift.get("actual_start")
+            actual_end = shift.get("actual_end")
+            notes = shift.get("notes")
+            cur.execute(
+                """
+                UPDATE runsheet_assignments
+                SET actual_start = %s, actual_end = %s, notes = %s
+                WHERE id = %s
+                """,
+                (actual_start, actual_end, notes, ra_id),
+            )
+            if work_date is None:
+                conn.commit()
+                return
+
+            user_id = shift.get("contractor_id")
+            if user_id is None:
+                cur.execute(
+                    "SELECT user_id FROM runsheet_assignments WHERE id = %s LIMIT 1",
+                    (ra_id,),
+                )
+                rrow = cur.fetchone()
+                user_id = rrow.get("user_id") if rrow else None
+            if user_id is None:
+                conn.commit()
+                return
+
+            iso_year, iso_week, _ = work_date.isocalendar()
+            week_id_str = f"{iso_year}{iso_week:02d}"
+            cur.execute(
+                "SELECT id FROM tb_timesheet_weeks WHERE user_id = %s AND week_id = %s",
+                (user_id, week_id_str),
+            )
+            wk = cur.fetchone()
+            if not wk:
+                conn.commit()
+                return
+            week_pk = wk["id"]
+            cur.execute(
+                """
+                UPDATE tb_timesheet_entries
+                SET actual_start = COALESCE(%s, actual_start),
+                    actual_end = COALESCE(%s, actual_end),
+                    notes = COALESCE(%s, notes)
+                WHERE week_id = %s AND user_id = %s AND work_date = %s
+                  AND source = 'runsheet' AND runsheet_id = %s
+                """,
+                (actual_start, actual_end, notes, week_pk, user_id, work_date, rs_id),
+            )
+            TimesheetService.refresh_entries_actuals(
+                cur, conn, week_pk, user_id, work_date, rs_id
+            )
+            conn.commit()
+        finally:
+            if not closed_early:
+                if cur is not None:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+    @staticmethod
     def create_and_publish_runsheet_for_shift(shift_id: int) -> Optional[Dict[str, Any]]:
         """
         For a scheduler-only shift (no runsheet yet), create a runsheet + one assignment,
@@ -6216,13 +6367,15 @@ class RunsheetService:
             shift = cur.fetchone()
             if not shift or shift.get("runsheet_id"):
                 return None
+            uid = shift.get("contractor_id")
+            if uid is None:
+                return None
             cid = shift["client_id"]
             sid = shift.get("site_id")
             jid = shift["job_type_id"]
             wd = shift["work_date"]
             ss = shift.get("scheduled_start")
             se = shift.get("scheduled_end")
-            uid = shift["contractor_id"]
             cur.execute("""
                 INSERT INTO runsheets (client_id, site_id, job_type_id, work_date, window_start, window_end, status, notes)
                 VALUES (%s, %s, %s, %s, %s, %s, 'draft', %s)

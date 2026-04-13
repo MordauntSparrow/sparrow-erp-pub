@@ -4,6 +4,7 @@ Uses tb_contractors, clients, sites, job_types from time_billing_module.
 """
 import logging
 import json
+import os
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 from app.objects import get_db_connection
@@ -1766,6 +1767,25 @@ class ScheduleService:
             ScheduleService.update_shift(shift_id, updates)
 
     @staticmethod
+    def _sync_linked_runsheet_after_clock(shift_id: int) -> None:
+        """
+        When a shift is linked to a Time Billing run sheet, keep assignment + timesheet
+        actuals aligned with schedule clock in/out. Uses Time Billing only (work module
+        not required). Work module ``record_stop`` still calls the same TB API plus visit sync.
+        """
+        try:
+            from app.plugins.time_billing_module.services import RunsheetService
+
+            RunsheetService.sync_schedule_shift_to_time_billing(shift_id)
+        except Exception as ex:
+            logger.warning(
+                "Could not sync schedule shift %s to time billing after clock: %s",
+                shift_id,
+                ex,
+                exc_info=True,
+            )
+
+    @staticmethod
     def get_clock_location(site_id: int) -> Optional[Dict[str, Any]]:
         """Get geofence for a site (lat, lng, radius_meters). None if not set."""
         conn = get_db_connection()
@@ -1894,6 +1914,7 @@ class ScheduleService:
         from datetime import datetime
         t = at_time or datetime.now().time()
         ScheduleService.record_actual_times(shift_id, actual_start=t)
+        ScheduleService._sync_linked_runsheet_after_clock(shift_id)
         return True, "Clocked in."
 
     @staticmethod
@@ -1926,6 +1947,7 @@ class ScheduleService:
         from datetime import datetime
         t = at_time or datetime.now().time()
         ScheduleService.record_actual_times(shift_id, actual_end=t)
+        ScheduleService._sync_linked_runsheet_after_clock(shift_id)
         return True, "Clocked out."
 
     @staticmethod
@@ -3633,6 +3655,147 @@ class ScheduleService:
 
         return out
 
+    @staticmethod
+    def create_team_event_with_runsheet(
+        *,
+        client_id: int,
+        site_id: Optional[int],
+        job_type_id: int,
+        work_date: date,
+        scheduled_start: Any,
+        scheduled_end: Any,
+        contractor_ids: List[int],
+        notes: Optional[str] = None,
+        shift_status: str = "published",
+        publish_runsheet: bool = True,
+        cura_operational_event_id: Optional[int] = None,
+        lead_user_id: Optional[int] = None,
+        actor_user_id: Optional[int] = None,
+        actor_username: Optional[str] = None,
+        eligibility_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        One run sheet for a multi-person event (e.g. training day), plus one schedule shift
+        per assignee linked to the same run sheet / assignment row.
+
+        After publish, each person gets a timesheet line from the run sheet; they record
+        **actual** start/end on the run sheet (contractor portal), which syncs to timesheets.
+
+        Shifts use ``runsheet_id`` so scheduler prefill does not duplicate those rows.
+        """
+        seen: Set[int] = set()
+        unique_ids: List[int] = []
+        for raw in contractor_ids or []:
+            try:
+                uid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if uid <= 0 or uid in seen:
+                continue
+            seen.add(uid)
+            unique_ids.append(uid)
+
+        if not unique_ids:
+            raise ValueError("Select at least one staff member for this event.")
+
+        from app.plugins.time_billing_module.services import RunsheetService
+
+        ctx = eligibility_context or {}
+        lead = lead_user_id if lead_user_id in unique_ids else unique_ids[0]
+
+        rs_payload: Dict[str, Any] = {
+            "client_id": int(client_id),
+            "site_id": int(site_id) if site_id is not None else None,
+            "job_type_id": int(job_type_id),
+            "work_date": work_date,
+            "window_start": scheduled_start,
+            "window_end": scheduled_end,
+            "notes": (notes or "").strip() or None,
+            "lead_user_id": int(lead),
+            "assignments": [
+                {
+                    "user_id": uid,
+                    "scheduled_start": scheduled_start,
+                    "scheduled_end": scheduled_end,
+                    "break_mins": 0,
+                    "notes": (notes or "").strip() or None,
+                }
+                for uid in unique_ids
+            ],
+        }
+        if cura_operational_event_id is not None:
+            rs_payload["cura_operational_event_id"] = int(cura_operational_event_id)
+
+        rs_id = RunsheetService.create_runsheet(rs_payload, eligibility_context=ctx)
+
+        rows: List[Dict[str, Any]] = []
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, user_id FROM runsheet_assignments
+                WHERE runsheet_id = %s ORDER BY id ASC
+                """,
+                (rs_id,),
+            )
+            rows = cur.fetchall() or []
+        finally:
+            cur.close()
+            conn.close()
+
+        user_to_ra: Dict[int, int] = {}
+        for r in rows:
+            u = r.get("user_id")
+            ra = r.get("id")
+            if u is not None and ra is not None:
+                user_to_ra[int(u)] = int(ra)
+
+        shift_ids: List[int] = []
+        for uid in unique_ids:
+            ra_id = user_to_ra.get(uid)
+            if ra_id is None:
+                raise RuntimeError(
+                    f"Run sheet {rs_id} has no assignment row for contractor {uid}."
+                )
+            shift_data: Dict[str, Any] = {
+                "client_id": int(client_id),
+                "site_id": int(site_id) if site_id is not None else None,
+                "job_type_id": int(job_type_id),
+                "work_date": work_date,
+                "scheduled_start": scheduled_start,
+                "scheduled_end": scheduled_end,
+                "break_mins": 0,
+                "notes": (notes or "").strip() or None,
+                "status": shift_status or "published",
+                "source": "manual",
+                "contractor_ids": [uid],
+                "required_count": 1,
+                "runsheet_id": rs_id,
+                "runsheet_assignment_id": ra_id,
+            }
+            shift_ids.append(
+                ScheduleService.create_shift(
+                    shift_data,
+                    actor_user_id=actor_user_id,
+                    actor_username=actor_username,
+                )
+            )
+
+        publish_result: Optional[Dict[str, Any]] = None
+        if publish_runsheet:
+            publish_result = RunsheetService.publish_runsheet(rs_id, published_by=actor_user_id)
+            if not publish_result.get("ok"):
+                raise RuntimeError(
+                    publish_result.get("message") or "Run sheet publish failed."
+                )
+
+        return {
+            "runsheet_id": rs_id,
+            "shift_ids": shift_ids,
+            "publish": publish_result,
+        }
+
 
 class SlingSyncService:
     """
@@ -3685,29 +3848,48 @@ class SlingSyncService:
             conn.close()
 
     @staticmethod
-    def load_credentials() -> Optional[Dict[str, str]]:
+    def load_credentials() -> Optional[Dict[str, Any]]:
         if not SlingSyncService._table_exists("sling_credentials"):
             return None
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute(
-                "SELECT id, sling_email_enc, sling_password_enc, sling_base_url FROM sling_credentials WHERE id = 1 LIMIT 1"
+            cur.execute("SHOW COLUMNS FROM sling_credentials LIKE 'sling_org_id'")
+            has_org_col = bool(cur.fetchone())
+            q = (
+                "SELECT id, sling_email_enc, sling_password_enc, sling_base_url, sling_org_id "
+                "FROM sling_credentials WHERE id = 1 LIMIT 1"
+                if has_org_col
+                else "SELECT id, sling_email_enc, sling_password_enc, sling_base_url FROM sling_credentials WHERE id = 1 LIMIT 1"
             )
+            cur.execute(q)
             row = cur.fetchone()
             if not row:
                 return None
-            return {
+            out: Dict[str, Any] = {
                 "email": SlingSyncService._decrypt(row.get("sling_email_enc")),
                 "password": SlingSyncService._decrypt(row.get("sling_password_enc")),
                 "base_url": row.get("sling_base_url") or "https://api.getsling.com/v1",
             }
+            if has_org_col and row.get("sling_org_id") is not None:
+                try:
+                    out["org_id"] = int(row["sling_org_id"])
+                except (TypeError, ValueError):
+                    out["org_id"] = None
+            else:
+                out["org_id"] = None
+            return out
         finally:
             cur.close()
             conn.close()
 
     @staticmethod
-    def save_credentials(email: str, password: str, base_url: str = "https://api.getsling.com/v1") -> None:
+    def save_credentials(
+        email: str,
+        password: str,
+        base_url: str = "https://api.getsling.com/v1",
+        org_id: Optional[int] = None,
+    ) -> None:
         email = (email or "").strip()
         password = (password or "").strip()
         if not email or not password:
@@ -3719,17 +3901,33 @@ class SlingSyncService:
         conn = get_db_connection()
         cur = conn.cursor()
         try:
-            cur.execute(
-                """
-                INSERT INTO sling_credentials (id, sling_email_enc, sling_password_enc, sling_base_url)
-                VALUES (1, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                  sling_email_enc = VALUES(sling_email_enc),
-                  sling_password_enc = VALUES(sling_password_enc),
-                  sling_base_url = VALUES(sling_base_url)
-                """,
-                (enc_email, enc_password, base_url),
-            )
+            cur.execute("SHOW COLUMNS FROM sling_credentials LIKE 'sling_org_id'")
+            has_org_col = bool(cur.fetchone())
+            if has_org_col:
+                cur.execute(
+                    """
+                    INSERT INTO sling_credentials (id, sling_email_enc, sling_password_enc, sling_base_url, sling_org_id)
+                    VALUES (1, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      sling_email_enc = VALUES(sling_email_enc),
+                      sling_password_enc = VALUES(sling_password_enc),
+                      sling_base_url = VALUES(sling_base_url),
+                      sling_org_id = VALUES(sling_org_id)
+                    """,
+                    (enc_email, enc_password, base_url, org_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO sling_credentials (id, sling_email_enc, sling_password_enc, sling_base_url)
+                    VALUES (1, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                      sling_email_enc = VALUES(sling_email_enc),
+                      sling_password_enc = VALUES(sling_password_enc),
+                      sling_base_url = VALUES(sling_base_url)
+                    """,
+                    (enc_email, enc_password, base_url),
+                )
             conn.commit()
         finally:
             cur.close()
@@ -3762,13 +3960,22 @@ class SlingSyncService:
             "default_client_id": None,
             "default_site_id": None,
             "cancel_missing": 1,
+            "import_filter_mode": "all",
+            "import_filter_patterns_raw": "",
         }
         try:
             cur.execute("SHOW TABLES LIKE 'schedule_settings'")
             if not cur.fetchone():
                 return out
             # Use SHOW COLUMNS to avoid breaking if older DB is missing new columns.
-            for col in ["sling_default_job_type_id", "sling_default_client_id", "sling_default_site_id", "sling_cancel_missing"]:
+            for col in [
+                "sling_default_job_type_id",
+                "sling_default_client_id",
+                "sling_default_site_id",
+                "sling_cancel_missing",
+                "sling_import_filter_mode",
+                "sling_import_filter_patterns",
+            ]:
                 cur.execute("SHOW COLUMNS FROM schedule_settings LIKE %s", (col,))
                 exists = bool(cur.fetchone())
                 if not exists:
@@ -3784,6 +3991,11 @@ class SlingSyncService:
                     out["default_site_id"] = int(v) if v is not None else None
                 elif col == "sling_cancel_missing":
                     out["cancel_missing"] = 1 if int(v or 0) == 1 else 0
+                elif col == "sling_import_filter_mode":
+                    m = (str(v).strip().lower() if v is not None else "") or "all"
+                    out["import_filter_mode"] = m if m in ("all", "include", "exclude") else "all"
+                elif col == "sling_import_filter_patterns":
+                    out["import_filter_patterns_raw"] = str(v) if v is not None else ""
         finally:
             cur.close()
             conn.close()
@@ -3795,6 +4007,8 @@ class SlingSyncService:
         default_client_id: Optional[int],
         default_site_id: Optional[int],
         cancel_missing: Optional[bool] = None,
+        import_filter_mode: Optional[str] = None,
+        import_filter_patterns: Optional[str] = None,
     ) -> None:
         """Persist Sling defaults into schedule_settings (id=1). Safe on older DBs."""
         conn = get_db_connection()
@@ -3835,10 +4049,591 @@ class SlingSyncService:
                 finally:
                     cur2.close()
 
+            if import_filter_mode is not None:
+                cur2 = conn.cursor()
+                try:
+                    cur2.execute(
+                        "SHOW COLUMNS FROM schedule_settings LIKE %s",
+                        ("sling_import_filter_mode",),
+                    )
+                    if cur2.fetchone():
+                        m = (import_filter_mode or "all").strip().lower()
+                        if m not in ("all", "include", "exclude"):
+                            m = "all"
+                        updates.append("sling_import_filter_mode = %s")
+                        params.append(m)
+                finally:
+                    cur2.close()
+
+            if import_filter_patterns is not None:
+                cur2 = conn.cursor()
+                try:
+                    cur2.execute(
+                        "SHOW COLUMNS FROM schedule_settings LIKE %s",
+                        ("sling_import_filter_patterns",),
+                    )
+                    if cur2.fetchone():
+                        raw = import_filter_patterns if import_filter_patterns is not None else ""
+                        updates.append("sling_import_filter_patterns = %s")
+                        params.append(str(raw))
+                finally:
+                    cur2.close()
+
             if not updates:
                 return
             sql = f"UPDATE schedule_settings SET {', '.join(updates)} WHERE id = 1"
             cur.execute(sql, tuple(params))
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def _parse_sling_filter_patterns(raw: Optional[str]) -> List[str]:
+        if not raw:
+            return []
+        out: List[str] = []
+        for line in str(raw).splitlines():
+            s = line.strip()
+            if s:
+                out.append(s)
+        return out
+
+    @staticmethod
+    def _sling_shift_passes_import_filter(
+        position_name: Optional[str],
+        location_name: Optional[str],
+        mode: str,
+        patterns: List[str],
+    ) -> Tuple[bool, str]:
+        """
+        Substring match (case-insensitive) on "position location" combined text.
+        include: import only if any pattern matches.
+        exclude: import only if no pattern matches.
+        """
+        mode_n = (mode or "all").strip().lower()
+        if mode_n not in ("all", "include", "exclude"):
+            mode_n = "all"
+        if mode_n == "all":
+            return True, ""
+        if not patterns:
+            return True, ""
+        hay = f"{position_name or ''} {location_name or ''}".strip().lower()
+        matched_any = any(p.lower() in hay for p in patterns)
+        if mode_n == "include":
+            if matched_any:
+                return True, ""
+            return False, "did not match any include pattern"
+        if matched_any:
+            return False, "matched an exclude pattern"
+        return True, ""
+
+    @staticmethod
+    def _sync_audit_tables_exist() -> bool:
+        return SlingSyncService._table_exists("sling_sync_runs") and SlingSyncService._table_exists(
+            "sling_sync_run_steps"
+        )
+
+    @staticmethod
+    def _json_safe_shift_value(val: Any) -> Any:
+        if val is None:
+            return None
+        if isinstance(val, datetime):
+            return val.isoformat()
+        if isinstance(val, date):
+            return val.isoformat()
+        if isinstance(val, time):
+            return val.strftime("%H:%M:%S")
+        if isinstance(val, timedelta):
+            total = int(val.total_seconds()) % 86400
+            h, rem = divmod(total, 3600)
+            m, s = divmod(rem, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return val
+
+    @staticmethod
+    def _snapshot_shift_for_revert(cur: Any, shift_id: int) -> Dict[str, Any]:
+        cur.execute(
+            """
+            SELECT contractor_id, client_id, site_id, job_type_id, work_date,
+                   scheduled_start, scheduled_end, break_mins, notes, status, source, external_id
+            FROM schedule_shifts WHERE id = %s
+            """,
+            (shift_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        keys = (
+            "contractor_id",
+            "client_id",
+            "site_id",
+            "job_type_id",
+            "work_date",
+            "scheduled_start",
+            "scheduled_end",
+            "break_mins",
+            "notes",
+            "status",
+            "source",
+            "external_id",
+        )
+        out: Dict[str, Any] = {}
+        if isinstance(row, dict):
+            for k in keys:
+                out[k] = SlingSyncService._json_safe_shift_value(row.get(k))
+        else:
+            for i, k in enumerate(keys):
+                out[k] = SlingSyncService._json_safe_shift_value(row[i])
+        raw = cur.connection.cursor()
+        try:
+            raw.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            if not raw.fetchone():
+                out["assignments"] = []
+                return out
+            raw.execute(
+                """
+                SELECT contractor_id FROM schedule_shift_assignments
+                WHERE shift_id = %s ORDER BY contractor_id
+                """,
+                (shift_id,),
+            )
+            out["assignments"] = [int(r[0]) for r in raw.fetchall()]
+        finally:
+            raw.close()
+        return out
+
+    @staticmethod
+    def _begin_sync_run(conn, date_from: date, date_to: date, actor_username: Optional[str]) -> Optional[int]:
+        if not SlingSyncService._sync_audit_tables_exist():
+            return None
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO sling_sync_runs (date_from, date_to, dry_run, actor_username)
+                VALUES (%s, %s, 0, %s)
+                """,
+                (date_from, date_to, (actor_username or "")[:150] or None),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            cur.close()
+
+    @staticmethod
+    def _finalize_sync_run(conn, run_id: Optional[int], stats: Dict[str, Any]) -> None:
+        if not run_id or not SlingSyncService._sync_audit_tables_exist():
+            return
+        cur = conn.cursor()
+        try:
+            errs = stats.get("errors") or []
+            err_js = json.dumps(errs) if errs else None
+            cur.execute(
+                """
+                UPDATE sling_sync_runs SET
+                  finished_at = CURRENT_TIMESTAMP,
+                  created_n = %s, updated_n = %s, cancelled_n = %s,
+                  skipped_filter_n = %s, unmapped_n = %s, processed_n = %s,
+                  errors_json = %s
+                WHERE id = %s
+                """,
+                (
+                    int(stats.get("created") or 0),
+                    int(stats.get("updated") or 0),
+                    int(stats.get("cancelled") or 0),
+                    int(stats.get("skipped_by_filter") or 0),
+                    int(stats.get("unmapped") or 0),
+                    int(stats.get("processed_shifts") or 0),
+                    err_js,
+                    run_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+    @staticmethod
+    def _append_sync_step(
+        conn,
+        run_id: Optional[int],
+        shift_id: int,
+        external_id: Optional[str],
+        action: str,
+        before_json: Optional[str],
+    ) -> None:
+        if not run_id or not SlingSyncService._sync_audit_tables_exist():
+            return
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO sling_sync_run_steps (run_id, schedule_shift_id, external_id, action, before_json)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (run_id, int(shift_id), (external_id or "")[:255] or None, action[:24], before_json),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+
+    @staticmethod
+    def list_recent_sync_runs(limit: int = 20) -> List[Dict[str, Any]]:
+        if not SlingSyncService._sync_audit_tables_exist():
+            return []
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, started_at, finished_at, date_from, date_to, actor_username,
+                       created_n, updated_n, cancelled_n, skipped_filter_n, processed_n, reverted_at
+                FROM sling_sync_runs
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (int(limit),),
+            )
+            return list(cur.fetchall() or [])
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def _parse_hms_to_time(s: str) -> time:
+        parts = (s or "").strip().split(":")
+        h = int(parts[0]) if parts and parts[0] else 0
+        m = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+        sec = int(parts[2]) if len(parts) > 2 and parts[2] else 0
+        return time(h, m, sec)
+
+    @staticmethod
+    def revert_sync_run(run_id: int) -> Dict[str, Any]:
+        """
+        Undo a non–dry-run Sling sync run using recorded steps.
+        Refuses if any affected shift currently has actual_start or actual_end set.
+        """
+        if not SlingSyncService._sync_audit_tables_exist():
+            raise RuntimeError("Sling sync audit tables are missing; run scheduling module upgrade.")
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, reverted_at, dry_run FROM sling_sync_runs
+                WHERE id = %s LIMIT 1
+                """,
+                (int(run_id),),
+            )
+            run = cur.fetchone()
+            if not run:
+                raise ValueError("Sync run not found.")
+            if run.get("reverted_at"):
+                raise ValueError("This sync run was already reverted.")
+            if int(run.get("dry_run") or 0) == 1:
+                raise ValueError("Dry-run syncs cannot be reverted.")
+
+            cur.execute(
+                """
+                SELECT id, schedule_shift_id, external_id, action, before_json
+                FROM sling_sync_run_steps
+                WHERE run_id = %s
+                ORDER BY id DESC
+                """,
+                (int(run_id),),
+            )
+            steps = list(cur.fetchall() or [])
+            shift_ids = [int(s["schedule_shift_id"]) for s in steps]
+            if shift_ids:
+                ph = ",".join(["%s"] * len(shift_ids))
+                cur.execute(
+                    f"""
+                    SELECT id FROM schedule_shifts
+                    WHERE id IN ({ph})
+                      AND (actual_start IS NOT NULL OR actual_end IS NOT NULL)
+                    """,
+                    tuple(shift_ids),
+                )
+                clocked = cur.fetchall() or []
+                if clocked:
+                    raise RuntimeError(
+                        "Cannot revert: one or more affected shifts have clock-in or clock-out recorded. "
+                        "Resolve timesheets first, or adjust shifts manually."
+                    )
+        finally:
+            cur.close()
+            conn.close()
+
+        deleted = 0
+        restored_updates = 0
+        restored_status = 0
+        conn3 = get_db_connection()
+        cur3 = conn3.cursor()
+        try:
+            for st in steps:
+                sid = int(st["schedule_shift_id"])
+                act = (st.get("action") or "").strip()
+                bj = st.get("before_json")
+
+                if act == "inserted":
+                    cur3.execute(
+                        """
+                        DELETE FROM schedule_shifts
+                        WHERE id = %s AND source = 'scheduler'
+                          AND external_id LIKE %s
+                          AND actual_start IS NULL AND actual_end IS NULL
+                        """,
+                        (sid, "sling:%"),
+                    )
+                    deleted += cur3.rowcount
+                elif act == "updated" and bj:
+                    before = json.loads(bj)
+                    wd = date.fromisoformat(str(before["work_date"]))
+                    ss = SlingSyncService._parse_hms_to_time(str(before["scheduled_start"]))
+                    se = SlingSyncService._parse_hms_to_time(str(before["scheduled_end"]))
+                    cur3.execute(
+                        """
+                        UPDATE schedule_shifts SET
+                          contractor_id = %s, client_id = %s, site_id = %s, job_type_id = %s,
+                          work_date = %s, scheduled_start = %s, scheduled_end = %s,
+                          break_mins = %s, notes = %s, status = %s, source = %s, external_id = %s,
+                          updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                          AND actual_start IS NULL AND actual_end IS NULL
+                        """,
+                        (
+                            before.get("contractor_id"),
+                            int(before["client_id"]),
+                            before.get("site_id"),
+                            int(before["job_type_id"]),
+                            wd,
+                            ss,
+                            se,
+                            int(before.get("break_mins") or 0),
+                            before.get("notes"),
+                            str(before.get("status") or "published"),
+                            str(before.get("source") or "scheduler"),
+                            before.get("external_id"),
+                            sid,
+                        ),
+                    )
+                    restored_updates += cur3.rowcount
+                    ScheduleService.set_shift_assignments(
+                        sid, [int(x) for x in (before.get("assignments") or [])]
+                    )
+                elif act == "status_cancelled" and bj:
+                    before = json.loads(bj)
+                    prev = str(before.get("status") or "published")
+                    cur3.execute(
+                        """
+                        UPDATE schedule_shifts SET status = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                          AND actual_start IS NULL AND actual_end IS NULL
+                          AND status = 'cancelled'
+                        """,
+                        (prev, sid),
+                    )
+                    restored_status += cur3.rowcount
+
+            cur3.execute(
+                "UPDATE sling_sync_runs SET reverted_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (int(run_id),),
+            )
+            conn3.commit()
+        finally:
+            cur3.close()
+            conn3.close()
+
+        return {
+            "ok": True,
+            "deleted_shifts": deleted,
+            "restored_updates": restored_updates,
+            "restored_status": restored_status,
+            "steps_applied": len(steps),
+        }
+
+    @staticmethod
+    def test_connection() -> Dict[str, Any]:
+        """Validate stored Sling credentials (login + session org)."""
+        creds = SlingSyncService.load_credentials()
+        if not creds or not creds.get("email") or not creds.get("password"):
+            return {"ok": False, "error": "Sling credentials not configured."}
+        base_url = creds["base_url"]
+        email = creds["email"]
+        password = creds["password"]
+        http = requests.Session()
+        try:
+            auth_token = SlingSyncService._login_and_token(
+                http, base_url, email, password, org_id=creds.get("org_id")
+            )
+            org_id = SlingSyncService._get_org_id(http, base_url, auth_token)
+            return {
+                "ok": True,
+                "org_id": org_id,
+                "message": f"Connected to Sling (organisation id {org_id}).",
+            }
+        except Exception as ex:
+            return {"ok": False, "error": str(ex)}
+
+    @staticmethod
+    def discover_shifts(date_from: date, date_to: date) -> Dict[str, Any]:
+        """
+        List shifts Sling would see for each contractor with an email, without writing to the DB.
+        Respects saved import filter settings for would_import / skip_reason.
+        """
+        creds = SlingSyncService.load_credentials()
+        if not creds or not creds.get("email") or not creds.get("password"):
+            return {"ok": False, "error": "Sling credentials not configured.", "shifts": []}
+
+        settings = SlingSyncService._get_sling_settings()
+        mode = settings.get("import_filter_mode") or "all"
+        patterns = SlingSyncService._parse_sling_filter_patterns(
+            settings.get("import_filter_patterns_raw")
+        )
+        default_job_type_id = settings.get("default_job_type_id")
+
+        base_url = creds["base_url"]
+        email = creds["email"]
+        password = creds["password"]
+        http = requests.Session()
+        try:
+            auth_token = SlingSyncService._login_and_token(
+                http, base_url, email, password, org_id=creds.get("org_id")
+            )
+            org_id = SlingSyncService._get_org_id(http, base_url, auth_token)
+        except Exception as ex:
+            return {"ok": False, "error": str(ex), "shifts": []}
+
+        shifts_out: List[Dict[str, Any]] = []
+        errors: List[str] = []
+        sling_user_id_cache: Dict[str, int] = {}
+
+        contractors = ScheduleService.list_contractors()
+        for c in contractors:
+            our_contractor_id = int(c["id"])
+            our_email = (c.get("email") or "").strip()
+            if not our_email:
+                continue
+            key = our_email.lower()
+            if key in sling_user_id_cache:
+                sling_user_id = sling_user_id_cache[key]
+            else:
+                sling_user_id = SlingSyncService._find_sling_user_id_by_email(
+                    http, base_url, auth_token, our_email
+                )
+                if not sling_user_id:
+                    continue
+                sling_user_id_cache[key] = sling_user_id
+
+            events = SlingSyncService._fetch_published_calendar_events(
+                http, base_url, auth_token, org_id, sling_user_id, date_from, date_to
+            )
+            for e in events:
+                event_id = e.get("id")
+                if event_id is None:
+                    continue
+                event_id_int = int(event_id)
+
+                dtstart = SlingSyncService._parse_sling_dt(e.get("dtstart"))
+                dtend = SlingSyncService._parse_sling_dt(e.get("dtend"))
+                if not dtstart or not dtend:
+                    details0 = SlingSyncService._fetch_shift_detailed(
+                        http, base_url, auth_token, event_id_int
+                    )
+                    dtstart = SlingSyncService._parse_sling_dt(details0.get("dtstart"))
+                    dtend = SlingSyncService._parse_sling_dt(details0.get("dtend"))
+
+                if not dtstart or not dtend:
+                    errors.append(f"Missing dtstart/dtend for Sling event {event_id_int}")
+                    continue
+
+                details = SlingSyncService._fetch_shift_detailed(
+                    http, base_url, auth_token, event_id_int
+                )
+                position = details.get("position") or {}
+                location = details.get("location") or {}
+                sling_position_id = position.get("id")
+                sling_position_name = position.get("name")
+                sling_location_id = location.get("id")
+                sling_location_name = location.get("name")
+
+                mapped_jt = SlingSyncService._lookup_sling_position_mapping(
+                    str(sling_position_id) if sling_position_id else None
+                )
+                if not mapped_jt and sling_position_name:
+                    mapped_jt = SlingSyncService._find_job_type_id_by_name(sling_position_name)
+                effective_jt = mapped_jt or default_job_type_id
+
+                ok_filter, skip_reason = SlingSyncService._sling_shift_passes_import_filter(
+                    sling_position_name, sling_location_name, mode, patterns
+                )
+                notes = (details.get("summary") or details.get("notes") or e.get("summary") or "").strip()
+
+                shifts_out.append(
+                    {
+                        "event_id": event_id_int,
+                        "contractor_id": our_contractor_id,
+                        "contractor_email": our_email,
+                        "dtstart": dtstart.isoformat(),
+                        "dtend": dtend.isoformat(),
+                        "work_date": dtstart.date().isoformat(),
+                        "sling_position_id": str(sling_position_id) if sling_position_id is not None else None,
+                        "sling_position_name": sling_position_name,
+                        "sling_location_id": str(sling_location_id) if sling_location_id is not None else None,
+                        "sling_location_name": sling_location_name,
+                        "summary": notes[:500] if notes else None,
+                        "mapped_job_type_id": mapped_jt,
+                        "effective_job_type_id": effective_jt,
+                        "would_import": bool(ok_filter and effective_jt),
+                        "skip_reason": (
+                            None
+                            if ok_filter and effective_jt
+                            else (
+                                (skip_reason or "filter")
+                                if not ok_filter
+                                else "no job type (set default or map position)"
+                            )
+                        ),
+                    }
+                )
+
+        return {
+            "ok": True,
+            "org_id": org_id,
+            "shifts": shifts_out,
+            "errors": errors[-20:],
+            "filter_mode": mode,
+            "filter_patterns": patterns,
+        }
+
+    @staticmethod
+    def upsert_position_job_type_mapping(
+        sling_position_id: str,
+        job_type_id: int,
+        sling_position_name: Optional[str] = None,
+    ) -> None:
+        """Replace prior mapping rows for this Sling position id with a single mapping."""
+        sid = (sling_position_id or "").strip()
+        if not sid:
+            raise ValueError("Sling position id is required.")
+        jid = int(job_type_id)
+        if not SlingSyncService._table_exists("sling_id_mappings"):
+            raise RuntimeError("sling_id_mappings table is missing.")
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "DELETE FROM sling_id_mappings WHERE sling_position_id = %s",
+                (sid,),
+            )
+            cur.execute(
+                """
+                INSERT INTO sling_id_mappings
+                  (sling_position_id, job_type_id, sling_position_name)
+                VALUES (%s, %s, %s)
+                """,
+                (sid, jid, (sling_position_name or "")[:255] if sling_position_name else None),
+            )
             conn.commit()
         finally:
             cur.close()
@@ -4013,11 +4808,59 @@ class SlingSyncService:
         return {"Authorization": auth_token}
 
     @staticmethod
-    def _login_and_token(session: requests.Session, base_url: str, email: str, password: str) -> str:
-        url = f"{base_url}/account/login"
-        r = session.post(url, json={"email": email, "password": password}, timeout=30)
+    def _sling_http_error_detail(response: Any) -> str:
+        try:
+            data = response.json()
+            if isinstance(data, dict):
+                msg = data.get("message") or data.get("error") or data.get("error_description")
+                if msg:
+                    return str(msg)
+        except Exception:
+            pass
+        t = (response.text or "").strip()
+        return t[:500] if t else f"HTTP {response.status_code}"
+
+    @staticmethod
+    def _sling_login_base_url(api_base_url: str) -> str:
+        """
+        Sling's own examples post to https://api.getsling.com/account/login (no /v1).
+        API calls for calendar etc. still use the configured base_url (often .../v1).
+        """
+        root = (api_base_url or "").strip().rstrip("/")
+        if root.endswith("/v1"):
+            root = root[:-3].rstrip("/")
+        return root or "https://api.getsling.com"
+
+    @staticmethod
+    def _login_and_token(
+        session: requests.Session,
+        base_url: str,
+        email: str,
+        password: str,
+        org_id: Optional[int] = None,
+    ) -> str:
+        login_root = SlingSyncService._sling_login_base_url(base_url)
+        url = f"{login_root}/account/login"
+        payload: Dict[str, Any] = {"email": email, "password": password}
+        if org_id is not None:
+            payload["orgId"] = int(org_id)
+        captcha: Optional[str] = None
+        try:
+            from flask import current_app, has_request_context
+
+            if has_request_context():
+                captcha = current_app.config.get("SLING_LOGIN_CAPTCHA_RESPONSE")
+        except Exception:
+            pass
+        if not captcha:
+            captcha = (os.environ.get("SLING_LOGIN_CAPTCHA_RESPONSE") or "").strip() or None
+        if captcha:
+            payload["captchaResponse"] = captcha
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        r = session.post(url, json=payload, headers=headers, timeout=30)
         if r.status_code >= 400:
-            raise RuntimeError(f"Sling login failed ({r.status_code}).")
+            detail = SlingSyncService._sling_http_error_detail(r)
+            raise RuntimeError(f"Sling login failed ({r.status_code}): {detail}")
         token = r.headers.get("Authorization")
         if not token:
             # Some deployments may return token in JSON; fall back to common shape.
@@ -4119,6 +4962,7 @@ class SlingSyncService:
         date_from: date,
         date_to: date,
         dry_run: bool = False,
+        actor_username: Optional[str] = None,
     ) -> Dict[str, Any]:
         creds = SlingSyncService.load_credentials()
         if not creds or not creds.get("email") or not creds.get("password"):
@@ -4134,228 +4978,338 @@ class SlingSyncService:
             raise RuntimeError("Default job type is required to sync Sling shifts (set it in Sling Sync admin page).")
         # default_client_id is optional: if unset we store shifts under a placeholder client.
 
+        filter_mode = settings.get("import_filter_mode") or "all"
+        filter_patterns = SlingSyncService._parse_sling_filter_patterns(
+            settings.get("import_filter_patterns_raw")
+        )
+        skipped_by_filter = 0
+
         base_url = creds["base_url"]
         email = creds["email"]
         password = creds["password"]
 
         http = requests.Session()
-        auth_token = SlingSyncService._login_and_token(http, base_url, email, password)
+        auth_token = SlingSyncService._login_and_token(
+            http, base_url, email, password, org_id=creds.get("org_id")
+        )
         org_id = SlingSyncService._get_org_id(http, base_url, auth_token)
 
         desired_external_ids: List[str] = []
-        processed_shifts = 0
+        processed_shifts = 0  # shifts that pass the import filter and are counted toward sync
         created = 0
         updated = 0
         cancelled = 0
         unmapped = 0
         errors: List[str] = []
 
+        audit_conn: Optional[Any] = None
+        run_id: Optional[int] = None
+        if not dry_run and SlingSyncService._sync_audit_tables_exist():
+            audit_conn = get_db_connection()
+            run_id = SlingSyncService._begin_sync_run(
+                audit_conn, date_from, date_to, actor_username
+            )
+
         contractors = ScheduleService.list_contractors()
         # Basic per-sync cache to reduce /users lookups.
         sling_user_id_cache: Dict[str, int] = {}
 
-        conn = get_db_connection()
-        cur = conn.cursor(dictionary=True)
         try:
-            for c in contractors:
-                our_contractor_id = int(c["id"])
-                our_email = (c.get("email") or "").strip()
-                if not our_email:
-                    continue
-                if our_email.lower() in sling_user_id_cache:
-                    sling_user_id = sling_user_id_cache[our_email.lower()]
-                else:
-                    sling_user_id = SlingSyncService._find_sling_user_id_by_email(
-                        http, base_url, auth_token, our_email
-                    )
-                    if not sling_user_id:
-                        continue
-                    sling_user_id_cache[our_email.lower()] = sling_user_id
-
-                events = SlingSyncService._fetch_published_calendar_events(
-                    http, base_url, auth_token, org_id, sling_user_id, date_from, date_to
-                )
-                for e in events:
-                    event_id = e.get("id")
-                    if event_id is None:
-                        continue
-                    event_id_int = int(event_id)
-                    external_id = f"sling:{event_id_int}"
-
-                    # Find/parse scheduled date/time from calendar event.
-                    dtstart = SlingSyncService._parse_sling_dt(e.get("dtstart"))
-                    dtend = SlingSyncService._parse_sling_dt(e.get("dtend"))
-                    if not dtstart or not dtend:
-                        # Fallback: attempt detailed for dates too.
-                        details = SlingSyncService._fetch_shift_detailed(http, base_url, auth_token, event_id_int)
-                        dtstart = SlingSyncService._parse_sling_dt(details.get("dtstart"))
-                        dtend = SlingSyncService._parse_sling_dt(details.get("dtend"))
-
-                    if not dtstart or not dtend:
-                        errors.append(f"Missing dtstart/dtend for sling event {event_id_int}")
-                        continue
-
-                    work_date = dtstart.date()
-                    scheduled_start = dtstart.time().replace(microsecond=0)
-                    scheduled_end = dtend.time().replace(microsecond=0)
-
-                    details = SlingSyncService._fetch_shift_detailed(http, base_url, auth_token, event_id_int)
-                    processed_shifts += 1
-
-                    # Break duration (minutes) if provided.
-                    break_mins = 0
-                    try:
-                        break_mins = int(details.get("breakDuration") or e.get("breakDuration") or 0)
-                    except Exception:
-                        break_mins = 0
-
-                    position = details.get("position") or {}
-                    location = details.get("location") or {}
-                    sling_position_id = position.get("id")
-                    sling_position_name = position.get("name")
-                    sling_location_id = location.get("id")
-                    sling_location_name = location.get("name")
-
-                    # Map job type
-                    job_type_id = SlingSyncService._lookup_sling_position_mapping(str(sling_position_id) if sling_position_id else None)
-                    if not job_type_id and sling_position_name:
-                        job_type_id = SlingSyncService._find_job_type_id_by_name(sling_position_name)
-                    if not job_type_id:
-                        job_type_id = default_job_type_id
-
-                    # Client/site mapping:
-                    # On Sling free plan, `location` is not reliably populated for ERP-required client/site mapping.
-                    # To keep the transfer painless, we always import shifts under a placeholder client and null site.
-                    client_id = SlingSyncService._get_or_create_sling_unmapped_client()
-                    site_id = None
-
-                    notes = (details.get("summary") or details.get("notes") or e.get("summary") or "").strip()
-                    notes = notes[:10000] if notes else None
-
-                    # If we can't map job type (position), we can't create a valid ERP shift.
-                    if not job_type_id:
-                        unmapped += 1
-                        continue
-
-                    desired_external_ids.append(external_id)
-
-                    # Upsert schedule_shifts by external_id.
-                    cur.execute("SELECT id FROM schedule_shifts WHERE external_id = %s LIMIT 1", (external_id,))
-                    existing = cur.fetchone()
-                    if existing and existing.get("id"):
-                        shift_id = int(existing["id"])
-                        if not dry_run:
-                            cur.execute(
-                                """
-                                UPDATE schedule_shifts
-                                SET contractor_id = %s,
-                                    client_id = %s,
-                                    site_id = %s,
-                                    job_type_id = %s,
-                                    work_date = %s,
-                                    scheduled_start = %s,
-                                    scheduled_end = %s,
-                                    break_mins = %s,
-                                    notes = %s,
-                                    status = 'published',
-                                    source = 'scheduler',
-                                    updated_at = CURRENT_TIMESTAMP
-                                WHERE id = %s
-                                """,
-                                (
-                                    our_contractor_id,
-                                    int(client_id),
-                                    int(site_id) if site_id else None,
-                                    int(job_type_id),
-                                    work_date,
-                                    scheduled_start,
-                                    scheduled_end,
-                                    break_mins,
-                                    notes,
-                                    shift_id,
-                                ),
-                            )
-                            conn.commit()
-                            ScheduleService.set_shift_assignments(shift_id, [our_contractor_id])
-                        updated += 1
-                    else:
-                        if not dry_run:
-                            cur.execute(
-                                """
-                                INSERT INTO schedule_shifts
-                                  (contractor_id, client_id, site_id, job_type_id, work_date,
-                                   scheduled_start, scheduled_end, break_mins, notes, status, source,
-                                   external_id, required_count)
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'published','scheduler',%s,1)
-                                """,
-                                (
-                                    our_contractor_id,
-                                    int(client_id),
-                                    int(site_id) if site_id else None,
-                                    int(job_type_id),
-                                    work_date,
-                                    scheduled_start,
-                                    scheduled_end,
-                                    break_mins,
-                                    notes,
-                                    external_id,
-                                ),
-                            )
-                            conn.commit()
-                            shift_id = cur.lastrowid
-                            ScheduleService.set_shift_assignments(shift_id, [our_contractor_id])
-                        created += 1
-        finally:
-            cur.close()
-            conn.close()
-
-        # Cancel missing shifts within the sync range.
-        if cancel_missing and not dry_run:
-            desired_set = set(desired_external_ids)
             conn = get_db_connection()
-            cur = conn.cursor()
+            cur = conn.cursor(dictionary=True)
             try:
-                # Only cancel future/unclocked shifts.
-                if not desired_set:
-                    cur.execute(
-                        """
-                        UPDATE schedule_shifts
-                        SET status = 'cancelled'
-                        WHERE source = 'scheduler'
-                          AND external_id LIKE 'sling:%'
-                          AND work_date >= %s AND work_date <= %s
-                          AND status IN ('draft','published')
-                          AND actual_start IS NULL AND actual_end IS NULL
-                        """,
-                        (date_from, date_to),
+                for c in contractors:
+                    our_contractor_id = int(c["id"])
+                    our_email = (c.get("email") or "").strip()
+                    if not our_email:
+                        continue
+                    if our_email.lower() in sling_user_id_cache:
+                        sling_user_id = sling_user_id_cache[our_email.lower()]
+                    else:
+                        sling_user_id = SlingSyncService._find_sling_user_id_by_email(
+                            http, base_url, auth_token, our_email
+                        )
+                        if not sling_user_id:
+                            continue
+                        sling_user_id_cache[our_email.lower()] = sling_user_id
+
+                    events = SlingSyncService._fetch_published_calendar_events(
+                        http, base_url, auth_token, org_id, sling_user_id, date_from, date_to
                     )
-                else:
-                    ext_list = list(desired_set)
-                    placeholders = ",".join(["%s"] * len(ext_list))
-                    sql = f"""
-                        UPDATE schedule_shifts
-                        SET status = 'cancelled'
-                        WHERE source = 'scheduler'
-                          AND external_id LIKE 'sling:%'
-                          AND work_date >= %s AND work_date <= %s
-                          AND status IN ('draft','published')
-                          AND actual_start IS NULL AND actual_end IS NULL
-                          AND external_id NOT IN ({placeholders})
-                    """
-                    params = [date_from, date_to] + ext_list
-                    cur.execute(sql, params)
-                conn.commit()
-                cancelled = cur.rowcount
+                    for e in events:
+                        event_id = e.get("id")
+                        if event_id is None:
+                            continue
+                        event_id_int = int(event_id)
+                        external_id = f"sling:{event_id_int}"
+
+                        # Find/parse scheduled date/time from calendar event.
+                        dtstart = SlingSyncService._parse_sling_dt(e.get("dtstart"))
+                        dtend = SlingSyncService._parse_sling_dt(e.get("dtend"))
+                        if not dtstart or not dtend:
+                            # Fallback: attempt detailed for dates too.
+                            details = SlingSyncService._fetch_shift_detailed(http, base_url, auth_token, event_id_int)
+                            dtstart = SlingSyncService._parse_sling_dt(details.get("dtstart"))
+                            dtend = SlingSyncService._parse_sling_dt(details.get("dtend"))
+
+                        if not dtstart or not dtend:
+                            errors.append(f"Missing dtstart/dtend for sling event {event_id_int}")
+                            continue
+
+                        work_date = dtstart.date()
+                        scheduled_start = dtstart.time().replace(microsecond=0)
+                        scheduled_end = dtend.time().replace(microsecond=0)
+
+                        details = SlingSyncService._fetch_shift_detailed(http, base_url, auth_token, event_id_int)
+
+                        # Break duration (minutes) if provided.
+                        break_mins = 0
+                        try:
+                            break_mins = int(details.get("breakDuration") or e.get("breakDuration") or 0)
+                        except Exception:
+                            break_mins = 0
+
+                        position = details.get("position") or {}
+                        location = details.get("location") or {}
+                        sling_position_id = position.get("id")
+                        sling_position_name = position.get("name")
+                        sling_location_id = location.get("id")
+                        sling_location_name = location.get("name")
+
+                        import_ok, _imp_reason = SlingSyncService._sling_shift_passes_import_filter(
+                            sling_position_name, sling_location_name, filter_mode, filter_patterns
+                        )
+                        if not import_ok:
+                            skipped_by_filter += 1
+                            continue
+
+                        processed_shifts += 1
+
+                        # Map job type
+                        job_type_id = SlingSyncService._lookup_sling_position_mapping(str(sling_position_id) if sling_position_id else None)
+                        if not job_type_id and sling_position_name:
+                            job_type_id = SlingSyncService._find_job_type_id_by_name(sling_position_name)
+                        if not job_type_id:
+                            job_type_id = default_job_type_id
+
+                        # Client/site mapping:
+                        # On Sling free plan, `location` is not reliably populated for ERP-required client/site mapping.
+                        # To keep the transfer painless, we always import shifts under a placeholder client and null site.
+                        client_id = SlingSyncService._get_or_create_sling_unmapped_client()
+                        site_id = None
+
+                        notes = (details.get("summary") or details.get("notes") or e.get("summary") or "").strip()
+                        notes = notes[:10000] if notes else None
+
+                        # If we can't map job type (position), we can't create a valid ERP shift.
+                        if not job_type_id:
+                            unmapped += 1
+                            continue
+
+                        desired_external_ids.append(external_id)
+
+                        # Upsert schedule_shifts by external_id.
+                        cur.execute("SELECT id FROM schedule_shifts WHERE external_id = %s LIMIT 1", (external_id,))
+                        existing = cur.fetchone()
+                        if existing and existing.get("id"):
+                            shift_id = int(existing["id"])
+                            if not dry_run:
+                                snap = SlingSyncService._snapshot_shift_for_revert(cur, shift_id)
+                                snap_js = (
+                                    json.dumps(snap)
+                                    if snap and snap.get("client_id") is not None
+                                    else None
+                                )
+                                cur.execute(
+                                    """
+                                    UPDATE schedule_shifts
+                                    SET contractor_id = %s,
+                                        client_id = %s,
+                                        site_id = %s,
+                                        job_type_id = %s,
+                                        work_date = %s,
+                                        scheduled_start = %s,
+                                        scheduled_end = %s,
+                                        break_mins = %s,
+                                        notes = %s,
+                                        status = 'published',
+                                        source = 'scheduler',
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = %s
+                                    """,
+                                    (
+                                        our_contractor_id,
+                                        int(client_id),
+                                        int(site_id) if site_id else None,
+                                        int(job_type_id),
+                                        work_date,
+                                        scheduled_start,
+                                        scheduled_end,
+                                        break_mins,
+                                        notes,
+                                        shift_id,
+                                    ),
+                                )
+                                conn.commit()
+                                ScheduleService.set_shift_assignments(shift_id, [our_contractor_id])
+                                if snap_js:
+                                    SlingSyncService._append_sync_step(
+                                        audit_conn,
+                                        run_id,
+                                        shift_id,
+                                        external_id,
+                                        "updated",
+                                        snap_js,
+                                    )
+                            updated += 1
+                        else:
+                            if not dry_run:
+                                cur.execute(
+                                    """
+                                    INSERT INTO schedule_shifts
+                                      (contractor_id, client_id, site_id, job_type_id, work_date,
+                                       scheduled_start, scheduled_end, break_mins, notes, status, source,
+                                       external_id, required_count)
+                                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'published','scheduler',%s,1)
+                                    """,
+                                    (
+                                        our_contractor_id,
+                                        int(client_id),
+                                        int(site_id) if site_id else None,
+                                        int(job_type_id),
+                                        work_date,
+                                        scheduled_start,
+                                        scheduled_end,
+                                        break_mins,
+                                        notes,
+                                        external_id,
+                                    ),
+                                )
+                                conn.commit()
+                                shift_id = int(cur.lastrowid)
+                                ScheduleService.set_shift_assignments(shift_id, [our_contractor_id])
+                                SlingSyncService._append_sync_step(
+                                    audit_conn,
+                                    run_id,
+                                    shift_id,
+                                    external_id,
+                                    "inserted",
+                                    None,
+                                )
+                            created += 1
             finally:
                 cur.close()
                 conn.close()
 
-        return {
-            "processed_shifts": processed_shifts,
-            "created": created,
-            "updated": updated,
-            "cancelled": cancelled,
-            "unmapped": unmapped,
-            "errors": errors[-10:],  # keep output small
-            "desired_external_ids": len(set(desired_external_ids)),
-        }
+            # Cancel missing shifts within the sync range.
+            if cancel_missing and not dry_run:
+                desired_set = set(desired_external_ids)
+                conn2 = get_db_connection()
+                try:
+                    curd = conn2.cursor(dictionary=True)
+                    try:
+                        if not desired_set:
+                            curd.execute(
+                                """
+                                SELECT id, external_id, status FROM schedule_shifts
+                                WHERE source = 'scheduler'
+                                  AND external_id LIKE %s
+                                  AND work_date >= %s AND work_date <= %s
+                                  AND status IN ('draft','published')
+                                  AND actual_start IS NULL AND actual_end IS NULL
+                                """,
+                                ("sling:%", date_from, date_to),
+                            )
+                        else:
+                            ext_list = list(desired_set)
+                            placeholders = ",".join(["%s"] * len(ext_list))
+                            sql_sel = f"""
+                                SELECT id, external_id, status FROM schedule_shifts
+                                WHERE source = 'scheduler'
+                                  AND external_id LIKE %s
+                                  AND work_date >= %s AND work_date <= %s
+                                  AND status IN ('draft','published')
+                                  AND actual_start IS NULL AND actual_end IS NULL
+                                  AND external_id NOT IN ({placeholders})
+                            """
+                            curd.execute(
+                                sql_sel,
+                                ("sling:%", date_from, date_to) + tuple(ext_list),
+                            )
+                        cancel_rows = list(curd.fetchall() or [])
+                    finally:
+                        curd.close()
+                    for cr in cancel_rows:
+                        SlingSyncService._append_sync_step(
+                            audit_conn,
+                            run_id,
+                            int(cr["id"]),
+                            cr.get("external_id"),
+                            "status_cancelled",
+                            json.dumps({"status": str(cr.get("status") or "published")}),
+                        )
+                    curu = conn2.cursor()
+                    try:
+                        if not desired_set:
+                            curu.execute(
+                                """
+                                UPDATE schedule_shifts
+                                SET status = 'cancelled'
+                                WHERE source = 'scheduler'
+                                  AND external_id LIKE %s
+                                  AND work_date >= %s AND work_date <= %s
+                                  AND status IN ('draft','published')
+                                  AND actual_start IS NULL AND actual_end IS NULL
+                                """,
+                                ("sling:%", date_from, date_to),
+                            )
+                        else:
+                            ext_list = list(desired_set)
+                            placeholders = ",".join(["%s"] * len(ext_list))
+                            sql_u = f"""
+                                UPDATE schedule_shifts
+                                SET status = 'cancelled'
+                                WHERE source = 'scheduler'
+                                  AND external_id LIKE %s
+                                  AND work_date >= %s AND work_date <= %s
+                                  AND status IN ('draft','published')
+                                  AND actual_start IS NULL AND actual_end IS NULL
+                                  AND external_id NOT IN ({placeholders})
+                            """
+                            curu.execute(
+                                sql_u,
+                                ("sling:%", date_from, date_to) + tuple(ext_list),
+                            )
+                        conn2.commit()
+                        cancelled = curu.rowcount
+                    finally:
+                        curu.close()
+                finally:
+                    conn2.close()
+
+            return {
+                "processed_shifts": processed_shifts,
+                "created": created,
+                "updated": updated,
+                "cancelled": cancelled,
+                "unmapped": unmapped,
+                "skipped_by_filter": skipped_by_filter,
+                "errors": errors[-10:],  # keep output small
+                "desired_external_ids": len(set(desired_external_ids)),
+                "sync_run_id": run_id,
+            }
+        finally:
+            if audit_conn is not None:
+                try:
+                    fin_stats = {
+                        "processed_shifts": processed_shifts,
+                        "created": created,
+                        "updated": updated,
+                        "cancelled": cancelled,
+                        "unmapped": unmapped,
+                        "skipped_by_filter": skipped_by_filter,
+                        "errors": errors[-10:],
+                    }
+                    SlingSyncService._finalize_sync_run(audit_conn, run_id, fin_stats)
+                finally:
+                    audit_conn.close()

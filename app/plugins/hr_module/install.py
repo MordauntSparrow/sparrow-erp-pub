@@ -459,15 +459,33 @@ def _migrate_user_id_columns_to_char36(conn):
         cur.close()
 
 
-def _seed_hr_onboarding_packs_if_empty(conn):
-    """First-time seed of onboarding packs from built-in defaults (idempotent)."""
+def _seed_hr_onboarding_packs_if_empty(conn, tenant_industries=None):
+    """
+    First-time seed of onboarding packs from built-in defaults (idempotent).
+
+    Neutral packs apply to every tenant; industry-tagged packs are added when
+    ``tenant_industries`` matches (from Core manifest via
+    ``load_tenant_industries_for_install`` when None).
+    """
+    from app.organization_profile import tenant_matches_industry
+
+    if tenant_industries is None:
+        try:
+            from app.plugins.hr_module.hr_industry_install import (
+                load_tenant_industries_for_install,
+            )
+
+            tenant_industries = load_tenant_industries_for_install()
+        except Exception:
+            tenant_industries = ["medical"]
+
     cur = conn.cursor()
     try:
         cur.execute("SELECT COUNT(*) FROM hr_onboarding_packs")
         row = cur.fetchone()
         if row and int(row[0] or 0) > 0:
             return
-        # Mirror app.plugins.hr_module.services.HR_ONBOARDING_PACKS + labels
+        # Neutral baseline — all tenants
         builtin = {
             "office_standard": (
                 "Office / standard",
@@ -493,6 +511,43 @@ def _seed_hr_onboarding_packs_if_empty(conn):
                 ],
             ),
         }
+        if tenant_matches_industry(tenant_industries, "medical"):
+            builtin["regulated_health_clinical"] = (
+                "Clinical / regulated roles",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("dbs", "DBS certificate"),
+                    (
+                        "other",
+                        "Professional registration evidence (e.g. HCPC, GMC, NMC)",
+                    ),
+                ],
+            )
+        if tenant_matches_industry(tenant_industries, "security"):
+            builtin["security_licence_hr"] = (
+                "Security / guarding",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("dbs", "DBS certificate (if required)"),
+                    ("other", "Security licence evidence (e.g. SIA)"),
+                ],
+            )
+        if tenant_matches_industry(tenant_industries, "hospitality"):
+            builtin["hospitality_guest_facing"] = (
+                "Hospitality / guest-facing",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("profile_picture", "Uniform or ID photo"),
+                ],
+            )
+        if tenant_matches_industry(tenant_industries, "cleaning"):
+            builtin["cleaning_facilities"] = (
+                "Cleaning / facilities",
+                [
+                    ("right_to_work", "Right to work evidence"),
+                    ("dbs", "DBS certificate (if required)"),
+                ],
+            )
         sort_main = 0
         for pack_key, (label, items) in builtin.items():
             cur.execute(

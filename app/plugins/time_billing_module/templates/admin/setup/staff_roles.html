@@ -18,7 +18,7 @@
     <strong>Hourly pay amounts</strong> are <em>not</em> set here — they live on
     <a href="{{ url_for('internal_time_billing.wage_cards_page') }}">wage rate cards</a>, and each <strong>new</strong> card must be linked to a role.
     In <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Edit profile</a>, each person gets a <strong>staff role</strong> plus an optional explicit wage card.
-    Roles also feed rota eligibility, Training rules, and Ventus crew data where you use those features.
+    Roles also feed rota eligibility and training rules{% if industry_visible('medical') %}; Ventus crew data uses these roles where you use that workflow{% endif %}.
   </div>
 
   <div class="card mb-4">
@@ -29,7 +29,7 @@
         <input type="hidden" name="action" value="create">
         <div class="col-md-8">
           <label class="form-label" for="new_role_name">Name</label>
-          <input class="form-control form-control-sm" id="new_role_name" name="name" maxlength="100" required placeholder="e.g. Band 6 clinician, Crew lead">
+          <input class="form-control form-control-sm" id="new_role_name" name="name" maxlength="100" required placeholder="{% if industry_visible('medical') %}e.g. Band 6 clinician, Crew lead{% else %}e.g. Supervisor, Crew lead{% endif %}">
         </div>
         <div class="col-md-4">
           <button type="submit" class="btn btn-primary btn-sm w-100">Add role</button>

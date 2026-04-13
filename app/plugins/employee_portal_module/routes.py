@@ -718,6 +718,62 @@ def my_equipment():
     )
 
 
+@public_bp.get("/event-plans/<int:plan_id>/kit")
+@staff_required_ep
+def event_plan_kit_list(plan_id: int):
+    """Serial equipment linked to a CRM event plan (updates when planners change allocations)."""
+    plan_title = None
+    rows: list = []
+    err = None
+    try:
+        from app.plugins.crm_module.crm_event_plan_media import list_plan_equipment_safe
+    except Exception as ex:
+        logger.exception("event_plan_kit_list import: %s", ex)
+        err = "Event plan equipment lists are not available."
+    if not err:
+        conn = None
+        cur = None
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor(dictionary=True)
+            cur.execute(
+                "SELECT id, title FROM crm_event_plans WHERE id=%s LIMIT 1",
+                (int(plan_id),),
+            )
+            prow = cur.fetchone()
+            if not prow:
+                err = "Event plan not found."
+            else:
+                plan_title = (prow.get("title") or "").strip() or f"Plan #{plan_id}"
+                rows = list_plan_equipment_safe(conn, int(plan_id))
+        except Exception as ex:
+            logger.exception("event_plan_kit_list: %s", ex)
+            err = "Could not load equipment for this plan."
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    pass
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    if err:
+        flash(err, "error")
+        return redirect(url_for("public_employee_portal.dashboard"))
+    return render_template(
+        "employee_portal_module/public/event_plan_kit_list.html",
+        config=core_manifest or {},
+        user=current_ep_user(),
+        plan_id=int(plan_id),
+        plan_title=plan_title or f"Plan #{plan_id}",
+        kit_rows=rows,
+        website_settings=_get_website_settings(),
+    )
+
+
 @public_bp.get("/my-equipment/<int:asset_id>")
 @staff_required_ep
 def my_equipment_detail(asset_id: int):

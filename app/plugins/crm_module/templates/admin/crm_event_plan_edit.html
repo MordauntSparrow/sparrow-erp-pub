@@ -95,7 +95,7 @@
   </noscript>
 
   <div class="crm-event-plan-edit{% if not can_edit %} crm-ep-viewer{% endif %}">
-  <form method="post" id="crmEpMainForm">
+  <form method="post" id="crmEpMainForm" enctype="multipart/form-data">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     {% if can_edit %}
     <input type="hidden" name="wizard_step" id="crmEpWizardStep" value="{{ display_step }}">
@@ -103,14 +103,49 @@
       <div class="card-body py-2">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
           <span class="small text-muted text-uppercase me-1">Plan steps</span>
-          {% set labels = ['1 Details', '2 Location', '3 Checklist', '4 Hospitals & handover', '5 Resources', '6 Risk', '7 Sign-off', '8 Review'] %}
-          {% for i in range(1, 9) %}
+          {% set labels = ['1 Details', '2 Location', '3 Checklist', '4 Hospitals & handover', '5 Resources', '6 Risk', '7 Sign-off', '8 Review', '9 PDF annex'] %}
+          {% for i in range(1, 10) %}
           <button type="button" class="btn btn-sm rounded-pill crm-ep-go{% if display_step == i %} btn-primary{% else %} btn-outline-secondary{% endif %}" data-go="{{ i }}">{{ labels[i - 1] }}</button>
           {% endfor %}
         </div>
         <div class="d-flex flex-wrap gap-2">
           <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpPrev" {% if display_step <= 1 %}disabled{% endif %}>Previous</button>
-          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpNext" {% if display_step >= 8 %}disabled{% endif %}>Next</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpNext" {% if display_step >= 9 %}disabled{% endif %}>Next</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if can_edit %}
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body py-3">
+        <h2 class="h6 text-uppercase text-muted mb-2">CRM links</h2>
+        <p class="small text-muted mb-3">Choose a quote (preferred — carries the latest commercial detail) and/or an opportunity. Saving updates the plan links; use prefill to copy empty fields from CRM without overwriting text you already entered.</p>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small mb-0">Quote</label>
+            <select class="form-select form-select-sm" name="crm_link_quote_id">
+              <option value="">— None —</option>
+              {% for q in crm_quotes_dropdown %}
+              <option value="{{ q.id }}" {% if plan.quote_id and (plan.quote_id|int) == (q.id|int) %}selected{% endif %}>#{{ q.id }} — {{ (q.title or 'Quote')[:80] }}{% if (q.title or '')|length > 80 %}…{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">Opportunity</label>
+            <select class="form-select form-select-sm" name="crm_link_opportunity_id">
+              <option value="">— None —</option>
+              {% for o in crm_opportunities_dropdown %}
+              <option value="{{ o.id }}" {% if plan.opportunity_id and (plan.opportunity_id|int) == (o.id|int) %}selected{% endif %}>{{ (o.account_name or '')[:40] }}{% if o.account_name %} — {% endif %}{{ (o.name or 'Opportunity')[:80] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-12">
+            <div class="form-check mt-1">
+              <input class="form-check-input" type="checkbox" name="apply_crm_prefill" value="1" id="crmApplyPrefill">
+              <label class="form-check-label small" for="crmApplyPrefill">On save, prefill <strong>empty</strong> plan fields from the linked quote / opportunity</label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -149,6 +184,10 @@
             <label class="form-label">Expected attendance</label>
             <input class="form-control" name="expected_attendance" inputmode="numeric" value="{{ plan.expected_attendance or '' }}" {% if not can_edit %}readonly{% endif %}>
           </div>
+          <div class="col-12 mt-2">
+            <label class="form-label">Attendance by day <span class="text-muted small fw-normal">(multi-day events — free text)</span></label>
+            <textarea class="form-control" name="attendance_by_day_text" rows="3" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Fri 5k — 4 000 · Sat 10k — 8 500">{{ plan.attendance_by_day_text or '' }}</textarea>
+          </div>
         </div>
         <div class="mt-2">
           <label class="form-label">Demographics / crowd profile</label>
@@ -157,6 +196,28 @@
         <div class="mt-2">
           <label class="form-label">Environment (indoor/outdoor, movement, water, etc.)</label>
           <textarea class="form-control" name="environment_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.environment_notes or '' }}</textarea>
+        </div>
+        <div class="mt-3 pt-3 border-top">
+          <label class="form-label">Purpose <span class="text-muted small fw-normal">(PDF — why you are on site; scope of cover)</span></label>
+          <textarea class="form-control" name="plan_purpose" rows="3" {% if not can_edit %}readonly{% endif %} placeholder="e.g. On site for first aid and medical emergencies; covering the full event footprint…">{{ plan.plan_purpose or '' }}</textarea>
+        </div>
+        <div class="row g-2 mt-1">
+          <div class="col-md-6">
+            <label class="form-label">Event organiser(s)</label>
+            <input class="form-control" name="event_organiser" value="{{ plan.event_organiser or '' }}" maxlength="255" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Purple Guide tier / level</label>
+            <input class="form-control" name="purple_guide_tier" value="{{ plan.purple_guide_tier or '' }}" maxlength="64" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Tier 3">
+          </div>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Event content / programme <span class="text-muted small fw-normal">(courses, obstacles, format)</span></label>
+          <textarea class="form-control" name="event_content_summary" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.event_content_summary or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Operational key timings <span class="text-muted small fw-normal">(leave base, on site, briefings, stand down…)</span></label>
+          <textarea class="form-control" name="operational_timings" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.operational_timings or '' }}</textarea>
         </div>
       </div>
     </div>
@@ -183,6 +244,34 @@
         <div class="mt-2">
           <label class="form-label">Site / access notes</label>
           <textarea class="form-control" name="location_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.location_notes or '' }}</textarea>
+        </div>
+        <div class="mt-4 pt-3 border-top">
+          <label class="form-label">Event site map <span class="text-muted small fw-normal">(optional — appears in the PDF after site &amp; access)</span></label>
+          <p class="small text-muted mb-2">PNG, JPG, JPEG, WebP, or GIF. Use a clear plan showing medical posts, access routes, or venue layout.</p>
+          {% if plan.event_map_path %}
+          <div class="mb-2">
+            <img src="{{ url_for('static', filename=(plan.event_map_path|string)|replace('\\', '/')) }}" alt="Current event map" class="img-fluid rounded border" style="max-height: 280px;">
+          </div>
+          {% endif %}
+          {% if can_edit %}
+          <input type="file" class="form-control form-control-sm mb-2" name="event_map_file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif">
+          {% if plan.event_map_path %}
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" value="1" name="event_map_clear" id="crmEpMapClear">
+            <label class="form-check-label small" for="crmEpMapClear">Remove map from this plan</label>
+          </div>
+          {% endif %}
+          {% endif %}
+          <label class="form-label small text-muted mb-0">Map caption <span class="fw-normal">(optional, shown under the image in the PDF)</span></label>
+          <input class="form-control form-control-sm" type="text" name="event_map_caption" maxlength="512" value="{{ plan.event_map_caption or '' }}" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Figure 1 — Arena layout, medical posts marked in red">
+        </div>
+        <div class="mt-4 pt-3 border-top">
+          <label class="form-label">Access &amp; egress <span class="text-muted small fw-normal">(PDF — access points table, vehicle movement; paste or type)</span></label>
+          <textarea class="form-control font-monospace small" name="access_egress_text" rows="6" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Access Point 1 · Address · W3W: …">{{ plan.access_egress_text or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Rendezvous points (RVPs)</label>
+          <textarea class="form-control font-monospace small" name="rendezvous_text" rows="5" {% if not can_edit %}readonly{% endif %} placeholder="RVP name · Address · W3W · notes for meeting external services…">{{ plan.rendezvous_text or '' }}</textarea>
         </div>
       </div>
     </div>
@@ -261,7 +350,7 @@
             <textarea class="form-control form-control-sm" name="ashice_current" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.current or '' }}</textarea>
           </div>
           <div class="col-12">
-            <label class="form-label small mb-0">E — Expected</label>
+            <label class="form-label small mb-0">E — Expected / ETA</label>
             <textarea class="form-control form-control-sm" name="ashice_expected" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.expected or '' }}</textarea>
           </div>
         </div>
@@ -273,8 +362,37 @@
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-3">Resources</h2>
+        <p class="small text-muted mb-2">Structured <strong>deployment roster</strong> (callsigns, posts) is included in the PDF; summary counts use the role / grade column.</p>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th style="width:8%">Callsign</th>
+                <th style="width:12%">Name</th>
+                <th style="width:14%">Role / grade</th>
+                <th style="width:15%">Post / assignment</th>
+                <th style="width:11%">Shift / times</th>
+                <th style="width:10%">Phone</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for slot in staff_roster_rows %}
+              <tr>
+                <td><input class="form-control form-control-sm" name="sr_callsign" value="{% if slot %}{{ slot.get('callsign','') }}{% endif %}" maxlength="64" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_name" value="{% if slot %}{{ slot.get('name','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_role" value="{% if slot %}{{ slot.get('role_grade','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_post" value="{% if slot %}{{ slot.get('post_assignment','') }}{% endif %}" maxlength="255" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_shift" value="{% if slot %}{{ slot.get('shift','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_phone" value="{% if slot %}{{ slot.get('phone','') }}{% endif %}" maxlength="32" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="sr_notes" value="{% if slot %}{{ slot.get('notes','') }}{% endif %}" maxlength="512" {% if not can_edit %}readonly{% endif %}></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
         <div class="mb-2">
-          <label class="form-label">Medics (planned)</label>
+          <label class="form-label">Medics / staffing summary <span class="text-muted small fw-normal">(optional narrative)</span></label>
           <input class="form-control" name="resources_medics" value="{{ plan.resources_medics or '' }}" {% if not can_edit %}readonly{% endif %}>
         </div>
         <div class="mb-2">
@@ -289,6 +407,65 @@
           <label class="form-label">Escalation</label>
           <textarea class="form-control" name="escalation_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.escalation_notes or '' }}</textarea>
         </div>
+        <div class="mt-3 pt-3 border-top">
+          <label class="form-label">Staff transportation <span class="text-muted small fw-normal">(PDF)</span></label>
+          <textarea class="form-control small" name="staff_transport_text" rows="4" {% if not can_edit %}readonly{% endif %} placeholder="By day / vehicle / named staff…">{{ plan.staff_transport_text or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Command, control &amp; support <span class="text-muted small fw-normal">(PDF — triage officer, bronze/silver, etc.)</span></label>
+          <textarea class="form-control small" name="command_control_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.command_control_text or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Uniform &amp; PPE <span class="text-muted small fw-normal">(PDF)</span></label>
+          <textarea class="form-control small" name="uniform_ppe_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.uniform_ppe_text or '' }}</textarea>
+        </div>
+        <div class="mt-2">
+          <label class="form-label">Equipment detail <span class="text-muted small fw-normal">(PDF — kit lists, beds, drugs bags, load lists)</span></label>
+          <textarea class="form-control font-monospace small" name="equipment_detail_text" rows="6" {% if not can_edit %}readonly{% endif %}>{{ plan.equipment_detail_text or '' }}</textarea>
+        </div>
+        <div class="mt-3 pt-3 border-top">
+          <h3 class="h6 text-uppercase text-muted mb-2">Event kit manifest (inventory)</h3>
+          <p class="small text-muted mb-2">Serial assets linked here appear in a stable employee-portal URL for this plan (and in the PDF). Add by numeric asset ID or public asset code.</p>
+          {% if kit_portal_url %}
+          <p class="small mb-2"><a href="{{ kit_portal_url }}" target="_blank" rel="noopener">Open live kit list for staff</a> <span class="text-muted">(login required)</span></p>
+          {% else %}
+          <p class="small text-warning mb-2">Portal URL unavailable (employee portal not registered) — PDFs will omit the live link until it is.</p>
+          {% endif %}
+          {% if can_edit %}
+          <div class="input-group input-group-sm mb-3" style="max-width:32rem">
+            <input class="form-control" name="equipment_asset_lookup" form="crmEpEquipmentAddForm" placeholder="Asset ID or public asset code" autocomplete="off">
+            <button type="submit" class="btn btn-outline-primary" form="crmEpEquipmentAddForm">Add to plan</button>
+          </div>
+          {% endif %}
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Item</th>
+                  <th>Serial</th>
+                  <th>Code</th>
+                  <th style="width:7rem"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for erow in equipment_rows %}
+                <tr>
+                  <td class="small">{{ erow.item_name or '—' }}</td>
+                  <td class="small text-secondary">{{ erow.serial_number or '—' }}</td>
+                  <td class="small"><code>{{ erow.public_asset_code or erow.id }}</code></td>
+                  <td class="text-end">
+                    {% if can_edit %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill" form="crmEpEquipRm{{ erow.id }}">Remove</button>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-muted small">No assets linked yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
     </div>
@@ -297,6 +474,28 @@
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-3">Risk assessment</h2>
+        <p class="small text-muted mb-2">Risk table (optional) — one row per topic; appears as a grid in the PDF (like SAG medical plans).</p>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th style="width:28%">Risk type / topic</th>
+                <th style="width:14%">Level</th>
+                <th>Comment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for rslot in risk_register_rows %}
+              <tr>
+                <td><input class="form-control form-control-sm" name="rr_type" value="{% if rslot %}{{ rslot.risk_type }}{% endif %}" maxlength="255" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="rr_level" value="{% if rslot %}{{ rslot.risk_level }}{% endif %}" maxlength="64" {% if not can_edit %}readonly{% endif %} placeholder="Low / Mod…"></td>
+                <td><input class="form-control form-control-sm" name="rr_comment" value="{% if rslot %}{{ rslot.risk_comment }}{% endif %}" maxlength="1024" {% if not can_edit %}readonly{% endif %}></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <label class="form-label">Narrative summary</label>
         <textarea class="form-control mb-2" name="risk_summary" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.risk_summary or '' }}</textarea>
         <label class="form-label">Optional score (1–10)</label>
         <input class="form-control" style="max-width:8rem" name="risk_score" inputmode="numeric" value="{{ plan.risk_score or '' }}" {% if not can_edit %}readonly{% endif %}>
@@ -307,7 +506,33 @@
     <div data-ep-step="7" class="crm-ep-panel mb-1{% if display_step == 7 %} crm-ep-active{% endif %}">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 text-uppercase text-muted mb-3">Sign-off</h2>
+        <h2 class="h6 text-uppercase text-muted mb-3">Sign-off &amp; PDF control sheet</h2>
+        <p class="small text-muted mb-3">Document version is assigned automatically when you generate a PDF (first issue <strong>v1.0</strong>, then <strong>v1.1</strong>, <strong>v1.2</strong>, …). Release date, status, and distribution still appear on the cover.</p>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="form-label small text-muted">Document version (read-only)</label>
+            <p class="form-control form-control-sm bg-light mb-0 text-dark">
+              {% if plan_pdf_version_display %}<strong>v{{ plan_pdf_version_display }}</strong> <span class="text-muted small">— last PDF generation</span>{% else %}<span class="text-muted">No PDF issued yet — first will be v1.0</span>{% endif %}
+            </p>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Date of release</label>
+            <input class="form-control form-control-sm" type="date" name="plan_document_release_date" value="{% if plan.plan_document_release_date %}{{ plan.plan_document_release_date.strftime('%Y-%m-%d') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Status <span class="text-muted fw-normal">(e.g. Pending SAG)</span></label>
+            <input class="form-control form-control-sm" name="plan_pdf_status" value="{{ plan.plan_pdf_status or '' }}" maxlength="128" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Written by</label>
+            <input class="form-control form-control-sm" name="plan_written_by" value="{{ plan.plan_written_by or '' }}" maxlength="255" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-12">
+            <label class="form-label small">Distribution</label>
+            <textarea class="form-control form-control-sm" name="plan_distribution" rows="2" {% if not can_edit %}readonly{% endif %} placeholder="Attending staff, event organisers, SAG…">{{ plan.plan_distribution or '' }}</textarea>
+          </div>
+        </div>
+        <h3 class="h6 text-uppercase text-muted mb-2">Clinical sign-off</h3>
         <div class="row g-2">
           <div class="col-md-4">
             <label class="form-label">Name</label>
@@ -326,6 +551,98 @@
     </div>
     </div>
 
+    <div data-ep-step="9" class="crm-ep-panel mb-1{% if display_step == 9 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Diagrams</h2>
+        <p class="small text-muted mb-3">Upload images for this plan only, or add from <a href="{{ url_for('crm_module.event_plan_diagram_templates_admin') }}" target="_blank" rel="noopener">shared templates</a> (template images can be replaced later for all plans that reference them).</p>
+        {% if can_edit and diagram_templates %}
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+          <div>
+            <label class="form-label small mb-0">From template</label>
+            <select class="form-select form-select-sm" name="diagram_template_id" form="crmEpDiagTplForm" style="min-width:14rem">
+              <option value="">Choose template…</option>
+              {% for t in diagram_templates %}
+              <option value="{{ t.id }}">{{ t.title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-sm btn-primary rounded-pill" form="crmEpDiagTplForm">Add</button>
+        </div>
+        {% endif %}
+        {% if can_edit %}
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-4">
+          <div>
+            <label class="form-label small mb-0">Upload image</label>
+            <input class="form-control form-control-sm" type="file" name="diagram_file" form="crmEpDiagUpForm" accept="image/*">
+          </div>
+          <button type="submit" class="btn btn-sm btn-outline-primary rounded-pill" form="crmEpDiagUpForm">Upload</button>
+        </div>
+        {% endif %}
+        {% if diagram_rows %}
+        <div class="row g-3 mb-4">
+          {% for d in diagram_rows %}
+          <div class="col-md-4">
+            <div class="border rounded p-2">
+              <div class="ratio ratio-4x3 bg-light rounded mb-2 overflow-hidden">
+                {% set _dimg = d.plan_image_path or d.template_image_path %}
+                {% if _dimg %}
+                <img src="{{ url_for('static', filename=_dimg) }}" alt="" class="object-fit-contain" style="object-fit:contain;">
+                {% else %}
+                <div class="d-flex align-items-center justify-content-center small text-muted">No image</div>
+                {% endif %}
+              </div>
+              <label class="form-label small mb-0">Caption</label>
+              <input class="form-control form-control-sm mb-2" name="diagram_caption_{{ d.id }}" value="{{ d.caption or '' }}" maxlength="512" {% if not can_edit %}readonly{% endif %}>
+              {% if can_edit %}
+              <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill" form="crmEpDiagDel{{ d.id }}">Remove</button>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="small text-muted mb-4">No diagrams on this plan yet.</p>
+        {% endif %}
+
+        <h2 class="h6 text-uppercase text-muted mb-3">PDF annex — policies &amp; welfare</h2>
+        <p class="small text-muted mb-3">Optional long-form sections matching full event medical plans (H&amp;S, IPC, major incidents, welfare, etc.).</p>
+        <div class="mb-2">
+          <label class="form-label small">Health &amp; safety at work</label>
+          <textarea class="form-control form-control-sm" name="health_safety_work_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.health_safety_work_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Privacy, dignity &amp; IPC</label>
+          <textarea class="form-control form-control-sm" name="privacy_ipc_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.privacy_ipc_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Incident reporting</label>
+          <textarea class="form-control form-control-sm" name="incident_reporting_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.incident_reporting_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Major incidents <span class="text-muted fw-normal">(METHANE, JESIP, cordons…)</span></label>
+          <textarea class="form-control form-control-sm" name="major_incident_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.major_incident_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Welfare arrangements</label>
+          <textarea class="form-control form-control-sm" name="welfare_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.welfare_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Safeguarding</label>
+          <textarea class="form-control form-control-sm" name="safeguarding_text" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.safeguarding_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Local ambulance trust awareness</label>
+          <textarea class="form-control form-control-sm" name="ambulance_trust_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.ambulance_trust_text or '' }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Other event-specific notes</label>
+          <textarea class="form-control form-control-sm" name="other_event_specific_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.other_event_specific_text or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    </div>
+
     <div data-ep-step="8" class="crm-ep-panel mb-1{% if display_step == 8 %} crm-ep-active{% endif %}">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
@@ -333,14 +650,26 @@
         <ol class="small text-muted mb-3 ps-3">
           <li class="mb-1"><strong>Save plan</strong> (button below).</li>
           <li class="mb-1"><strong>Generate PDF</strong> for the file pack.</li>
-          <li class="mb-0"><strong>Send to Cura</strong> — single explicit action; creates or updates the operational event for rostering.{% if plan.quote_id %} If this plan is linked to a quote, that quote must be <strong>Accepted</strong> first.{% endif %}</li>
+          <li class="mb-0"><strong>Send to Cura</strong> — single explicit action; creates or updates the operational event for rostering.{% if plan.quote_id %} If this plan is linked to a quote, that quote must be <strong>Accepted</strong> first (Kanban “Won” is not enough).{% endif %}</li>
         </ol>
         {% if can_edit %}
         {% if handoff_block_message %}
-        <div class="alert alert-warning small mb-3 py-2">{{ handoff_block_message }}</div>
-        {% if plan.quote_id %}
-        <a class="btn btn-sm btn-outline-secondary rounded-pill mb-3" href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">Open linked quote</a>
-        {% endif %}
+        <div class="alert alert-warning mb-3">
+          <p class="fw-semibold mb-2">Client agreed to this quote?</p>
+          <p class="small mb-3">{{ handoff_block_message }}</p>
+          {% if plan.quote_id and linked_quote and (linked_quote.status or '')|lower != 'accepted' %}
+          <form method="post" action="{{ url_for('crm_module.quote_accept_for_cura', quote_id=plan.quote_id) }}" class="d-inline">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="return_plan_id" value="{{ plan.id }}">
+            <button type="submit" class="btn btn-success rounded-pill px-4">Mark quote accepted — client agreed pricing</button>
+          </form>
+          <a class="btn btn-outline-secondary rounded-pill ms-2" href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">Open quote to review</a>
+          {% elif plan.quote_id %}
+          <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">Open linked quote</a>
+          {% endif %}
+        </div>
+        {% elif plan.quote_id %}
+        <p class="small text-muted mb-3">Linked quote #{{ plan.quote_id }} is <span class="text-success fw-semibold">Accepted</span> — you may send to Cura after PDF if required.</p>
         {% endif %}
         <div class="d-flex flex-wrap gap-2 align-items-center">
           <button type="submit" form="crmEpPdfForm" class="btn btn-outline-dark rounded-pill">Generate PDF</button>
@@ -360,6 +689,29 @@
     {% endif %}
   </form>
   </div>
+
+  {% if can_edit %}
+  <form id="crmEpEquipmentAddForm" method="post" action="{{ url_for('crm_module.event_plan_equipment_add', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% for erow in equipment_rows %}
+  <form id="crmEpEquipRm{{ erow.id }}" method="post" action="{{ url_for('crm_module.event_plan_equipment_remove', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="equipment_asset_id" value="{{ erow.id }}">
+  </form>
+  {% endfor %}
+  <form id="crmEpDiagTplForm" method="post" action="{{ url_for('crm_module.event_plan_diagram_add_template', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  <form id="crmEpDiagUpForm" method="post" action="{{ url_for('crm_module.event_plan_diagram_upload', plan_id=plan.id) }}" enctype="multipart/form-data" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% for d in diagram_rows %}
+  <form id="crmEpDiagDel{{ d.id }}" method="post" action="{{ url_for('crm_module.event_plan_diagram_delete', plan_id=plan.id, dg_id=d.id) }}" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  </form>
+  {% endfor %}
+  {% endif %}
 
   {% if can_edit %}
   <form method="post" action="{{ url_for('crm_module.event_plan_pdf', plan_id=plan.id) }}" id="crmEpPdfForm" class="visually-hidden" aria-hidden="true">
@@ -398,11 +750,11 @@
 
     function currentStep() {
       var n = parseInt(stepInput.value, 10);
-      return isNaN(n) ? 1 : Math.max(1, Math.min(8, n));
+      return isNaN(n) ? 1 : Math.max(1, Math.min(9, n));
     }
 
     function showStep(s) {
-      var n = Math.max(1, Math.min(8, s));
+      var n = Math.max(1, Math.min(9, s));
       stepInput.value = String(n);
       panels.forEach(function (el) {
         var sn = parseInt(el.getAttribute('data-ep-step'), 10);
@@ -414,7 +766,7 @@
         btn.classList.toggle('btn-outline-secondary', gn !== n);
       });
       if (prevBtn) prevBtn.disabled = n <= 1;
-      if (nextBtn) nextBtn.disabled = n >= 8;
+      if (nextBtn) nextBtn.disabled = n >= 9;
     }
 
     navBtns.forEach(function (btn) {

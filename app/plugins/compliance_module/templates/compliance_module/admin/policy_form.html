@@ -6,8 +6,47 @@
   <p class="small mb-3"><a href="{{ url_for('internal_compliance.admin_index') }}">← Compliance</a>
     · <a href="{{ url_for('internal_compliance.admin_document_types') }}">Document types</a></p>
 
+  {% if policy %}
+  {% set ls = (policy.lifecycle_status or '') %}
+  {% if not ls %}{% set ls = 'active' if policy.published|default(0)|int == 1 else 'draft' %}{% endif %}
+  <div class="alert alert-light border mb-4 py-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+      <span class="small text-muted text-uppercase" style="letter-spacing: 0.05em;">Current status</span>
+      {% if ls == 'active' %}
+      <span class="badge bg-success">Active</span>
+      <span class="small text-muted">Staff can see this on the portal (version {{ policy.version }}).</span>
+      {% elif ls == 'retired' %}
+      <span class="badge bg-dark">Retired</span>
+      <span class="small text-muted">Hidden from staff — archived.</span>
+      {% else %}
+      <span class="badge bg-secondary">Draft</span>
+      <span class="small text-muted">Not visible to staff until status is <strong>Active</strong> or you use <strong>Save &amp; publish to staff</strong>.</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <form method="post" enctype="multipart/form-data" class="mb-4">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold" for="lifecycle_status">Status</label>
+      <select class="form-select" name="lifecycle_status" id="lifecycle_status" required>
+        {% set cur_ls = (policy.lifecycle_status if policy else 'draft') or '' %}
+        {% if not cur_ls and policy %}{% set cur_ls = 'active' if policy.published|default(0)|int == 1 else 'draft' %}{% endif %}
+        {% if not policy %}{% set cur_ls = 'draft' %}{% endif %}
+        {% for key in ['draft', 'active', 'retired'] %}
+        <option value="{{ key }}" {% if cur_ls == key %}selected{% endif %}>{{ (lifecycle_labels or {}).get(key, key) }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">
+        <strong>Draft</strong> — working copy, staff do not see it.
+        <strong>Active</strong> — live on the staff portal (you can save without notifying everyone).
+        <strong>Retired</strong> — kept for records; staff no longer see it.
+        Use <strong>Save &amp; publish to staff</strong> to record a new issued version and create portal to-dos for mandatory documents.
+      </div>
+    </div>
+
     <div class="mb-3">
       <label class="form-label">Title</label>
       <input class="form-control" name="title" required value="{{ policy.title if policy else '' }}">
@@ -51,12 +90,12 @@
       <input class="form-check-input" type="checkbox" name="mandatory" value="1" id="mandatory" {% if not policy or policy.mandatory %}checked{% endif %}>
       <label class="form-check-label" for="mandatory">Mandatory acknowledgement (portal to-do + blocks “cleared” counts)</label>
     </div>
-    <div class="row g-3 mb-3">
+    <div class="row g-3 mb-4">
       <div class="col-md-6">
         <label class="form-label" for="next_review_date">Next review due</label>
         <input class="form-control" type="date" name="next_review_date" id="next_review_date"
           value="{% if policy and policy.next_review_date %}{{ (policy.next_review_date|string)[:10] }}{% endif %}">
-        <div class="form-text">Shown to staff on the policy and in their library (e.g. scheduled governance review).</div>
+        <div class="form-text">Shown to staff on the document and in their library.</div>
       </div>
       <div class="col-md-6">
         <label class="form-label" for="last_reviewed_date">Last reviewed (organisation)</label>
@@ -68,26 +107,31 @@
     {% if policy and policy.updated_at %}
     <p class="small text-muted mb-3">System <strong>last updated</strong> (auto): {{ policy.updated_at }}</p>
     {% endif %}
-    <button type="submit" class="btn btn-primary">Save</button>
+
+    <div class="mb-4">
+      <label class="form-label fw-semibold" for="lifecycle_change_reason">Audit reason (for status / visibility changes)</label>
+      <textarea class="form-control" name="lifecycle_change_reason" id="lifecycle_change_reason" rows="3" maxlength="8000"
+        placeholder="When you unpublish, retire, or move an active document to Draft, describe why (e.g. superseded by SOP-12, CQC feedback, annual review, error in prior version)."></textarea>
+      <div class="form-text">
+        <strong>Required</strong> when taking a live document off the portal, retiring it, or moving <strong>Active → Draft</strong>.
+        <strong>Required</strong> when marking a document <strong>Retired</strong> (including from Draft).
+        Optional for other saves — leave blank if you are only editing content and status is unchanged.
+        Entries are stored in the append-only history below (suitable for CQC / inspection evidence).
+      </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="submit" name="admin_action" value="save" class="btn btn-primary">Save</button>
+      {% if policy %}
+      <button type="submit" name="admin_action" value="issue" class="btn btn-success"
+        onclick="return confirm('Save changes, set status to Active, issue this version to all active staff, and create portal to-dos for mandatory documents?');">Save &amp; publish to staff</button>
+      <button type="submit" name="admin_action" value="unpublish" class="btn btn-outline-secondary"
+        onclick="return confirm('Save any changes, then return this document to Draft (staff will no longer see it until you publish again)?');">Unpublish (to draft)</button>
+      {% endif %}
+    </div>
   </form>
 
   {% if policy %}
-  <hr>
-  <h2 class="h6">Publish</h2>
-  <p class="small text-muted">First issue publishes version 1 and creates portal tasks (if mandatory). Further issues increment the version, close old tasks, and notify everyone again.</p>
-  <form method="post" class="d-inline" onsubmit="return confirm('Issue this policy version to all active staff now?');">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="issue">
-    <button type="submit" class="btn btn-success btn-sm">Issue to all staff</button>
-  </form>
-  {% if policy.published %}
-  <form method="post" class="d-inline ms-2" onsubmit="return confirm('Unpublish? Staff will no longer see this policy until you issue again.');">
-    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="action" value="unpublish">
-    <button type="submit" class="btn btn-outline-secondary btn-sm">Unpublish</button>
-  </form>
-  {% endif %}
-
   <h3 class="h6 mt-4">Recent acknowledgements</h3>
   <div class="table-responsive border rounded small">
     <table class="table table-sm mb-0">
@@ -101,6 +145,29 @@
         </tr>
         {% else %}
         <tr><td colspan="3" class="text-muted">None yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h3 class="h6 mt-4">Status &amp; publication history (audit)</h3>
+  <p class="small text-muted mb-2">Append-only log — each row records a status or publication change, the reason given, and who saved it.</p>
+  <div class="table-responsive border rounded small">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>When</th><th>From</th><th>To</th><th>Reason</th><th>Recorded by</th></tr>
+      </thead>
+      <tbody>
+        {% for e in lifecycle_audit or [] %}
+        <tr>
+          <td class="text-nowrap">{{ e.created_at }}</td>
+          <td><span class="text-capitalize">{{ e.from_status or '—' }}</span></td>
+          <td><span class="text-capitalize">{{ e.to_status or '—' }}</span></td>
+          <td class="small" style="white-space: pre-wrap;">{{ e.reason }}</td>
+          <td class="small">{{ e.actor_label or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted">No audit entries yet — history appears when you change status, unpublish, or publish to staff.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -81,9 +81,11 @@
 <!-- 
 DEV NOTES:
 - Live client-side calc with manual overrides.
+{% if industry_visible('cleaning') %}
 - Fallback dev rates (case-insensitive job_type_name contains):
     • residential, commercial, school clean → £14.50
     • end of tenancy, deep clean            → £15.00
+{% endif %}
 - If backend has no rates yet, user can set rate/pay manually and save.
 - Date is fully editable; no forced 'today' for new rows (defaults empty).
 -->
@@ -690,11 +692,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         let jobTypes = []; // cache of job types from backend
 
-        // Dev-only fallback rates (in case backend has no rates yet)
-        const DEV_RATES = [
+        // Dev-only fallback rates (in case backend has no rates yet; cleaning sector only)
+        const DEV_RATES = {% if industry_visible('cleaning') %}[
             { pattern: /^(residential|commercial|school clean)$/i, rate: 14.50 },
             { pattern: /^(end of tenancy|deep clean)$/i, rate: 15.00 }
-        ];
+        ]{% else %}[]{% endif %};
 
         // --- Utility helpers ---------------------------------------------------
 

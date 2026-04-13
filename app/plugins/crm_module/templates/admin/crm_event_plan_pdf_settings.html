@@ -1,0 +1,32 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Event plan PDF{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Event plan PDF</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width: 52rem;">
+  <h1 class="h4 mb-2">Event plan PDF — cover &amp; about</h1>
+  <p class="text-muted small mb-4">
+    Text here is stored in <code>app/config/manifest.json</code> under <code>crm_module_settings</code> and is merged into every generated event medical plan PDF (after the cover).
+    Your <strong>company logo</strong> comes from <strong>Core settings → General</strong> (same as the rest of Sparrow).
+  </p>
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label class="form-label fw-semibold" for="event_plan_pdf_tagline">Cover tagline <span class="text-muted fw-normal small">(optional, one line)</span></label>
+      <input class="form-control" id="event_plan_pdf_tagline" name="event_plan_pdf_tagline" maxlength="500"
+             value="{{ settings.get('event_plan_pdf_tagline', '') }}" {% if not can_edit %}readonly{% endif %}
+             placeholder="e.g. Event medical services · Pre-hospital care · UK-wide">
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold" for="event_plan_pdf_about_us">About us <span class="text-muted fw-normal small">(appears in PDF after cover)</span></label>
+      <textarea class="form-control font-monospace small" id="event_plan_pdf_about_us" name="event_plan_pdf_about_us" rows="14" maxlength="20000" {% if not can_edit %}readonly{% endif %}
+        placeholder="Registered provider summary, CQC / governance statement, scope of event cover, key contacts…">{{ settings.get('event_plan_pdf_about_us', '') }}</textarea>
+    </div>
+    {% if can_edit %}
+    <button type="submit" class="btn btn-primary rounded-pill">Save</button>
+    {% endif %}
+  </form>
+</div>
+{% endblock %}

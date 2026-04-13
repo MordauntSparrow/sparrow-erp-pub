@@ -15,6 +15,10 @@ for p in (str(PROJECT_ROOT), str(APP_ROOT), str(PLUGIN_DIR)):
         sys.path.insert(0, p)
 
 from app.objects import get_db_connection  # noqa: E402
+from app.organization_profile import tenant_matches_industry  # noqa: E402
+from app.plugins.inventory_control.industry_install import (  # noqa: E402
+    load_tenant_industries_for_install,
+)
 
 
 def _create_table(conn, name: str, columns_sql: str) -> None:
@@ -254,29 +258,6 @@ def _ensure_med_bag_schema(conn) -> None:
         KEY idx_med_bag_seal_inst (instance_id, created_at)
         """,
     )
-    cur = conn.cursor()
-    try:
-        defaults = [
-            ("epcr_consumption", 0, 1),
-            ("restock_hq", 2, 1),
-            ("restock_bag", 2, 1),
-            ("disposal", 2, 1),
-        ]
-        for action_type, wcount, en in defaults:
-            cur.execute(
-                """
-                INSERT IGNORE INTO inventory_med_witness_rules (action_type, witness_count, enabled)
-                VALUES (%s, %s, %s)
-                """,
-                (action_type, wcount, en),
-            )
-        conn.commit()
-    finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-
     _alter_add_column(
         conn,
         "inventory_med_bag_instances",
@@ -298,6 +279,33 @@ def _ensure_med_bag_schema(conn) -> None:
         "entered_initial VARCHAR(16) NULL",
     ):
         _alter_add_column(conn, "inventory_med_bag_seal_events", col)
+
+
+def _seed_med_bag_witness_defaults(conn) -> None:
+    """EPCR / drug-bag style witness defaults — only for medical-industry tenants (PRD)."""
+    cur = conn.cursor()
+    try:
+        defaults = [
+            ("epcr_consumption", 0, 1),
+            ("restock_hq", 2, 1),
+            ("restock_bag", 2, 1),
+            ("disposal", 2, 1),
+        ]
+        for action_type, wcount, en in defaults:
+            cur.execute(
+                """
+                INSERT IGNORE INTO inventory_med_witness_rules (action_type, witness_count, enabled)
+                VALUES (%s, %s, %s)
+                """,
+                (action_type, wcount, en),
+            )
+        conn.commit()
+        print("[inventory_control] Seeded med bag witness defaults (medical industry)")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
 
 
 def _try_add_med_bag_parent_fk(conn) -> None:
@@ -932,6 +940,13 @@ def install():
         )
 
         _ensure_med_bag_schema(conn)
+        if tenant_matches_industry(load_tenant_industries_for_install(), "medical"):
+            _seed_med_bag_witness_defaults(conn)
+        else:
+            print(
+                "[inventory_control] Skipping med bag witness seed — "
+                "tenant industry profile does not include medical"
+            )
         _ensure_asset_extension_schema(conn)
         _ensure_default_holding_location(conn)
     finally:

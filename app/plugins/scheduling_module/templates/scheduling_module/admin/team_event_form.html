@@ -1,0 +1,112 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Team event (run sheet){% endblock %}
+{% block content %}
+<nav class="mb-2 small">
+  <a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a>
+  <span class="text-muted">/</span>
+  <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}">Week view</a>
+  <span class="text-muted">/</span>
+  <span>Team event</span>
+</nav>
+<h1 class="h4 mb-2">Team event → run sheet</h1>
+<p class="text-muted small mb-3">
+  Creates <strong>one</strong> Time Billing run sheet for everyone (e.g. training day), with <strong>one schedule shift per person</strong>
+  on the same date and job type. After you publish, each person gets a timesheet line; they enter <strong>actual</strong> start/end on the
+  run sheet in the <strong>employee portal</strong>, which updates their timesheet.
+</p>
+
+<form method="post" action="{{ url_for('internal_scheduling.admin_team_event_create') }}" class="card card-body shadow-sm border-0">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">{{ assignment_label|default('Client') }} <span class="text-danger">*</span></label>
+      <select name="client_id" class="form-select" required>
+        <option value="">Select…</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Site</label>
+      <select name="site_id" class="form-select">
+        <option value="">Any</option>
+        {% for st in sites %}
+        <option value="{{ st.id }}" data-client-id="{{ st.client_id }}">{{ st.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Job type <span class="text-danger">*</span></label>
+      <select name="job_type_id" class="form-select" required>
+        <option value="">Select…</option>
+        {% for jt in job_types %}
+        <option value="{{ jt.id }}">{{ jt.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Use your <em>Training</em> (or similar) job type so timesheets and reporting stay consistent.</div>
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Work date <span class="text-danger">*</span></label>
+      <input type="date" name="work_date" class="form-control" required value="{{ default_date }}" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Start <span class="text-danger">*</span></label>
+      <input type="time" name="scheduled_start" class="form-control" required value="{{ default_start }}" />
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">End <span class="text-danger">*</span></label>
+      <input type="time" name="scheduled_end" class="form-control" required value="{{ default_end }}" />
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Lead on run sheet</label>
+      <select name="lead_user_id" class="form-select">
+        <option value="">First selected staff member</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}">{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Staff on this event <span class="text-danger">*</span></label>
+      <select name="contractor_ids" class="form-select" multiple size="8" aria-describedby="staffHelp">
+        {% for c in contractors %}
+        <option value="{{ c.id }}">{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+      <div id="staffHelp" class="form-text">Hold <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> to select multiple (e.g. two trainers, one coordinator, twenty trainees).</div>
+    </div>
+    <div class="col-12">
+      <label class="form-label">Notes</label>
+      <textarea name="notes" class="form-control" rows="2" placeholder="Training day — venue, agenda, etc."></textarea>
+    </div>
+    {% if industry_visible('medical') %}
+    <div class="col-md-6">
+      <label class="form-label">Cura operational event ID</label>
+      <input type="text" name="cura_operational_event_id" class="form-control" inputmode="numeric" pattern="[0-9]*" placeholder="Optional — links run sheet to Cura ops event" />
+      <div class="form-text">When set, ties this run sheet to Medical Records / Cura planning.</div>
+    </div>
+    {% endif %}
+    <div class="col-md-6 d-flex flex-column justify-content-end">
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="publish_runsheet" id="publish_runsheet" value="1" checked>
+        <label class="form-check-label" for="publish_runsheet">Publish run sheet now (creates timesheet rows from scheduled times)</label>
+      </div>
+      <label class="form-label small text-muted mb-0">Schedule shift visibility</label>
+      <select name="shift_status" class="form-select form-select-sm">
+        <option value="published" selected>Published (visible on team schedule)</option>
+        <option value="draft">Draft (planning only until you publish shifts)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2 mt-4">
+    <button type="submit" class="btn btn-primary"><i class="bi bi-people-fill me-1"></i>Create event</button>
+    <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-outline-secondary">Cancel</a>
+    {% if runsheets_admin_url %}
+    <a href="{{ runsheets_admin_url }}" class="btn btn-outline-secondary ms-auto" target="_blank" rel="noopener">Open run sheets (admin)</a>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}

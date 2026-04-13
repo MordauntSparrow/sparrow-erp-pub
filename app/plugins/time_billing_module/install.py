@@ -345,6 +345,15 @@ def install(seed_demo: bool = False):
                 _run_sql_file(conn, demo_path)
                 _record_applied(conn, demo_file)
 
+        try:
+            from app.plugins.time_billing_module.industry_seeds import (
+                apply_time_billing_industry_seed_packs,
+            )
+
+            apply_time_billing_industry_seed_packs(conn)
+        except Exception as e:
+            print(f"[WARN] time_billing industry seed packs: {e}")
+
         _ensure_job_types_colour_hex(conn)
     finally:
         conn.close()
@@ -362,6 +371,15 @@ def upgrade():
             if not _already_applied(conn, fname):
                 _run_sql_file_then_hooks(conn, fname)
                 _record_applied(conn, fname)
+
+        try:
+            from app.plugins.time_billing_module.industry_seeds import (
+                apply_time_billing_industry_seed_packs,
+            )
+
+            apply_time_billing_industry_seed_packs(conn)
+        except Exception as e:
+            print(f"[WARN] time_billing industry seed packs: {e}")
 
         _ensure_job_types_colour_hex(conn)
     finally:

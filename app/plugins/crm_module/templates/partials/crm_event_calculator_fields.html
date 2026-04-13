@@ -1,0 +1,56 @@
+{# Shared: public calculator + staff intake. fv = form values dict (optional). #}
+{% set fv = fv if fv is defined else {} %}
+<div class="col-12">
+  <h3 class="h6 text-uppercase text-muted mb-2">Event profile <span class="fw-normal text-muted small">(Purple Guide–style risk factors)</span></h3>
+</div>
+<div class="col-md-6">
+  <label class="form-label" for="activity_risk">Activity / programme risk</label>
+  <select class="form-select" id="activity_risk" name="activity_risk">
+    {% set ar = fv.get('activity_risk', 'low') %}
+    <option value="low" {% if ar == 'low' %}selected{% endif %}>Low — seated, exhibition, low-energy</option>
+    <option value="moderate" {% if ar == 'moderate' %}selected{% endif %}>Moderate — general public event</option>
+    <option value="significant" {% if ar == 'significant' %}selected{% endif %}>Significant — sport, water, stages, machinery</option>
+    <option value="high" {% if ar == 'high' %}selected{% endif %}>High — motors, combat sport, major structures</option>
+  </select>
+</div>
+<div class="col-md-6">
+  <label class="form-label" for="duration_span">Programme length (tiering)</label>
+  <select class="form-select" id="duration_span" name="duration_span">
+    {% set ds = fv.get('duration_span', '') %}
+    <option value="" {% if not ds %}selected{% endif %}>Use hours on site (auto)</option>
+    <option value="few_hours" {% if ds == 'few_hours' %}selected{% endif %}>Few hours or less</option>
+    <option value="single_day" {% if ds == 'single_day' %}selected{% endif %}>Single day (no overnight)</option>
+    <option value="multi_day" {% if ds == 'multi_day' %}selected{% endif %}>Multi-day / overnight / camping</option>
+  </select>
+</div>
+<div class="col-md-6">
+  <label class="form-label" for="alcohol_level">Alcohol</label>
+  <select class="form-select" id="alcohol_level" name="alcohol_level">
+    {% set al = fv.get('alcohol_level', '') %}
+    <option value="" {% if not al %}selected{% endif %}>Match checkboxes below (auto)</option>
+    <option value="none" {% if al == 'none' %}selected{% endif %}>None / minimal</option>
+    <option value="social" {% if al == 'social' %}selected{% endif %}>Social drinking</option>
+    <option value="likely" {% if al == 'likely' %}selected{% endif %}>Intoxication likely</option>
+    <option value="expected" {% if al == 'expected' %}selected{% endif %}>Intoxication expected</option>
+  </select>
+</div>
+<div class="col-md-6">
+  <label class="form-label" for="drug_risk">Recreational drugs (audience risk)</label>
+  <select class="form-select" id="drug_risk" name="drug_risk">
+    {% set dr = fv.get('drug_risk', 'none') %}
+    <option value="none" {% if dr == 'none' %}selected{% endif %}>None / minimal</option>
+    <option value="isolated" {% if dr == 'isolated' %}selected{% endif %}>Isolated use possible</option>
+    <option value="likely" {% if dr == 'likely' %}selected{% endif %}>Use likely</option>
+    <option value="expected" {% if dr == 'expected' %}selected{% endif %}>Use expected</option>
+  </select>
+</div>
+<div class="col-md-6">
+  <label class="form-label" for="hospital_referrals">Expected hospital transfers</label>
+  <select class="form-select" id="hospital_referrals" name="hospital_referrals">
+    {% set hr = fv.get('hospital_referrals', '') %}
+    <option value="" {% if not hr %}selected{% endif %}>Auto from crowd size</option>
+    <option value="unlikely" {% if hr == 'unlikely' %}selected{% endif %}>Unlikely</option>
+    <option value="possible" {% if hr == 'possible' %}selected{% endif %}>Possible</option>
+    <option value="likely" {% if hr == 'likely' %}selected{% endif %}>Likely — plan ambulances &amp; CQC-registered providers</option>
+  </select>
+</div>

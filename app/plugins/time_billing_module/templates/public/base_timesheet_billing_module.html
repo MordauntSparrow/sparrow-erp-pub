@@ -255,8 +255,8 @@
       </a>
       {% endif %}
       {% if config.site_settings['branding'] == 'logo' and config.site_settings['logo_path'] %}
-          <a class="navbar-brand mb-0 text-truncate" href="/time-billing/">
-              <img src="{{ url_for('static', filename=config.site_settings['logo_path']) }}" alt="Logo" height="40">
+          <a class="navbar-brand mb-0 text-truncate d-flex align-items-center" href="/time-billing/">
+              <img src="{{ url_for('static', filename=config.site_settings['logo_path']) }}" alt="Logo" style="{{ navbar_logo_inline_style(config.site_settings) }}">
           </a>
       {% else %}
           <a class="navbar-brand mb-0 text-truncate" href="/time-billing/">

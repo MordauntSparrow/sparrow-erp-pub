@@ -13,7 +13,7 @@
     <div class="container">
       <a class="navbar-brand d-flex align-items-center gap-2" href="/">
         {% if _site.get('branding') == 'logo' and _site.get('logo_path') %}
-          <img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="{{ _site.get('company_name') or 'Logo' }}" height="28" style="max-height:28px">
+          <img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="{{ _site.get('company_name') or 'Logo' }}" style="{{ navbar_logo_inline_style(_site) }}">
         {% endif %}
         <span class="text-truncate" style="max-width: 220px;">{{ _site.get('company_name') or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}</span>
       </a>
@@ -24,7 +24,7 @@
     <div class="card">
       <div class="card-body">
         <h1 class="h5 card-title">Shifts</h1>
-        <p class="text-secondary small">Shifts can be created from here, from Ventus sign-on, or from published runsheets. Use filters and table below.</p>
+        <p class="text-secondary small">Shifts can be created from here{% if industry_visible is defined and industry_visible('medical') %}, from Ventus sign-on{% endif %}, or from published runsheets. Use filters and table below.</p>
         <div class="row g-2 mb-3">
           <div class="col-md-2">
             <label class="form-label small">From</label>

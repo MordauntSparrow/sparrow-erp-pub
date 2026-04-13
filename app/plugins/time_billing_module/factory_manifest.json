@@ -9,7 +9,9 @@
   "dashboard_category": "Time & pay",
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/time_billing_module/icon.png",
   "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Ftime_billing_module%2Ftime_billing_module_v0.0.4.zip/raw?ref=main",
-  "dependencies": [],
+  "dependencies": [
+    "hr_module"
+  ],
   "settings": {
     "week_start_day": { "value": "Monday", "editable": true },
     "date_format": { "value": "DD/MM/YYYY", "editable": true },

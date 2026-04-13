@@ -3,8 +3,10 @@ CRM module install/upgrade: CRM core, quotes, activities, medical event planner 
 Run from repo root: python app/plugins/crm_module/install.py install
 Or: python app/plugins/crm_module/install.py upgrade
 """
+import json
 import sys
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve()
 PLUGIN_DIR = HERE.parent
@@ -16,6 +18,54 @@ for p in (str(PROJECT_ROOT), str(APP_ROOT), str(PLUGIN_DIR)):
         sys.path.insert(0, p)
 
 from app.objects import get_db_connection  # noqa: E402
+from app.organization_profile import industries_from_manifest, tenant_matches_industry  # noqa: E402
+
+# Full medical plan PDF fields (SAG-style templates); added via upgrade on existing DBs.
+_CRM_EVENT_PLAN_EXTRA_FIELDS = (
+    "plan_pdf_version VARCHAR(32) DEFAULT NULL",
+    "plan_pdf_status VARCHAR(128) DEFAULT NULL",
+    "plan_written_by VARCHAR(255) DEFAULT NULL",
+    "plan_distribution TEXT",
+    "plan_document_release_date DATE DEFAULT NULL",
+    "plan_purpose TEXT",
+    "event_organiser VARCHAR(255) DEFAULT NULL",
+    "event_content_summary TEXT",
+    "purple_guide_tier VARCHAR(64) DEFAULT NULL",
+    "operational_timings TEXT",
+    "access_egress_text TEXT",
+    "rendezvous_text TEXT",
+    "risk_register_json JSON DEFAULT NULL",
+    "health_safety_work_text TEXT",
+    "staff_transport_text TEXT",
+    "command_control_text TEXT",
+    "uniform_ppe_text TEXT",
+    "privacy_ipc_text TEXT",
+    "incident_reporting_text TEXT",
+    "equipment_detail_text TEXT",
+    "major_incident_text TEXT",
+    "welfare_text TEXT",
+    "safeguarding_text TEXT",
+    "ambulance_trust_text TEXT",
+    "other_event_specific_text TEXT",
+    "plan_pdf_revision INT NOT NULL DEFAULT 0",
+    "attendance_by_day_text TEXT",
+)
+
+
+def _core_manifest_path() -> Path:
+    return APP_ROOT / "config" / "manifest.json"
+
+
+def _load_core_manifest() -> dict[str, Any]:
+    p = _core_manifest_path()
+    if not p.is_file():
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _create_table(conn, name: str, columns_sql: str) -> None:
@@ -57,6 +107,13 @@ def _alter_add_column(conn, table: str, col_def: str) -> None:
 
 
 def _seed_event_plan_questions(conn) -> None:
+    industries = industries_from_manifest(_load_core_manifest())
+    if not tenant_matches_industry(industries, "medical"):
+        print(
+            "[crm_module] Skipping event plan checklist seeds "
+            "(Medical not in tenant industries — Core manifest organization_profile.industries)."
+        )
+        return
     cur = conn.cursor()
     try:
         cur.execute("SELECT COUNT(*) FROM crm_event_plan_questions")
@@ -123,6 +180,23 @@ def _migrate_crm_extensions(conn) -> None:
         "crm_event_plans",
         "clinical_handover_json JSON DEFAULT NULL",
     )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "staff_roster_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "event_map_path VARCHAR(512) DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "event_map_caption VARCHAR(512) DEFAULT NULL",
+    )
+    for _coldef in _CRM_EVENT_PLAN_EXTRA_FIELDS:
+        _alter_add_column(conn, "crm_event_plans", _coldef)
     _alter_add_column(conn, "crm_opportunities", "lead_meta_json JSON NULL")
     _alter_add_column(conn, "crm_quote_rules", "conditions_json JSON NULL")
     _alter_add_column(conn, "crm_quotes", "quote_group_id INT NULL")
@@ -427,6 +501,36 @@ def install():
             hospitals_notes TEXT,
             hospitals_json JSON DEFAULT NULL,
             clinical_handover_json JSON DEFAULT NULL,
+            staff_roster_json JSON DEFAULT NULL,
+            event_map_path VARCHAR(512) DEFAULT NULL,
+            event_map_caption VARCHAR(512) DEFAULT NULL,
+            plan_pdf_version VARCHAR(32) DEFAULT NULL,
+            plan_pdf_status VARCHAR(128) DEFAULT NULL,
+            plan_written_by VARCHAR(255) DEFAULT NULL,
+            plan_distribution TEXT,
+            plan_document_release_date DATE DEFAULT NULL,
+            plan_purpose TEXT,
+            event_organiser VARCHAR(255) DEFAULT NULL,
+            event_content_summary TEXT,
+            purple_guide_tier VARCHAR(64) DEFAULT NULL,
+            operational_timings TEXT,
+            access_egress_text TEXT,
+            rendezvous_text TEXT,
+            risk_register_json JSON DEFAULT NULL,
+            health_safety_work_text TEXT,
+            staff_transport_text TEXT,
+            command_control_text TEXT,
+            uniform_ppe_text TEXT,
+            privacy_ipc_text TEXT,
+            incident_reporting_text TEXT,
+            equipment_detail_text TEXT,
+            major_incident_text TEXT,
+            welfare_text TEXT,
+            safeguarding_text TEXT,
+            ambulance_trust_text TEXT,
+            other_event_specific_text TEXT,
+            plan_pdf_revision INT NOT NULL DEFAULT 0,
+            attendance_by_day_text TEXT,
             resources_medics VARCHAR(255) DEFAULT NULL,
             resources_vehicles TEXT,
             resources_comms TEXT,
@@ -493,6 +597,50 @@ def install():
             KEY idx_crm_ephh_plan (plan_id, created_at),
             CONSTRAINT fk_crm_ephh_plan
                 FOREIGN KEY (plan_id) REFERENCES crm_event_plans(id) ON DELETE CASCADE
+            """,
+        )
+        _create_table(
+            conn,
+            "crm_event_plan_equipment_assets",
+            """
+            plan_id INT NOT NULL,
+            equipment_asset_id BIGINT NOT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (plan_id, equipment_asset_id),
+            KEY idx_crm_epea_plan (plan_id, sort_order),
+            CONSTRAINT fk_crm_epea_plan
+                FOREIGN KEY (plan_id) REFERENCES crm_event_plans(id) ON DELETE CASCADE
+            """,
+        )
+        _create_table(
+            conn,
+            "crm_event_plan_diagram_templates",
+            """
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            image_path VARCHAR(512) NOT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_crm_epdt_sort (sort_order, id)
+            """,
+        )
+        _create_table(
+            conn,
+            "crm_event_plan_diagrams",
+            """
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            plan_id INT NOT NULL,
+            template_id INT NULL,
+            plan_image_path VARCHAR(512) NULL,
+            caption VARCHAR(512) NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            KEY idx_crm_epdg_plan (plan_id, sort_order),
+            CONSTRAINT fk_crm_epdg_plan
+                FOREIGN KEY (plan_id) REFERENCES crm_event_plans(id) ON DELETE CASCADE,
+            CONSTRAINT fk_crm_epdg_tpl
+                FOREIGN KEY (template_id) REFERENCES crm_event_plan_diagram_templates(id) ON DELETE SET NULL
             """,
         )
 

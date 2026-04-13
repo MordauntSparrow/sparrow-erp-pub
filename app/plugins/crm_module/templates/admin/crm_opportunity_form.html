@@ -53,11 +53,15 @@
   {% set gq = lead_meta.get('guide_questions') or {} %}
   {% set inp = r.get('inputs') or {} %}
   <div class="crm-opp-purple-guide p-3 p-md-4 mb-3">
-    <p class="crm-opp-pg-pill mb-1">Same questions as the public purple guide</p>
+    <p class="crm-opp-pg-pill mb-1">{% if industry_visible('medical') %}Same questions as the public event risk guide{% else %}From public event enquiry{% endif %}</p>
     <h2 class="h5 fw-bold text-white mb-3"><i class="bi bi-signpost-2 me-2"></i>Event risk guide — full breakdown</h2>
     <p class="small text-white-50 mb-3">
-      Early pipeline view: risk-led hints from intake / calculator — not clinical advice.
+      Early pipeline view: risk-led hints from intake / calculator — not operational advice.
+      {% if industry_visible('medical') %}
       Binding quotes normally follow medical needs assessment, agreed scope, and event medical plan documentation.
+      {% else %}
+      Binding quotes follow agreed scope and your quote rules; figures here are indicative only.
+      {% endif %}
     </p>
 
     <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
@@ -109,19 +113,29 @@
           <h3 class="text-uppercase text-muted fw-bold mb-2">Staffing &amp; resource guide</h3>
           {% set sb = r.get('staffing_breakdown') or {} %}
           {% set tot = sb.get('totals') or {} %}
-          <p class="small text-muted mb-3">{{ sb.get('intro') or 'Indicative headcount and skill mix for quoting — not clinical advice or a deployment order.' }}</p>
+          <p class="small text-muted mb-3">{{ sb.get('intro') or ('Indicative headcount and skill mix for quoting — not clinical advice or a deployment order.' if industry_visible('medical') else 'Indicative headcount and skill mix for quoting — not a deployment order.') }}</p>
           {% if tot.get('on_foot_clinical') is not none %}
           <div class="crm-opp-pg-totals rounded-3 p-3 mb-3">
             <h4 class="h6 text-uppercase fw-bold mb-2" style="color:#4c1d95;">Headcount summary</h4>
             <ul class="list-unstyled small mb-2">
               <li class="mb-1">
-                <strong>{{ tot.on_foot_clinical }}</strong> on-foot clinical post(s)
+                <strong>{{ tot.on_foot_clinical }}</strong>
+                {% if industry_visible('medical') %}
+                on-foot clinical post(s)
                 <span class="text-muted">(table below — does <strong>not</strong> include vehicle crew).</span>
+                {% else %}
+                on-site role(s)
+                <span class="text-muted">(table below — does <strong>not</strong> include vehicle crew).</span>
+                {% endif %}
               </li>
               <li class="mb-1">
                 {% if tot.response_vehicles %}
                 <strong>{{ tot.response_vehicles }}</strong> response vehicle(s), typical <strong>~{{ tot.vehicle_crew_positions_hint }}</strong> crew position(s)
+                {% if industry_visible('medical') %}
                 <span class="text-muted">(driver + clinician / dual-trained — <strong>separate</strong> from the clinical post count above).</span>
+                {% else %}
+                <span class="text-muted">(<strong>separate</strong> from the on-site role count above).</span>
+                {% endif %}
                 {% else %}
                 <span class="text-muted">No vehicles in this guide snapshot (crew line not applied).</span>
                 {% endif %}
@@ -129,7 +143,13 @@
             </ul>
             <p class="small fw-semibold mb-1">
               Indicative total roles if you plan both: <span class="text-primary fs-6">{{ tot.combined_planning_headcount }}</span>
-              <span class="fw-normal text-muted">= {{ tot.on_foot_clinical }} clinical + ~{{ tot.vehicle_crew_positions_hint }} vehicle crew</span>
+              <span class="fw-normal text-muted">
+                {% if industry_visible('medical') %}
+                = {{ tot.on_foot_clinical }} clinical + ~{{ tot.vehicle_crew_positions_hint }} vehicle crew
+                {% else %}
+                = {{ tot.on_foot_clinical }} on-site + ~{{ tot.vehicle_crew_positions_hint }} vehicle crew
+                {% endif %}
+              </span>
             </p>
             {% if tot.clarification %}
             <p class="small text-muted mb-0"><i class="bi bi-info-circle me-1"></i>{{ tot.clarification }}</p>
@@ -165,7 +185,9 @@
           {% set vp = sb.vehicle_package %}
           <div class="border-top pt-3 mt-2">
             <h4 class="h6 text-uppercase text-muted fw-bold mb-2">Vehicle package</h4>
-            <p class="small mb-1"><strong>{{ vp.vehicles }}</strong> response vehicle(s); typical <strong>~{{ vp.crew_headcount_hint }}</strong> crew positions (driver + clinician / dual-trained) before rota overlap.</p>
+            <p class="small mb-1"><strong>{{ vp.vehicles }}</strong> response vehicle(s); typical <strong>~{{ vp.crew_headcount_hint }}</strong> crew positions
+              {% if industry_visible('medical') %}(driver + clinician / dual-trained){% else %}(e.g. driver + specialist){% endif %}
+              before rota overlap.</p>
             <p class="small text-muted mb-1">{{ vp.grade_hint }}</p>
             <p class="small text-muted mb-0">{{ vp.notes }}</p>
           </div>
@@ -180,7 +202,13 @@
             </ul>
           </div>
           {% endif %}
-          <p class="small text-muted mt-3 mb-0">Refine in the medical event plan and quote line items; map grades to your job types for bill rates (customer price) vs wage card (internal cost).</p>
+          <p class="small text-muted mt-3 mb-0">
+            {% if industry_visible('medical') %}
+            Refine in the medical event plan and quote line items; map grades to your job types for bill rates (customer price) vs wage card (internal cost).
+            {% else %}
+            Refine in quote line items and notes; map roles to your job types for bill rates (customer price) vs wage card (internal cost).
+            {% endif %}
+          </p>
         </div>
       </div>
     </div>
@@ -211,7 +239,8 @@
       <p class="small text-muted mb-2">
         Uses indicative headcounts from the guide × hours × <strong>£/h from your wage rate card</strong>
         {% if guide_cost_estimate.wage_card_name %}({{ guide_cost_estimate.wage_card_name }}){% endif %}.
-        This is <strong>not</strong> the customer quote: quote totals still come from <strong>quote rule sets</strong> (bill rates, per-head, VAT, etc.), normally after medical needs assessment and agreed scope.
+        This is <strong>not</strong> the customer quote: quote totals still come from <strong>quote rule sets</strong> (bill rates, per-head, VAT, etc.)
+        {% if industry_visible('medical') %}, normally after medical needs assessment and agreed scope{% else %}, once scope is agreed{% endif %}.
         {% if tb_wage_cards_url %}<a href="{{ tb_wage_cards_url }}" class="text-decoration-none">Wage cards</a>{% endif %}
         · <a href="{{ url_for('crm_module.guide_wage_job_map') }}" class="text-decoration-none">Guide ↔ job type map</a>.
         Optional: <code class="small">SPARROW_CRM_GUIDE_WAGE_CARD_ID</code> for which card to use.
@@ -240,7 +269,7 @@
     {% endif %}
   </div>
   {% endif %}
-  {% if opportunity and linked_event_plans %}
+  {% if opportunity and linked_event_plans and industry_visible('medical') %}
   <div class="alert alert-light border small mb-3">
     <strong>Medical event plans</strong> for this opportunity (or quotes on it):
     {% for ep in linked_event_plans %}
@@ -289,7 +318,7 @@
           <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_list') }}">Cancel</a>
         </div>
       </form>
-      {% if opportunity %}
+      {% if opportunity and industry_visible('medical') %}
       <div class="card-footer bg-light border-0 pt-0">
         <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', opportunity_id=opportunity.id) }}">Create event plan from this opportunity</a>
       </div>

@@ -92,8 +92,6 @@
     }
 
     .brand-logo {
-      max-height: 72px;
-      max-width: 220px;
       object-fit: contain;
       border-radius: 10px;
     }
@@ -249,8 +247,8 @@
     <div class="login-card">
       <div class="brand-wrap">
         {% if config.site_settings.branding == 'logo' and config.site_settings.logo_path %}
-        <img src="{{ url_for('static', filename=config.site_settings['logo_path']) }}"
-          alt="{{ config.site_settings.company_name }}" class="brand-logo">
+        <img src="{{ url_for('static', filename=normalize_manifest_static_path(config.site_settings['logo_path'])) }}"
+          alt="{{ config.site_settings.company_name }}" class="brand-logo" style="{{ auth_logo_inline_style(config.site_settings) }}">
         {% else %}
         <h1 class="brand-title">{{ config.site_settings.company_name or 'Sparrow ERP' }}</h1>
         {% endif %}

@@ -8,6 +8,19 @@
   </div>
 </div>
 
+{% with sling_msgs = get_flashed_messages(with_categories=true, category_filter=['sling_success','sling_warning']) %}
+  {% if sling_msgs %}
+    <div class="mb-3" aria-live="polite">
+      {% for category, message in sling_msgs %}
+      <div class="alert alert-{% if category == 'sling_success' %}success{% else %}warning{% endif %} alert-dismissible fade show" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-mdb-dismiss="alert" aria-label="Close"></button>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
 <div class="row g-3">
   <div class="col-12 col-lg-6">
     <div class="card shadow-sm border-0 h-100">
@@ -23,7 +36,7 @@
           </div>
         {% endif %}
 
-        <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_credentials') }}">
+        <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_credentials') }}" class="mb-3">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
           <label class="form-label">Sling email</label>
           <input type="email" name="email" class="form-control form-control-sm mb-3" required value="{{ stored_email or '' }}" placeholder="you@example.com" />
@@ -31,10 +44,28 @@
           <label class="form-label">Sling password</label>
           <input type="password" name="password" class="form-control form-control-sm mb-3" required />
 
+          <label class="form-label">Sling organisation ID <span class="text-muted fw-normal">(optional)</span></label>
+          <input type="text" name="org_id" class="form-control form-control-sm mb-2" inputmode="numeric" pattern="[0-9]*" value="{{ stored_org_id if stored_org_id is not none else '' }}" placeholder="e.g. 12345" />
+          <p class="small text-muted mb-3">
+            Use when your account belongs to more than one organisation so login targets the right workspace.
+            If login returns <strong>400</strong> with a message about <strong>captcha</strong>, the API expects
+            <code>captchaResponse</code> (see Sling’s <a href="https://api.getsling.com/#/accounts/post_account_login" target="_blank" rel="noopener">account login</a> docs);
+            server-side sync can supply a token via env <code>SLING_LOGIN_CAPTCHA_RESPONSE</code> or app config <code>SLING_LOGIN_CAPTCHA_RESPONSE</code> if you have a supported flow.
+          </p>
+
           <button type="submit" class="btn btn-primary btn-sm w-100">
             <i class="bi bi-save me-1"></i> Save credentials
           </button>
         </form>
+
+        {% if credentials_saved %}
+        <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_test_connection') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-outline-secondary btn-sm w-100">
+            <i class="bi bi-plug me-1"></i> Test connection (uses saved credentials)
+          </button>
+        </form>
+        {% endif %}
 
         <p class="text-muted small mt-3 mb-0">
           Credentials are stored encrypted on the server.
@@ -46,7 +77,7 @@
   <div class="col-12 col-lg-6">
     <div class="card shadow-sm border-0 h-100">
       <div class="card-body">
-        <h5 class="card-title mb-2">Sync defaults</h5>
+        <h5 class="card-title mb-2">Sync defaults &amp; filters</h5>
 
         <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_save_settings') }}">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -59,6 +90,18 @@
               </option>
             {% endfor %}
           </select>
+
+          <label class="form-label">Import filter</label>
+          <select name="import_filter_mode" class="form-select form-select-sm mb-2">
+            <option value="all" {% if import_filter_mode == 'all' %}selected{% endif %}>Import all shifts</option>
+            <option value="include" {% if import_filter_mode == 'include' %}selected{% endif %}>Import only when position/location contains…</option>
+            <option value="exclude" {% if import_filter_mode == 'exclude' %}selected{% endif %}>Import everything except when position/location contains…</option>
+          </select>
+          <label class="form-label small text-muted">Patterns (one per line, case-insensitive substring)</label>
+          <textarea name="import_filter_patterns" class="form-control form-control-sm mb-2" rows="3" placeholder="e.g. residential clean&#10;deep clean">{{ import_filter_patterns_raw }}</textarea>
+          <p class="small text-muted mb-3">
+            Matching uses Sling <strong>position</strong> and <strong>location</strong> names together. Example: <em>Include</em> with <code>residential</code> only pulls shifts whose position/location text contains that word; <em>Exclude</em> with <code>residential clean</code> drops those shifts.
+          </p>
 
           <div class="alert alert-info py-2 small mb-3" role="alert">
             <strong>Client import:</strong> on Sling free plan we don’t get structured `location/client`,
@@ -84,41 +127,231 @@
 
 <div class="card shadow-sm border-0 mt-3">
   <div class="card-body">
-    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-      <h5 class="card-title mb-0">Run sync</h5>
+    <div class="d-flex align-items-center justify-content-between gap-2 mb-2 flex-wrap">
+      <h5 class="card-title mb-0">Discover &amp; run sync</h5>
     </div>
+
+    <div class="row g-3">
+      <div class="col-12 col-md-4">
+        <label class="form-label">Date from</label>
+        <input type="date" id="slingDateFrom" class="form-control form-control-sm" required value="{{ date_from }}" />
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label">Date to</label>
+        <input type="date" id="slingDateTo" class="form-control form-control-sm" required value="{{ date_to }}" />
+      </div>
+      <div class="col-12 col-md-4 d-flex align-items-end gap-2 flex-wrap">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btnSlingDiscover" {% if not credentials_saved %}disabled title="Save credentials first"{% endif %}>
+          <i class="bi bi-search me-1"></i> Discover shifts
+        </button>
+      </div>
+    </div>
+
+    <div id="slingDiscoverStatus" class="small text-muted mt-2 d-none"></div>
+    <div id="slingDiscoverErr" class="alert alert-warning py-2 small mt-2 d-none"></div>
+
+    <div class="table-responsive mt-3 d-none" id="slingDiscoverWrap">
+      <table class="table table-sm table-bordered align-middle" id="slingDiscoverTbl">
+        <thead class="table-light">
+          <tr>
+            <th>Event</th>
+            <th>Contractor</th>
+            <th>When</th>
+            <th>Position / location</th>
+            <th>ERP job type</th>
+            <th>Import?</th>
+            <th>Map position</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <hr class="my-4">
 
     <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_run') }}">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-      <div class="row g-3">
-        <div class="col-12 col-md-6">
-          <label class="form-label">Date from</label>
-          <input type="date" name="date_from" class="form-control form-control-sm" required value="{{ date_from }}" />
-        </div>
-        <div class="col-12 col-md-6">
-          <label class="form-label">Date to</label>
-          <input type="date" name="date_to" class="form-control form-control-sm" required value="{{ date_to }}" />
-        </div>
-      </div>
+      <input type="hidden" name="date_from" id="syncDateFromInp" value="{{ date_from }}" />
+      <input type="hidden" name="date_to" id="syncDateToInp" value="{{ date_to }}" />
 
-      <div class="form-check mt-3">
+      <div class="form-check mt-2">
         <input class="form-check-input" type="checkbox" name="dry_run" id="slingDryRun" value="1">
         <label class="form-check-label" for="slingDryRun">
           Dry run (no database changes)
         </label>
       </div>
 
-      <button type="submit" class="btn btn-primary btn-sm mt-3 w-100">
+      <button type="submit" class="btn btn-primary btn-sm mt-3" id="btnSlingSyncSubmit">
         <i class="bi bi-arrow-repeat me-1"></i> Sync from Sling
       </button>
 
       <p class="text-muted small mt-3 mb-0">
-        This sync creates/updates `schedule_shifts` as <strong>published</strong> so contractors can clock-in/out in ERP.
+        This sync creates/updates <code>schedule_shifts</code> as <strong>published</strong> so contractors can clock-in/out in ERP.
+        Use <strong>Discover</strong> first to see what Sling returns and tune filters/mappings.
       </p>
     </form>
   </div>
 </div>
 
-{# no client/site mapping UI on Sling free plan #}
-{% endblock %}
+<div class="card shadow-sm border-0 mt-3">
+  <div class="card-body">
+    <h5 class="card-title mb-2">Recent sync runs &amp; revert</h5>
+    <p class="text-muted small mb-3">
+      Every <strong>real</strong> sync (not dry run) is recorded here.
+      <strong>Revert</strong> undoes that run: removes shifts it <em>created</em>, restores previous data for shifts it <em>updated</em>,
+      and restores <code>draft</code>/<code>published</code> status for shifts it <em>cancelled</em> via “cancel missing”.
+      Revert is blocked if anyone has clock-in or clock-out on an affected shift.
+    </p>
+    {% if recent_runs %}
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Run</th>
+            <th>Started</th>
+            <th>Date range</th>
+            <th class="text-end">Created</th>
+            <th class="text-end">Updated</th>
+            <th class="text-end">Cancelled</th>
+            <th>Actor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in recent_runs %}
+          <tr>
+            <td class="fw-semibold">#{{ r.id }}</td>
+            <td class="small text-nowrap">{{ r.started_at }}{% if not r.finished_at %} <span class="badge bg-secondary">unfinished</span>{% endif %}</td>
+            <td class="small">{{ r.date_from }} → {{ r.date_to }}</td>
+            <td class="text-end">{{ r.created_n }}</td>
+            <td class="text-end">{{ r.updated_n }}</td>
+            <td class="text-end">{{ r.cancelled_n }}</td>
+            <td class="small">{{ r.actor_username or '—' }}</td>
+            <td class="text-end text-nowrap">
+              {% if r.reverted_at %}
+                <span class="badge bg-secondary">Reverted {{ r.reverted_at }}</span>
+              {% elif r.finished_at %}
+                <form method="post" action="{{ url_for('internal_scheduling.admin_sling_sync_revert', run_id=r.id) }}" class="d-inline"
+                      onsubmit="return confirm('Revert sync run #{{ r.id }}? This reverses creates, updates, and cancel-missing actions from that run only.');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Revert</button>
+                </form>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">No sync history yet (run a real sync after upgrading the scheduling module).</p>
+    {% endif %}
+  </div>
+</div>
 
+<script>
+(function () {
+  const discoverUrl = {{ discover_url|tojson }};
+  const jobTypes = [
+    {% for jt in job_types %}
+    { id: {{ jt.id|int }}, name: {{ jt.name|tojson }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  const df = document.getElementById('slingDateFrom');
+  const dt = document.getElementById('slingDateTo');
+  const sfi = document.getElementById('syncDateFromInp');
+  const sti = document.getElementById('syncDateToInp');
+  function syncHiddenDates() {
+    if (df && sfi) sfi.value = df.value;
+    if (dt && sti) sti.value = dt.value;
+  }
+  if (df) df.addEventListener('change', syncHiddenDates);
+  if (dt) dt.addEventListener('change', syncHiddenDates);
+  syncHiddenDates();
+
+  const btn = document.getElementById('btnSlingDiscover');
+  const wrap = document.getElementById('slingDiscoverWrap');
+  const tbody = document.querySelector('#slingDiscoverTbl tbody');
+  const st = document.getElementById('slingDiscoverStatus');
+  const er = document.getElementById('slingDiscoverErr');
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function jobTypeSelect(selectedId, formId) {
+    let h = '<select name="job_type_id" class="form-select form-select-sm" form="' + formId + '" required>';
+    h += '<option value="">—</option>';
+    jobTypes.forEach(function (jt) {
+      h += '<option value="' + jt.id + '"' + (String(jt.id) === String(selectedId || '') ? ' selected' : '') + '>' + esc(jt.name) + '</option>';
+    });
+    h += '</select>';
+    return h;
+  }
+
+  if (btn) {
+    btn.addEventListener('click', async function () {
+      er.classList.add('d-none');
+      er.textContent = '';
+      st.classList.remove('d-none');
+      st.textContent = 'Loading from Sling…';
+      wrap.classList.add('d-none');
+      tbody.innerHTML = '';
+      const body = new FormData();
+      body.set('date_from', df.value);
+      body.set('date_to', dt.value);
+      try {
+        const r = await fetch(discoverUrl, { method: 'POST', body: body });
+        const j = await r.json();
+        if (!r.ok || !j.ok) {
+          throw new Error(j.error || ('HTTP ' + r.status));
+        }
+        st.textContent = 'Found ' + (j.shifts || []).length + ' shift(s). Org id: ' + (j.org_id != null ? j.org_id : '—') +
+          '. Filter: ' + String(j.filter_mode || '') + (j.filter_patterns && j.filter_patterns.length ? ' (' + j.filter_patterns.length + ' pattern(s))' : '');
+        (j.shifts || []).forEach(function (row, idx) {
+          const fid = 'mapForm' + idx;
+          const pos = [row.sling_position_name || '—', row.sling_location_name || '—'].join(' / ');
+          const imp = row.would_import ? '<span class="text-success">Yes</span>' : '<span class="text-warning">No</span>';
+          const reason = row.skip_reason ? '<div class="small text-muted">' + esc(row.skip_reason) + '</div>' : '';
+          const tr = document.createElement('tr');
+          const eff = row.effective_job_type_id;
+          tr.innerHTML =
+            '<td>' + esc(row.event_id) + '</td>' +
+            '<td><div class="small">' + esc(row.contractor_email) + '</div><div class="small text-muted">id ' + esc(row.contractor_id) + '</div></td>' +
+            '<td class="small text-nowrap">' + esc(row.work_date) + '<br>' + esc(row.dtstart) + '</td>' +
+            '<td class="small">' + esc(pos) +
+              (row.sling_position_id ? '<div class="text-muted" style="font-size:0.7rem">pos id: ' + esc(row.sling_position_id) + '</div>' : '') +
+            '</td>' +
+            '<td class="small">' + (eff ? esc(eff) : '—') + '</td>' +
+            '<td class="small">' + imp + reason + '</td>' +
+            '<td class="small">' +
+              (row.sling_position_id
+                ? '<form method="post" action="{{ url_for("internal_scheduling.admin_sling_sync_save_position_mapping") }}" id="' + fid + '" class="d-flex flex-column gap-1">' +
+                  '<input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">' +
+                  '<input type="hidden" name="sling_position_id" value="' + String(row.sling_position_id).replace(/"/g, '&quot;') + '">' +
+                  '</form>' + jobTypeSelect(eff, fid) +
+                  '<button type="submit" class="btn btn-sm btn-outline-success mt-1" form="' + fid + '">Save map</button>'
+                : '<span class="text-muted">—</span>') +
+            '</td>';
+          tbody.appendChild(tr);
+        });
+        if ((j.errors || []).length) {
+          er.classList.remove('d-none');
+          er.textContent = 'Warnings: ' + j.errors.join('; ');
+        }
+        wrap.classList.remove('d-none');
+      } catch (e) {
+        st.textContent = '';
+        er.classList.remove('d-none');
+        er.textContent = e.message || String(e);
+      }
+    });
+  }
+})();
+</script>
+{% endblock %}

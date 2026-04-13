@@ -93,8 +93,6 @@
     }
 
     .brand-logo {
-      max-height: 72px;
-      max-width: 220px;
       object-fit: contain;
       border-radius: 10px;
     }
@@ -251,7 +249,7 @@
     <div class="login-card">
       <div class="brand-wrap">
         {% if site_settings.branding == 'logo' and site_settings.logo_path %}
-          <img src="{{ url_for('static', filename=site_settings['logo_path']) }}" alt="{{ site_settings.company_name }}" class="brand-logo">
+          <img src="{{ url_for('static', filename=normalize_manifest_static_path(site_settings['logo_path'])) }}" alt="{{ site_settings.company_name }}" class="brand-logo" style="{{ auth_logo_inline_style(site_settings) }}">
         {% else %}
           <h1 class="brand-title">{{ site_settings.company_name or 'Employee Portal' }}</h1>
         {% endif %}

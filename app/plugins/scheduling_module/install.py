@@ -44,6 +44,8 @@ MODULE_TABLES = [
     "schedule_settings",
     "sling_credentials",
     "sling_id_mappings",
+    "sling_sync_runs",
+    "sling_sync_run_steps",
     "schedule_templates",
     "schedule_template_slots",
     "schedule_job_type_requirements",
@@ -240,6 +242,7 @@ CREATES = [
       sling_email_enc TEXT NOT NULL,
       sling_password_enc TEXT NOT NULL,
       sling_base_url VARCHAR(255) NOT NULL DEFAULT 'https://api.getsling.com/v1',
+      sling_org_id INT DEFAULT NULL,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
@@ -260,6 +263,40 @@ CREATES = [
       KEY idx_mapped_job (job_type_id),
       KEY idx_mapped_site (site_id),
       KEY idx_mapped_client (client_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sling_sync_runs (
+      id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TIMESTAMP NULL DEFAULT NULL,
+      date_from DATE NOT NULL,
+      date_to DATE NOT NULL,
+      dry_run TINYINT(1) NOT NULL DEFAULT 0,
+      actor_username VARCHAR(150) DEFAULT NULL,
+      created_n INT NOT NULL DEFAULT 0,
+      updated_n INT NOT NULL DEFAULT 0,
+      cancelled_n INT NOT NULL DEFAULT 0,
+      skipped_filter_n INT NOT NULL DEFAULT 0,
+      unmapped_n INT NOT NULL DEFAULT 0,
+      processed_n INT NOT NULL DEFAULT 0,
+      errors_json TEXT,
+      reverted_at TIMESTAMP NULL DEFAULT NULL,
+      KEY idx_ssr_started (started_at),
+      KEY idx_ssr_reverted (reverted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS sling_sync_run_steps (
+      id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      run_id BIGINT NOT NULL,
+      schedule_shift_id BIGINT NOT NULL,
+      external_id VARCHAR(255) DEFAULT NULL,
+      action VARCHAR(24) NOT NULL,
+      before_json LONGTEXT,
+      KEY idx_ssrs_run (run_id),
+      KEY idx_ssrs_shift (schedule_shift_id),
+      CONSTRAINT fk_ssrs_run FOREIGN KEY (run_id) REFERENCES sling_sync_runs(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """,
     # open shifts claim approvals + module settings
@@ -599,6 +636,14 @@ def ensure_tables(conn):
             ("sling_default_client_id", "ALTER TABLE schedule_settings ADD COLUMN sling_default_client_id INT DEFAULT NULL AFTER sling_default_job_type_id"),
             ("sling_default_site_id", "ALTER TABLE schedule_settings ADD COLUMN sling_default_site_id INT DEFAULT NULL AFTER sling_default_client_id"),
             ("sling_cancel_missing", "ALTER TABLE schedule_settings ADD COLUMN sling_cancel_missing TINYINT(1) NOT NULL DEFAULT 1 AFTER sling_default_site_id"),
+            (
+                "sling_import_filter_mode",
+                "ALTER TABLE schedule_settings ADD COLUMN sling_import_filter_mode VARCHAR(16) NOT NULL DEFAULT 'all' AFTER sling_cancel_missing",
+            ),
+            (
+                "sling_import_filter_patterns",
+                "ALTER TABLE schedule_settings ADD COLUMN sling_import_filter_patterns TEXT NULL AFTER sling_import_filter_mode",
+            ),
         ]:
             try:
                 if not _column_exists(conn, "schedule_settings", col):
@@ -611,6 +656,20 @@ def ensure_tables(conn):
                     cur.close()
                 except Exception:
                     pass
+
+    if _table_exists(conn, "sling_credentials") and not _column_exists(conn, "sling_credentials", "sling_org_id"):
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "ALTER TABLE sling_credentials ADD COLUMN sling_org_id INT DEFAULT NULL AFTER sling_base_url"
+            )
+            conn.commit()
+            cur.close()
+        except Exception:
+            try:
+                cur.close()
+            except Exception:
+                pass
 
 
 def install():

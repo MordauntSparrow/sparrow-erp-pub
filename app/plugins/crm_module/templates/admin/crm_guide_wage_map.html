@@ -23,7 +23,7 @@
     <div class="card-body">
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label fw-semibold" for="clinical_job_type_id">Clinical / medic line</label>
+          <label class="form-label fw-semibold" for="clinical_job_type_id">{% if industry_visible('medical') %}Clinical / medic line{% else %}Primary guide role (clinical slot){% endif %}</label>
           <select class="form-select" id="clinical_job_type_id" name="clinical_job_type_id">
             <option value="">— Auto-detect from names (legacy) —</option>
             {% for j in all_job_types %}
@@ -32,7 +32,7 @@
           </select>
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold" for="driver_job_type_id">Driver / response crew line</label>
+          <label class="form-label fw-semibold" for="driver_job_type_id">{% if industry_visible('medical') %}Driver / response crew line{% else %}Secondary crew / driver slot{% endif %}</label>
           <select class="form-select" id="driver_job_type_id" name="driver_job_type_id">
             <option value="">— Auto-detect from names (legacy) —</option>
             {% for j in all_job_types %}
@@ -51,7 +51,7 @@
   {% if preview_estimate %}
   <div class="card border-0 shadow-sm">
     <div class="card-body">
-      <h2 class="h6 text-uppercase text-muted mb-3">Live preview (2 medics, 1 vehicle, 8 h)</h2>
+      <h2 class="h6 text-uppercase text-muted mb-3">{% if industry_visible('medical') %}Live preview (2 medics, 1 vehicle, 8 h){% else %}Live preview (sample headcount, 1 vehicle, 8 h){% endif %}</h2>
       {% if preview_estimate.tb_note %}
       <div class="alert alert-warning small py-2">{{ preview_estimate.tb_note }}</div>
       {% endif %}
@@ -69,8 +69,8 @@
       <p class="small text-muted mb-0">No lines — configure wage card rates or mappings.</p>
       {% endif %}
       <p class="small text-muted mt-2 mb-0">
-        Using explicit CRM map — clinical: {{ 'yes' if preview_estimate.get('used_clinical_mapping') else 'no' }},
-        driver: {{ 'yes' if preview_estimate.get('used_driver_mapping') else 'no' }}.
+        Using explicit CRM map — {% if industry_visible('medical') %}clinical{% else %}primary slot{% endif %}: {{ 'yes' if preview_estimate.get('used_clinical_mapping') else 'no' }},
+        {% if industry_visible('medical') %}driver{% else %}secondary slot{% endif %}: {{ 'yes' if preview_estimate.get('used_driver_mapping') else 'no' }}.
       </p>
     </div>
   </div>

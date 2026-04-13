@@ -9,6 +9,10 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.objects import get_db_connection
+from app.organization_profile import (
+    normalize_organization_industries,
+    tenant_matches_industry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +38,15 @@ MODULE_LINKS_CONFIG = [
         "system_name": "training_module", "launch_slug": None},
     {"name": "Scheduling & Shifts", "url": "/scheduling/", "icon": "bi-calendar-week",
         "system_name": "scheduling_module", "launch_slug": None},
-    {"name": "Fleet", "url": "/fleet/", "icon": "bi-truck-front",
-        "system_name": "fleet_management", "launch_slug": None},
+    # Vehicle / patrol workflows: hide tile for hospitality-only tenants (PRD tenant industry profile).
+    {
+        "name": "Fleet",
+        "url": "/fleet/",
+        "icon": "bi-truck-front",
+        "system_name": "fleet_management",
+        "launch_slug": None,
+        "industry_slugs": ("medical", "security", "cleaning"),
+    },
 ]
 
 
@@ -177,11 +188,28 @@ def get_todos(contractor_id, filter_completed=None, limit=None):
 def get_module_links(plugin_manager):
     """
     Return list of module link dicts with 'enabled' set from plugin manifest.
-    Each item: name, url, icon, system_name, enabled.
+    Each item: name, url, icon, system_name, launch_slug, enabled.
+
+    Optional ``industry_slugs`` on a config row (OR semantics): link is omitted unless the
+    tenant matches at least one slug (see Core → organization_profile.industries).
     """
+    tenant_ids = None
+    try:
+        from flask import has_app_context, current_app
+
+        if has_app_context():
+            tenant_ids = current_app.config.get("organization_industries")
+    except Exception:
+        pass
+    norm_tenant = normalize_organization_industries(tenant_ids)
+
     result = []
     for mod in MODULE_LINKS_CONFIG:
-        item = dict(mod)
+        req = mod.get("industry_slugs")
+        if req:
+            if not tenant_matches_industry(norm_tenant, *req):
+                continue
+        item = {k: v for k, v in mod.items() if k != "industry_slugs"}
         try:
             item["enabled"] = bool(
                 plugin_manager.is_plugin_enabled(mod["system_name"]))
