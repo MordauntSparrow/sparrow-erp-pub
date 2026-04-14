@@ -2218,14 +2218,36 @@ def api_refs_sites():
                   AND client_id = %s
                 ORDER BY name ASC
             """, (client_id,))
+            items = cur.fetchall() or []
         elif client_name:
-            cur.execute("""
-                SELECT id, name
-                FROM sites
-                WHERE active IN (1, '1', 'active', TRUE)
-                  AND client_name = %s
-                ORDER BY name ASC
-            """, (client_name,))
+            # `sites` is keyed by client_id only (no client_name column).
+            cn = (client_name or "").strip()
+            resolved_cid: int | None = None
+            try:
+                resolved_cid = int(cn, 10)
+            except (TypeError, ValueError):
+                cur.execute(
+                    """
+                    SELECT id FROM clients
+                    WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s))
+                    LIMIT 2
+                    """,
+                    (cn,),
+                )
+                matches = cur.fetchall() or []
+                if len(matches) == 1:
+                    resolved_cid = int(matches[0]["id"])
+            if resolved_cid is not None:
+                cur.execute("""
+                    SELECT id, name
+                    FROM sites
+                    WHERE active IN (1, '1', 'active', TRUE)
+                      AND client_id = %s
+                    ORDER BY name ASC
+                """, (resolved_cid,))
+                items = cur.fetchall() or []
+            else:
+                items = []
         else:
             cur.execute("""
                 SELECT id, name
@@ -2233,7 +2255,7 @@ def api_refs_sites():
                 WHERE active IN (1, '1', 'active', TRUE)
                 ORDER BY name ASC
             """)
-        items = cur.fetchall() or []
+            items = cur.fetchall() or []
     finally:
         cur.close()
         conn.close()

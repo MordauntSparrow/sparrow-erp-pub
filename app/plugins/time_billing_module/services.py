@@ -397,23 +397,100 @@ class TimesheetService:
     - Entry validation and computation (hours, pay, variance)
     - Contractor lookups
     - Staff/admin API payloads
+
+    ``tb_timesheet_entries`` may be legacy (free-text ``client_name`` / ``site_name``)
+    or core (``client_id`` / ``site_id`` only). All writers and readers that touch
+    location fields must use ``_tb_entry_column_flags`` or
+    ``_tb_timesheet_entry_location_parts`` so both layouts work.
     """
 
-    # Cached once per process: legacy rows use client_name/site_name; core schema uses client_id/site_id only.
-    _tb_entry_has_client_name: ClassVar[Optional[bool]] = None
-    _tb_entry_has_client_id: ClassVar[Optional[bool]] = None
+    # Cached once per process: which location columns exist on tb_timesheet_entries.
+    _tb_entry_col_flags: ClassVar[Optional[Dict[str, bool]]] = None
+
+    @staticmethod
+    def _tb_entry_column_flags(cur) -> Dict[str, bool]:
+        if TimesheetService._tb_entry_col_flags is None:
+            cur.execute(
+                """
+                SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tb_timesheet_entries'
+                  AND COLUMN_NAME IN ('client_name','site_name','client_id','site_id')
+                """
+            )
+            found: Set[str] = set()
+            for row in cur.fetchall() or []:
+                raw = row.get("COLUMN_NAME") or row.get("column_name") or list(row.values())[0]
+                found.add(str(raw).lower())
+            TimesheetService._tb_entry_col_flags = {
+                "client_name": "client_name" in found,
+                "site_name": "site_name" in found,
+                "client_id": "client_id" in found,
+                "site_id": "site_id" in found,
+            }
+        return TimesheetService._tb_entry_col_flags
 
     @staticmethod
     def _tb_timesheet_entry_schema_flags(cur) -> Tuple[bool, bool]:
-        if TimesheetService._tb_entry_has_client_name is None:
-            cur.execute("SHOW COLUMNS FROM tb_timesheet_entries LIKE 'client_name'")
-            TimesheetService._tb_entry_has_client_name = cur.fetchone() is not None
-            cur.execute("SHOW COLUMNS FROM tb_timesheet_entries LIKE 'client_id'")
-            TimesheetService._tb_entry_has_client_id = cur.fetchone() is not None
-        return (
-            bool(TimesheetService._tb_entry_has_client_name),
-            bool(TimesheetService._tb_entry_has_client_id),
-        )
+        f = TimesheetService._tb_entry_column_flags(cur)
+        return f["client_name"], f["client_id"]
+
+    @staticmethod
+    def _resolve_client_site_ids(
+        cur,
+        client_name: Optional[str],
+        site_name: Optional[str],
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """Best-effort match typed labels to clients.id / sites.id (core schema)."""
+        cn = (client_name or "").strip()
+        sn = (site_name or "").strip()
+        cid: Optional[int] = None
+        sid: Optional[int] = None
+        if cn:
+            cur.execute(
+                "SELECT id FROM clients WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s)) LIMIT 2",
+                (cn,),
+            )
+            m = cur.fetchall() or []
+            if len(m) == 1:
+                cid = int(m[0]["id"] if isinstance(m[0], dict) else m[0][0])
+        if sn and cid is not None:
+            cur.execute(
+                """
+                SELECT id FROM sites
+                WHERE client_id = %s AND LOWER(TRIM(name)) = LOWER(TRIM(%s))
+                LIMIT 2
+                """,
+                (cid, sn),
+            )
+            m2 = cur.fetchall() or []
+            if len(m2) == 1:
+                sid = int(m2[0]["id"] if isinstance(m2[0], dict) else m2[0][0])
+        elif sn and cid is None:
+            cur.execute(
+                "SELECT id FROM sites WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s)) LIMIT 2",
+                (sn,),
+            )
+            m3 = cur.fetchall() or []
+            if len(m3) == 1:
+                sid = int(m3[0]["id"] if isinstance(m3[0], dict) else m3[0][0])
+        return cid, sid
+
+    @staticmethod
+    def _client_site_display_names(
+        cur, client_id: Optional[int], site_id: Optional[int]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        cname = sname = None
+        if client_id:
+            cur.execute("SELECT name FROM clients WHERE id=%s LIMIT 1", (int(client_id),))
+            r = cur.fetchone()
+            if r:
+                cname = r.get("name") if isinstance(r, dict) else r[0]
+        if site_id:
+            cur.execute("SELECT name FROM sites WHERE id=%s LIMIT 1", (int(site_id),))
+            r2 = cur.fetchone()
+            if r2:
+                sname = r2.get("name") if isinstance(r2, dict) else r2[0]
+        return cname, sname
 
     @staticmethod
     def _tb_timesheet_entry_location_parts(cur) -> Tuple[str, str, str, bool, bool]:
@@ -534,6 +611,8 @@ class TimesheetService:
             if not contractor:
                 return
 
+            ecf = TimesheetService._tb_entry_column_flags(cur)
+
             # Pull shifts; only those not yet linked to a runsheet.
             # (If runsheet_id is set, the normal runsheet->timesheet path
             # should be used instead.)
@@ -568,6 +647,17 @@ class TimesheetService:
             if not shifts:
                 return
 
+            loc_sel_pf: List[str] = []
+            if ecf["client_name"]:
+                loc_sel_pf.append("client_name")
+            if ecf["site_name"]:
+                loc_sel_pf.append("site_name")
+            if ecf["client_id"]:
+                loc_sel_pf.append("client_id")
+            if ecf["site_id"]:
+                loc_sel_pf.append("site_id")
+            loc_csv_pf = (", " + ", ".join(loc_sel_pf)) if loc_sel_pf else ""
+
             updated = 0
             created = 0
 
@@ -600,12 +690,10 @@ class TimesheetService:
                 auto_reason = "Clock not recorded; defaulted actual to scheduled" if clock_missing else None
 
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                         id,
-                        edited_by,
-                        client_name,
-                        site_name,
+                        edited_by{loc_csv_pf},
                         job_type_id,
                         scheduled_start,
                         scheduled_end,
@@ -652,13 +740,29 @@ class TimesheetService:
                     if row.get("edited_by") is not None:
                         continue
 
+                    loc_set_pf: List[str] = []
+                    loc_vals_pf: List[Any] = []
+                    if ecf["client_name"]:
+                        loc_set_pf.append("client_name=%s")
+                        loc_vals_pf.append(payload["client_name"])
+                    if ecf["site_name"]:
+                        loc_set_pf.append("site_name=%s")
+                        loc_vals_pf.append(payload["site_name"])
+                    if ecf["client_id"]:
+                        loc_set_pf.append("client_id=%s")
+                        loc_vals_pf.append(sh.get("client_id"))
+                    if ecf["site_id"]:
+                        loc_set_pf.append("site_id=%s")
+                        loc_vals_pf.append(sh.get("site_id"))
+                    loc_prefix_pf = (
+                        ", ".join(loc_set_pf) + ",\n                            "
+                    ) if loc_set_pf else ""
+
                     cur.execute(
-                        """
+                        f"""
                         UPDATE tb_timesheet_entries
                         SET
-                            client_name=%s,
-                            site_name=%s,
-                            job_type_id=%s,
+                            {loc_prefix_pf}job_type_id=%s,
                             work_date=%s,
                             scheduled_start=%s,
                             scheduled_end=%s,
@@ -684,8 +788,7 @@ class TimesheetService:
                         WHERE id=%s
                         """,
                         (
-                            payload["client_name"],
-                            payload["site_name"],
+                            *loc_vals_pf,
                             payload["job_type_id"],
                             payload["work_date"],
                             payload["scheduled_start"],
@@ -710,11 +813,34 @@ class TimesheetService:
                     )
                     updated += 1
                 else:
+                    loc_cols_pf: List[str] = []
+                    loc_ph_pf: List[str] = []
+                    loc_ins_vals_pf: List[Any] = []
+                    if ecf["client_name"]:
+                        loc_cols_pf.append("client_name")
+                        loc_ph_pf.append("%s")
+                        loc_ins_vals_pf.append(payload["client_name"])
+                    if ecf["site_name"]:
+                        loc_cols_pf.append("site_name")
+                        loc_ph_pf.append("%s")
+                        loc_ins_vals_pf.append(payload["site_name"])
+                    if ecf["client_id"]:
+                        loc_cols_pf.append("client_id")
+                        loc_ph_pf.append("%s")
+                        loc_ins_vals_pf.append(sh.get("client_id"))
+                    if ecf["site_id"]:
+                        loc_cols_pf.append("site_id")
+                        loc_ph_pf.append("%s")
+                        loc_ins_vals_pf.append(sh.get("site_id"))
+                    loc_cols_sql_pf = (
+                        ", " + ", ".join(loc_cols_pf) if loc_cols_pf else ""
+                    )
+                    loc_ph_sql_pf = ", " + ", ".join(loc_ph_pf) if loc_ph_pf else ""
+
                     cur.execute(
-                        """
+                        f"""
                         INSERT INTO tb_timesheet_entries (
-                            week_id, user_id,
-                            client_name, site_name, job_type_id,
+                            week_id, user_id{loc_cols_sql_pf}, job_type_id,
                             work_date, scheduled_start, scheduled_end,
                             actual_start, actual_end, break_mins,
                             travel_parking, notes,
@@ -726,8 +852,7 @@ class TimesheetService:
                             rate_overridden,
                             edited_by, edited_at, edit_reason
                         ) VALUES (
-                            %s,%s,
-                            %s,%s,%s,
+                            %s,%s{loc_ph_sql_pf},%s,
                             %s,%s,%s,
                             %s,%s,%s,
                             %s,%s,
@@ -743,8 +868,7 @@ class TimesheetService:
                         (
                             wk_pk,
                             user_id,
-                            payload["client_name"],
-                            payload["site_name"],
+                            *loc_ins_vals_pf,
                             payload["job_type_id"],
                             payload["work_date"],
                             payload["scheduled_start"],
@@ -1380,16 +1504,6 @@ class TimesheetService:
         Returns:
             dict: Success status, saved entries, totals, or conflicts
         """
-        print(
-            "UPSERT DEBUG:",
-            {
-                "user_id": user_id,
-                "week_id": week_id,
-                "entries": entries,
-                "client_updated_at": client_updated_at,
-            },
-        )
-
         wk = TimesheetService._ensure_week(user_id, week_id)
 
         # ----- Optimistic concurrency check -----
@@ -1424,6 +1538,18 @@ class TimesheetService:
 
         try:
             saved_entries = []
+            ecf = TimesheetService._tb_entry_column_flags(cur)
+            loc_sel: List[str] = []
+            if ecf["client_name"]:
+                loc_sel.append("client_name")
+            if ecf["site_name"]:
+                loc_sel.append("site_name")
+            if ecf["client_id"]:
+                loc_sel.append("client_id")
+            if ecf["site_id"]:
+                loc_sel.append("site_id")
+            select_loc = (", " + ", ".join(loc_sel)) if loc_sel else ""
+
             jt_meta_cache: Dict[int, Tuple[Optional[str], Optional[str]]] = {}
 
             def _jt_meta(jtid: int) -> Tuple[Optional[str], Optional[str]]:
@@ -1441,6 +1567,7 @@ class TimesheetService:
                     continue
 
                 entry_id = e.get("id")
+                existing = None
 
                 # ----- Existing entry checks -----
                 edited_by_value = None
@@ -1448,14 +1575,12 @@ class TimesheetService:
                 edit_reason_value = None
                 if entry_id:
                     cur.execute(
-                        """
+                        f"""
                         SELECT
                             user_id,
                             source,
                             runsheet_id,
-                            lock_job_client,
-                            client_name,
-                            site_name,
+                            lock_job_client{select_loc},
                             job_type_id,
                             scheduled_start,
                             scheduled_end,
@@ -1491,8 +1616,14 @@ class TimesheetService:
                     # fields, so compute-and-fill still works.)
                     if existing["source"] in ("runsheet", "scheduler") and existing.get("lock_job_client"):
                         e["job_type_id"] = existing.get("job_type_id")
-                        e["client_name"] = existing.get("client_name")
-                        e["site_name"] = existing.get("site_name")
+                        if ecf["client_name"]:
+                            e["client_name"] = existing.get("client_name")
+                        if ecf["site_name"]:
+                            e["site_name"] = existing.get("site_name")
+                        if ecf["client_id"]:
+                            e["client_id"] = existing.get("client_id")
+                        if ecf["site_id"]:
+                            e["site_id"] = existing.get("site_id")
 
                     # Optional: scheduled time editing rules for scheduler-generated entries.
                     if existing.get("source") == "scheduler" and not TimesheetService._scheduler_source_scheduled_edit_allowed():
@@ -1542,12 +1673,38 @@ class TimesheetService:
                 # Compute derived fields
                 computed = TimesheetService._compute_and_fill(e, contractor)
 
-                # Columns and parameters (with client_name, site_name added)
+                cn_raw = (e.get("client_name") or "").strip() or None
+                sn_raw = (e.get("site_name") or "").strip() or None
+                r_cid: Optional[int] = None
+                r_sid: Optional[int] = None
+                if ecf["client_id"] or ecf["site_id"]:
+                    locked_loc = bool(
+                        existing
+                        and existing.get("source") in ("runsheet", "scheduler")
+                        and existing.get("lock_job_client")
+                    )
+                    if locked_loc:
+                        r_cid = existing.get("client_id") if existing else None
+                        r_sid = existing.get("site_id") if existing else None
+                    else:
+                        r_cid, r_sid = TimesheetService._resolve_client_site_ids(
+                            cur, cn_raw, sn_raw
+                        )
+
+                loc_cols: List[str] = []
+                if ecf["client_name"]:
+                    loc_cols.append("client_name")
+                if ecf["site_name"]:
+                    loc_cols.append("site_name")
+                if ecf["client_id"]:
+                    loc_cols.append("client_id")
+                if ecf["site_id"]:
+                    loc_cols.append("site_id")
+
                 cols = [
                     "week_id",
                     "user_id",
-                    "client_name",
-                    "site_name",
+                    *loc_cols,
                     "job_type_id",
                     "work_date",
                     "scheduled_start",
@@ -1576,11 +1733,9 @@ class TimesheetService:
                     "edit_reason",
                 ]
 
-                params = {
+                params: Dict[str, Any] = {
                     "week_id": wk["id"],
                     "user_id": user_id,
-                    "client_name": (e.get("client_name") or "").strip() or None,
-                    "site_name": (e.get("site_name") or "").strip() or None,
                     "job_type_id": int(e["job_type_id"]),
                     "work_date": e["work_date"]
                     if isinstance(e["work_date"], date)
@@ -1610,6 +1765,14 @@ class TimesheetService:
                     "edited_at": edited_at_value,
                     "edit_reason": edit_reason_value,
                 }
+                if ecf["client_name"]:
+                    params["client_name"] = cn_raw
+                if ecf["site_name"]:
+                    params["site_name"] = sn_raw
+                if ecf["client_id"]:
+                    params["client_id"] = r_cid
+                if ecf["site_id"]:
+                    params["site_id"] = r_sid
 
                 if entry_id:
                     # Update existing entry
@@ -1639,12 +1802,24 @@ class TimesheetService:
                     entry_id = cur.lastrowid
 
                 jn, jh = _jt_meta(params["job_type_id"])
+                disp_c: Optional[str] = cn_raw
+                disp_s: Optional[str] = sn_raw
+                if ecf["client_id"] and (
+                    params.get("client_id") is not None or params.get("site_id") is not None
+                ):
+                    dc, ds = TimesheetService._client_site_display_names(
+                        cur, params.get("client_id"), params.get("site_id")
+                    )
+                    if dc:
+                        disp_c = dc
+                    if ds:
+                        disp_s = ds
                 saved_entries.append(
                     {
                         "id": entry_id,
                         "work_date": params["work_date"].isoformat(),
-                        "client_name": params["client_name"],
-                        "site_name": params["site_name"],
+                        "client_name": disp_c,
+                        "site_name": disp_s,
                         "job_type_id": params["job_type_id"],
                         "job_type_name": jn,
                         "job_type_colour_hex": jh,
@@ -1775,6 +1950,8 @@ class TimesheetService:
             if not row:
                 return {"ok": False, "message": "Entry not found."}
 
+            ecf = TimesheetService._tb_entry_column_flags(cur)
+
             # Only allow editing of core mutable fields
             mutable = {
                 "client_name", "site_name", "job_type_id", "work_date", "scheduled_start",
@@ -1786,6 +1963,16 @@ class TimesheetService:
 
             # Merge current row with updates
             merged = {**row, **payload}
+
+            if ecf["client_id"] or ecf["site_id"]:
+                if "client_name" in payload or "site_name" in payload:
+                    r_cid, r_sid = TimesheetService._resolve_client_site_ids(
+                        cur,
+                        merged.get("client_name"),
+                        merged.get("site_name"),
+                    )
+                    merged["client_id"] = r_cid
+                    merged["site_id"] = r_sid
 
             # Normalize types
             if isinstance(merged.get("work_date"), str):
@@ -1809,6 +1996,19 @@ class TimesheetService:
                     }
                 recompute = False
 
+            dcf = merged.get("client_name")
+            dsf = merged.get("site_name")
+            if not ecf["client_name"] and not ecf["site_name"]:
+                dcf, dsf = TimesheetService._client_site_display_names(
+                    cur, merged.get("client_id"), merged.get("site_id")
+                )
+            elif dcf is None and dsf is None:
+                d2, d3 = TimesheetService._client_site_display_names(
+                    cur, merged.get("client_id"), merged.get("site_id")
+                )
+                dcf = dcf or d2
+                dsf = dsf or d3
+
             if recompute:
                 computed = TimesheetService._compute_and_fill({
                     "job_type_id": merged.get("job_type_id"),
@@ -1818,8 +2018,8 @@ class TimesheetService:
                     "actual_start": merged.get("actual_start"),
                     "actual_end": merged.get("actual_end"),
                     "break_mins": merged.get("break_mins"),
-                    "client_name": merged.get("client_name"),
-                    "site_name": merged.get("site_name"),
+                    "client_name": dcf,
+                    "site_name": dsf,
                     "source": merged.get("source"),
                     "runsheet_id": merged.get("runsheet_id"),
                     "lock_job_client": merged.get("lock_job_client"),
@@ -1846,9 +2046,7 @@ class TimesheetService:
                 edit_reason = (updates.get("edit_reason") or "").strip()
 
             # Build SQL update parameters
-            params = {
-                "client_name": merged.get("client_name"),
-                "site_name": merged.get("site_name"),
+            params: Dict[str, Any] = {
                 "job_type_id": int(merged.get("job_type_id")),
                 "work_date": merged.get("work_date"),
                 "scheduled_start": merged.get("scheduled_start"),
@@ -1873,6 +2071,14 @@ class TimesheetService:
                 "edited_at": datetime.utcnow(),
                 "edit_reason": edit_reason
             }
+            if ecf["client_name"]:
+                params["client_name"] = merged.get("client_name")
+            if ecf["site_name"]:
+                params["site_name"] = merged.get("site_name")
+            if ecf["client_id"]:
+                params["client_id"] = merged.get("client_id")
+            if ecf["site_id"]:
+                params["site_id"] = merged.get("site_id")
 
             set_clause = ", ".join([f"{k}=%({k})s" for k in params.keys()])
             sql = f"UPDATE tb_timesheet_entries SET {set_clause} WHERE id=%(id)s"
@@ -2127,13 +2333,27 @@ class TimesheetService:
         for the affected timesheet entries and update the week totals.
         Call this with the same conn/cur used for the UPDATE so it runs in the same transaction.
         """
-        cur.execute("""
+        ecf = TimesheetService._tb_entry_column_flags(cur)
+        loc_sel: List[str] = []
+        if ecf["client_name"]:
+            loc_sel.append("client_name")
+        if ecf["site_name"]:
+            loc_sel.append("site_name")
+        if ecf["client_id"]:
+            loc_sel.append("client_id")
+        if ecf["site_id"]:
+            loc_sel.append("site_id")
+        loc_csv = (", " + ", ".join(loc_sel)) if loc_sel else ""
+        cur.execute(
+            f"""
             SELECT id, work_date, scheduled_start, scheduled_end, actual_start, actual_end,
-                   break_mins, job_type_id, client_name, site_name, source, runsheet_id,
+                   break_mins, job_type_id{loc_csv}, source, runsheet_id,
                    lock_job_client, notes
             FROM tb_timesheet_entries
             WHERE week_id=%s AND user_id=%s AND work_date=%s AND runsheet_id=%s
-        """, (week_pk, user_id, work_date, runsheet_id))
+            """,
+            (week_pk, user_id, work_date, runsheet_id),
+        )
         rows = cur.fetchall() or []
         if not rows:
             return
@@ -2145,6 +2365,18 @@ class TimesheetService:
         for row in rows:
             if row.get("actual_start") is None or row.get("actual_end") is None:
                 continue
+            cn = row.get("client_name")
+            sn = row.get("site_name")
+            if not ecf["client_name"] and not ecf["site_name"]:
+                cn, sn = TimesheetService._client_site_display_names(
+                    cur, row.get("client_id"), row.get("site_id")
+                )
+            elif cn is None and sn is None:
+                d2, d3 = TimesheetService._client_site_display_names(
+                    cur, row.get("client_id"), row.get("site_id")
+                )
+                cn = cn or d2
+                sn = sn or d3
             entry = {
                 "work_date": row["work_date"],
                 "scheduled_start": row.get("scheduled_start"),
@@ -2153,8 +2385,8 @@ class TimesheetService:
                 "actual_end": row.get("actual_end"),
                 "break_mins": row.get("break_mins") or 0,
                 "job_type_id": row["job_type_id"],
-                "client_name": row.get("client_name"),
-                "site_name": row.get("site_name"),
+                "client_name": cn,
+                "site_name": sn,
                 "source": row.get("source"),
                 "runsheet_id": row.get("runsheet_id"),
                 "lock_job_client": row.get("lock_job_client"),
@@ -5691,6 +5923,7 @@ class RunsheetService:
         created = 0
         updated = 0
         try:
+            ecf = TimesheetService._tb_entry_column_flags(cur)
             for a in (rs.get("assignments") or []):
                 user_id = a["user_id"]
 
@@ -5753,71 +5986,75 @@ class RunsheetService:
                     rs, computed
                 )
 
+                loc_keys_pub: List[str] = []
+                if ecf["client_name"]:
+                    loc_keys_pub.append("client_name")
+                if ecf["site_name"]:
+                    loc_keys_pub.append("site_name")
+                if ecf["client_id"]:
+                    loc_keys_pub.append("client_id")
+                if ecf["site_id"]:
+                    loc_keys_pub.append("site_id")
+
+                tail_keys_pub = [
+                    "job_type_id",
+                    "work_date",
+                    "scheduled_start",
+                    "scheduled_end",
+                    "actual_start",
+                    "actual_end",
+                    "break_mins",
+                    "travel_parking",
+                    "notes",
+                    "scheduled_hours",
+                    "actual_hours",
+                    "labour_hours",
+                    "wage_rate_used",
+                    "pay",
+                    "lateness_mins",
+                    "overrun_mins",
+                    "variance_mins",
+                    "policy_applied",
+                    "policy_source",
+                    "lock_job_client",
+                    "rate_overridden",
+                ]
+
+                params = computed.copy()
+                if not ecf["client_name"]:
+                    params.pop("client_name", None)
+                if not ecf["site_name"]:
+                    params.pop("site_name", None)
+                if ecf["client_id"]:
+                    params["client_id"] = rs.get("client_id")
+                if ecf["site_id"]:
+                    params["site_id"] = rs.get("site_id")
+
                 if row:
                     updated += 1
-                    set_clause = ", ".join([
-                        "client_name=%(client_name)s",
-                        "site_name=%(site_name)s",
-                        "job_type_id=%(job_type_id)s",
-                        "work_date=%(work_date)s",
-                        "scheduled_start=%(scheduled_start)s",
-                        "scheduled_end=%(scheduled_end)s",
-                        "actual_start=%(actual_start)s",
-                        "actual_end=%(actual_end)s",
-                        "break_mins=%(break_mins)s",
-                        "travel_parking=%(travel_parking)s",
-                        "notes=%(notes)s",
-                        "scheduled_hours=%(scheduled_hours)s",
-                        "actual_hours=%(actual_hours)s",
-                        "labour_hours=%(labour_hours)s",
-                        "wage_rate_used=%(wage_rate_used)s",
-                        "pay=%(pay)s",
-                        "lateness_mins=%(lateness_mins)s",
-                        "overrun_mins=%(overrun_mins)s",
-                        "variance_mins=%(variance_mins)s",
-                        "policy_applied=%(policy_applied)s",
-                        "policy_source=%(policy_source)s",
-                        "lock_job_client=%(lock_job_client)s",
-                        "rate_overridden=%(rate_overridden)s",
-                    ])
+                    update_keys_pub = loc_keys_pub + tail_keys_pub
+                    set_clause = ", ".join(
+                        [f"{k}=%({k})s" for k in update_keys_pub]
+                    )
                     sql = f"UPDATE tb_timesheet_entries SET {set_clause} WHERE id=%(id)s"
-                    params = computed.copy()
                     params["id"] = row["id"]
                     cur.execute(sql, params)
                 else:
-                    cols = [
-                        "week_id",
-                        "user_id",
-                        "client_name",
-                        "site_name",
-                        "job_type_id",
-                        "work_date",
-                        "scheduled_start",
-                        "scheduled_end",
-                        "actual_start",
-                        "actual_end",
-                        "break_mins",
-                        "travel_parking",
-                        "notes",
-                        "source",
-                        "runsheet_id",
-                        "lock_job_client",
-                        "scheduled_hours",
-                        "actual_hours",
-                        "labour_hours",
-                        "wage_rate_used",
-                        "pay",
-                        "lateness_mins",
-                        "overrun_mins",
-                        "variance_mins",
-                        "policy_applied",
-                        "policy_source",
-                        "rate_overridden",
-                    ]
-                    placeholders = ", ".join([f"%({k})s" for k in cols])
-                    params = computed.copy()
-                    params.update({"week_id": wk["id"], "user_id": user_id})
-                    sql = f"INSERT INTO tb_timesheet_entries ({', '.join(cols)}) VALUES ({placeholders})"
+                    cols_pub = (
+                        ["week_id", "user_id"]
+                        + loc_keys_pub
+                        + tail_keys_pub
+                        + ["source", "runsheet_id"]
+                    )
+                    placeholders = ", ".join([f"%({k})s" for k in cols_pub])
+                    params["week_id"] = wk["id"]
+                    params["user_id"] = user_id
+                    params["source"] = "runsheet"
+                    params["runsheet_id"] = rs_id
+                    sql = (
+                        f"INSERT INTO tb_timesheet_entries ({', '.join(cols_pub)}) "
+                        f"VALUES ({placeholders})"
+                    )
                     cur.execute(sql, params)
                     created += 1
 
