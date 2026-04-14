@@ -11,7 +11,7 @@ Timesheet – Week {{ data.week.week_id }}
     #ts-modal .modal-dialog { margin: 0.5rem; max-width: calc(100% - 1rem); }
   }
 </style>
-<div class="container my-4" id="ts-root" data-week-id="{{ data.week.week_id }}">
+<div class="container my-4" id="ts-root" data-week-id="{{ data.week.week_id }}" data-week-ending="{{ data.week.week_ending }}">
 
   <!-- Header -->
   <div class="d-flex flex-wrap align-items-center justify-content-between mb-3">
@@ -430,8 +430,36 @@ Timesheet – Week {{ data.week.week_id }}
   }
 
   async function loadJobTypes() {
-    const r = await fetchJSON("/time-billing/api/refs/job-types");
+    const root = document.getElementById("ts-root");
+    const weekEnd = (root && root.dataset.weekEnding) || "";
+    const qs = weekEnd ? `?on=${encodeURIComponent(weekEnd)}` : "";
+    const r = await fetchJSON("/time-billing/api/refs/job-types" + qs);
     jobTypes = r.items || [];
+  }
+
+  /** Keep legacy rows editable if their job type was removed from the wage card. */
+  function mergeJobTypesFromEntries(entries) {
+    const byId = new Map((jobTypes || []).map((j) => [String(j.id), j]));
+    for (const e of entries || []) {
+      const jid = e.job_type_id;
+      if (jid == null || jid === "") continue;
+      const k = String(jid);
+      if (byId.has(k)) continue;
+      byId.set(k, {
+        id: jid,
+        name: e.job_type_name || ("Job #" + k),
+        colour_hex: e.job_type_colour_hex || null,
+      });
+    }
+    jobTypes = Array.from(byId.values()).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""), undefined, {
+        sensitivity: "base",
+      })
+    );
+  }
+
+  function applyJobTypesToForm() {
+    mergeJobTypesFromEntries(entriesCache);
     fillJobTypes();
   }
 
@@ -455,6 +483,8 @@ Timesheet – Week {{ data.week.week_id }}
   async function refreshWeek() {
     const d = await fetchJSON(`/time-billing/api/weeks/${weekId}`);
     entriesCache           = d.entries || [];
+    await loadJobTypes();
+    applyJobTypesToForm();
     renderDesktop(entriesCache);
     renderMobile(entriesCache);
     setTotals(d.totals || { hours: 0, pay: 0, travel: 0 });
@@ -1009,8 +1039,7 @@ Timesheet – Week {{ data.week.week_id }}
   // ============================
   (async function init() {
     try {
-      await loadJobTypes();
-      // Always load week from API so totals + job-type breakdown stay correct after submit.
+      // Loads week, eligible job types for this week ending, then merges legacy entry types.
       await refreshWeek();
     } catch (e) {
       showToast("Failed to initialize UI", "danger");

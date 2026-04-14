@@ -2259,9 +2259,9 @@ def api_refs_sites():
     return jsonify({"items": items})
 
 
-@public_bp.get("/api/refs/job-types")
 @internal_bp.get("/api/refs/job-types")
-def api_refs_job_types():
+def api_internal_refs_job_types():
+    """Full active catalogue for admin (wage cards, templates)."""
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
@@ -2275,6 +2275,25 @@ def api_refs_job_types():
     finally:
         cur.close()
         conn.close()
+    return jsonify({"items": items})
+
+
+@public_bp.get("/api/refs/job-types")
+@staff_required_tb
+def api_public_refs_job_types():
+    """
+    Staff timesheet dropdown: job types the contractor can be paid for on ``on``
+    (week ending / work date), from wage cards and overrides — not the full catalogue.
+    """
+    uid = current_tb_user_id()
+    if uid is None:
+        return jsonify({"items": []})
+    on_raw = (request.args.get("on") or "").strip()
+    try:
+        on_d = date.fromisoformat(on_raw) if on_raw else date.today()
+    except ValueError:
+        on_d = date.today()
+    items = MinimalRateResolver.list_eligible_job_types_for_contractor(int(uid), on_d)
     return jsonify({"items": items})
 
 

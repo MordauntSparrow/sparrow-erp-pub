@@ -90,7 +90,7 @@ DEV NOTES:
 - Date is fully editable; no forced 'today' for new rows (defaults empty).
 -->
 
-<div class="container py-3">
+<div class="container py-3" id="ts2-root" data-week-ending="{{ data.week.week_ending }}">
   <!-- Header -->
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h4 class="mb-0 d-flex align-items-center">
@@ -690,7 +690,7 @@ document.addEventListener('DOMContentLoaded', function () {
             totals: "/time-billing/api/weeks/{{ data.week.week_id }}/totals"
         };
 
-        let jobTypes = []; // cache of job types from backend
+        let jobTypes = []; // latest eligible job types from backend (refetched so admin wage-card edits apply)
 
         // Dev-only fallback rates (in case backend has no rates yet; cleaning sector only)
         const DEV_RATES = {% if industry_visible('cleaning') %}[
@@ -769,11 +769,34 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // --- Job Types ---------------------------------------------------------
 
-        // Load job types (cached after first fetch)
+        function mergeJobTypesFromPage() {
+            const byId = new Map((jobTypes || []).map((j) => [String(j.id), j]));
+            document.querySelectorAll('select.js-job-type').forEach((sel) => {
+                const pre = sel.getAttribute('data-value');
+                if (!pre) return;
+                const k = String(pre);
+                if (byId.has(k)) return;
+                const row = sel.closest('tr, .ts-card');
+                const nameEl = row?.querySelector('[data-field-view="job_type_name"]');
+                const name =
+                    (nameEl && nameEl.textContent && nameEl.textContent.trim()) || ('Job #' + k);
+                const idNum = parseInt(pre, 10);
+                byId.set(k, { id: isNaN(idNum) ? pre : idNum, name });
+            });
+            jobTypes = Array.from(byId.values()).sort((a, b) =>
+                String(a.name || '').localeCompare(String(b.name || ''), undefined, {
+                    sensitivity: 'base'
+                })
+            );
+        }
+
         async function ensureJobTypes() {
-            if (jobTypes.length) return;
-            const { ok, data } = await fetchJSON(API.jobs);
+            const root = document.getElementById('ts2-root');
+            const weekEnd = (root && root.dataset.weekEnding) || '';
+            const qs = weekEnd ? `?on=${encodeURIComponent(weekEnd)}` : '';
+            const { ok, data } = await fetchJSON(API.jobs + qs);
             if (ok) jobTypes = data?.items || [];
+            mergeJobTypesFromPage();
         }
 
         // Fill <select> with job type options

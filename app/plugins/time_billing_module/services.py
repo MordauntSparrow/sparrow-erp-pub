@@ -222,6 +222,114 @@ class MinimalRateResolver:
             cur.close()
             conn.close()
 
+    @staticmethod
+    def list_eligible_job_types_for_contractor(
+        contractor_id: int, on_date: date
+    ) -> List[Dict[str, Any]]:
+        """
+        Job types shown on staff timesheets: aligned with ``resolve_rate`` eligibility.
+
+        If the contractor has ``wage_rate_override``, any active job type is allowed
+        (same flat rate applies). Otherwise: union of job types that have an effective
+        ``wage_rate_rows`` row on the contractor's card (if set) and on the role's
+        default active wage card (if any). Also includes job types referenced by
+        effective dated ``contractor_client_overrides`` rows when that table exists.
+        """
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, role_id, wage_rate_card_id, wage_rate_override
+                FROM tb_contractors WHERE id=%s
+                """,
+                (int(contractor_id),),
+            )
+            c = cur.fetchone()
+            if not c:
+                return []
+
+            if c.get("wage_rate_override") is not None:
+                cur.execute(
+                    """
+                    SELECT id, name, colour_hex
+                    FROM job_types
+                    WHERE active IN (1, '1', 'active', TRUE)
+                    ORDER BY name ASC
+                    """
+                )
+                return list(cur.fetchall() or [])
+
+            card_ids: List[int] = []
+            wrc = c.get("wage_rate_card_id")
+            if wrc:
+                card_ids.append(int(wrc))
+
+            role_id = c.get("role_id")
+            if role_id:
+                cur.execute(
+                    """
+                    SELECT id FROM wage_rate_cards
+                    WHERE role_id=%s AND active=1
+                    ORDER BY id ASC LIMIT 1
+                    """,
+                    (int(role_id),),
+                )
+                rc = cur.fetchone()
+                if rc and rc.get("id"):
+                    rid = int(rc["id"])
+                    if rid not in card_ids:
+                        card_ids.append(rid)
+
+            by_id: Dict[int, Dict[str, Any]] = {}
+
+            if card_ids:
+                ph = ",".join(["%s"] * len(card_ids))
+                cur.execute(
+                    f"""
+                    SELECT DISTINCT jt.id, jt.name, jt.colour_hex
+                    FROM wage_rate_rows wrr
+                    INNER JOIN job_types jt ON jt.id = wrr.job_type_id
+                    WHERE wrr.rate_card_id IN ({ph})
+                      AND jt.active IN (1, '1', 'active', TRUE)
+                      AND wrr.effective_from <= %s
+                      AND (wrr.effective_to IS NULL OR wrr.effective_to >= %s)
+                    """,
+                    tuple(card_ids) + (on_date, on_date),
+                )
+                for row in cur.fetchall() or []:
+                    jid = row.get("id")
+                    if jid is not None:
+                        by_id[int(jid)] = row
+
+            try:
+                cur.execute(
+                    """
+                    SELECT DISTINCT jt.id, jt.name, jt.colour_hex
+                    FROM contractor_client_overrides cco
+                    INNER JOIN job_types jt ON jt.id = cco.job_type_id
+                    WHERE cco.contractor_id=%s
+                      AND cco.job_type_id IS NOT NULL
+                      AND cco.effective_from <= %s
+                      AND (cco.effective_to IS NULL OR cco.effective_to >= %s)
+                      AND jt.active IN (1, '1', 'active', TRUE)
+                    """,
+                    (int(contractor_id), on_date, on_date),
+                )
+                for row in cur.fetchall() or []:
+                    jid = row.get("id")
+                    if jid is not None:
+                        by_id[int(jid)] = row
+            except Exception:
+                pass
+
+            out = list(by_id.values())
+            out.sort(key=lambda r: ((r.get("name") or "").lower(), int(r.get("id") or 0)))
+            return out
+        finally:
+            cur.close()
+            conn.close()
+
 
 class RateResolver:
     """
