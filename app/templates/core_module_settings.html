@@ -54,6 +54,21 @@
           <input type="text" id="company_name" name="company_name" class="form-control" required
                  value="{{ config.site_settings.company_name|default('Sparrow ERP', true) }}">
         </div>
+
+        <div class="mb-4">
+          <label class="form-label d-block">Industry &amp; categories</label>
+          <p class="text-muted small mb-2">Select every sector you work in. Modules can tailor fields and demo data for medical, security, cleaning, and hospitality. Tick both <strong>Medical</strong> and <strong>Security</strong> if you operate in both.</p>
+          {% set _o_sel = organization_industries_selected if organization_industries_selected is defined else ['medical'] %}
+          {% for slug, label, blurb in (industry_options if industry_options is defined else []) %}
+          <div class="form-check mb-2 ms-1">
+            <input class="form-check-input" type="checkbox" name="organization_industry" value="{{ slug }}"
+                   id="org_ind_{{ slug }}" {% if slug in _o_sel %}checked{% endif %}>
+            <label class="form-check-label fw-medium" for="org_ind_{{ slug }}">{{ label }}</label>
+            <div class="form-text small ms-4 mb-0">{{ blurb }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
         <div class="mb-3">
           <label class="form-label" for="branding">Navbar branding</label>
           <select id="branding" name="branding" class="form-select">
@@ -65,9 +80,107 @@
           <label class="form-label" for="logo">Company logo</label>
           <input type="file" id="logo" name="logo" class="form-control" accept="image/*">
           {% if config.site_settings.logo_path %}
-          <img src="{{ url_for('static', filename=config.site_settings.logo_path) }}" alt="Logo preview" class="img-thumbnail mt-2" style="max-height: 100px;">
+          <img src="{{ url_for('static', filename=normalize_manifest_static_path(config.site_settings.logo_path)) }}" alt="Logo preview" class="img-thumbnail mt-2" style="max-height: 100px;">
           {% endif %}
         </div>
+        {% set ss = config.site_settings %}
+        <div class="mb-4 border rounded p-3 bg-light bg-opacity-50">
+          <label class="form-label fw-semibold">Logo display size</label>
+          <p class="text-muted small mb-3">Tune how large your logo appears in the <strong>admin navbar</strong> and on <strong>sign-in pages</strong> (login, password reset, employee portal login, and similar). Adjust the sliders and check the live preview, then save this tab.</p>
+          <div class="row g-3 mb-2">
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="logo_navbar_max_height_px">Navbar max height (px)</label>
+              <input type="range" class="form-range" id="logo_navbar_max_height_px" name="logo_navbar_max_height_px"
+                     min="32" max="120" step="1" value="{{ ss.logo_navbar_max_height_px }}">
+              <div class="small text-muted"><span id="logoSizeValNavH">{{ ss.logo_navbar_max_height_px }}</span> px — try 56–80 for square marks with text</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="logo_navbar_max_width_px">Navbar max width (px)</label>
+              <input type="range" class="form-range" id="logo_navbar_max_width_px" name="logo_navbar_max_width_px"
+                     min="120" max="420" step="4" value="{{ ss.logo_navbar_max_width_px }}">
+              <div class="small text-muted"><span id="logoSizeValNavW">{{ ss.logo_navbar_max_width_px }}</span> px — wider allows horizontal logos</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="logo_auth_max_height_px">Sign-in pages max height (px)</label>
+              <input type="range" class="form-range" id="logo_auth_max_height_px" name="logo_auth_max_height_px"
+                     min="72" max="280" step="2" value="{{ ss.logo_auth_max_height_px }}">
+              <div class="small text-muted"><span id="logoSizeValAuthH">{{ ss.logo_auth_max_height_px }}</span> px</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="logo_auth_max_width_px">Sign-in pages max width (px)</label>
+              <input type="range" class="form-range" id="logo_auth_max_width_px" name="logo_auth_max_width_px"
+                     min="160" max="520" step="4" value="{{ ss.logo_auth_max_width_px }}">
+              <div class="small text-muted"><span id="logoSizeValAuthW">{{ ss.logo_auth_max_width_px }}</span> px</div>
+            </div>
+          </div>
+          <div class="border rounded bg-white p-3 mt-2">
+            <div class="small text-muted mb-2">Live preview</div>
+            <div class="d-flex flex-wrap align-items-start gap-4">
+              <div>
+                <div class="small fw-semibold mb-1">Navbar strip</div>
+                <nav class="navbar navbar-light bg-white border rounded px-2 py-1 d-inline-flex align-items-center" style="min-height:56px;">
+                  {% if ss.logo_path %}
+                  <img id="coreLogoPreviewNav" src="{{ url_for('static', filename=normalize_manifest_static_path(ss.logo_path)) }}" alt="" style="{{ navbar_logo_inline_style(ss) }}">
+                  {% else %}
+                  <span class="text-muted small">Upload a logo above to preview</span>
+                  {% endif %}
+                </nav>
+              </div>
+              <div>
+                <div class="small fw-semibold mb-1">Sign-in card</div>
+                <div class="border rounded p-3 text-center mx-auto" style="max-width:320px;background:rgba(0,0,0,.04);">
+                  {% if ss.logo_path %}
+                  <img id="coreLogoPreviewAuth" src="{{ url_for('static', filename=normalize_manifest_static_path(ss.logo_path)) }}" alt="" style="{{ auth_logo_inline_style(ss) }}">
+                  {% else %}
+                  <span class="text-muted small">Upload a logo above to preview</span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+        (function () {
+          function clamp(v, lo, hi) {
+            v = parseInt(v, 10);
+            if (isNaN(v)) return lo;
+            return Math.max(lo, Math.min(hi, v));
+          }
+          function boxStyle(nh, nw) {
+            return 'max-height:' + nh + 'px;max-width:' + nw + 'px;width:auto;height:auto;object-fit:contain;vertical-align:middle;';
+          }
+          var navH = document.getElementById('logo_navbar_max_height_px');
+          var navW = document.getElementById('logo_navbar_max_width_px');
+          var authH = document.getElementById('logo_auth_max_height_px');
+          var authW = document.getElementById('logo_auth_max_width_px');
+          var imgNav = document.getElementById('coreLogoPreviewNav');
+          var imgAuth = document.getElementById('coreLogoPreviewAuth');
+          var vnh = document.getElementById('logoSizeValNavH');
+          var vnw = document.getElementById('logoSizeValNavW');
+          var vah = document.getElementById('logoSizeValAuthH');
+          var vaw = document.getElementById('logoSizeValAuthW');
+          function sync() {
+            if (!navH || !navW || !authH || !authW) return;
+            var nh = clamp(navH.value, 32, 120);
+            var nw = clamp(navW.value, 120, 420);
+            var ah = clamp(authH.value, 72, 280);
+            var aw = clamp(authW.value, 160, 520);
+            if (vnh) vnh.textContent = String(nh);
+            if (vnw) vnw.textContent = String(nw);
+            if (vah) vah.textContent = String(ah);
+            if (vaw) vaw.textContent = String(aw);
+            if (imgNav) imgNav.setAttribute('style', boxStyle(nh, nw));
+            if (imgAuth) imgAuth.setAttribute('style', boxStyle(ah, aw));
+          }
+          [navH, navW, authH, authW].forEach(function (el) {
+            if (el) {
+              el.addEventListener('input', sync);
+              el.addEventListener('change', sync);
+            }
+          });
+          sync();
+        })();
+        </script>
         <div class="mb-3">
           <label class="form-label" for="theme">Theme</label>
           <select id="theme" name="theme" class="form-select">

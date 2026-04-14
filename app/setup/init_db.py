@@ -1,3 +1,12 @@
+"""
+Pre-deploy / one-shot database bootstrap (``python -m app.setup.init_db``).
+
+Industry / category (Core manifest ``organization_profile.industries``) does **not**
+cause upgrades to delete or truncate application data. Plugin ``install.py upgrade``
+hooks may *add* schema, *insert* defaults with ``INSERT IGNORE`` / ``ON DUPLICATE KEY``,
+or *skip* optional seeds when an industry is not selected — they do not wipe existing
+rows because the tenant changed category or rebooted with a new image.
+"""
 from app.objects import AuthManager, get_db_connection, mysql_connect_with_retry
 import os
 import uuid
@@ -98,6 +107,10 @@ def run_predeploy_install_upgrades():
     """
     Run core + plugin ``install.py upgrade`` (same as Settings → version / run upgrades).
     Railway ``preDeployCommand`` uses this module; failures exit non-zero so deploy does not proceed.
+
+    Safe when Core **Industry & categories** differ from earlier deploys: upgrades are
+    idempotent and industry-aware seeds only add or upsert — they do not remove HR,
+    contractors, triage history, etc. based on the current category list.
 
     Set SPARROW_SKIP_PREDEPLOY_UPGRADES=1 to skip (e.g. debugging).
     """

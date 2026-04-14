@@ -181,7 +181,7 @@ select:-webkit-autofill,
 <nav class="navbar navbar-expand-lg navbar-light sticky-top shadow-sm navbar-erp">
 <div class="container-fluid px-3">
   {% if _site.get('branding') == 'logo' and _site.get('logo_path') %}
-<a class="navbar-brand py-2" href="/"><img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="Logo" height="48" style="max-height:48px"></a>
+<a class="navbar-brand py-2 d-flex align-items-center" href="/"><img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="Logo" style="{{ navbar_logo_inline_style(_site) }}"></a>
 {% else %}
 <a class="navbar-brand fw-semibold py-2" href="/">{{ _site.get('company_name') or 'Sparrow ERP' }}</a>
 {% endif %}
@@ -258,7 +258,7 @@ select:-webkit-autofill,
 
 <!-- Page Content -->
 <main class="container-fluid">
-{% with _fl = get_flashed_messages(with_categories=true) %}
+{% with _fl = get_shell_flashed_messages(with_categories=true) %}
   {% set _alerts = _fl|admin_visible_flashes %}
   {% if _alerts %}
   <div class="container-fluid px-3 pt-3" aria-live="polite">
