@@ -1,6 +1,6 @@
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Dict, Any, Optional, Tuple, Set, cast
+from typing import List, Dict, Any, Optional, Tuple, Set, cast, ClassVar
 import json
 import os
 import csv
@@ -398,6 +398,53 @@ class TimesheetService:
     - Contractor lookups
     - Staff/admin API payloads
     """
+
+    # Cached once per process: legacy rows use client_name/site_name; core schema uses client_id/site_id only.
+    _tb_entry_has_client_name: ClassVar[Optional[bool]] = None
+    _tb_entry_has_client_id: ClassVar[Optional[bool]] = None
+
+    @staticmethod
+    def _tb_timesheet_entry_schema_flags(cur) -> Tuple[bool, bool]:
+        if TimesheetService._tb_entry_has_client_name is None:
+            cur.execute("SHOW COLUMNS FROM tb_timesheet_entries LIKE 'client_name'")
+            TimesheetService._tb_entry_has_client_name = cur.fetchone() is not None
+            cur.execute("SHOW COLUMNS FROM tb_timesheet_entries LIKE 'client_id'")
+            TimesheetService._tb_entry_has_client_id = cur.fetchone() is not None
+        return (
+            bool(TimesheetService._tb_entry_has_client_name),
+            bool(TimesheetService._tb_entry_has_client_id),
+        )
+
+    @staticmethod
+    def _tb_timesheet_entry_location_parts(cur) -> Tuple[str, str, str, bool, bool]:
+        """
+        SQL fragments for resolving client/site labels on tb_timesheet_entries.
+
+        Returns:
+            client_expr, site_expr, join_sql (before JOIN job_types), has_client_name_col, has_client_id_col
+        """
+        has_cn, has_cid = TimesheetService._tb_timesheet_entry_schema_flags(cur)
+        if has_cn and has_cid:
+            return (
+                "COALESCE(c.name, e.client_name)",
+                "COALESCE(s.name, e.site_name)",
+                "LEFT JOIN clients c ON c.id = e.client_id\n"
+                "                LEFT JOIN sites s ON s.id = e.site_id\n",
+                has_cn,
+                has_cid,
+            )
+        if has_cn:
+            return "e.client_name", "e.site_name", "", has_cn, has_cid
+        if has_cid:
+            return (
+                "c.name",
+                "s.name",
+                "LEFT JOIN clients c ON c.id = e.client_id\n"
+                "                LEFT JOIN sites s ON s.id = e.site_id\n",
+                has_cn,
+                has_cid,
+            )
+        return "NULL", "NULL", "", has_cn, has_cid
 
     # ----------------- Module settings -----------------
 
@@ -1016,7 +1063,7 @@ class TimesheetService:
         - Entries for the week
         - Totals (hours, pay, travel, lateness, overrun)
 
-        MVP: uses free-text client_name/site_name (no joins on IDs).
+        Resolves client/site labels for both legacy (free-text columns) and core schema (client_id/site_id only).
         """
         wk = TimesheetService._ensure_week(user_id, week_id)
 
@@ -1036,17 +1083,22 @@ class TimesheetService:
         cur = conn.cursor(dictionary=True)
 
         try:
-            # MVP: no joins to clients/sites (IDs not in use yet). Use free-text fields.
+            ce, se, join_sql, has_cn, has_cid = TimesheetService._tb_timesheet_entry_location_parts(cur)
+            star_suffix = ""
+            if has_cid:
+                star_suffix = f", {ce} AS client_name, {se} AS site_name"
+            elif not has_cn:
+                star_suffix = ", NULL AS client_name, NULL AS site_name"
+
             cur.execute(
-                """
-                SELECT 
+                f"""
+                SELECT
                     e.*,
                     jt.name AS job_type_name,
-                    jt.colour_hex AS job_type_colour_hex,
-                    e.client_name AS client_name,
-                    e.site_name   AS site_name
+                    jt.colour_hex AS job_type_colour_hex
+                    {star_suffix}
                 FROM tb_timesheet_entries e
-                JOIN job_types jt ON jt.id = e.job_type_id
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
                 WHERE e.week_id=%s AND e.user_id=%s
                 ORDER BY e.work_date ASC, e.actual_start ASC
                 """,
@@ -2267,12 +2319,13 @@ class InvoiceService:
                 return []
             if str(wrow.get("status") or "").lower() == "invoiced":
                 return []
+            ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
-                """
-                SELECT e.id, e.work_date, e.client_name, e.site_name, jt.name AS job_type_name,
+                f"""
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
                        e.actual_hours, e.labour_hours, e.pay, e.travel_parking
                 FROM tb_timesheet_entries e
-                JOIN job_types jt ON jt.id = e.job_type_id
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
                 WHERE e.week_id=%s AND e.user_id=%s
                   AND (e.invoice_id IS NULL OR EXISTS (
                     SELECT 1 FROM contractor_invoices i
@@ -2882,13 +2935,14 @@ class InvoiceService:
             we = inv.get("week_ending")
             if hasattr(we, "strftime"):
                 inv["week_ending"] = we.strftime("%Y-%m-%d")
+            ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
-                """
-                SELECT e.id, e.work_date, e.client_name, e.site_name, jt.name AS job_type_name,
+                f"""
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
                        e.actual_hours, e.pay, e.travel_parking,
                        tw.week_id AS timesheet_week_code
                 FROM tb_timesheet_entries e
-                JOIN job_types jt ON jt.id = e.job_type_id
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
                 JOIN tb_timesheet_weeks tw ON tw.id = e.week_id
                 WHERE e.invoice_id = %s
                 ORDER BY tw.week_ending, e.work_date, e.id
@@ -2976,13 +3030,14 @@ class InvoiceService:
             we = inv.get("week_ending")
             if hasattr(we, "strftime"):
                 inv["week_ending"] = we.strftime("%Y-%m-%d")
+            ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
-                """
-                SELECT e.id, e.work_date, e.client_name, e.site_name, jt.name AS job_type_name,
+                f"""
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
                        e.actual_hours, e.pay, e.travel_parking,
                        tw.week_id AS timesheet_week_code
                 FROM tb_timesheet_entries e
-                JOIN job_types jt ON jt.id = e.job_type_id
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
                 JOIN tb_timesheet_weeks tw ON tw.id = e.week_id
                 WHERE e.invoice_id = %s
                 ORDER BY tw.week_ending, e.work_date, e.id
@@ -7536,19 +7591,22 @@ class ExportService:
             if not wk:
                 return "<p>No timesheet found.</p>"
 
-            # Fetch entries with COALESCE for names
+            ce, se, join_sql, has_cn, has_cid = TimesheetService._tb_timesheet_entry_location_parts(cur)
+            star_suffix = ""
+            if has_cid:
+                star_suffix = f", {ce} AS client_name, {se} AS site_name"
+            elif not has_cn:
+                star_suffix = ", NULL AS client_name, NULL AS site_name"
+
             cur.execute(
-                """ 
+                f"""
                 SELECT e.*,
-                    jt.name AS job_type_name,
-                    COALESCE(e.client_name, c.name) AS client_name,
-                    COALESCE(e.site_name, s.name)   AS site_name
-                FROM tb_timesheet_entries e 
-                JOIN job_types jt ON jt.id = e.job_type_id 
-                LEFT JOIN clients c ON c.id = e.client_name 
-                LEFT JOIN sites s ON s.id = e.site_name 
-                WHERE e.week_id=%s AND e.user_id=%s 
-                ORDER BY e.work_date ASC, e.actual_start ASC 
+                    jt.name AS job_type_name
+                    {star_suffix}
+                FROM tb_timesheet_entries e
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
+                WHERE e.week_id=%s AND e.user_id=%s
+                ORDER BY e.work_date ASC, e.actual_start ASC
                 """,
                 (wk["id"], user_id),
             )
@@ -7638,19 +7696,22 @@ class ExportService:
             if not wk:
                 return b"", f"timesheet_{user_id}_{week_id}.csv"
 
-            # Fetch entries
+            ce, se, join_sql, has_cn, has_cid = TimesheetService._tb_timesheet_entry_location_parts(cur)
+            star_suffix = ""
+            if has_cid:
+                star_suffix = f", {ce} AS client_name, {se} AS site_name"
+            elif not has_cn:
+                star_suffix = ", NULL AS client_name, NULL AS site_name"
+
             cur.execute(
-                """ 
+                f"""
                 SELECT e.*,
-                    jt.name AS job_type_name,
-                    COALESCE(e.client_name, c.name) AS client_name,
-                    COALESCE(e.site_name, s.name)   AS site_name
-                FROM tb_timesheet_entries e 
-                JOIN job_types jt ON jt.id = e.job_type_id 
-                LEFT JOIN clients c ON c.id = e.client_name 
-                LEFT JOIN sites s ON s.id = e.site_name 
-                WHERE e.week_id=%s AND e.user_id=%s 
-                ORDER BY e.work_date ASC, e.actual_start ASC 
+                    jt.name AS job_type_name
+                    {star_suffix}
+                FROM tb_timesheet_entries e
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
+                WHERE e.week_id=%s AND e.user_id=%s
+                ORDER BY e.work_date ASC, e.actual_start ASC
                 """,
                 (wk["id"], user_id),
             )
@@ -7727,16 +7788,20 @@ class ExportService:
             if not wk:
                 return b"", f"timesheet_{user_id}_{week_id}.pdf"
 
+            ce, se, join_sql, has_cn, has_cid = TimesheetService._tb_timesheet_entry_location_parts(cur)
+            star_suffix = ""
+            if has_cid:
+                star_suffix = f", {ce} AS client_name, {se} AS site_name"
+            elif not has_cn:
+                star_suffix = ", NULL AS client_name, NULL AS site_name"
+
             cur.execute(
-                """
+                f"""
                 SELECT e.*,
-                    jt.name AS job_type_name,
-                    COALESCE(e.client_name, c.name) AS client_name,
-                    COALESCE(e.site_name, s.name)   AS site_name
+                    jt.name AS job_type_name
+                    {star_suffix}
                 FROM tb_timesheet_entries e
-                JOIN job_types jt ON jt.id = e.job_type_id
-                LEFT JOIN clients c ON c.id = e.client_name
-                LEFT JOIN sites s   ON s.id = e.site_name
+                {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
                 WHERE e.week_id=%s AND e.user_id=%s
                 ORDER BY e.work_date ASC, e.actual_start ASC
                 """,
