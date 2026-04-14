@@ -6,11 +6,12 @@ from .services import (
     ExportService,
     InvoiceService,
     MinimalRateResolver,
+    RateResolver,
     _dec,
 )
 from werkzeug.exceptions import HTTPException
 from functools import wraps
-from datetime import datetime, date
+from datetime import datetime, date, time as time_cls
 from io import BytesIO
 import os
 import re
@@ -692,13 +693,6 @@ def api_timesheets_overview():
     finally:
         cur.close()
         conn.close()
-
-    print({
-        "items": items,
-        "total": total,
-        "has_more": has_more,
-        "page": page,
-    })
 
     return jsonify(
         {
@@ -1418,7 +1412,10 @@ def get_policies():
 @admin_required_tb
 def create_policy():
     data = request.get_json(force=True) or {}
-    return jsonify({"id": TemplateService.create_policy(data)})
+    try:
+        return jsonify({"id": TemplateService.create_policy(data)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @internal_bp.get("/policies/page")
@@ -2594,21 +2591,42 @@ def api_my_runsheets_assignment_reactivate(rs_id, ra_id):
 @staff_required_tb
 def api_public_contractor_rate():
     """
-    Effective £/h wage rate for the logged-in contractor, job type, and work date.
-    Uses the same card lookup as saving a timesheet row (MinimalRateResolver).
-    Query: job_type_id (int), on=YYYY-MM-DD
+    Indicative £/h for the logged-in contractor (same resolver stack as saving a row).
+
+    Uses ``RateResolver`` with a nominal 09:00–17:00 window (0 break) so weekend/BH/night
+    uplifts match saved entries; falls back to ``MinimalRateResolver`` on error.
+    Query: job_type_id (int), on=YYYY-MM-DD, optional client_id (int).
     """
     uid = current_tb_user_id()
     job_type_id = request.args.get("job_type_id", type=int)
     on_raw = (request.args.get("on") or "").strip()
+    client_id = request.args.get("client_id", type=int)
     if not uid or not job_type_id or not on_raw:
         return jsonify({"ok": False, "rate": 0.0, "message": "job_type_id and on (YYYY-MM-DD) required"}), 400
     try:
         work_date = datetime.strptime(on_raw, "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"ok": False, "rate": 0.0, "message": "invalid on date"}), 400
-    rate = MinimalRateResolver.resolve_rate(uid, job_type_id, work_date)
-    return jsonify({"ok": True, "rate": float(rate)})
+    try:
+        contractor = TimesheetService._get_contractor(int(uid))
+        rate_dec, _, _ = RateResolver.resolve_rate_and_pay(
+            int(uid),
+            contractor.get("role_id"),
+            job_type_id,
+            client_id,
+            work_date,
+            time_cls(9, 0, 0),
+            time_cls(17, 0, 0),
+            0,
+        )
+        rate_f = float(rate_dec)
+    except Exception:
+        rate_f = float(
+            MinimalRateResolver.resolve_rate(
+                int(uid), job_type_id, work_date, client_id=client_id
+            )
+        )
+    return jsonify({"ok": True, "rate": rate_f})
 
 
 # -------------------------

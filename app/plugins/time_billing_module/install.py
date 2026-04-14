@@ -324,6 +324,16 @@ def _ensure_job_types_colour_hex(conn):
 # =============================================================================
 
 
+def _invalidate_timesheet_entry_schema_cache() -> None:
+    """Clear in-process column flags after DDL (install/upgrade)."""
+    try:
+        from app.plugins.time_billing_module.services import TimesheetService
+
+        TimesheetService.invalidate_tb_entry_column_flags_cache()
+    except Exception:
+        pass
+
+
 def install(seed_demo: bool = False):
     """
     Fresh install: runs all SQL files in db/ in order, skipping those already applied.
@@ -355,6 +365,7 @@ def install(seed_demo: bool = False):
             print(f"[WARN] time_billing industry seed packs: {e}")
 
         _ensure_job_types_colour_hex(conn)
+        _invalidate_timesheet_entry_schema_cache()
     finally:
         conn.close()
 
@@ -382,6 +393,7 @@ def upgrade():
             print(f"[WARN] time_billing industry seed packs: {e}")
 
         _ensure_job_types_colour_hex(conn)
+        _invalidate_timesheet_entry_schema_cache()
     finally:
         conn.close()
 

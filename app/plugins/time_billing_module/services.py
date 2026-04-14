@@ -1,12 +1,29 @@
 from datetime import datetime, date, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any, Optional, Tuple, Set, cast, ClassVar
+from time import monotonic as _monotonic_seconds
 import json
+import logging
 import os
 import csv
 import io
 import re
 from app.objects import get_db_connection, EmailManager
+
+_LOG = logging.getLogger(__name__)
+
+
+def _tb_log_warning(message: str, *, exc_info: bool = False) -> None:
+    """Prefer Flask app logger in-request; otherwise module logger."""
+    try:
+        from flask import has_request_context, current_app
+
+        if has_request_context():
+            current_app.logger.warning(message, exc_info=exc_info)
+            return
+    except Exception:
+        pass
+    _LOG.warning(message, exc_info=exc_info)
 
 # ----------------- Helpers -----------------
 
@@ -88,31 +105,119 @@ class MinimalRateResolver:
             conn.close()
 
     @staticmethod
-    def resolve_rate(contractor_id: int, job_type_id: int, on_date: date) -> Decimal:
-        """
-        Return the effective wage rate from wage_rate_rows.
-        If no row matches, return Decimal('0.00').
-        """
-        rate_card_id = MinimalRateResolver.get_contractor_rate_card_id(
-            contractor_id)
-        if not rate_card_id:
-            return _dec(0)
+    def _rate_from_card(
+        cur, rate_card_id: int, job_type_id: int, on_date: date
+    ) -> Optional[Decimal]:
+        cur.execute(
+            """
+            SELECT rate
+            FROM wage_rate_rows
+            WHERE rate_card_id=%s
+              AND job_type_id=%s
+              AND effective_from <= %s
+              AND (effective_to IS NULL OR effective_to >= %s)
+            ORDER BY effective_from DESC, id DESC
+            LIMIT 1
+            """,
+            (int(rate_card_id), int(job_type_id), on_date, on_date),
+        )
+        r = cur.fetchone()
+        if r and r.get("rate") is not None:
+            return _dec(r["rate"])
+        return None
 
+    @staticmethod
+    def resolve_rate(
+        contractor_id: int,
+        job_type_id: int,
+        on_date: date,
+        client_id: Optional[int] = None,
+    ) -> Decimal:
+        """
+        Effective wage rate for timesheet save, refresh, and staff previews.
+
+        Order (aligned with ``RateResolver._base_rate`` for common cases):
+        1. Per-client contractor override (``contractor_client_overrides``), if
+           ``client_id`` is given and the table exists
+        2. Contractor ``wage_rate_override``
+        3. Contractor ``wage_rate_card_id`` + matching ``wage_rate_rows`` row
+        4. Role default active ``wage_rate_cards`` + matching row
+
+        If nothing matches, returns Decimal('0.00').
+        """
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute("""
-                SELECT rate
-                FROM wage_rate_rows
-                WHERE rate_card_id=%s
-                AND job_type_id=%s
-                AND effective_from <= %s
-                AND (effective_to IS NULL OR effective_to >= %s)
-                ORDER BY effective_from DESC, id DESC
-                LIMIT 1
-            """, (rate_card_id, int(job_type_id), on_date, on_date))
-            r = cur.fetchone()
-            return _dec(r["rate"]) if r and r.get("rate") is not None else _dec(0)
+            if client_id is not None:
+                try:
+                    cid = int(client_id)
+                except (TypeError, ValueError):
+                    cid = None
+                if cid is not None:
+                    try:
+                        cur.execute(
+                            """
+                            SELECT wage_rate_override AS rate
+                            FROM contractor_client_overrides
+                            WHERE contractor_id=%s AND client_id=%s
+                              AND (job_type_id IS NULL OR job_type_id=%s)
+                              AND effective_from <= %s
+                              AND (effective_to IS NULL OR effective_to >= %s)
+                            ORDER BY (job_type_id IS NOT NULL) DESC, effective_from DESC
+                            LIMIT 1
+                            """,
+                            (
+                                int(contractor_id),
+                                cid,
+                                int(job_type_id),
+                                on_date,
+                                on_date,
+                            ),
+                        )
+                        r0 = cur.fetchone()
+                        if r0 and r0.get("rate") is not None:
+                            return _dec(r0["rate"])
+                    except Exception:
+                        pass
+
+            cur.execute(
+                """
+                SELECT id, role_id, wage_rate_card_id, wage_rate_override
+                FROM tb_contractors WHERE id=%s
+                """,
+                (int(contractor_id),),
+            )
+            c = cur.fetchone() or {}
+            if c.get("wage_rate_override") is not None:
+                return _dec(c["wage_rate_override"])
+
+            rate_card_id = c.get("wage_rate_card_id")
+            if rate_card_id:
+                hit = MinimalRateResolver._rate_from_card(
+                    cur, int(rate_card_id), int(job_type_id), on_date
+                )
+                if hit is not None:
+                    return hit
+
+            role_id = c.get("role_id")
+            if role_id:
+                cur.execute(
+                    """
+                    SELECT id FROM wage_rate_cards
+                    WHERE role_id=%s AND active=1
+                    ORDER BY id ASC LIMIT 1
+                    """,
+                    (int(role_id),),
+                )
+                rc = cur.fetchone()
+                if rc and rc.get("id"):
+                    hit2 = MinimalRateResolver._rate_from_card(
+                        cur, int(rc["id"]), int(job_type_id), on_date
+                    )
+                    if hit2 is not None:
+                        return hit2
+
+            return _dec(0)
         finally:
             cur.close()
             conn.close()
@@ -155,29 +260,44 @@ class RateResolver:
             conn.close()
 
     @staticmethod
-    def _base_rate(contractor_id: int, job_type_id: int, work_date: date, client_name: Optional[int]) -> Decimal:
+    def _base_rate(
+        contractor_id: int,
+        job_type_id: int,
+        work_date: date,
+        client_id: Optional[int],
+    ) -> Decimal:
         """
         Determine the base rate using hierarchy of overrides and wage cards.
         """
         # 1) Contractor-client override (job-specific preferred)
-        conn = get_db_connection()
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute("""
-                SELECT wage_rate_override AS rate
-                FROM contractor_client_overrides
-                WHERE contractor_id=%s AND client_name=%s
-                AND (job_type_id IS NULL OR job_type_id=%s)
-                AND effective_from <= %s AND (effective_to IS NULL OR effective_to >= %s)
-                ORDER BY (job_type_id IS NOT NULL) DESC, effective_from DESC
-                LIMIT 1
-            """, (contractor_id, client_name, job_type_id, work_date, work_date))
-            r = cur.fetchone()
-            if r and r.get('rate') is not None:
-                return _dec(r['rate'])
-        finally:
-            cur.close()
-            conn.close()
+        if client_id is not None:
+            conn = get_db_connection()
+            cur = conn.cursor(dictionary=True)
+            try:
+                cur.execute(
+                    """
+                    SELECT wage_rate_override AS rate
+                    FROM contractor_client_overrides
+                    WHERE contractor_id=%s AND client_id=%s
+                    AND (job_type_id IS NULL OR job_type_id=%s)
+                    AND effective_from <= %s AND (effective_to IS NULL OR effective_to >= %s)
+                    ORDER BY (job_type_id IS NOT NULL) DESC, effective_from DESC
+                    LIMIT 1
+                    """,
+                    (
+                        contractor_id,
+                        int(client_id),
+                        job_type_id,
+                        work_date,
+                        work_date,
+                    ),
+                )
+                r = cur.fetchone()
+                if r and r.get("rate") is not None:
+                    return _dec(r["rate"])
+            finally:
+                cur.close()
+                conn.close()
 
         # 2) Contractor override
         c = RateResolver._fetch_contractor(contractor_id)
@@ -248,17 +368,22 @@ class RateResolver:
             conn.close()
 
         def match(p):
-            s = p['scope']
-            if s == 'GLOBAL':
+            s = str(p.get("scope") or "").strip().upper()
+            if not s:
+                return False
+            if s == "GLOBAL":
                 return True
-            if s == 'ROLE':
-                return p['role_id'] == scope.get('role_id')
-            if s == 'JOB_TYPE':
-                return p['job_type_id'] == scope.get('job_type_id')
-            if s == 'CLIENT':
-                return p['client_name'] == scope.get('client_name')
-            if s == 'CONTRACTOR_CLIENT':
-                return p['client_name'] == scope.get('client_name') and p['contractor_id'] == scope.get('contractor_id')
+            if s == "ROLE":
+                return p.get("role_id") == scope.get("role_id")
+            if s == "JOB_TYPE":
+                return p.get("job_type_id") == scope.get("job_type_id")
+            if s == "CLIENT":
+                return p.get("client_id") == scope.get("client_id")
+            if s == "CONTRACTOR_CLIENT":
+                return (
+                    p.get("client_id") == scope.get("client_id")
+                    and p.get("contractor_id") == scope.get("contractor_id")
+                )
             return False
 
         return [p for p in allp if match(p)]
@@ -277,11 +402,16 @@ class RateResolver:
             conn.close()
 
     @staticmethod
+    def _policy_mode_upper(p: Dict[str, Any]) -> str:
+        m = p.get("mode")
+        return str(m).strip().upper() if m is not None else ""
+
+    @staticmethod
     def resolve_rate_and_pay(
         contractor_id: int,
         role_id: Optional[int],
         job_type_id: int,
-        client_name: Optional[int],
+        client_id: Optional[int],
         work_date: date,
         actual_start: time,
         actual_end: time,
@@ -297,13 +427,13 @@ class RateResolver:
             policy_meta: Dict with applied policy details
         """
         base = RateResolver._base_rate(
-            contractor_id, job_type_id, work_date, client_name)
+            contractor_id, job_type_id, work_date, client_id)
         hrs = Decimal(
             str(_hours_between(actual_start, actual_end, break_mins)))
         scope = {
             "role_id": role_id,
             "job_type_id": job_type_id,
-            "client_name": client_name,
+            "client_id": client_id,
             "contractor_id": contractor_id
         }
 
@@ -315,10 +445,11 @@ class RateResolver:
             pols = RateResolver._policies('WEEKEND', scope, work_date)
             if pols:
                 p = pols[0]
-                if p['mode'] == 'MULTIPLIER' and p.get('multiplier') is not None:
+                pm = RateResolver._policy_mode_upper(p)
+                if pm == "MULTIPLIER" and p.get('multiplier') is not None:
                     candidates.append(
                         ("WEEKEND", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
-                elif p['mode'] == 'ABSOLUTE' and p.get('absolute_rate') is not None:
+                elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
                     candidates.append(("WEEKEND", _dec(p['absolute_rate'])))
 
         # Bank Holiday policy
@@ -326,10 +457,11 @@ class RateResolver:
             pols = RateResolver._policies('BANK_HOLIDAY', scope, work_date)
             if pols:
                 p = pols[0]
-                if p['mode'] == 'MULTIPLIER' and p.get('multiplier') is not None:
+                pm = RateResolver._policy_mode_upper(p)
+                if pm == "MULTIPLIER" and p.get('multiplier') is not None:
                     candidates.append(
                         ("BANK_HOLIDAY", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
-                elif p['mode'] == 'ABSOLUTE' and p.get('absolute_rate') is not None:
+                elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
                     candidates.append(
                         ("BANK_HOLIDAY", _dec(p['absolute_rate'])))
 
@@ -341,10 +473,11 @@ class RateResolver:
             ws, we = p.get('window_start'), p.get('window_end')
             if ws and we:
                 night_window = (ws, we)
-            if p['mode'] == 'MULTIPLIER' and p.get('multiplier') is not None:
+            pm = RateResolver._policy_mode_upper(p)
+            if pm == "MULTIPLIER" and p.get('multiplier') is not None:
                 candidates.append(
                     ("NIGHT", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
-            elif p['mode'] == 'ABSOLUTE' and p.get('absolute_rate') is not None:
+            elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
                 candidates.append(("NIGHT", _dec(p['absolute_rate'])))
 
         # Choose max-of all candidate rates
@@ -398,18 +531,34 @@ class TimesheetService:
     - Contractor lookups
     - Staff/admin API payloads
 
+    Pay/rate on save uses ``RateResolver.resolve_rate_and_pay`` (calendar policies, OT, etc.),
+    with ``MinimalRateResolver`` only if that raises. Entry column detection is cached with a
+    short TTL and cleared after module install/upgrade.
+
     ``tb_timesheet_entries`` may be legacy (free-text ``client_name`` / ``site_name``)
     or core (``client_id`` / ``site_id`` only). All writers and readers that touch
     location fields must use ``_tb_entry_column_flags`` or
     ``_tb_timesheet_entry_location_parts`` so both layouts work.
     """
 
-    # Cached once per process: which location columns exist on tb_timesheet_entries.
+    # TTL cache: avoids hammering information_schema; refreshes after migrations (~5 min).
     _tb_entry_col_flags: ClassVar[Optional[Dict[str, bool]]] = None
+    _tb_entry_col_flags_expires_at: ClassVar[float] = 0.0
+    _TB_ENTRY_COL_FLAGS_TTL_SEC: ClassVar[float] = 300.0
+
+    @staticmethod
+    def invalidate_tb_entry_column_flags_cache() -> None:
+        """Call after migrations that add/drop columns on ``tb_timesheet_entries``."""
+        TimesheetService._tb_entry_col_flags = None
+        TimesheetService._tb_entry_col_flags_expires_at = 0.0
 
     @staticmethod
     def _tb_entry_column_flags(cur) -> Dict[str, bool]:
-        if TimesheetService._tb_entry_col_flags is None:
+        now = _monotonic_seconds()
+        if (
+            TimesheetService._tb_entry_col_flags is None
+            or now >= TimesheetService._tb_entry_col_flags_expires_at
+        ):
             cur.execute(
                 """
                 SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -427,6 +576,9 @@ class TimesheetService:
                 "client_id": "client_id" in found,
                 "site_id": "site_id" in found,
             }
+            TimesheetService._tb_entry_col_flags_expires_at = (
+                now + TimesheetService._TB_ENTRY_COL_FLAGS_TTL_SEC
+            )
         return TimesheetService._tb_entry_col_flags
 
     @staticmethod
@@ -1092,51 +1244,64 @@ class TimesheetService:
         actual_total_mins = int(actual_hours * 60)
         variance = actual_total_mins - scheduled_total_mins
 
-        base_rate = MinimalRateResolver.resolve_rate(
-            contractor_id=contractor["id"],
-            job_type_id=int(entry["job_type_id"]),
-            on_date=work_date
-        )
-        hrs_dec = _dec(actual_hours, '0.0001')
-        pay_dec = (hrs_dec * base_rate).quantize(Decimal('0.01'))
+        cid_for_rate: Optional[int] = None
+        raw_cid = entry.get("client_id")
+        if raw_cid is not None:
+            try:
+                cid_for_rate = int(raw_cid)
+            except (TypeError, ValueError):
+                cid_for_rate = None
+
+        hrs_dec = _dec(actual_hours, "0.0001")
+        wage_f: float
+        pay_f: float
+        policy_applied_val: Optional[str]
+        policy_source_val: str
+
+        try:
+            rate_dec, pay_dec, policy_meta = RateResolver.resolve_rate_and_pay(
+                contractor_id=int(contractor["id"]),
+                role_id=contractor.get("role_id"),
+                job_type_id=int(entry["job_type_id"]),
+                client_id=cid_for_rate,
+                work_date=work_date,
+                actual_start=as_,
+                actual_end=ae,
+                break_mins=break_mins,
+            )
+            wage_f = float(rate_dec)
+            pay_f = float(pay_dec)
+            policy_applied_val = json.dumps(policy_meta, default=str)
+            policy_source_val = str(policy_meta.get("chosen_reason") or "POLICY")
+        except Exception:
+            _tb_log_warning(
+                "time_billing: RateResolver failed; using MinimalRateResolver fallback.",
+                exc_info=True,
+            )
+            base_rate = MinimalRateResolver.resolve_rate(
+                contractor_id=contractor["id"],
+                job_type_id=int(entry["job_type_id"]),
+                on_date=work_date,
+                client_id=cid_for_rate,
+            )
+            pay_dec_fb = (hrs_dec * base_rate).quantize(Decimal("0.01"))
+            wage_f = float(base_rate)
+            pay_f = float(pay_dec_fb)
+            policy_applied_val = None
+            policy_source_val = "MINIMAL_FALLBACK"
 
         entry.update({
-            "scheduled_hours": float(_dec(scheduled_hours, '0.0001')),
+            "scheduled_hours": float(_dec(scheduled_hours, "0.0001")),
             "actual_hours": float(hrs_dec),
-            "labour_hours": float(_dec(labour_hours, '0.0001')),
+            "labour_hours": float(_dec(labour_hours, "0.0001")),
             "lateness_mins": lateness,
             "overrun_mins": overrun,
             "variance_mins": variance,
-            "wage_rate_used": float(base_rate),
-            "pay": float(pay_dec),
-            "policy_applied": None,
-            "policy_source": "CARD_ONLY"
+            "wage_rate_used": wage_f,
+            "pay": pay_f,
+            "policy_applied": policy_applied_val,
+            "policy_source": policy_source_val,
         })
-
-        # # Resolve rate and pay using RateResolver
-        # rate, pay, policy_meta = RateResolver.resolve_rate_and_pay(
-        #     contractor_id=contractor["id"],
-        #     role_id=contractor.get("role_id"),
-        #     job_type_id=int(entry["job_type_id"]),
-        #     client_name=entry.get("client_name"),
-        #     work_date=work_date,
-        #     actual_start=as_,
-        #     actual_end=ae,
-        #     break_mins=break_mins
-        # )
-
-        # entry.update({
-        #     "scheduled_hours": float(_dec(scheduled_hours, '0.0001')),
-        #     "actual_hours": float(_dec(actual_hours, '0.0001')),
-        #     "labour_hours": float(_dec(labour_hours, '0.0001')),
-        #     "lateness_mins": lateness,
-        #     "overrun_mins": overrun,
-        #     "variance_mins": variance,
-        #     "wage_rate_used": float(rate),
-        #     "pay": float(pay),
-        #     "policy_applied": json.dumps(policy_meta),
-        #     "policy_source": policy_meta.get("chosen_reason")
-        # })
         return entry
 
     @staticmethod
@@ -2228,7 +2393,7 @@ class TimesheetService:
                 EmailManager().send_email(subject=subject, body=body,
                                           recipients=to_addr, html_body=html_body)
             except Exception as e:
-                print(f"[WARN] Failed to send approval email: {e}")
+                _tb_log_warning(f"time_billing: approval email failed: {e}")
 
             return pdf_bytes, {"ok": True, "filename": filename}
 
@@ -2253,7 +2418,7 @@ class TimesheetService:
         try:
             InvoiceService.void_invoice_for_week(wk["id"], "Timesheet rejected – create new invoice after re-approval.")
         except Exception as e:
-            print(f"[WARN] Could not void invoice for week {wk['id']}: {e}")
+            _tb_log_warning(f"time_billing: could not void invoice for week {wk['id']}: {e}")
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
@@ -2287,7 +2452,7 @@ class TimesheetService:
                     EmailManager().send_email(subject=subject, body=body,
                                               recipients=to_addr, html_body=html_body)
                 except Exception as e:
-                    print(f"[WARN] Failed to send rejection email: {e}")
+                    _tb_log_warning(f"time_billing: rejection email failed: {e}")
 
         finally:
             cur.close()
@@ -4870,11 +5035,31 @@ class RunsheetService:
                     )
                     shift_pay_rate = rw.get("shift_pay_rate")
 
-        card = MinimalRateResolver.resolve_rate(
-            int(contractor_id), int(job_type_id), work_date
-        )
-        card_f = float(card)
-        typical_shift = round(card_f * hours, 2) if card_f > 0 else None
+        try:
+            try:
+                as_s = _to_time(scheduled_start) if scheduled_start else time(9, 0, 0)
+                ae_s = _to_time(scheduled_end) if scheduled_end else time(17, 0, 0)
+            except Exception:
+                as_s, ae_s = time(9, 0, 0), time(17, 0, 0)
+            contractor = TimesheetService._get_contractor(int(contractor_id))
+            rate_dec, pay_dec, _ = RateResolver.resolve_rate_and_pay(
+                int(contractor_id),
+                contractor.get("role_id"),
+                int(job_type_id),
+                None,
+                work_date,
+                as_s,
+                ae_s,
+                int(break_mins or 0),
+            )
+            card_f = float(rate_dec)
+            typical_shift = round(float(pay_dec), 2) if card_f > 0 else None
+        except Exception:
+            card = MinimalRateResolver.resolve_rate(
+                int(contractor_id), int(job_type_id), work_date
+            )
+            card_f = float(card)
+            typical_shift = round(card_f * hours, 2) if card_f > 0 else None
 
         out: Dict[str, Any] = {
             "hours_estimated": hours,
@@ -7037,6 +7222,29 @@ class TemplateService:
 
     # ---- Bill Rate Cards & Rows ----
     @staticmethod
+    def _bill_card_scope_ids(data: dict) -> Tuple[Optional[int], Optional[int]]:
+        """Resolve client/site FKs from API payload (accepts client_id or legacy client_name keys)."""
+        raw_c = data.get("client_id")
+        if raw_c is None:
+            raw_c = data.get("client_name")
+        raw_s = data.get("site_id")
+        if raw_s is None:
+            raw_s = data.get("site_name")
+        cid: Optional[int] = None
+        sid: Optional[int] = None
+        if raw_c not in (None, ""):
+            try:
+                cid = int(raw_c)
+            except (TypeError, ValueError):
+                cid = None
+        if raw_s not in (None, ""):
+            try:
+                sid = int(raw_s)
+            except (TypeError, ValueError):
+                sid = None
+        return cid, sid
+
+    @staticmethod
     def list_bill_cards() -> list[dict]:
         """List all bill rate cards with associated client and site names."""
         conn = get_db_connection()
@@ -7044,11 +7252,11 @@ class TemplateService:
         try:
             cur.execute("""
                 SELECT brc.id, brc.name, brc.active,
-                       brc.client_name AS client_ref, brc.site_name AS site_ref,
+                       brc.client_id AS client_ref, brc.site_id AS site_ref,
                        c.name AS client_label, s.name AS site_label
                 FROM bill_rate_cards brc
-                LEFT JOIN clients c ON c.id=brc.client_name
-                LEFT JOIN sites s ON s.id=brc.site_name
+                LEFT JOIN clients c ON c.id = brc.client_id
+                LEFT JOIN sites s ON s.id = brc.site_id
                 ORDER BY brc.id
             """)
             return cur.fetchall() or []
@@ -7062,13 +7270,13 @@ class TemplateService:
         if not data.get("name"):
             raise Exception("name required")
 
+        cid, sid = TemplateService._bill_card_scope_ids(data)
         conn = get_db_connection()
         cur = conn.cursor()
         try:
             cur.execute(
-                "INSERT INTO bill_rate_cards (name, client_name, site_name, active) VALUES (%s,%s,%s,%s)",
-                (data["name"], data.get("client_name"), data.get(
-                    "site_name"), int(data.get("active", 1)))
+                "INSERT INTO bill_rate_cards (name, client_id, site_id, active) VALUES (%s,%s,%s,%s)",
+                (data["name"], cid, sid, int(data.get("active", 1))),
             )
             conn.commit()
             return cur.lastrowid
@@ -7172,13 +7380,22 @@ class TemplateService:
             if not cur.fetchone():
                 raise Exception("Card not found")
             fields, params = [], {}
-            for k in ("name", "client_name", "site_name", "active"):
+            for k in ("name", "active"):
                 if k in data:
                     fields.append(f"{k}=%({k})s")
                     v = data[k]
                     if k == "active" and isinstance(v, bool):
                         v = 1 if v else 0
                     params[k] = v
+            if any(
+                x in data
+                for x in ("client_id", "client_name", "site_id", "site_name")
+            ):
+                bcid, bsid = TemplateService._bill_card_scope_ids(data)
+                fields.append("client_id=%(client_id)s")
+                fields.append("site_id=%(site_id)s")
+                params["client_id"] = bcid
+                params["site_id"] = bsid
             if not fields:
                 return
             params["id"] = card_id
@@ -7205,7 +7422,69 @@ class TemplateService:
             cur.close()
             conn.close()
 
-    # ---- Policies ----
+    # ---- Policies (calendar_policies) ----
+    _CAL_POLICY_TYPES = frozenset(
+        {
+            "WEEKEND",
+            "BANK_HOLIDAY",
+            "NIGHT",
+            "OVERTIME_SHIFT",
+            "OVERTIME_DAILY",
+            "OVERTIME_WEEKLY",
+        }
+    )
+    _CAL_POLICY_SCOPES = frozenset(
+        {
+            "GLOBAL",
+            "ROLE",
+            "JOB_TYPE",
+            "CLIENT",
+            "CONTRACTOR_CLIENT",
+        }
+    )
+    _CAL_POLICY_MODES = frozenset({"OFF", "MULTIPLIER", "ABSOLUTE"})
+
+    @staticmethod
+    def _normalize_calendar_policy_type(val: Any) -> str:
+        if not val:
+            return "WEEKEND"
+        s = str(val).strip().upper()
+        return s if s in TemplateService._CAL_POLICY_TYPES else "WEEKEND"
+
+    @staticmethod
+    def _normalize_calendar_policy_scope(val: Any) -> str:
+        if val is None or str(val).strip() == "":
+            return "GLOBAL"
+        s = str(val).strip().upper()
+        if s in TemplateService._CAL_POLICY_SCOPES:
+            return s
+        low = str(val).strip().lower()
+        return {
+            "global": "GLOBAL",
+            "role": "ROLE",
+            "job_type": "JOB_TYPE",
+            "client": "CLIENT",
+            "contractor_client": "CONTRACTOR_CLIENT",
+            "site": "GLOBAL",
+        }.get(low, "GLOBAL")
+
+    @staticmethod
+    def _normalize_calendar_policy_mode(val: Any) -> str:
+        if not val:
+            return "OFF"
+        s = str(val).strip().upper()
+        return s if s in TemplateService._CAL_POLICY_MODES else "OFF"
+
+    @staticmethod
+    def _coerce_calendar_policy_effective_from(val: Any) -> date:
+        if val is None or val == "":
+            return date.today()
+        if isinstance(val, date):
+            return val
+        if isinstance(val, datetime):
+            return val.date()
+        return datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
+
     @staticmethod
     def list_policies() -> list[dict]:
         """List all calendar policies."""
@@ -7213,7 +7492,7 @@ class TemplateService:
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute("""
-                SELECT id, name, type, scope, role_id, job_type_id, client_name, contractor_id,
+                SELECT id, name, type, scope, role_id, job_type_id, client_id, contractor_id,
                        mode, multiplier, absolute_rate, window_start, window_end,
                        ot_threshold_hours, ot_tier2_threshold_hours, ot_tier1_mult, ot_tier2_mult,
                        applies_to, stacking, effective_from, effective_to, active
@@ -7227,18 +7506,32 @@ class TemplateService:
 
     @staticmethod
     def create_policy(data: dict) -> int:
-        """Create a new calendar policy."""
-        required = ["name", "type", "scope", "mode", "effective_from"]
-        missing = [k for k in required if not data.get(k)]
-        if missing:
-            raise Exception(f"Missing: {', '.join(missing)}")
+        """
+        Insert a ``calendar_policies`` row.
+
+        Fills DB-safe defaults when the UI sends a minimal payload (e.g. name + scope only).
+        """
+        data = dict(data or {})
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise Exception("name required")
+        data["name"] = name
+        data["type"] = TemplateService._normalize_calendar_policy_type(data.get("type"))
+        data["scope"] = TemplateService._normalize_calendar_policy_scope(data.get("scope"))
+        data["mode"] = TemplateService._normalize_calendar_policy_mode(data.get("mode"))
+        data["effective_from"] = TemplateService._coerce_calendar_policy_effective_from(
+            data.get("effective_from")
+        )
 
         conn = get_db_connection()
         cur = conn.cursor()
         try:
+            pol_cid = data.get("client_id")
+            if pol_cid is None:
+                pol_cid = data.get("client_name")
             cur.execute("""
                 INSERT INTO calendar_policies
-                (name, type, scope, role_id, job_type_id, client_name, contractor_id,
+                (name, type, scope, role_id, job_type_id, client_id, contractor_id,
                  mode, multiplier, absolute_rate, window_start, window_end,
                  ot_threshold_hours, ot_tier2_threshold_hours, ot_tier1_mult, ot_tier2_mult,
                  applies_to, stacking, effective_from, effective_to, active)
@@ -7246,7 +7539,7 @@ class TemplateService:
             """, (
                 data["name"], data["type"], data["scope"], data.get(
                     "role_id"), data.get("job_type_id"),
-                data.get("client_name"), data.get(
+                pol_cid, data.get(
                     "contractor_id"), data["mode"], data.get("multiplier"),
                 data.get("absolute_rate"), data.get(
                     "window_start"), data.get("window_end"),
