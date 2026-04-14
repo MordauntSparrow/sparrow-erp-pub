@@ -194,12 +194,13 @@ def login_page():
     if current_ep_user():
         # Already logged in: always go to dashboard (do not use next - avoids redirect loop to /time-billing/)
         return redirect(url_for("public_employee_portal.dashboard"))
-    site_settings = (core_manifest or {}).get("site_settings") or {}
-    site_settings = {
-        "company_name": site_settings.get("company_name") or "Employee Portal",
-        "branding": site_settings.get("branding") or "name",
-        "logo_path": site_settings.get("logo_path") or "",
-    }
+    from app.branding_utils import merge_site_settings_defaults
+
+    site_settings = merge_site_settings_defaults(
+        (core_manifest or {}).get("site_settings")
+    )
+    if not (site_settings.get("company_name") or "").strip():
+        site_settings["company_name"] = "Employee Portal"
     return render_template(
         "employee_portal_module/public/login.html",
         config=core_manifest,

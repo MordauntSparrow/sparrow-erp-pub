@@ -414,6 +414,11 @@ def _register_jinja_filters(app: Flask) -> None:
     )
     app.jinja_env.globals["static_upload_file_exists"] = static_upload_file_exists
 
+    from app.branding_utils import auth_logo_inline_style, navbar_logo_inline_style
+
+    app.jinja_env.globals["navbar_logo_inline_style"] = navbar_logo_inline_style
+    app.jinja_env.globals["auth_logo_inline_style"] = auth_logo_inline_style
+
 
 # ---------------------------------------------------------------------
 # Flask app factory
@@ -437,6 +442,16 @@ def create_app():
 
     # Ensure core config exists (writes to volume when manifest.json is symlinked)
     _ensure_core_manifest(config_dir)
+    try:
+        from app.organization_profile import (
+            migrate_core_manifest_organization_profile_defaults,
+        )
+
+        migrate_core_manifest_organization_profile_defaults(
+            os.path.join(config_dir, "manifest.json")
+        )
+    except Exception as _org_mig_err:
+        print(f"[WARN] organization_profile manifest migration skipped: {_org_mig_err}")
 
     # Dependency handler (your existing behaviour)
     # _run_dependency_handler(app_root)
@@ -465,6 +480,21 @@ def create_app():
     _register_jinja_filters(app)
 
     @app.context_processor
+    def inject_branding_logo_style_helpers():
+        """
+        Also expose logo sizing helpers via context (not only jinja_env.globals).
+        Public plugin blueprints (inventory, scheduling, fleet, …) extend
+        employee_portal_module/base_public.html; app-level context processors
+        run for every request so those layouts always receive these names.
+        """
+        from app.branding_utils import auth_logo_inline_style, navbar_logo_inline_style
+
+        return {
+            "navbar_logo_inline_style": navbar_logo_inline_style,
+            "auth_logo_inline_style": auth_logo_inline_style,
+        }
+
+    @app.context_processor
     def inject_user_management_nav():
         from app.permissions_registry import (
             user_can_open_org_admin_nav,
@@ -481,6 +511,31 @@ def create_app():
         from datetime import datetime
 
         return {"current_year": datetime.now().year}
+
+    @app.context_processor
+    def inject_organization_industries():
+        from flask import current_app
+
+        from app.organization_profile import (
+            normalize_organization_industries,
+            tenant_matches_industry,
+        )
+
+        def industry_visible(*slugs: str) -> bool:
+            if not slugs:
+                return True
+            return tenant_matches_industry(
+                current_app.config.get("organization_industries"),
+                *slugs,
+            )
+
+        ids = normalize_organization_industries(
+            current_app.config.get("organization_industries")
+        )
+        return {
+            "organization_industries": ids,
+            "industry_visible": industry_visible,
+        }
 
     @app.before_request
     def _scanner_guard_before_request():
@@ -637,11 +692,9 @@ def create_app():
     app.register_blueprint(routes)
     app.register_blueprint(api_bp)
 
-    _DEFAULT_ADMIN_SITE_SETTINGS = {
-        "company_name": "Sparrow ERP",
-        "branding": "name",
-        "logo_path": "",
-    }
+    from app.branding_utils import merge_site_settings_defaults
+
+    _DEFAULT_ADMIN_SITE_SETTINGS = merge_site_settings_defaults({})
 
     @app.before_request
     def _ensure_admin_session_site_settings():
@@ -665,8 +718,8 @@ def create_app():
         try:
             pm = PluginManager(plugins_dir=plugins_dir)
             cm = pm.get_core_manifest() or {}
-            session["site_settings"] = cm.get(
-                "site_settings", dict(_DEFAULT_ADMIN_SITE_SETTINGS)
+            session["site_settings"] = merge_site_settings_defaults(
+                cm.get("site_settings")
             )
             if not session.get("core_manifest"):
                 session["core_manifest"] = cm
@@ -731,6 +784,15 @@ def create_app():
         _ts.setdefault("dashboard_background_color", "#1e293b")
         _ts.setdefault("dashboard_background_image_path", "")
         app.config["theme_settings"] = _ts
+        from app.organization_profile import normalize_organization_industries
+
+        _op = _core_m.get("organization_profile")
+        _inds = (
+            (_op or {}).get("industries")
+            if isinstance(_op, dict)
+            else None
+        )
+        app.config["organization_industries"] = normalize_organization_industries(_inds)
     except Exception as _theme_err:
         print(f"[WARN] Could not set app.config['theme_settings']: {_theme_err}")
         app.config["theme_settings"] = {
@@ -740,6 +802,9 @@ def create_app():
             "dashboard_background_color": "#1e293b",
             "dashboard_background_image_path": "",
         }
+        from app.organization_profile import normalize_organization_industries
+
+        app.config["organization_industries"] = normalize_organization_industries(None)
 
     plugin_manager.register_admin_routes(app)
     # Public plugin blueprints (e.g. recruitment /vacancies, employee portal paths) — required for url_for from admin templates
@@ -1009,6 +1074,28 @@ def create_app():
         def _csrf_token():
             return ""
         app.jinja_env.globals["csrf_token"] = _csrf_token
+
+    # Pop only categories meant for the main admin shell — keeps Sling sync toasts on that page only.
+    _ADMIN_SHELL_FLASH_CATEGORIES = (
+        "message",
+        "success",
+        "info",
+        "warning",
+        "danger",
+        "error",
+        "plugins_page_success",
+        "plugins_page_danger",
+        "plugins_page_error",
+    )
+
+    @app.template_global()
+    def get_shell_flashed_messages(with_categories=True):
+        from flask import get_flashed_messages as _gfm
+
+        return _gfm(
+            with_categories=with_categories,
+            category_filter=list(_ADMIN_SHELL_FLASH_CATEGORIES),
+        )
 
     # Basic rate limiting + stricter caps on authentication surfaces
     if Limiter:

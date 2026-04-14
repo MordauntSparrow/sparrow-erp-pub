@@ -58,6 +58,7 @@ CONTRACTOR_AUDIT_PREFIXES: tuple[str, ...] = (
     "/time-billing/",
     "/employee-portal/",
     "/inventory/",
+    "/compliance/",
 )
 
 HR_CID_RE = re.compile(r"/plugin/hr_module/contractors/(\d+)")
@@ -300,7 +301,15 @@ def _infer_permission(endpoint: str | None, path: str) -> str | None:
         return "medical_records_module.access"
     if "training" in low or "/training_module/" in path_l:
         return "training_module.access"
-    if "compliance" in low or "/compliance_module/" in path_l:
+    # compliance_audit_internal.* matches "compliance" as a substring — check audit before policies module
+    if "compliance_audit" in low or "/compliance_audit_module/" in path_l:
+        return "compliance_audit_module.access"
+    if (
+        low.startswith("internal_compliance.")
+        or low.startswith("public_compliance.")
+        or "/compliance_module/" in path_l
+        or path_l.startswith("/compliance/")
+    ):
         return "compliance_module.access"
     if "website" in low or "/website_module/" in path_l:
         return "website_module.access"
@@ -312,8 +321,6 @@ def _infer_permission(endpoint: str | None, path: str) -> str | None:
         return "work_module.access"
     if "news_blog" in low or "/news_blog_module/" in path_l:
         return "news_blog_module.access"
-    if "compliance_audit" in low or "/compliance_audit_module/" in path_l:
-        return "compliance_audit_module.access"
     if low.startswith("public_employee_portal") or path_l.startswith("/employee-portal/"):
         return "employee_portal_module.access"
     if low.startswith("public_time_billing") or path_l.startswith("/time-billing/"):
@@ -468,6 +475,14 @@ def after_request_record(response):
             detail["endpoint"] = endpoint
         if inferred:
             detail["inferred_permission"] = inferred
+        try:
+            from flask import g
+
+            extra = getattr(g, "_staff_audit_extra", None)
+            if isinstance(extra, dict):
+                detail.update(extra)
+        except Exception:
+            pass
 
         ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
         if len(ip) > 45:

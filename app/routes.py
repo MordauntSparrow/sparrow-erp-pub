@@ -48,6 +48,11 @@ from app.ai_config import (
     sanitize_chat_model_id,
 )
 from app.create_app import update_env_var
+from app.branding_utils import (
+    apply_logo_dimensions_to_site_settings,
+    merge_site_settings_defaults,
+)
+from app.organization_profile import INDUSTRY_OPTIONS, normalize_organization_industries
 from app.static_upload_paths import normalize_manifest_static_path
 from app.storage_paths import get_persistent_data_root, get_persistent_smtp_env_path
 from app.auth_jwt import encode_session_token
@@ -443,11 +448,7 @@ def login():
     plugin_manager = PluginManager(PLUGINS_FOLDER)
     core_manifest = plugin_manager.get_core_manifest() or {}
 
-    site_settings = core_manifest.get('site_settings', {
-        'company_name': 'Sparrow ERP',
-        'branding': 'name',
-        'logo_path': ''
-    })
+    site_settings = merge_site_settings_defaults(core_manifest.get("site_settings"))
 
     session['site_settings'] = site_settings
     session['core_manifest'] = core_manifest
@@ -663,7 +664,12 @@ def reset_password_request():
 
     plugin_manager = PluginManager(PLUGINS_FOLDER)
     core_manifest = plugin_manager.get_core_manifest() or {}
-    return render_template('reset_password_request.html', config=core_manifest)
+    _ss = merge_site_settings_defaults(core_manifest.get("site_settings"))
+    return render_template(
+        "reset_password_request.html",
+        config=core_manifest,
+        site_settings=_ss,
+    )
 
 
 @routes.route('/reset-password/<token>', methods=['GET', 'POST'])
@@ -687,7 +693,14 @@ def reset_password(token):
 
         if new_password != confirm_password:
             flash("Passwords do not match.", "danger")
-            return render_template('reset_password.html', token=token, config=core_manifest)
+            return render_template(
+                "reset_password.html",
+                token=token,
+                config=core_manifest,
+                site_settings=merge_site_settings_defaults(
+                    core_manifest.get("site_settings")
+                ),
+            )
 
         user_data = User.get_user_by_email(email)
         if user_data and int(user_data.get("billable_exempt") or 0):
@@ -705,7 +718,14 @@ def reset_password(token):
         flash("User not found.", "danger")
         return redirect(url_for('routes.reset_password_request'))
 
-    return render_template('reset_password.html', token=token, config=core_manifest)
+    return render_template(
+        "reset_password.html",
+        token=token,
+        config=core_manifest,
+        site_settings=merge_site_settings_defaults(
+            core_manifest.get("site_settings")
+        ),
+    )
 
 
 ##############################################################################
@@ -1468,13 +1488,12 @@ def core_module_settings():
             "dashboard_background_color": "#1e293b",
             "dashboard_background_image_path": "",
         },
-        "site_settings": {
-            "company_name": "Sparrow ERP",
-            "branding": "name",
-            "logo_path": ""
-        },
+        "site_settings": merge_site_settings_defaults({}),
         "ai_settings": {
             "chat_model": "",
+        },
+        "organization_profile": {
+            "industries": ["medical"],
         },
     }
 
@@ -1498,6 +1517,28 @@ def core_module_settings():
             **_loaded_ai,
         }
 
+    _loaded_op = config_data.get("organization_profile")
+    if not isinstance(_loaded_op, dict):
+        config_data["organization_profile"] = dict(
+            default_config["organization_profile"]
+        )
+    else:
+        config_data["organization_profile"] = {
+            **default_config["organization_profile"],
+            **_loaded_op,
+        }
+    config_data["organization_profile"]["industries"] = (
+        normalize_organization_industries(
+            config_data["organization_profile"].get("industries")
+        )
+    )
+
+    _loaded_ss = config_data.get("site_settings")
+    if not isinstance(_loaded_ss, dict):
+        config_data["site_settings"] = merge_site_settings_defaults({})
+    else:
+        config_data["site_settings"] = merge_site_settings_defaults(_loaded_ss)
+
     redirect_tab = "general"
     if request.method == 'POST':
         section = (request.form.get("settings_section")
@@ -1509,7 +1550,18 @@ def core_module_settings():
                 'company_name')
             config_data['site_settings']['branding'] = request.form.get(
                 'branding')
+            apply_logo_dimensions_to_site_settings(
+                config_data["site_settings"], request.form
+            )
             config_data['theme_settings']['theme'] = request.form.get('theme')
+
+            if not isinstance(config_data.get("organization_profile"), dict):
+                config_data["organization_profile"] = {}
+            config_data["organization_profile"]["industries"] = (
+                normalize_organization_industries(
+                    request.form.getlist("organization_industry")
+                )
+            )
 
             _ts = config_data.get("theme_settings")
             if not isinstance(_ts, dict):
@@ -1624,13 +1676,18 @@ def core_module_settings():
                 _ts.get("dashboard_background_image_path")
             )
             current_app.config["theme_settings"] = _ts
+            current_app.config["organization_industries"] = (
+                normalize_organization_industries(
+                    config_data.get("organization_profile", {}).get("industries")
+                )
+            )
 
             core_manifest = plugin_manager.get_core_manifest() or {}
-            session['site_settings'] = core_manifest.get('site_settings', {
-                'company_name': 'Sparrow ERP',
-                'branding': 'name',
-                'logo_path': ''
-            })
+            session["site_settings"] = merge_site_settings_defaults(
+                core_manifest.get("site_settings")
+            )
+            session['core_manifest'] = core_manifest
+            session.modified = True
             flash("General settings saved.", 'success')
 
         elif section == "smtp":
@@ -1799,9 +1856,18 @@ def core_module_settings():
 
     otp_flash = session.pop("_support_access_otp", None)
 
+    _org_inds = normalize_organization_industries(
+        (core_manifest.get("organization_profile") or {}).get("industries")
+    )
+
+    _cfg_view = dict(core_manifest) if core_manifest else {}
+    _cfg_view["site_settings"] = merge_site_settings_defaults(
+        _cfg_view.get("site_settings")
+    )
+
     return render_template(
         "core_module_settings.html",
-        config=core_manifest,
+        config=_cfg_view,
         env_ctx=_settings_env_context(),
         active_tab=active_tab,
         chat_model_choices=CHAT_MODEL_DROPDOWN_CHOICES,
@@ -1809,6 +1875,8 @@ def core_module_settings():
         seat_usage=get_seat_usage_snapshot(),
         support_access_status=get_support_access_status(),
         support_access_otp=otp_flash,
+        industry_options=INDUSTRY_OPTIONS,
+        organization_industries_selected=set(_org_inds),
     )
 
 

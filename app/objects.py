@@ -1505,6 +1505,11 @@ def run_install_upgrade_scripts(app_root: str) -> dict:
 
     No BackgroundScheduler or UpdateManager side effects — safe for Railway
     preDeploy / one-shot CLI (``python -m app.setup.init_db``).
+
+    Tenant industry profile (Core manifest) may influence *which* optional seed rows
+    are applied on a given run; it is not used as a signal to delete or truncate
+    existing business data. Changing categories between deploys does not, by design,
+    clear tables through this path.
     """
     import subprocess
     import sys
@@ -2215,7 +2220,7 @@ class UpdateManager:
                 return True
             return False
         # Plugin package root
-        if norm in ("pages.json", "manifest.json"):
+        if norm in ("pages.json", "manifest.json", "local_service_pages.json"):
             return True
         for prefix in (
             "data/",

@@ -4,161 +4,193 @@
   <meta charset="utf-8">
   <title>{{ plan.title or 'Event plan' }} — {{ branding.company_name }}</title>
   <style>
+    /* Aligned with medical_records_module pdf/cura_ops_debrief.html (WeasyPrint + green clinical brand) */
     @page {
       size: A4;
-      margin: 14mm 16mm 18mm 16mm;
+      margin: 12mm 14mm 16mm 14mm;
       @bottom-center {
         content: counter(page);
         font-size: 9pt;
-        color: #555;
+        color: #546E7A;
       }
     }
     @page :first {
-      margin: 18mm;
+      margin: 14mm 14mm 18mm 14mm;
       @bottom-center { content: none; }
     }
     * { box-sizing: border-box; }
     body {
-      font-family: DejaVu Sans, Arial, Helvetica, sans-serif;
+      font-family: DejaVu Sans, "Segoe UI", Arial, Helvetica, sans-serif;
       font-size: 9.5pt;
-      line-height: 1.35;
-      color: #1a1a1a;
+      line-height: 1.4;
+      color: #263238;
+      margin: 0;
       counter-reset: page;
     }
     .cover {
-      min-height: 240mm;
+      min-height: 0;
       page-break-after: always;
       text-align: center;
-      padding-top: 6mm;
+      padding-top: 4mm;
     }
     .cover .logo-wrap {
-      margin-bottom: 8mm;
-      min-height: 26mm;
+      margin-bottom: 6mm;
+      min-height: 22mm;
     }
     .cover .logo-wrap img {
-      max-height: 24mm;
-      max-width: 85%;
+      max-height: 22mm;
+      max-width: 80%;
       object-fit: contain;
     }
-    .cover h1 {
-      font-size: 19pt;
-      font-weight: 700;
-      color: #0f2940;
-      margin: 0 0 4mm;
-      line-height: 1.15;
+    .cover-band {
+      background: linear-gradient(135deg, #1B5E20 0%, #2E7D32 100%);
+      color: #fff;
+      border: 1px solid #1B5E20;
+      border-radius: 4px;
+      padding: 10mm 8mm;
+      margin: 0 auto;
+      max-width: 100%;
+      text-align: center;
     }
-    .cover .tagline {
-      font-size: 10pt;
-      color: #444;
-      margin-bottom: 6mm;
+    .cover-band .co {
+      font-size: 11pt;
+      font-weight: 700;
+      margin-bottom: 3mm;
+      opacity: 0.95;
+    }
+    .cover-band h1 {
+      font-size: 17pt;
+      font-weight: 700;
+      margin: 0 0 3mm;
+      line-height: 1.2;
+      color: #fff;
+    }
+    .cover-band .tagline {
+      font-size: 9.5pt;
+      margin: 0;
+      opacity: 0.92;
+      line-height: 1.35;
     }
     .cover .meta-block {
       text-align: left;
       display: inline-block;
       width: 100%;
       max-width: 168mm;
-      margin: 0 auto;
-      border: 1px solid #c5d4e0;
+      margin: 6mm auto 0;
+      border: 1px solid #BDBDBD;
       border-radius: 4px;
-      padding: 7mm;
-      background: #f7fafc;
+      padding: 6mm;
+      background: #fff;
+      border-top: 3px solid #2E7D32;
     }
     .cover .meta-block table { width: 100%; border-collapse: collapse; font-size: 9pt; }
-    .cover .meta-block td { padding: 1.8mm 2mm; vertical-align: top; }
-    .cover .meta-block td.k { width: 34%; font-weight: 700; color: #345; }
+    .cover .meta-block td { padding: 1.8mm 2mm; vertical-align: top; border-bottom: 1px solid #ECEFF1; }
+    .cover .meta-block tr:last-child td { border-bottom: none; }
+    .cover .meta-block td.k { width: 34%; font-weight: 700; color: #37474F; }
     .cover .genstamp {
-      margin-top: 10mm;
+      margin-top: 8mm;
       font-size: 8pt;
-      color: #666;
+      color: #616161;
     }
     .toc-page { page-break-after: always; }
-    .toc-page h2 {
-      font-size: 14pt;
-      color: #0f2940;
-      border-bottom: 2px solid #1a5f8a;
-      padding-bottom: 3mm;
-      margin: 0 0 6mm;
-    }
+    .toc-page h2.sec { margin-top: 0; }
     .toc { list-style: none; padding: 0; margin: 0; }
     .toc li { margin: 0 0 2.5mm; }
     .toc a {
-      color: #0f2940;
+      color: #1B5E20;
       text-decoration: none;
       display: block;
       position: relative;
+      font-weight: 600;
     }
     .toc a::after {
       content: leader('.') target-counter(attr(href), page);
       float: right;
       padding-left: 2mm;
       background: white;
+      color: #546E7A;
+      font-weight: 400;
     }
     h2.sec {
-      font-size: 12pt;
-      color: #0f2940;
-      margin: 9mm 0 3mm;
+      font-size: 12.5pt;
+      color: #1B5E20;
+      margin: 8mm 0 3mm;
       padding-bottom: 2mm;
-      border-bottom: 1px solid #bcd;
+      border-bottom: 2px solid #2E7D32;
       page-break-after: avoid;
     }
     h3.sub {
-      font-size: 10pt;
-      color: #234;
-      margin: 4mm 0 2mm;
+      font-size: 10.5pt;
+      color: #37474F;
+      margin: 5mm 0 2mm;
       page-break-after: avoid;
     }
     table.meta { width: 100%; border-collapse: collapse; margin-bottom: 4mm; font-size: 9pt; }
-    table.meta td { border: 1px solid #d0d8e0; padding: 2.5mm 3mm; vertical-align: top; }
-    table.meta td:first-child { width: 30%; font-weight: 700; background: #f0f4f8; color: #2a3f55; }
+    table.meta td {
+      border: 1px solid #BDBDBD;
+      padding: 2.2mm 3mm;
+      vertical-align: top;
+    }
+    table.meta td:first-child {
+      width: 30%;
+      font-weight: 700;
+      background: #F1F8F4;
+      color: #37474F;
+      border-color: #BDBDBD;
+    }
     table.roster, table.risk {
       width: 100%;
       border-collapse: collapse;
-      font-size: 8.2pt;
+      font-size: 8.5pt;
       margin: 3mm 0 5mm;
     }
     table.roster th, table.roster td, table.risk th, table.risk td {
-      border: 1px solid #aab;
-      padding: 2mm 2.5mm;
+      border: 1px solid #BDBDBD;
+      padding: 2.2mm 3mm;
       vertical-align: top;
     }
     table.roster th, table.risk th {
-      background: #1a5f8a;
+      background: #2E7D32;
       color: #fff;
       font-weight: 700;
       text-align: left;
+      border: 1px solid #1B5E20;
     }
-    table.roster tr:nth-child(even) td, table.risk tr:nth-child(even) td { background: #f8fafb; }
+    table.roster tr:nth-child(even) td, table.risk tr:nth-child(even) td { background: #F1F8F4; }
+    table.roster tr:nth-child(odd) td, table.risk tr:nth-child(odd) td { background: #fff; }
     .count-pill {
       display: inline-block;
       margin: 1mm 2mm 0 0;
       padding: 1mm 3mm;
-      background: #e8f0f7;
+      background: #E8F5E9;
       border-radius: 2mm;
       font-size: 8.5pt;
       font-weight: 600;
+      color: #1B5E20;
     }
     .about-box {
-      border-left: 4px solid #1a5f8a;
+      border-left: 4px solid #2E7D32;
       padding: 4mm 5mm;
       margin: 4mm 0 6mm;
-      background: #f7fafc;
+      background: #F1F8F4;
       white-space: pre-wrap;
-      font-size: 9pt;
+      font-size: 9.5pt;
     }
     .pdf-block {
       margin: 2mm 0 4mm;
       font-size: 9pt;
     }
-    .chk { margin: 0 0 3mm; padding: 2mm 0; border-bottom: 1px solid #e8e8e8; page-break-inside: avoid; }
-    .muted { color: #555; font-size: 8.5pt; }
+    .chk { margin: 0 0 3mm; padding: 2mm 0; border-bottom: 1px solid #ECEFF1; page-break-inside: avoid; }
+    .muted, .text-muted { color: #78909C; font-size: 8.5pt; }
     ul.hosp { margin: 2mm 0 4mm; padding-left: 5mm; }
     .disclaimer {
       margin-top: 8mm;
-      padding: 4mm;
-      border: 1px solid #ccc;
-      background: #f5f5f5;
+      padding: 4mm 5mm;
+      border: 1px solid #CFD8DC;
+      border-left: 4px solid #2E7D32;
+      background: #FAFAFA;
       font-size: 7.5pt;
-      color: #444;
+      color: #546E7A;
       page-break-inside: avoid;
     }
     .map-wrap {
@@ -171,12 +203,13 @@
       height: auto;
       max-height: 220mm;
       object-fit: contain;
-      border: 1px solid #c5d4e0;
+      border: 1px solid #CFD8DC;
+      border-radius: 2px;
     }
     .map-caption {
       margin-top: 3mm;
       font-size: 9pt;
-      color: #333;
+      color: #37474F;
       text-align: left;
     }
   </style>
@@ -196,10 +229,13 @@
       <img src="{{ branding.logo_file_uri }}" alt="{{ branding.company_name }}">
       {% endif %}
     </div>
-    <h1>{{ plan.title or 'Event medical plan' }}</h1>
-    {% if crm_pdf.get('event_plan_pdf_tagline') %}
-    <p class="tagline">{{ crm_pdf.get('event_plan_pdf_tagline') }}</p>
-    {% endif %}
+    <div class="cover-band">
+      <div class="co">{{ branding.company_name }}</div>
+      <h1>{{ plan.title or 'Event medical plan' }}</h1>
+      {% if crm_pdf.get('event_plan_pdf_tagline') %}
+      <p class="tagline">{{ crm_pdf.get('event_plan_pdf_tagline') }}</p>
+      {% endif %}
+    </div>
     <div class="meta-block">
       <table>
         {% if doc_version_label %}
@@ -242,7 +278,7 @@
 
   {# ——— Contents (aligned with full medical plan templates) ——— #}
   <div class="toc-page">
-    <h2>Contents</h2>
+    <h2 class="sec">Contents</h2>
     <ul class="toc">
       {% if crm_pdf.get('event_plan_pdf_about_us') %}<li><a href="#sec-about">Information about the provider</a></li>{% endif %}
       {% if plan.plan_purpose %}<li><a href="#sec-purpose">Purpose</a></li>{% endif %}

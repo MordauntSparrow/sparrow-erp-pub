@@ -1,4 +1,8 @@
-"""Medical event plan PDF (WeasyPrint + Jinja) with core branding."""
+"""Medical event plan PDF (WeasyPrint + Jinja) with core branding.
+
+Print CSS matches the green clinical PDF theme used by the medical debrief export
+(``medical_records_module`` ``pdf/cura_ops_debrief.html``) for a consistent client look.
+"""
 from __future__ import annotations
 
 import hashlib

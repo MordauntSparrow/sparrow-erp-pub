@@ -48,6 +48,8 @@ import sys
 import zipfile
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.branding_utils import merge_site_settings_defaults
+
 # Railway’s usual volume mount path when you add a volume to a service.
 _RAILWAY_DEFAULT_VOLUME_MOUNT = "/volume"
 
@@ -70,13 +72,12 @@ def default_core_manifest_dict() -> Dict[str, Any]:
             "dashboard_background_color": "#1e293b",
             "dashboard_background_image_path": "",
         },
-        "site_settings": {
-            "company_name": "Sparrow ERP",
-            "branding": "name",
-            "logo_path": "",
-        },
+        "site_settings": merge_site_settings_defaults({}),
         "ai_settings": {
             "chat_model": "",
+        },
+        "organization_profile": {
+            "industries": ["medical"],
         },
     }
 
@@ -288,7 +289,7 @@ def push_website_volume_from_package(
     app_pkg_dir: str, *, prefer_bundled_public: bool
 ) -> Dict[str, Any]:
     """
-    Overwrite volume ``public_templates`` and ``site_data/{pages.json,manifest.json}`` from the
+    Overwrite volume ``public_templates`` and ``site_data/{pages.json,manifest.json,local_service_pages.json}`` from the
     plugin package on disk (image / bind mount).
 
     Returns ``{"ok": bool, "message": str, "log": [str, ...]}``.
@@ -324,7 +325,7 @@ def push_website_volume_from_package(
 
     json_ok = 0
     os.makedirs(site_dst, exist_ok=True)
-    for fname in ("pages.json", "manifest.json"):
+    for fname in ("pages.json", "manifest.json", "local_service_pages.json"):
         dest = os.path.join(site_dst, fname)
         srcf = os.path.join(wm, "site_data", fname)
         if not os.path.isfile(srcf) or os.path.islink(srcf):
@@ -342,7 +343,13 @@ def push_website_volume_from_package(
         msg = "Nothing was copied. Add templates/public_bundled or plugin pages.json/manifest.json."
     else:
         msg = " ".join(log)
-    return {"ok": ok, "message": msg, "log": log}
+    return {
+        "ok": ok,
+        "message": msg,
+        "log": log,
+        "public_ok": public_ok,
+        "json_ok": json_ok,
+    }
 
 
 def build_website_volume_backup_zip(app_pkg_dir: str) -> Tuple[Optional[bytes], str]:
@@ -568,6 +575,24 @@ def resolved_pages_json_path(module_dir: str) -> str:
     return os.path.join(resolved_website_module_site_data_dir(module_dir), "pages.json")
 
 
+def resolved_local_service_pages_json_path(module_dir: str) -> str:
+    """
+    Optional programmatic SEO landings (``local_service_pages.json``).
+
+    Prefers ``site_data/local_service_pages.json``; falls back to legacy plugin root file.
+    """
+    module_dir = os.path.abspath(module_dir)
+    site_p = os.path.join(
+        resolved_website_module_site_data_dir(module_dir), "local_service_pages.json"
+    )
+    legacy = os.path.join(module_dir, "local_service_pages.json")
+    if os.path.isfile(site_p):
+        return site_p
+    if os.path.isfile(legacy):
+        return legacy
+    return site_p
+
+
 def resolved_website_module_data_dir(module_dir: str) -> str:
     """
     Builder drafts (``pages/*.json``), analytics ``geo_cache.json``, contact config, etc.
@@ -597,6 +622,17 @@ def migrate_website_module_site_data_once(module_dir: str) -> None:
             shutil.copy2(legacy_pages, target_pages)
         except OSError as e:
             print(f"[sparrow] website_module pages.json migration copy failed: {e}", file=sys.stderr)
+
+    legacy_lsp = os.path.join(module_dir, "local_service_pages.json")
+    target_lsp = os.path.join(site, "local_service_pages.json")
+    if not os.path.isfile(target_lsp) and os.path.isfile(legacy_lsp):
+        try:
+            shutil.copy2(legacy_lsp, target_lsp)
+        except OSError as e:
+            print(
+                f"[sparrow] website_module local_service_pages.json migration copy failed: {e}",
+                file=sys.stderr,
+            )
 
     legacy_data = os.path.join(module_dir, "data")
     target_data = os.path.join(site, "data")

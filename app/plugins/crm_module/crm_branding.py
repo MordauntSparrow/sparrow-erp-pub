@@ -25,22 +25,35 @@ def get_site_branding(app=None) -> dict[str, Any]:
         ss = core.get("site_settings") or {}
         if isinstance(ss, dict):
             name = (ss.get("company_name") or "").strip() or name
-            logo_rel = (ss.get("logo_path") or "").strip().lstrip("/\\")
+            logo_rel = (ss.get("logo_path") or "").strip().lstrip("/\\").replace("\\", "/")
+            if logo_rel.lower().startswith("static/"):
+                logo_rel = logo_rel[7:].lstrip("/")
     except Exception:
         pass
 
     logo_abs = None
     logo_uri = None
     if logo_rel:
-        static_root = Path(app.root_path) / "static"
-        candidate = (static_root / logo_rel).resolve()
+        # Prefer Flask static_folder (correct when app.root_path is not the static parent).
         try:
-            static_root = static_root.resolve()
-            if candidate.is_file() and str(candidate).startswith(str(static_root)):
+            static_root = Path(app.static_folder or (Path(app.root_path) / "static")).resolve()
+            candidate = (static_root / logo_rel).resolve()
+            candidate.relative_to(static_root)
+            if candidate.is_file():
                 logo_abs = str(candidate)
                 logo_uri = candidate.as_uri()
-        except Exception:
+        except (ValueError, OSError, TypeError, RuntimeError):
             pass
+        if logo_abs is None:
+            try:
+                static_root = (Path(app.root_path) / "static").resolve()
+                candidate = (static_root / logo_rel).resolve()
+                candidate.relative_to(static_root)
+                if candidate.is_file():
+                    logo_abs = str(candidate)
+                    logo_uri = candidate.as_uri()
+            except (ValueError, OSError, TypeError, RuntimeError):
+                pass
 
     # Relative to static root — use with WeasyPrint ``base_url`` = static dir file URI + "/"
     logo_pdf_src = logo_rel.replace("\\", "/") if logo_rel else None
