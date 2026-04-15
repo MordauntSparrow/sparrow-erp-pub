@@ -236,9 +236,16 @@
     cardSelect.disabled = on;
   });
 
-  // Load job types + cards whenever modal opens
+  // Load job types + cards whenever modal opens (re-apply card from per-card "Add rate" after options refresh).
   createModalEl.addEventListener('show.mdb.modal', async () => {
+    const preselectCard = (createModalEl.dataset.preselectCardId || '').trim();
+    delete createModalEl.dataset.preselectCardId;
+
     await Promise.all([loadJobTypes(), loadCardsForSelect()]);
+
+    if (preselectCard && cardSelect.options.length) {
+      cardSelect.value = preselectCard;
+    }
   });
 
   editRowModalEl.addEventListener('show.mdb.modal', async () => {
@@ -414,7 +421,7 @@
           createNewCardChk.checked = false;
           newCardFields.classList.add('d-none');
           cardSelect.disabled = false;
-          cardSelect.value = btn.getAttribute('data-card-id') || '';
+          createModalEl.dataset.preselectCardId = btn.getAttribute('data-card-id') || '';
         });
       });
 

@@ -75,7 +75,7 @@
                      placeholder="e.g., Contractor Base Rates 2025" />
 
               <label class="form-label">Staff role <span class="text-danger">*</span></label>
-              <select class="form-select" name="new_card_role_id" id="newCardRoleSelect" required>
+              <select class="form-select" name="new_card_role_id" id="newCardRoleSelect">
               </select>
               <div class="form-text">
                 Required for new cards. Staff get hourly £ from card rows; their HR profile picks role + optional card override.
@@ -216,6 +216,7 @@
   const createNewCardChk = document.getElementById('createNewCardChk');
   const newCardFields    = document.getElementById('newCardFields');
   const jobTypeSelect    = document.getElementById('jobTypeSelect');
+  const newCardRoleSelect = document.getElementById('newCardRoleSelect');
   const form             = document.getElementById('createRowForm');
   const editCardModalEl  = document.getElementById('editCardModal');
   const editRowModalEl   = document.getElementById('editRowModal');
@@ -244,16 +245,27 @@
     }
   }
 
-  // Toggle new card fields
+  // Toggle new card fields (do not leave required on hidden controls — Chrome blocks submit with
+  // "An invalid form control with name='new_card_role_id' is not focusable.")
   createNewCardChk.addEventListener('change', () => {
     const on = createNewCardChk.checked;
     newCardFields.classList.toggle('d-none', !on);
     cardSelect.disabled = on;
+    if (newCardRoleSelect) newCardRoleSelect.required = !!on;
   });
 
-  // Load job types + cards whenever modal opens
+  // Load job types + cards whenever modal opens (re-applies card chosen via "Add rate" on a block —
+  // loadCardsForSelect replaces <option>s and would otherwise drop the preselection set on click).
   createModalEl.addEventListener('show.mdb.modal', async () => {
+    const preselectCard = (createModalEl.dataset.preselectCardId || '').trim();
+    delete createModalEl.dataset.preselectCardId;
+
     await Promise.all([loadJobTypes(), loadCardsForSelect(), loadRolesForWageCardModals()]);
+
+    if (preselectCard && cardSelect.options.length) {
+      cardSelect.value = preselectCard;
+    }
+    if (newCardRoleSelect) newCardRoleSelect.required = !!createNewCardChk.checked;
   });
 
   editRowModalEl.addEventListener('show.mdb.modal', async () => {
@@ -427,7 +439,8 @@
           createNewCardChk.checked = false;
           newCardFields.classList.add('d-none');
           cardSelect.disabled = false;
-          cardSelect.value = btn.getAttribute('data-card-id') || '';
+          if (newCardRoleSelect) newCardRoleSelect.required = false;
+          createModalEl.dataset.preselectCardId = btn.getAttribute('data-card-id') || '';
         });
       });
 
@@ -614,6 +627,7 @@
       createNewCardChk.checked = false;
       newCardFields.classList.add('d-none');
       cardSelect.disabled = false;
+      if (newCardRoleSelect) newCardRoleSelect.required = false;
       await refreshCards();
     } catch (err) {
       console.error(err);
