@@ -998,9 +998,26 @@ def admin_contractor_profile(cid):
 @login_required
 @_hr_require(HR_EDIT)
 def admin_contractor_portal_password(cid):
-    if not hr_services.admin_get_staff_profile(cid):
+    prof = hr_services.admin_get_staff_profile(cid)
+    if not prof:
         flash("Employee not found.", "error")
         return redirect(url_for("internal_hr.admin_employees"))
+    # Access hardening: resetting the portal password can also sync the linked core ERP password.
+    # Only a superuser may change access-related credentials for superuser or clinical lead accounts.
+    try:
+        from app.permissions_registry import normalize_core_role
+
+        editor_role = normalize_core_role(getattr(current_user, "role", None))
+        linked = (prof or {}).get("linked_core_user") or {}
+        target_role = normalize_core_role((linked or {}).get("role"))
+        if target_role in ("superuser", "clinical_lead") and editor_role != "superuser":
+            flash(
+                "Only a superuser may change access credentials for superuser or clinical lead accounts.",
+                "danger",
+            )
+            return redirect(url_for("internal_hr.admin_contractor_profile", cid=cid))
+    except Exception:
+        pass
     pw = (request.form.get("new_password") or "").strip()
     ok, msg = hr_services.admin_set_contractor_portal_password(cid, pw)
     flash("Portal password updated." if ok else (

@@ -779,16 +779,21 @@
     <div class="card-body">
       <p class="small text-muted mb-2">Portal login accepts this username or their work email. The username was set when the employee was created in HR (from full name, or from a core admin <code>username</code> when a matching email existed). It is not edited from this screen.</p>
       <p class="mb-3"><strong>Login username</strong> <code class="user-select-all">{{ profile.username or '—' }}</code></p>
+      {% set _linked_role = ((profile.linked_core_user or {}).get('role') or '')|lower %}
+      {% set _protected_linked = _linked_role in ('superuser', 'clinical_lead', 'clinical lead', 'clinical-lead') %}
       <form method="post" action="{{ url_for('internal_hr.admin_contractor_portal_password', cid=profile.id) }}" class="row g-2 align-items-end mb-4">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="col-md-5">
           <label class="form-label small mb-1" for="new_password">Set / reset password</label>
-          <input class="form-control form-control-sm" type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="8" required placeholder="New password (min 8 characters)">
+          <input class="form-control form-control-sm" type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="8" required placeholder="New password (min 8 characters)" {% if _protected_linked and (current_user.role or '')|lower != 'superuser' %}disabled{% endif %}>
         </div>
         <div class="col-auto">
-          <button type="submit" class="btn btn-sm btn-primary">Update password</button>
+          <button type="submit" class="btn btn-sm btn-primary" {% if _protected_linked and (current_user.role or '')|lower != 'superuser' %}disabled{% endif %}>Update password</button>
         </div>
       </form>
+      {% if _protected_linked and (current_user.role or '')|lower != 'superuser' %}
+      <p class="small text-muted mb-3">Password changes for superuser and clinical lead accounts are restricted to superusers.</p>
+      {% endif %}
       <hr class="my-3">
       <p class="small text-danger mb-2"><strong>Delete employee</strong> removes their Sparrow contractor record (time sheets, HR profile data linked to this ID, etc. may be removed per database rules). This cannot be undone.</p>
       <form method="post" action="{{ url_for('internal_hr.admin_contractor_delete', cid=profile.id) }}" class="row g-2 align-items-end" onsubmit="return confirm('Delete this employee permanently?');">
