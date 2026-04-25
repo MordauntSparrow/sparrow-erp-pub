@@ -32,6 +32,26 @@ from flask_login import current_user
 # Time-limited vendor support shadow user (see app.support_access)
 SUPPORT_SHADOW_ROLE = "support_break_glass"
 
+def normalize_core_role(raw: Any) -> str:
+    """
+    Normalise stored user role strings for consistent permission checks.
+
+    The database has historically contained variants such as "clinical lead" or "clinical-lead".
+    We treat those as "clinical_lead" for hierarchy rules.
+    """
+    s = str(raw or "").strip().lower()
+    if not s:
+        return ""
+    s = s.replace("-", "_").replace(" ", "_")
+    while "__" in s:
+        s = s.replace("__", "_")
+    # Common synonyms / legacy variants
+    if s in ("clinicallead", "clinical_lead", "clinical_lead_", "_clinical_lead"):
+        return "clinical_lead"
+    if s == "clinical":
+        return "clinical_lead"
+    return s
+
 def normalize_stored_permissions(raw: Any) -> list[str]:
     """DB JSON / legacy text -> list of permission ids for forms and APIs."""
     if raw is None:
@@ -57,7 +77,7 @@ def user_can_open_user_management() -> bool:
     """
     if not getattr(current_user, "is_authenticated", False):
         return False
-    r = str(getattr(current_user, "role", "") or "").lower()
+    r = normalize_core_role(getattr(current_user, "role", "") or "")
     if r in ("admin", "superuser", "clinical_lead", SUPPORT_SHADOW_ROLE):
         return True
     from app.objects import has_permission
@@ -69,7 +89,7 @@ def user_can_open_org_admin_nav() -> bool:
     """Top nav / dashboard: Settings, System (plugins, updates) — admin, superuser, or legacy vendor shadow."""
     if not getattr(current_user, "is_authenticated", False):
         return False
-    r = str(getattr(current_user, "role", "") or "").lower()
+    r = normalize_core_role(getattr(current_user, "role", "") or "")
     return r in ("admin", "superuser", SUPPORT_SHADOW_ROLE)
 
 
@@ -102,8 +122,8 @@ def editor_may_edit_target_user(editor_role: str | None, target_role: str | None
     Hierarchy: only superuser may change superuser, admin, or clinical_lead accounts.
     Admin / clinical_lead / delegated staff (core.manage_users) may manage staff, crew, and legacy user role.
     """
-    e = (editor_role or "").lower()
-    t = (target_role or "").lower()
+    e = normalize_core_role(editor_role)
+    t = normalize_core_role(target_role)
     if e in ("superuser", SUPPORT_SHADOW_ROLE):
         return True
     if t == "superuser":
