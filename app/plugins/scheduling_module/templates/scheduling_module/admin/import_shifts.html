@@ -1,0 +1,175 @@
+{% extends "scheduling_module/admin/base_admin.html" %}
+{% block title %}Import shifts – Scheduling{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" class="sched-breadcrumb mb-3">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="/">Home</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('internal_scheduling.admin_shifts') }}">Shifts</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Import shifts</li>
+  </ol>
+</nav>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h1 class="h5 mb-1">Import shifts (CSV)</h1>
+    <p class="small text-muted mb-0">
+      Upload a CSV export from any scheduling system, map columns, preview, then import as <strong>draft</strong> shifts.
+      After import you can select shifts in the list and use <strong>Repeat selected</strong>.
+    </p>
+  </div>
+</div>
+
+{% if step == 'upload' %}
+<form method="post" enctype="multipart/form-data" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="row g-3">
+    <div class="col-md-6">
+      <label class="form-label">CSV file</label>
+      <input type="file" name="csv_file" class="form-control" accept=".csv,text/csv" required>
+      <div class="form-text small text-muted">First row must be headers.</div>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Delimiter</label>
+      <select name="delimiter" class="form-select">
+        <option value="," selected>Comma (,)</option>
+        <option value=";">Semicolon (;)</option>
+        <option value="\\t">Tab</option>
+      </select>
+    </div>
+    <div class="col-md-3 d-flex align-items-end">
+      <button class="btn btn-primary" type="submit">Next: map columns</button>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+{% if step == 'map' %}
+<form method="post" class="card card-body">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  <input type="hidden" name="delimiter" value="{{ delimiter }}">
+  <input type="hidden" name="action" value="import">
+  <div class="row g-3">
+    <div class="col-12">
+      <h2 class="h6 mb-2">Map columns</h2>
+      <p class="small text-muted mb-2">
+        Required: <strong>work date</strong>, <strong>start</strong>, <strong>end</strong>, <strong>job type</strong>, <strong>client</strong>.
+        Optional: site, staff, notes, person-hours, staff needed.
+      </p>
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label small">Work date</label>
+      <select name="map_work_date" class="form-select form-select-sm" required>
+        <option value="">Select…</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Start time</label>
+      <select name="map_start" class="form-select form-select-sm" required>
+        <option value="">Select…</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">End time</label>
+      <select name="map_end" class="form-select form-select-sm" required>
+        <option value="">Select…</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small">Job type (name)</label>
+      <select name="map_job_type" class="form-select form-select-sm" required>
+        <option value="">Select…</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label small">Client (name)</label>
+      <select name="map_client" class="form-select form-select-sm" required>
+        <option value="">Select…</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Site (name, optional)</label>
+      <select name="map_site" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Staff (name/email, optional)</label>
+      <select name="map_staff" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+      <div class="form-text small text-muted">If multiple staff are in one cell, separate with comma.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label small">Notes (optional)</label>
+      <select name="map_notes" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Person-hours (optional)</label>
+      <select name="map_person_hours" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Staff needed (optional)</label>
+      <select name="map_required_count" class="form-select form-select-sm">
+        <option value="">— None —</option>
+        {% for h in headers %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="col-12">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" value="1" id="createMissing" name="create_missing" checked>
+        <label class="form-check-label" for="createMissing">
+          Create missing clients/sites/job types if not found
+        </label>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <h2 class="h6 mb-2">Preview (first {{ preview|length }} rows)</h2>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead class="table-light">
+            <tr>
+              {% for h in headers %}<th class="small">{{ h }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in preview %}
+            <tr>
+              {% for h in headers %}<td class="small">{{ r.get(h) }}</td>{% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col-12 d-flex gap-2 flex-wrap">
+      <a class="btn btn-outline-secondary" href="{{ url_for('internal_scheduling.admin_import_shifts') }}">Start over</a>
+      <button class="btn btn-primary" type="submit">Import shifts (draft)</button>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+{% endblock %}
+

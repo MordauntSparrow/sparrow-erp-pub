@@ -15,6 +15,13 @@
   {% set _rc = shift.required_count if shift and shift.required_count is not none else 1 %}
   {% set _ac = assigned_contractor_ids %}
   {% set use_multi = (_rc > 1) or (_ac|length > 1) %}
+  <style>
+    .shift-summary-kpi { border: 1px solid rgba(0,0,0,.08); border-radius: .75rem; padding: .75rem; background: rgba(13,110,253,.04); }
+    .shift-summary-kpi .k { font-size: .75rem; letter-spacing: .02em; text-transform: uppercase; color: rgba(0,0,0,.55); }
+    .shift-summary-kpi .v { font-weight: 700; font-size: 1.05rem; }
+    .shift-summary-kpi .h { font-size: .8rem; color: rgba(0,0,0,.55); margin: .15rem 0 0; }
+    .shift-subcard { border: 1px solid rgba(0,0,0,.08); border-radius: .75rem; padding: .75rem; }
+  </style>
   <div class="row g-3">
     <div class="col-md-3">
       <label class="form-label" for="required_count">Staff needed</label>
@@ -105,14 +112,85 @@
         <option value="cancelled" {{ 'selected' if shift and shift.status == 'cancelled' else '' }}>Cancelled</option>
       </select>
     </div>
-    <div class="col-md-2">
-      <label class="form-label">Labour cost (£)</label>
-      <input type="number" name="labour_cost" class="form-control" value="{{ shift.labour_cost if (shift and shift.labour_cost is not none) else '' }}" min="0" step="0.01" placeholder="Optional">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">Person-hours (optional)</label>
-      <input type="number" name="shared_labour_hours" class="form-control" min="0" step="0.25" placeholder="e.g. 2" value="{% if shift and shift.shared_labour_hours is not none %}{{ shift.shared_labour_hours }}{% endif %}">
-      <p class="form-text small text-muted mb-0">Fixed labour budget: when set, end time shortens as more people are assigned (people × duration ≈ these hours). Leave blank for a normal fixed start/end window.</p>
+    <div class="col-12">
+      <div class="shift-subcard">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+          <div style="min-width: 18rem;">
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+              <strong>Estimated labour</strong>
+              <span class="badge bg-light text-dark border">live preview</span>
+            </div>
+            <div class="small text-muted mb-2">
+              Person-hours estimate updates from the time window and the number of people assigned (or “staff needed” if unassigned).
+            </div>
+            <div class="row g-2">
+              <div class="col-12 col-sm-4">
+                <div class="shift-summary-kpi">
+                  <div class="k">On-site hours</div>
+                  <div class="v" id="kpi-onsite">—</div>
+                  <div class="h" id="kpi-onsite-sub">after break</div>
+                </div>
+              </div>
+              <div class="col-12 col-sm-4">
+                <div class="shift-summary-kpi">
+                  <div class="k">People</div>
+                  <div class="v" id="kpi-people">—</div>
+                  <div class="h" id="kpi-people-sub">assigned / needed</div>
+                </div>
+              </div>
+              <div class="col-12 col-sm-4">
+                <div class="shift-summary-kpi">
+                  <div class="k">Person-hours</div>
+                  <div class="v" id="kpi-personhours">—</div>
+                  <div class="h" id="kpi-personhours-sub">derived</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="min-width: 18rem; flex: 1;">
+            <label class="form-label mb-1">Sizing mode</label>
+            <div class="d-flex flex-wrap gap-3 mb-2">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="__sizing_mode" id="sizingFixedWindow" value="window" checked>
+                <label class="form-check-label" for="sizingFixedWindow">
+                  Keep time window fixed (person-hours rise with crew)
+                </label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="__sizing_mode" id="sizingFixedBudget" value="budget">
+                <label class="form-check-label" for="sizingFixedBudget">
+                  Fixed person-hours budget (time shortens with crew)
+                </label>
+              </div>
+            </div>
+
+            <div id="sharedBudgetWrap" class="mb-2 d-none">
+              <label class="form-label">Fixed person-hours budget</label>
+              <input type="number" name="shared_labour_hours" id="shared_labour_hours" class="form-control" min="0" step="0.25" placeholder="e.g. 2" value="{% if shift and shift.shared_labour_hours is not none %}{{ shift.shared_labour_hours }}{% endif %}">
+              <div class="form-text">When set, end time will be recalculated as \(start + (budget / crew)\) hours.</div>
+            </div>
+
+            <div class="row g-2 align-items-end">
+              <div class="col-12 col-sm-5">
+                <label class="form-label">£ / person-hour <span class="text-muted fw-normal">(optional)</span></label>
+                <input type="number" id="est_hourly_rate" class="form-control" min="0" step="0.01" placeholder="e.g. 15.00">
+                <div class="form-text">Used for an estimated cost preview only.</div>
+              </div>
+              <div class="col-12 col-sm-7">
+                <label class="form-label">Labour cost (£)</label>
+                <div class="input-group">
+                  <input type="number" name="labour_cost" id="labour_cost" class="form-control" value="{{ shift.labour_cost if (shift and shift.labour_cost is not none) else '' }}" min="0" step="0.01" placeholder="Optional">
+                  <button class="btn btn-outline-secondary" type="button" id="btn-fill-labour-cost" title="Copy estimate into the labour cost field">
+                    Use estimate
+                  </button>
+                </div>
+                <div class="form-text">Estimate: <strong id="kpi-cost">—</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="col-12" id="assignment-instructions-wrap">
       <label class="form-label small text-muted">Location / {{ assignment_label|default('assignment') }} notes</label>
@@ -130,6 +208,11 @@
   <div class="mt-3 d-flex gap-2 flex-wrap">
     <button type="submit" class="btn btn-primary">{{ 'Save' if shift else 'Create shift' }}</button>
     <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-outline-secondary">Cancel</a>
+    {% if shift %}
+    <a href="{{ url_for('public_time_billing.public_runsheets_new_page') }}?shift_id={{ shift.id }}" class="btn btn-outline-success" title="Create a run sheet linked to this scheduled shift">
+      Start run sheet
+    </a>
+    {% endif %}
   </div>
 </form>
 
@@ -638,6 +721,157 @@
   syncStaffMode();
   if (single) prevSingleVal = single.value;
   scheduleSlotStatus();
+})();
+</script>
+<script>
+(function() {
+  function q(id) { return document.getElementById(id); }
+  function parseHM(v) {
+    if (!v) return null;
+    var s = String(v).trim();
+    if (!s) return null;
+    var parts = s.split(':');
+    if (parts.length < 2) return null;
+    var h = parseInt(parts[0], 10);
+    var m = parseInt(parts[1], 10);
+    if (isNaN(h) || isNaN(m)) return null;
+    return h * 60 + m;
+  }
+  function fmtHours(x) {
+    if (x === null || x === undefined || isNaN(x)) return '—';
+    if (x < 0) x = 0;
+    var r = Math.round(x * 100) / 100;
+    return r.toFixed(r % 1 === 0 ? 0 : 2) + 'h';
+  }
+  function fmtMoney(x) {
+    if (x === null || x === undefined || isNaN(x)) return '—';
+    if (x < 0) x = 0;
+    return '£' + (Math.round(x * 100) / 100).toFixed(2);
+  }
+
+  var startEl = document.querySelector('input[name="scheduled_start"]');
+  var endEl = document.querySelector('input[name="scheduled_end"]');
+  var breakEl = document.querySelector('input[name="break_mins"]');
+  var requiredEl = q('required_count');
+  var single = q('contractor_single');
+  var multi = q('contractor_multi');
+  var labourCostEl = q('labour_cost');
+  var rateEl = q('est_hourly_rate');
+  var fillBtn = q('btn-fill-labour-cost');
+  var sharedWrap = q('sharedBudgetWrap');
+  var sharedInput = q('shared_labour_hours');
+  var modeWindow = q('sizingFixedWindow');
+  var modeBudget = q('sizingFixedBudget');
+
+  var kOnsite = q('kpi-onsite');
+  var kOnsiteSub = q('kpi-onsite-sub');
+  var kPeople = q('kpi-people');
+  var kPeopleSub = q('kpi-people-sub');
+  var kPH = q('kpi-personhours');
+  var kPHSub = q('kpi-personhours-sub');
+  var kCost = q('kpi-cost');
+
+  function selectedCount() {
+    if (multi && !multi.disabled) return (multi.selectedOptions || []).length;
+    if (single && !single.disabled) return (single.value && String(single.value).trim()) ? 1 : 0;
+    return 0;
+  }
+
+  function compute() {
+    var st = parseHM(startEl && startEl.value);
+    var en = parseHM(endEl && endEl.value);
+    var br = parseFloat((breakEl && breakEl.value) || '0') || 0;
+    if (br < 0) br = 0;
+    var rawMins = (st !== null && en !== null) ? (en - st) : null;
+    if (rawMins !== null && rawMins < 0) rawMins += 24 * 60; // cross midnight
+    var onsiteMins = rawMins;
+    if (onsiteMins !== null) onsiteMins = Math.max(0, onsiteMins - br);
+    var onsiteHours = onsiteMins === null ? null : onsiteMins / 60;
+
+    var needed = parseInt((requiredEl && requiredEl.value) || '1', 10);
+    if (isNaN(needed) || needed < 1) needed = 1;
+    var assigned = selectedCount();
+    var nForCalc = assigned > 0 ? assigned : needed;
+
+    var mode = (modeBudget && modeBudget.checked) ? 'budget' : 'window';
+    var slab = sharedInput ? (parseFloat(String(sharedInput.value || '').trim()) || 0) : 0;
+    var personHours;
+    if (mode === 'budget') {
+      personHours = slab > 0 ? slab : null;
+    } else {
+      personHours = onsiteHours === null ? null : (onsiteHours * nForCalc);
+    }
+
+    var rate = rateEl ? (parseFloat(String(rateEl.value || '').trim()) || 0) : 0;
+    var estCost = (personHours !== null && rate > 0) ? (personHours * rate) : null;
+
+    if (kOnsite) kOnsite.textContent = fmtHours(onsiteHours);
+    if (kOnsiteSub) kOnsiteSub.textContent = (rawMins === null) ? 'after break' : ('break ' + Math.round(br) + 'm');
+    if (kPeople) kPeople.textContent = String(nForCalc);
+    if (kPeopleSub) kPeopleSub.textContent = (assigned > 0 ? (assigned + ' assigned') : 'using staff needed') + ' / ' + needed + ' needed';
+    if (kPH) kPH.textContent = (personHours === null ? '—' : (Math.round(personHours * 100) / 100).toString());
+    if (kPHSub) kPHSub.textContent = (mode === 'budget')
+      ? (slab > 0 ? 'fixed budget' : 'enter a budget to use this mode')
+      : ('on-site hours × people');
+    if (kCost) kCost.textContent = fmtMoney(estCost);
+
+    return { onsiteHours: onsiteHours, nForCalc: nForCalc, needed: needed, assigned: assigned, personHours: personHours, estCost: estCost };
+  }
+
+  function setMode(mode) {
+    if (!modeWindow || !modeBudget || !sharedWrap) return;
+    if (mode === 'budget') {
+      modeBudget.checked = true;
+      sharedWrap.classList.remove('d-none');
+    } else {
+      modeWindow.checked = true;
+      sharedWrap.classList.add('d-none');
+      if (sharedInput) sharedInput.value = '';
+    }
+    compute();
+  }
+
+  // Initialise mode based on existing shared_labour_hours.
+  try {
+    var hasBudget = sharedInput && String(sharedInput.value || '').trim();
+    if (hasBudget) setMode('budget');
+    else setMode('window');
+  } catch (e) {}
+
+  // Persist hourly estimate in localStorage (UI only).
+  try {
+    var key = 'sched_est_hourly_rate';
+    if (rateEl && !rateEl.value) {
+      var v0 = window.localStorage.getItem(key);
+      if (v0) rateEl.value = v0;
+    }
+    if (rateEl) {
+      rateEl.addEventListener('change', function() {
+        try { window.localStorage.setItem(key, String(rateEl.value || '')); } catch (e) {}
+        compute();
+      });
+    }
+  } catch (e) {}
+
+  if (modeWindow) modeWindow.addEventListener('change', function() { setMode('window'); });
+  if (modeBudget) modeBudget.addEventListener('change', function() { setMode('budget'); });
+  if (sharedInput) sharedInput.addEventListener('input', compute);
+  if (startEl) startEl.addEventListener('change', compute);
+  if (endEl) endEl.addEventListener('change', compute);
+  if (breakEl) breakEl.addEventListener('input', compute);
+  if (requiredEl) requiredEl.addEventListener('input', compute);
+  if (single) single.addEventListener('change', compute);
+  if (multi) multi.addEventListener('change', compute);
+
+  if (fillBtn && labourCostEl) {
+    fillBtn.addEventListener('click', function() {
+      var res = compute();
+      if (res.estCost === null) return;
+      labourCostEl.value = (Math.round(res.estCost * 100) / 100).toFixed(2);
+    });
+  }
+
+  compute();
 })();
 </script>
 {% endblock %}

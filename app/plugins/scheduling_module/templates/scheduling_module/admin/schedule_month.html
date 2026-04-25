@@ -16,7 +16,15 @@
       <h1 class="h5 mb-0">Month view</h1>
       <p class="text-muted small mb-0">Calendar overview — jump to a week or add shifts by day.</p>
     </div>
-    <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar-week me-1"></i> Week view</a>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <div class="btn-group" role="group" aria-label="Month layout">
+        <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=year, month=month, view='shift', contractor_id=contractor_id or '', client_id=client_id or '') }}"
+           class="btn btn-sm {{ 'btn-primary' if view_mode != 'job' else 'btn-outline-primary' }}">Shifts</a>
+        <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=year, month=month, view='job', contractor_id=contractor_id or '', client_id=client_id or '') }}"
+           class="btn btn-sm {{ 'btn-primary' if view_mode == 'job' else 'btn-outline-primary' }}">Jobs / events</a>
+      </div>
+      <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar-week me-1"></i> Week view</a>
+    </div>
   </div>
 </div>
 
@@ -27,9 +35,9 @@
       {% set prev_year = year if month > 1 else year - 1 %}
       {% set next_month = month + 1 if month < 12 else 1 %}
       {% set next_year = year if month < 12 else year + 1 %}
-      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=prev_year, month=prev_month, contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Previous month"><i class="bi bi-chevron-left"></i></a>
+      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=prev_year, month=prev_month, view=view_mode or 'shift', contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Previous month"><i class="bi bi-chevron-left"></i></a>
       <h1 class="h5 mb-0 fw-semibold schedule-month-title">{{ first.strftime('%B %Y') }}</h1>
-      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=next_year, month=next_month, contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Next month"><i class="bi bi-chevron-right"></i></a>
+      <a href="{{ url_for('internal_scheduling.admin_schedule_month', year=next_year, month=next_month, view=view_mode or 'shift', contractor_id=contractor_id or '', client_id=client_id or '') }}" class="btn btn-outline-secondary btn-sm" title="Next month"><i class="bi bi-chevron-right"></i></a>
       <span class="text-muted ms-1">|</span>
       <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}{% if contractor_id %}?contractor_id={{ contractor_id }}{% endif %}{% if client_id %}{{ '&' if contractor_id else '?' }}client_id={{ client_id }}{% endif %}" class="btn btn-outline-primary btn-sm">Week</a>
       <a href="{{ url_for('internal_scheduling.admin_index') }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
@@ -37,6 +45,7 @@
     <form method="get" class="d-inline-flex gap-1 align-items-center">
       <input type="hidden" name="year" value="{{ year }}">
       <input type="hidden" name="month" value="{{ month }}">
+      <input type="hidden" name="view" value="{{ view_mode or 'shift' }}">
       <select name="contractor_id" class="form-select form-select-sm schedule-month-select" onchange="this.form.submit()">
         <option value="">All staff</option>
         {% for c in contractors %}
@@ -76,18 +85,33 @@
                 <a href="{{ url_for('internal_scheduling.admin_shift_new') }}?date={{ day.iso }}" class="schedule-month-add" title="Add shift"><i class="bi bi-plus-lg"></i></a>
               </div>
               <div class="schedule-month-shifts">
-                {% for s in day.shifts %}
-                <a href="{{ url_for('internal_scheduling.admin_shift_edit', shift_id=s.id) }}" class="schedule-month-shift schedule-month-shift--{{ (s.job_type_id or 0) % 6 }}" title="{{ s.client_name or '' }} · {{ s.job_type_name or '' }}">
-                  <span class="schedule-month-shift-time">
-                    {{ (time_display(s.scheduled_start) if s.scheduled_start else '—') }}–{{ (time_display(s.scheduled_end) if s.scheduled_end else '—') }}
-                  </span>
-                  <span class="schedule-month-shift-role">{{ s.job_type_name or 'Shift' }}</span>
-                  <span class="schedule-month-shift-name">{{ s.contractor_name or s.contractor_initials or 'Unassigned' }}</span>
-                </a>
-                {% endfor %}
+                {% if view_mode == 'job' %}
+                  {% for j in day.jobs %}
+                    <a
+                      href="{{ url_for('internal_scheduling.admin_schedule_week') }}?week={{ (day.date - timedelta(days=day.date.weekday())).isoformat() }}&view=job{% if contractor_id %}&contractor_id={{ contractor_id }}{% endif %}{% if client_id %}&client_id={{ client_id }}{% endif %}"
+                      class="schedule-month-shift schedule-month-shift--{{ ((j.any_shift_id or 0) % 6) }}"
+                      title="{{ j.external_id or '' }}"
+                    >
+                      <span class="schedule-month-shift-role">{{ j.label or 'Job' }}</span>
+                      <span class="schedule-month-shift-name">
+                        <span class="badge bg-secondary">{{ j.count or 0 }} slot{{ 's' if (j.count or 0) != 1 else '' }}</span>
+                      </span>
+                    </a>
+                  {% endfor %}
+                {% else %}
+                  {% for s in day.shifts %}
+                  <a href="{{ url_for('internal_scheduling.admin_shift_edit', shift_id=s.id) }}" class="schedule-month-shift schedule-month-shift--{{ (s.job_type_id or 0) % 6 }}" title="{{ s.client_name or '' }} · {{ s.job_type_name or '' }}">
+                    <span class="schedule-month-shift-time">
+                      {{ (time_display(s.scheduled_start) if s.scheduled_start else '—') }}–{{ (time_display(s.scheduled_end) if s.scheduled_end else '—') }}
+                    </span>
+                    <span class="schedule-month-shift-role">{{ s.job_type_name or 'Shift' }}</span>
+                    <span class="schedule-month-shift-name">{{ s.contractor_name or s.contractor_initials or 'Unassigned' }}</span>
+                  </a>
+                  {% endfor %}
+                {% endif %}
               </div>
-              {% if day.count > 0 and not day.shifts %}
-              <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}?week={{ (day.date - timedelta(days=day.date.weekday())).isoformat() }}{% if contractor_id %}&contractor_id={{ contractor_id }}{% endif %}{% if client_id %}&client_id={{ client_id }}{% endif %}" class="schedule-month-count-link">{{ day.count }} shift{{ 's' if day.count != 1 else '' }}</a>
+              {% if day.count > 0 and ((view_mode == 'job' and not day.jobs) or (view_mode != 'job' and not day.shifts)) %}
+              <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}?week={{ (day.date - timedelta(days=day.date.weekday())).isoformat() }}&view={{ 'job' if view_mode == 'job' else 'staff' }}{% if contractor_id %}&contractor_id={{ contractor_id }}{% endif %}{% if client_id %}&client_id={{ client_id }}{% endif %}" class="schedule-month-count-link">{{ day.count }} shift{{ 's' if day.count != 1 else '' }}</a>
               {% endif %}
             </div>
           </td>

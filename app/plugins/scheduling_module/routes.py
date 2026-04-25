@@ -18,7 +18,7 @@ from flask import (
 from flask_login import current_user, login_required
 from app.objects import PluginManager, get_db_connection
 from app.portal_session import contractor_id_from_tb_user
-from .services import ScheduleService, SlingSyncService
+from .services import ScheduleService
 from .ai_chat import chat as ai_chat, is_ai_available
 
 _plugin_manager = PluginManager(os.path.abspath("app/plugins"))
@@ -44,11 +44,6 @@ def _ensure_scheduling_tables():
     except Exception:
         pass
 _core_manifest = _plugin_manager.get_core_manifest() or {}
-
-
-def _flash_sling(message: str, *, ok: bool = True) -> None:
-    """Queue a flash shown only on the Sling sync page (not the core admin shell)."""
-    flash(message, "sling_success" if ok else "sling_warning")
 
 
 def _scheduling_tenant_industries():
@@ -1646,6 +1641,9 @@ def admin_schedule_month():
         last = date(year, month + 1, 1) - timedelta(days=1)
     contractor_id = request.args.get("contractor_id", type=int)
     client_id = request.args.get("client_id", type=int)
+    view_mode = (request.args.get("view") or "shift").strip().lower()
+    if view_mode not in ("shift", "job"):
+        view_mode = "shift"
     shifts = ScheduleService.list_shifts(
         date_from=first,
         date_to=last,
@@ -1677,6 +1675,40 @@ def admin_schedule_month():
             shifts_by_day[iso].append(s)
     for iso in shifts_by_day:
         shifts_by_day[iso].sort(key=lambda x: (x.get("scheduled_start") or ""))
+
+    jobs_by_day: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if view_mode == "job":
+        try:
+            bundles = ScheduleService.week_job_bundle_rows(shifts, first, last)
+        except Exception:
+            bundles = []
+        for b in bundles or []:
+            b_shifts = b.get("shifts") or []
+            by_date: Dict[str, int] = defaultdict(int)
+            any_shift_id_by_date: Dict[str, int] = {}
+            for s in b_shifts:
+                wd = s.get("work_date")
+                if wd is None:
+                    continue
+                iso = wd.isoformat() if hasattr(wd, "isoformat") else str(wd)[:10]
+                by_date[iso] += 1
+                if iso not in any_shift_id_by_date:
+                    try:
+                        any_shift_id_by_date[iso] = int(s.get("id") or 0)
+                    except Exception:
+                        any_shift_id_by_date[iso] = 0
+            for iso, cnt in by_date.items():
+                jobs_by_day[iso].append(
+                    {
+                        "label": b.get("label"),
+                        "external_id": b.get("external_id"),
+                        "bundle_key": b.get("bundle_key"),
+                        "count": int(cnt or 0),
+                        "any_shift_id": any_shift_id_by_date.get(iso) or 0,
+                    }
+                )
+        for iso in jobs_by_day:
+            jobs_by_day[iso].sort(key=lambda x: (str(x.get("label") or ""), str(x.get("external_id") or "")))
     # Calendar grid: weeks (each week Mon-Sun), first week may start in prev month
     week_start = first - timedelta(days=first.weekday())
     weeks = []
@@ -1693,6 +1725,7 @@ def admin_schedule_month():
                 "job_types": jt_counts_by_day.get(iso, {}),
                 "in_month": d.month == month,
                 "shifts": shifts_by_day.get(iso, []),
+                "jobs": jobs_by_day.get(iso, []),
             })
         weeks.append(week_days)
         current += timedelta(days=7)
@@ -1715,6 +1748,7 @@ def admin_schedule_month():
         job_type_palette=job_type_palette,
         contractor_id=contractor_id,
         client_id=client_id,
+        view_mode=view_mode,
         timedelta=timedelta,
         time_display=_time_display,
         config=_core_manifest,
@@ -2166,6 +2200,35 @@ def admin_shift_repeat(shift_id):
     flash(f"Created {count} repeat shift(s) as drafts.", "success")
     return redirect(request.referrer or url_for("internal_scheduling.admin_shifts"))
 
+@internal_bp.post("/api/shifts/repeat-bulk")
+@_admin_required_scheduling
+def api_repeat_shifts_bulk():
+    body = request.get_json(force=True) or {}
+    ids = body.get("shift_ids") or []
+    try:
+        shift_ids = [int(x) for x in (ids or []) if x is not None and str(x).strip().isdigit()]
+    except Exception:
+        shift_ids = []
+    every = body.get("every") or 1
+    occurrences = body.get("occurrences") or body.get("times") or 1
+    unit = (body.get("unit") or "weeks").strip().lower()
+    try:
+        every_i = max(1, int(every))
+    except Exception:
+        every_i = 1
+    try:
+        occ_i = max(1, int(occurrences))
+    except Exception:
+        occ_i = 1
+    if occ_i > 104:
+        occ_i = 104
+    if unit not in ("weeks", "months"):
+        unit = "weeks"
+    if not shift_ids:
+        return jsonify({"ok": False, "error": "No shifts selected."}), 400
+    created = ScheduleService.repeat_shifts_bulk(shift_ids, every=every_i, unit=unit, occurrences=occ_i)
+    return jsonify({"ok": True, "created": int(created or 0)})
+
 
 @internal_bp.get("/shifts/<int:shift_id>/delete")
 @_admin_required_scheduling
@@ -2221,6 +2284,293 @@ def admin_shifts():
         job_types=job_types,
         contractors=contractors,
         website_settings=_get_website_settings(),
+        config=_core_manifest,
+    )
+
+
+@internal_bp.get("/shifts/import")
+@_admin_required_scheduling
+def admin_import_shifts():
+    _ensure_scheduling_tables()
+    return render_template(
+        "scheduling_module/admin/import_shifts.html",
+        step="upload",
+        config=_core_manifest,
+    )
+
+
+@internal_bp.post("/shifts/import")
+@_admin_required_scheduling
+def admin_import_shifts_post():
+    """
+    Two-step import:
+    - Step 1: upload CSV → store temp file → show mapping + preview
+    - Step 2: submit mapping → create draft shifts
+    """
+    _ensure_scheduling_tables()
+    import csv
+    import os
+    import tempfile
+    import uuid
+
+    token = (request.form.get("token") or "").strip()
+    action = (request.form.get("action") or "").strip().lower()
+    delimiter_raw = request.form.get("delimiter") or ","
+    delimiter = "\t" if delimiter_raw == "\\t" else str(delimiter_raw)[:1]
+
+    def _load_csv_rows(path: str, *, limit: int = 25):
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            headers = reader.fieldnames or []
+            rows = []
+            for i, r in enumerate(reader):
+                if i >= limit:
+                    break
+                rows.append(r or {})
+            return headers, rows
+
+    # Step 2: import
+    if token and action == "import":
+        tmp_path = os.path.join(tempfile.gettempdir(), f"sched_import_{token}.csv")
+        if not os.path.exists(tmp_path):
+            flash("Import file expired. Please upload again.", "error")
+            return redirect(url_for("internal_scheduling.admin_import_shifts"))
+        headers, preview = _load_csv_rows(tmp_path, limit=20)
+
+        m_work_date = request.form.get("map_work_date") or ""
+        m_start = request.form.get("map_start") or ""
+        m_end = request.form.get("map_end") or ""
+        m_job_type = request.form.get("map_job_type") or ""
+        m_client = request.form.get("map_client") or ""
+        m_site = request.form.get("map_site") or ""
+        m_staff = request.form.get("map_staff") or ""
+        m_notes = request.form.get("map_notes") or ""
+        m_person_hours = request.form.get("map_person_hours") or ""
+        m_required_count = request.form.get("map_required_count") or ""
+        create_missing = (request.form.get("create_missing") or "") == "1"
+
+        required_maps = {"work date": m_work_date, "start": m_start, "end": m_end, "job type": m_job_type, "client": m_client}
+        missing_maps = [k for k, v in required_maps.items() if not v]
+        if missing_maps:
+            flash("Missing mappings: " + ", ".join(missing_maps), "error")
+            return render_template(
+                "scheduling_module/admin/import_shifts.html",
+                step="map",
+                token=token,
+                delimiter=delimiter_raw,
+                headers=headers,
+                preview=preview,
+                config=_core_manifest,
+            )
+
+        # Build lookup caches
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SELECT id, name FROM clients")
+            clients_by_name = {str(r["name"]).strip().lower(): int(r["id"]) for r in (cur.fetchall() or []) if r.get("name")}
+            cur.execute("SELECT id, name, client_id FROM sites")
+            sites = cur.fetchall() or []
+            sites_by_key = {}
+            for r in sites:
+                nm = str(r.get("name") or "").strip().lower()
+                if not nm:
+                    continue
+                ck = (int(r.get("client_id") or 0), nm)
+                sites_by_key[ck] = int(r["id"])
+            cur.execute("SELECT id, name FROM job_types")
+            jts_by_name = {str(r["name"]).strip().lower(): int(r["id"]) for r in (cur.fetchall() or []) if r.get("name")}
+            cur.execute("SELECT id, name, email, initials FROM tb_contractors")
+            staff_rows = cur.fetchall() or []
+            staff_by_key = {}
+            for r in staff_rows:
+                if r.get("email"):
+                    staff_by_key[str(r["email"]).strip().lower()] = int(r["id"])
+                if r.get("name"):
+                    staff_by_key[str(r["name"]).strip().lower()] = int(r["id"])
+                if r.get("initials"):
+                    staff_by_key[str(r["initials"]).strip().lower()] = int(r["id"])
+
+            def _get_or_create_client(name: str) -> Optional[int]:
+                key = (name or "").strip().lower()
+                if not key:
+                    return None
+                if key in clients_by_name:
+                    return clients_by_name[key]
+                if not create_missing:
+                    return None
+                cur.execute("INSERT INTO clients (name) VALUES (%s)", (name.strip()[:255],))
+                conn.commit()
+                cid_new = int(cur.lastrowid)
+                clients_by_name[key] = cid_new
+                return cid_new
+
+            def _get_or_create_site(client_id: int, name: str) -> Optional[int]:
+                key = (name or "").strip().lower()
+                if not key:
+                    return None
+                ck = (int(client_id or 0), key)
+                if ck in sites_by_key:
+                    return sites_by_key[ck]
+                if not create_missing:
+                    return None
+                cur.execute(
+                    "INSERT INTO sites (client_id, name) VALUES (%s, %s)",
+                    (int(client_id), name.strip()[:255]),
+                )
+                conn.commit()
+                sid_new = int(cur.lastrowid)
+                sites_by_key[ck] = sid_new
+                return sid_new
+
+            def _get_or_create_job_type(name: str) -> Optional[int]:
+                key = (name or "").strip().lower()
+                if not key:
+                    return None
+                if key in jts_by_name:
+                    return jts_by_name[key]
+                if not create_missing:
+                    return None
+                cur.execute("INSERT INTO job_types (name, active) VALUES (%s, 1)", (name.strip()[:255],))
+                conn.commit()
+                jid_new = int(cur.lastrowid)
+                jts_by_name[key] = jid_new
+                return jid_new
+
+            def _parse_time(val: str) -> Optional[str]:
+                s = (val or "").strip()
+                if not s:
+                    return None
+                s = s.replace(".", ":")
+                # Accept HH:MM or HH:MM:SS
+                parts = s.split(":")
+                if len(parts) >= 2:
+                    try:
+                        hh = int(parts[0])
+                        mm = int(parts[1])
+                        return f"{hh:02d}:{mm:02d}"
+                    except Exception:
+                        return None
+                return None
+
+            def _parse_date(val: str) -> Optional[date]:
+                s = (val or "").strip()
+                if not s:
+                    return None
+                try:
+                    return date.fromisoformat(s[:10])
+                except Exception:
+                    # try dd/mm/yyyy
+                    try:
+                        dd, mm, yy = s.split("/")[:3]
+                        return date(int(yy), int(mm), int(dd))
+                    except Exception:
+                        return None
+
+            created = 0
+            errors = 0
+            with open(tmp_path, "r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f, delimiter=delimiter)
+                for r in reader:
+                    try:
+                        wd = _parse_date(r.get(m_work_date))
+                        st = _parse_time(r.get(m_start))
+                        en = _parse_time(r.get(m_end))
+                        client_name = (r.get(m_client) or "").strip()
+                        jt_name = (r.get(m_job_type) or "").strip()
+                        if not wd or not st or not en or not client_name or not jt_name:
+                            errors += 1
+                            continue
+                        cid = _get_or_create_client(client_name)
+                        if not cid:
+                            errors += 1
+                            continue
+                        jid = _get_or_create_job_type(jt_name)
+                        if not jid:
+                            errors += 1
+                            continue
+                        site_id = None
+                        if m_site:
+                            site_name = (r.get(m_site) or "").strip()
+                            if site_name:
+                                site_id = _get_or_create_site(cid, site_name)
+                        notes = (r.get(m_notes) or "").strip() if m_notes else ""
+                        required_count = 1
+                        if m_required_count:
+                            try:
+                                required_count = max(1, int(float((r.get(m_required_count) or "1").strip() or "1")))
+                            except Exception:
+                                required_count = 1
+                        shared_labour_hours = None
+                        if m_person_hours:
+                            try:
+                                ph = float((r.get(m_person_hours) or "").strip() or 0)
+                                if ph > 0:
+                                    shared_labour_hours = ph
+                            except Exception:
+                                shared_labour_hours = None
+                        contractor_ids = []
+                        if m_staff:
+                            raw_staff = (r.get(m_staff) or "").strip()
+                            if raw_staff:
+                                parts = [x.strip() for x in raw_staff.replace(";", ",").split(",") if x.strip()]
+                                for p in parts:
+                                    key = p.lower()
+                                    if key in staff_by_key:
+                                        contractor_ids.append(int(staff_by_key[key]))
+                        data = {
+                            "client_id": int(cid),
+                            "site_id": int(site_id) if site_id else None,
+                            "job_type_id": int(jid),
+                            "work_date": wd,
+                            "scheduled_start": st,
+                            "scheduled_end": en,
+                            "break_mins": 0,
+                            "notes": notes or None,
+                            "status": "draft",
+                            "source": "manual",
+                            "required_count": int(required_count),
+                            "contractor_ids": contractor_ids,
+                        }
+                        if shared_labour_hours is not None:
+                            data["shared_labour_hours"] = float(shared_labour_hours)
+                        uid = getattr(current_user, "id", None)
+                        uname = getattr(current_user, "username", None) or getattr(current_user, "email", None)
+                        ScheduleService.create_shift(data, actor_user_id=uid, actor_username=uname)
+                        created += 1
+                    except Exception:
+                        errors += 1
+                        continue
+        finally:
+            cur.close()
+            conn.close()
+
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        flash(f"Imported {created} draft shift(s). {errors} row(s) skipped.", "success" if created else "warning")
+        return redirect(url_for("internal_scheduling.admin_shifts"))
+
+    # Step 1: upload
+    up = request.files.get("csv_file")
+    if not up:
+        flash("CSV file required.", "error")
+        return redirect(url_for("internal_scheduling.admin_import_shifts"))
+    token = uuid.uuid4().hex
+    tmp_path = os.path.join(tempfile.gettempdir(), f"sched_import_{token}.csv")
+    up.save(tmp_path)
+    headers, preview = _load_csv_rows(tmp_path, limit=20)
+    if not headers:
+        flash("Could not read headers from CSV.", "error")
+        return redirect(url_for("internal_scheduling.admin_import_shifts"))
+    return render_template(
+        "scheduling_module/admin/import_shifts.html",
+        step="map",
+        token=token,
+        delimiter=delimiter_raw,
+        headers=headers,
+        preview=preview,
         config=_core_manifest,
     )
 
@@ -3249,233 +3599,6 @@ def api_unassign_slot_overlap():
         actor_username=uname,
     )
     return jsonify({"ok": True, "cleared_shift_ids": cleared})
-
-
-# ---------- Sling sync (admin) ----------
-
-@internal_bp.get("/sling-sync")
-@_admin_required_scheduling
-def admin_sling_sync():
-    _ensure_scheduling_tables()
-
-    today = date.today()
-    # Default: next Mon-Sun week (Sling sync is easier in weekly chunks).
-    date_from = today
-    while date_from.weekday() != 0:  # 0=Mon
-        date_from = date_from + timedelta(days=1)
-    date_to = date_from + timedelta(days=6)
-
-    job_types = ScheduleService.list_job_types()
-    clients, sites = ScheduleService.list_clients_and_sites()
-
-    settings = SlingSyncService._get_sling_settings()
-    creds = None
-    try:
-        creds = SlingSyncService.load_credentials()
-    except Exception:
-        creds = None
-    credentials_saved = bool(creds)
-    recent_runs = SlingSyncService.list_recent_sync_runs(20)
-
-    return render_template(
-        "scheduling_module/admin/sling_sync.html",
-        job_types=job_types,
-        clients=clients,
-        sites=sites,
-        default_job_type_id=settings.get("default_job_type_id"),
-        default_client_id=settings.get("default_client_id"),
-        default_site_id=settings.get("default_site_id"),
-        cancel_missing=bool(settings.get("cancel_missing", 1)),
-        import_filter_mode=settings.get("import_filter_mode") or "all",
-        import_filter_patterns_raw=settings.get("import_filter_patterns_raw") or "",
-        credentials_saved=credentials_saved,
-        stored_email=(creds or {}).get("email") if creds else "",
-        stored_org_id=(creds or {}).get("org_id") if creds else None,
-        date_from=date_from.isoformat(),
-        date_to=date_to.isoformat(),
-        discover_url=url_for("internal_scheduling.admin_sling_discover"),
-        recent_runs=recent_runs,
-        config=_core_manifest,
-    )
-
-
-@internal_bp.post("/sling-sync/save-credentials")
-@_admin_required_scheduling
-def admin_sling_sync_save_credentials():
-    _ensure_scheduling_tables()
-    email = (request.form.get("email") or "").strip()
-    password = request.form.get("password") or ""
-    org_id = None
-    org_raw = (request.form.get("org_id") or "").strip()
-    if org_raw:
-        try:
-            org_id = int(org_raw)
-        except ValueError:
-            _flash_sling(
-                "Sling organisation ID must be a whole number, or leave the field blank.",
-                ok=False,
-            )
-            return redirect(url_for("internal_scheduling.admin_sling_sync"))
-    try:
-        SlingSyncService.save_credentials(email=email, password=password, org_id=org_id)
-        _flash_sling("Sling credentials saved.", ok=True)
-    except Exception as e:
-        _flash_sling(f"Unable to save Sling credentials: {e}", ok=False)
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-
-@internal_bp.post("/sling-sync/save-settings")
-@_admin_required_scheduling
-def admin_sling_sync_save_settings():
-    _ensure_scheduling_tables()
-
-    default_job_type_id = request.form.get("default_job_type_id", type=int)
-    # Client/site mapping not reliably available from Sling free plan.
-    # We still persist optional defaults for forward compatibility, but sync always imports under a placeholder client.
-    default_client_id = None
-    default_site_id = None
-
-    cancel_missing = (request.form.get("cancel_missing") or "") == "1"
-    import_filter_mode = (request.form.get("import_filter_mode") or "all").strip().lower()
-    if import_filter_mode not in ("all", "include", "exclude"):
-        import_filter_mode = "all"
-    import_filter_patterns = request.form.get("import_filter_patterns") or ""
-
-    try:
-        SlingSyncService.update_sling_settings(
-            default_job_type_id=default_job_type_id,
-            default_client_id=default_client_id,
-            default_site_id=default_site_id,
-            cancel_missing=cancel_missing,
-            import_filter_mode=import_filter_mode,
-            import_filter_patterns=import_filter_patterns,
-        )
-        _flash_sling("Sling sync settings saved.", ok=True)
-    except Exception as e:
-        _flash_sling(f"Unable to save Sling settings: {e}", ok=False)
-
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-
-@internal_bp.post("/sling-sync/run")
-@_admin_required_scheduling
-def admin_sling_sync_run():
-    _ensure_scheduling_tables()
-
-    date_from_s = (request.form.get("date_from") or "").strip()
-    date_to_s = (request.form.get("date_to") or "").strip()
-    dry_run = (request.form.get("dry_run") or "") == "1"
-
-    try:
-        date_from = date.fromisoformat(date_from_s)
-        date_to = date.fromisoformat(date_to_s)
-        if date_to < date_from:
-            _flash_sling("Invalid date range.", ok=False)
-            return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-        actor = (
-            (getattr(current_user, "username", None) or getattr(current_user, "email", None) or "")
-            .strip()
-            or None
-        )
-        res = SlingSyncService.sync_published_shifts(
-            date_from=date_from,
-            date_to=date_to,
-            dry_run=dry_run,
-            actor_username=actor,
-        )
-        sk = int(res.get("skipped_by_filter") or 0)
-        sk_part = f" Skipped by filter: {sk}." if sk else ""
-        if dry_run:
-            _flash_sling(
-                f"Dry run complete: {res.get('processed_shifts')} shifts would be written.{sk_part}",
-                ok=True,
-            )
-        else:
-            rid = res.get("sync_run_id")
-            rev_part = f" Run #{rid} can be reverted below if needed." if rid else ""
-            _flash_sling(
-                f"Sync complete: created {res.get('created')}, updated {res.get('updated')}, "
-                f"cancelled {res.get('cancelled')}.{sk_part}{rev_part}",
-                ok=True,
-            )
-    except Exception as e:
-        _flash_sling(f"Sling sync failed: {e}", ok=False)
-
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-
-@internal_bp.post("/sling-sync/test-connection")
-@_admin_required_scheduling
-def admin_sling_sync_test_connection():
-    _ensure_scheduling_tables()
-    try:
-        res = SlingSyncService.test_connection()
-        if res.get("ok"):
-            _flash_sling(res.get("message") or "Sling connection OK.", ok=True)
-        else:
-            _flash_sling(res.get("error") or "Connection failed.", ok=False)
-    except Exception as e:
-        _flash_sling(f"Sling connection test failed: {e}", ok=False)
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-
-@internal_bp.post("/sling-sync/discover")
-@_admin_required_scheduling
-def admin_sling_discover():
-    _ensure_scheduling_tables()
-    date_from_s = (request.form.get("date_from") or "").strip()
-    date_to_s = (request.form.get("date_to") or "").strip()
-    try:
-        date_from = date.fromisoformat(date_from_s)
-        date_to = date.fromisoformat(date_to_s)
-        if date_to < date_from:
-            return jsonify({"ok": False, "error": "Invalid date range."}), 400
-        out = SlingSyncService.discover_shifts(date_from=date_from, date_to=date_to)
-        return jsonify(out)
-    except ValueError:
-        return jsonify({"ok": False, "error": "Invalid dates."}), 400
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-@internal_bp.post("/sling-sync/save-position-mapping")
-@_admin_required_scheduling
-def admin_sling_sync_save_position_mapping():
-    _ensure_scheduling_tables()
-    sling_position_id = (request.form.get("sling_position_id") or "").strip()
-    sling_position_name = (request.form.get("sling_position_name") or "").strip() or None
-    job_type_id = request.form.get("job_type_id", type=int)
-    try:
-        if not job_type_id:
-            raise ValueError("Job type is required.")
-        SlingSyncService.upsert_position_job_type_mapping(
-            sling_position_id=sling_position_id,
-            job_type_id=int(job_type_id),
-            sling_position_name=sling_position_name,
-        )
-        _flash_sling("Position → job type mapping saved.", ok=True)
-    except Exception as e:
-        _flash_sling(f"Could not save mapping: {e}", ok=False)
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
-
-
-@internal_bp.post("/sling-sync/revert/<int:run_id>")
-@_admin_required_scheduling
-def admin_sling_sync_revert(run_id: int):
-    _ensure_scheduling_tables()
-    try:
-        out = SlingSyncService.revert_sync_run(int(run_id))
-        _flash_sling(
-            "Revert complete: "
-            f"removed {out.get('deleted_shifts', 0)} shift(s) created in that run, "
-            f"restored {out.get('restored_updates', 0)} update(s) and "
-            f"{out.get('restored_status', 0)} cancelled shift(s).",
-            ok=True,
-        )
-    except Exception as e:
-        _flash_sling(f"Revert failed: {e}", ok=False)
-    return redirect(url_for("internal_scheduling.admin_sling_sync"))
 
 
 def get_blueprint():

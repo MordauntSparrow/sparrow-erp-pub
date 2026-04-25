@@ -29,13 +29,13 @@
         <a class="nav-link {% if request.endpoint == ep_week %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_schedule_week') }}"><i class="bi bi-calendar-week me-1"></i>Week view</a>
         <a class="nav-link {% if request.endpoint == ep_month %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_schedule_month') }}"><i class="bi bi-calendar3 me-1"></i>Month view</a>
         <a class="nav-link {% if request.endpoint in shifts_endpoints %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_shifts') }}"><i class="bi bi-list-task me-1"></i>Shifts</a>
-        <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_team_event_new' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_team_event_new') }}"><i class="bi bi-people-fill me-1"></i>Team event</a>
+        {# Team event is a secondary action; keep out of primary nav to avoid confusing normal shift workflows. #}
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_templates' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_templates') }}"><i class="bi bi-journal-bookmark me-1"></i>Templates</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_open_shift_claims' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_open_shift_claims') }}"><i class="bi bi-person-check me-1"></i>Open claims</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_time_off' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_time_off') }}"><i class="bi bi-calendar-x me-1"></i>Time off</a>
         <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_swaps' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_swaps') }}"><i class="bi bi-arrow-left-right me-1"></i>Swaps</a>
         <a class="nav-link {% if request.endpoint in ep_labor %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_labor_settings') }}"><i class="bi bi-graph-up-arrow me-1"></i>Labor &amp; budget</a>
-        <a class="nav-link {% if request.endpoint == 'internal_scheduling.admin_sling_sync' %}active{% endif %}" href="{{ url_for('internal_scheduling.admin_sling_sync') }}"><i class="bi bi-cloud-arrow-down me-1"></i>Sling sync</a>
+        {# Sling Sync is experimental and frequently blocked by Sling captcha; keep out of primary nav. #}
       </div>
     </div>
   </nav>

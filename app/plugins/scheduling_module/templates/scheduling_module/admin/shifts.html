@@ -14,6 +14,11 @@
   <div class="card-body">
     <h1 class="h5 card-title">Shifts list</h1>
     <p class="text-secondary small">Shifts are created here{% if industry_visible('medical') %}, from Ventus sign-on{% endif %}, or templates; a published Time Billing run sheet can add shifts for ad-hoc or actual-time workflows. Use filters and table below.</p>
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_scheduling.admin_shift_new') }}"><i class="bi bi-plus-lg me-1"></i>Add shift</a>
+      <a class="btn btn-sm btn-outline-success" href="{{ url_for('internal_scheduling.admin_import_shifts') }}"><i class="bi bi-upload me-1"></i>Import shifts (CSV)</a>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_scheduling.admin_team_event_new') }}"><i class="bi bi-people-fill me-1"></i>Group block / training day</a>
+    </div>
     <div class="row g-2 mb-3">
       <div class="col-md-2">
         <label class="form-label small">From</label>
@@ -37,9 +42,26 @@
       </div>
     </div>
     <div class="table-responsive">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <div class="small text-muted">Selected: <span id="selCount">0</span></div>
+        <div class="input-group input-group-sm" style="max-width: 520px;">
+          <span class="input-group-text">Repeat</span>
+          <input type="number" class="form-control" id="repeatEvery" min="1" value="1" style="max-width:90px;">
+          <select class="form-select" id="repeatUnit" style="max-width:110px;">
+            <option value="weeks" selected>weeks</option>
+            <option value="months">months</option>
+          </select>
+          <span class="input-group-text">for</span>
+          <input type="number" class="form-control" id="repeatTimes" min="1" value="4" style="max-width:90px;">
+          <span class="input-group-text">occurrence(s)</span>
+          <button class="btn btn-outline-primary" type="button" id="btnRepeatSel">Repeat selected</button>
+        </div>
+        <span class="small text-muted" id="bulkMsg"></span>
+      </div>
       <table class="table table-sm table-hover">
         <thead>
           <tr>
+            <th style="width:32px;"><input type="checkbox" id="selAll"></th>
             <th>Date</th>
             <th>Contractor</th>
             <th>{{ assignment_label|default('Client') }}</th>
@@ -61,6 +83,18 @@
 {% block extra_scripts %}
 <script>
   const apiBase = '/plugin/scheduling_module/api/shifts';
+  const bulkRepeatUrl = '/plugin/scheduling_module/api/shifts/repeat-bulk';
+  const sel = new Set();
+  function updateSelCount() {
+    const el = document.getElementById('selCount');
+    if (el) el.textContent = String(sel.size);
+  }
+  function setBulkMsg(msg, kind) {
+    const el = document.getElementById('bulkMsg');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = 'small ' + (kind === 'danger' ? 'text-danger' : kind === 'success' ? 'text-success' : 'text-muted');
+  }
   document.getElementById('btnLoad').addEventListener('click', function() {
     const from = document.getElementById('filterFrom').value;
     const to = document.getElementById('filterTo').value;
@@ -72,12 +106,16 @@
     fetch(url).then(r => r.json()).then(data => {
       const tbody = document.getElementById('shiftsBody');
       const shifts = data.shifts || [];
+      sel.clear();
+      updateSelCount();
+      setBulkMsg('', null);
       if (shifts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No shifts found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No shifts found.</td></tr>';
         return;
       }
       tbody.innerHTML = shifts.map(s => `
         <tr>
+          <td><input class="form-check-input selShift" type="checkbox" data-id="${s.id}"></td>
           <td>${s.work_date || ''}</td>
           <td>${(s.contractor_name || s.contractor_initials || s.contractor_id) || ''}</td>
           <td>${s.client_name || ''}</td>
@@ -88,7 +126,56 @@
           <td>${s.source || ''}</td>
         </tr>
       `).join('');
+
+      // wire checkboxes
+      document.querySelectorAll('.selShift').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const id = parseInt(cb.dataset.id || '0', 10);
+          if (!id) return;
+          if (cb.checked) sel.add(id);
+          else sel.delete(id);
+          updateSelCount();
+        });
+      });
     });
   });
+
+  const selAll = document.getElementById('selAll');
+  if (selAll) {
+    selAll.addEventListener('change', () => {
+      const checked = !!selAll.checked;
+      document.querySelectorAll('.selShift').forEach(cb => {
+        cb.checked = checked;
+        const id = parseInt(cb.dataset.id || '0', 10);
+        if (!id) return;
+        if (checked) sel.add(id);
+        else sel.delete(id);
+      });
+      updateSelCount();
+    });
+  }
+
+  const btnRepeatSel = document.getElementById('btnRepeatSel');
+  if (btnRepeatSel) {
+    btnRepeatSel.addEventListener('click', async () => {
+      if (!sel.size) { setBulkMsg('Select one or more shifts first.', 'danger'); return; }
+      const every = parseInt((document.getElementById('repeatEvery').value || '1'), 10) || 1;
+      const unit = document.getElementById('repeatUnit').value || 'weeks';
+      const occurrences = parseInt((document.getElementById('repeatTimes').value || '1'), 10) || 1;
+      setBulkMsg('Repeating…', null);
+      try {
+        const r = await fetch(bulkRepeatUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shift_ids: Array.from(sel.values()), every, unit, occurrences }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) throw new Error(j.error || 'Failed');
+        setBulkMsg(`Created ${j.created || 0} draft repeat shifts. Reload to see them.`, 'success');
+      } catch (e) {
+        setBulkMsg(e.message || 'Repeat failed', 'danger');
+      }
+    });
+  }
 </script>
 {% endblock %}

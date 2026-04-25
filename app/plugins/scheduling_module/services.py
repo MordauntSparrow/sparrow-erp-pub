@@ -3667,6 +3667,103 @@ class ScheduleService:
         return count
 
     @staticmethod
+    def _add_months(d: date, months: int) -> date:
+        """Add months to date, clamping day-of-month where needed."""
+        import calendar
+
+        y = int(d.year)
+        m0 = int(d.month) - 1 + int(months)
+        y += m0 // 12
+        m = (m0 % 12) + 1
+        last_day = calendar.monthrange(y, m)[1]
+        return date(y, m, min(int(d.day), int(last_day)))
+
+    @staticmethod
+    def repeat_shift_interval(shift_id: int, *, every: int, unit: str, occurrences: int) -> int:
+        """
+        Repeat a shift by interval.
+
+        Args:
+            every: interval step (e.g. 2)
+            unit: 'weeks' or 'months'
+            occurrences: number of repeats to create
+        """
+        shift = ScheduleService.get_shift(int(shift_id))
+        if not shift:
+            return 0
+        if every < 1:
+            every = 1
+        if occurrences < 1:
+            return 0
+        if occurrences > 104:
+            occurrences = 104
+        unit_n = (unit or "weeks").strip().lower()
+        if unit_n not in ("weeks", "months"):
+            unit_n = "weeks"
+
+        wd = shift.get("work_date")
+        if wd is None or not hasattr(wd, "isoformat"):
+            return 0
+        base_date: date = wd.date() if isinstance(wd, datetime) else wd
+
+        recurrence_id = shift.get("recurrence_id") or int(shift_id)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            if not shift.get("recurrence_id"):
+                cur.execute(
+                    "UPDATE schedule_shifts SET recurrence_id = %s WHERE id = %s",
+                    (recurrence_id, int(shift_id)),
+                )
+                conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        count = 0
+        for i in range(1, occurrences + 1):
+            if unit_n == "months":
+                new_date = ScheduleService._add_months(base_date, every * i)
+            else:
+                new_date = base_date + timedelta(days=7 * every * i)
+            data = {
+                "contractor_id": shift.get("contractor_id"),
+                "client_id": shift.get("client_id"),
+                "site_id": shift.get("site_id"),
+                "job_type_id": shift.get("job_type_id"),
+                "work_date": new_date,
+                "scheduled_start": shift.get("scheduled_start"),
+                "scheduled_end": shift.get("scheduled_end"),
+                "break_mins": shift.get("break_mins") or 0,
+                "notes": shift.get("notes"),
+                "status": "draft",
+                "source": "manual",
+                "recurrence_id": recurrence_id,
+            }
+            try:
+                if data.get("client_id") and data.get("job_type_id") and data.get("work_date"):
+                    ScheduleService.create_shift(data)
+                    count += 1
+            except Exception:
+                pass
+        return count
+
+    @staticmethod
+    def repeat_shifts_bulk(shift_ids: List[int], *, every: int, unit: str, occurrences: int) -> int:
+        """Repeat many shifts; returns total created."""
+        total = 0
+        for sid in (shift_ids or []):
+            try:
+                total += int(
+                    ScheduleService.repeat_shift_interval(
+                        int(sid), every=int(every), unit=str(unit), occurrences=int(occurrences)
+                    )
+                )
+            except Exception:
+                pass
+        return total
+
+    @staticmethod
     def list_shifts_in_series(recurrence_id: int) -> List[Dict[str, Any]]:
         """Return shifts with the same recurrence_id, ordered by work_date."""
         if not recurrence_id:

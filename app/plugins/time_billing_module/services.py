@@ -7412,6 +7412,88 @@ class RunsheetService:
             data.get("cura_operational_event_id")
         )
 
+        schedule_shift_id = RunsheetService._optional_int(data.get("schedule_shift_id"))
+        if schedule_shift_id is not None:
+            # Best-effort: when staff link a rota shift, prefill core job fields so the
+            # on-the-day runsheet creation flow is "select shift → fill actuals".
+            conn0 = None
+            cur0 = None
+            try:
+                conn0 = get_db_connection()
+                cur0 = conn0.cursor(dictionary=True)
+                cur0.execute("SHOW TABLES LIKE 'schedule_shifts'")
+                if cur0.fetchone():
+                    cur0.execute(
+                            """
+                            SELECT id, client_id, site_id, job_type_id, work_date,
+                                   scheduled_start, scheduled_end, notes
+                            FROM schedule_shifts
+                            WHERE id=%s
+                            LIMIT 1
+                            """,
+                            (int(schedule_shift_id),),
+                    )
+                    sh = cur0.fetchone() or {}
+                    if sh:
+                        # Only fill missing fields — explicit payload still wins.
+                        data.setdefault("client_id", sh.get("client_id"))
+                        data.setdefault("site_id", sh.get("site_id"))
+                        data.setdefault("job_type_id", sh.get("job_type_id"))
+                        data.setdefault("work_date", sh.get("work_date"))
+                        data.setdefault("window_start", sh.get("scheduled_start"))
+                        data.setdefault("window_end", sh.get("scheduled_end"))
+                        if not (data.get("notes") or "").strip():
+                            data["notes"] = sh.get("notes")
+            except Exception:
+                pass
+            finally:
+                try:
+                    if cur0 is not None:
+                        cur0.close()
+                    if conn0 is not None:
+                        conn0.close()
+                except Exception:
+                    pass
+
+        # If the caller didn't pick a template explicitly, use the job type mapping:
+        # first active runsheet_template where runsheet_templates.job_type_id matches.
+        if not data.get("template_id") and data.get("job_type_id"):
+            try:
+                conn_t = get_db_connection()
+                cur_t = conn_t.cursor(dictionary=True)
+                try:
+                    cur_t.execute("SHOW TABLES LIKE 'runsheet_templates'")
+                    if cur_t.fetchone():
+                        cur_t.execute(
+                            """
+                            SELECT id, version
+                            FROM runsheet_templates
+                            WHERE active = 1 AND job_type_id = %s
+                            ORDER BY id ASC
+                            LIMIT 1
+                            """,
+                            (int(data.get("job_type_id")),),
+                        )
+                        tpl = cur_t.fetchone() or {}
+                        if tpl and tpl.get("id"):
+                            data["template_id"] = int(tpl["id"])
+                            if not data.get("template_version") and tpl.get("version") is not None:
+                                try:
+                                    data["template_version"] = int(tpl.get("version") or 1)
+                                except Exception:
+                                    data["template_version"] = 1
+                finally:
+                    cur_t.close()
+                    conn_t.close()
+            except Exception:
+                pass
+
+        # Refresh locals after schedule-shift prefill (we may have set defaults above).
+        if client_id is None and data.get("client_id") is not None:
+            client_id = data.get("client_id")
+        if site_id is None and data.get("site_id") is not None:
+            site_id = data.get("site_id")
+
         required = ["job_type_id", "work_date"]
         missing = [k for k in required if not data.get(k)]
 
@@ -7585,7 +7667,7 @@ class RunsheetService:
             conn.close()
 
     @staticmethod
-    def ensure_lead_assignment(runsheet_id: int, lead_user_id: int) -> None:
+    def ensure_lead_assignment(runsheet_id: int, lead_user_id: int) -> int:
         """
         If the lead has no assignment row yet, add one so publish can create their timesheet line.
         Respects required_role_id ladder (ROTA-ROLE-001).
@@ -7594,11 +7676,12 @@ class RunsheetService:
         cur = conn.cursor()
         try:
             cur.execute(
-                "SELECT 1 FROM runsheet_assignments WHERE runsheet_id=%s AND user_id=%s",
+                "SELECT id FROM runsheet_assignments WHERE runsheet_id=%s AND user_id=%s",
                 (runsheet_id, lead_user_id),
             )
-            if cur.fetchone():
-                return
+            row0 = cur.fetchone()
+            if row0 and row0[0] is not None:
+                return int(row0[0])
             cur.execute(
                 "SELECT required_role_id FROM runsheets WHERE id=%s", (runsheet_id,)
             )
@@ -7620,6 +7703,7 @@ class RunsheetService:
                 (runsheet_id, lead_user_id),
             )
             conn.commit()
+            return int(cur.lastrowid)
         except Exception as e:
             try:
                 conn.rollback()

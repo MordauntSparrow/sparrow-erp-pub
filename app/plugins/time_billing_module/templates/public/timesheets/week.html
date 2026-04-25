@@ -163,6 +163,14 @@ Timesheet – Week {{ data.week.week_id }}
           <th id="tot-travel">£{{ '%.2f' % (data.totals.travel or 0) }}</th>
           <th colspan="2"></th>
         </tr>
+        <tr class="table-light">
+          <th colspan="9" class="text-end">
+            Total (inc. travel)
+            <span class="text-muted fw-normal small d-block">Includes travel/parking: <span id="tot-travel-note">£{{ '%.2f' % (data.totals.travel or 0) }}</span></span>
+          </th>
+          <th colspan="2" class="text-end" id="tot-inc-travel">£{{ '%.2f' % ((data.totals.pay or 0) + (data.totals.travel or 0)) }}</th>
+          <th colspan="2"></th>
+        </tr>
       </tfoot>
     </table>
   </div>
@@ -309,6 +317,8 @@ Timesheet – Week {{ data.week.week_id }}
   const totHoursEl  = document.getElementById("tot-hours");
   const totPayEl    = document.getElementById("tot-pay");
   const totTravelEl = document.getElementById("tot-travel");
+  const totIncTravelEl = document.getElementById("tot-inc-travel");
+  const totTravelNoteEl = document.getElementById("tot-travel-note");
   const statusEl    = document.getElementById("ts-status");
   const updatedEl   = document.getElementById("ts-updated");
 
@@ -750,6 +760,8 @@ Timesheet – Week {{ data.week.week_id }}
     totHoursEl.textContent  = (t.hours || 0).toFixed(2);
     totPayEl.textContent    = "£" + money(t.pay);
     totTravelEl.textContent = "£" + money(t.travel);
+    if (totIncTravelEl) totIncTravelEl.textContent = "£" + money((t.pay || 0) + (t.travel || 0));
+    if (totTravelNoteEl) totTravelNoteEl.textContent = "£" + money(t.travel || 0);
   }
 
   /** When API summaries are empty (e.g. legacy rows), derive breakdown from line items. */

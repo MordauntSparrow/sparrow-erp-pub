@@ -37,6 +37,22 @@
   </div>
 </div>
 
+<div class="mb-3">
+  <h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing: 0.06em;">More actions</h2>
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('internal_scheduling.admin_import_shifts') }}" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-upload me-1"></i>Import shifts (CSV)
+    </a>
+    <a href="{{ url_for('internal_scheduling.admin_team_event_new') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-people-fill me-1"></i>Group block / training day
+    </a>
+  </div>
+  <p class="small text-muted mt-2 mb-0">
+    Use <strong>Group block / training day</strong> for meetings, training, standby, or any multi-person block that isn’t a normal client shift.
+    For regular work, use shifts (manual/import) and repeat.
+  </p>
+</div>
+
 {% if industry_visible('medical') %}
 <div class="mb-3">
   <h2 class="h6 text-uppercase text-muted mb-2" style="letter-spacing: 0.06em;">Medical ops &amp; run sheets</h2>

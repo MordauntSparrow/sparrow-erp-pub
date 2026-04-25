@@ -154,7 +154,19 @@ DEV NOTES:
     <div class="col-6 col-md-3">
       <div class="card">
         <div class="card-body py-2">
-          <div class="text-muted small">Pay</div>
+          <div class="text-muted small">Total (inc. travel)</div>
+          <div class="small text-muted">Includes travel/parking: <span id="totalTravelNote">£{{ '%.2f'|format(data.totals.travel or 0) }}</span></div>
+          <div id="totalIncTravel" class="fs-5 fw-semibold">
+            £{{ '%.2f'|format((data.totals.pay or 0) + (data.totals.travel or 0)) }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-6 col-md-3">
+      <div class="card">
+        <div class="card-body py-2">
+          <div class="text-muted small">Pay (excl. travel)</div>
           <div id="totalPay" class="fs-5 fw-semibold">
             £{{ '%.2f'|format(data.totals.pay or 0) }}
           </div>
@@ -173,7 +185,7 @@ DEV NOTES:
       </div>
     </div>
 
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-3 d-none d-md-block">
       <div class="card">
         <div class="card-body py-2">
           <div class="text-muted small">Status</div>
@@ -831,9 +843,13 @@ document.addEventListener('DOMContentLoaded', function () {
             const th = document.getElementById('totalHours');
             const tp = document.getElementById('totalPay');
             const tt = document.getElementById('totalTravel');
+            const ti = document.getElementById('totalIncTravel');
+            const tn = document.getElementById('totalTravelNote');
             if (th) th.textContent = fmt2(totalHours);
             if (tp) tp.textContent = money(totalPay);
             if (tt) tt.textContent = money(totalTravel);
+            if (ti) ti.textContent = money(totalPay + totalTravel);
+            if (tn) tn.textContent = money(totalTravel);
         }
 
         // Fetch totals from backend; fallback to client calc if fails
@@ -843,9 +859,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 const th = document.getElementById('totalHours');
                 const tp = document.getElementById('totalPay');
                 const tt = document.getElementById('totalTravel');
+                const ti = document.getElementById('totalIncTravel');
+                const tn = document.getElementById('totalTravelNote');
                 if (th) th.textContent = fmt2(data.hours || 0);
                 if (tp) tp.textContent = money(data.pay || 0);
                 if (tt) tt.textContent = money(data.travel || 0);
+                if (ti) ti.textContent = money((data.pay || 0) + (data.travel || 0));
+                if (tn) tn.textContent = money(data.travel || 0);
             } else {
                 updateTotalsUIClientSide();
             }

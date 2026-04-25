@@ -1916,6 +1916,7 @@ def public_runsheets_new_page():
         config=core_manifest,
         rs_id=None,
         current_contractor_id=int(uid),
+        default_schedule_shift_id=request.args.get("shift_id", type=int),
     )
 
 
@@ -1930,6 +1931,7 @@ def public_runsheets_edit_page(rs_id):
         config=core_manifest,
         rs_id=rs_id,
         current_contractor_id=int(uid),
+        default_schedule_shift_id=None,
     )
 
 
@@ -2061,6 +2063,118 @@ def api_public_submit(week_id):
     if not res.get("ok"):
         return jsonify(res), 400
     return jsonify({"ok": True})
+
+@public_bp.get("/api/my/schedule-shifts")
+@staff_required_tb
+def api_my_schedule_shifts():
+    """
+    Upcoming scheduled shifts for the logged-in contractor (for run sheet creation).
+
+    Includes shifts where the contractor is either the primary contractor_id or is in
+    schedule_shift_assignments (multi-assignee).
+    """
+    uid = current_tb_user_id()
+    if not uid:
+        return jsonify({"items": []}), 401
+    days = request.args.get("days", default=21, type=int) or 21
+    if days < 1:
+        days = 1
+    if days > 90:
+        days = 90
+    today = date.today()
+    date_from = today
+    date_to = today + timedelta(days=days)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+        if not cur.fetchone():
+            return jsonify({"items": []})
+        cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+        has_asg = bool(cur.fetchone())
+        if has_asg:
+            who_clause = (
+                "(ss.contractor_id = %s OR EXISTS ("
+                "SELECT 1 FROM schedule_shift_assignments sa "
+                "WHERE sa.shift_id = ss.id AND sa.contractor_id = %s))"
+            )
+            who_params = (int(uid), int(uid))
+        else:
+            who_clause = "ss.contractor_id = %s"
+            who_params = (int(uid),)
+        cur.execute(
+            f"""
+            SELECT
+                ss.id,
+                ss.work_date,
+                ss.scheduled_start,
+                ss.scheduled_end,
+                ss.status,
+                ss.client_id,
+                ss.site_id,
+                ss.job_type_id,
+                c.name AS client_name,
+                s.name AS site_name,
+                jt.name AS job_type_name
+            FROM schedule_shifts ss
+            LEFT JOIN clients c ON c.id = ss.client_id
+            LEFT JOIN sites s   ON s.id = ss.site_id
+            LEFT JOIN job_types jt ON jt.id = ss.job_type_id
+            WHERE {who_clause}
+              AND ss.work_date BETWEEN %s AND %s
+              AND (ss.status IS NULL OR LOWER(ss.status) <> 'cancelled')
+            ORDER BY ss.work_date ASC, ss.scheduled_start ASC, ss.id ASC
+            LIMIT 200
+            """,
+            (*who_params, date_from, date_to),
+        )
+        rows = cur.fetchall() or []
+
+        def _t(v: Any) -> str:
+            try:
+                if v is None:
+                    return ""
+                if isinstance(v, timedelta):
+                    secs = int(v.total_seconds()) % 86400
+                    hh = secs // 3600
+                    mm = (secs % 3600) // 60
+                    return f"{hh:02d}:{mm:02d}"
+                if hasattr(v, "strftime"):
+                    return v.strftime("%H:%M")
+                s = str(v)
+                return s[:5]
+            except Exception:
+                return ""
+
+        items = []
+        for r in rows:
+            wd = r.get("work_date")
+            day = wd.strftime("%Y-%m-%d") if hasattr(wd, "strftime") else str(wd)[:10]
+            st = _t(r.get("scheduled_start")) or "—"
+            en = _t(r.get("scheduled_end")) or "—"
+            cn = (r.get("client_name") or "").strip() or "—"
+            sn = (r.get("site_name") or "").strip()
+            jn = (r.get("job_type_name") or "").strip() or "—"
+            label = f"{day} · {st}-{en} · {cn}"
+            if sn:
+                label += f" ({sn})"
+            label += f" · {jn} · #{int(r.get('id') or 0)}"
+            items.append(
+                {
+                    "id": int(r.get("id") or 0),
+                    "label": label,
+                    "work_date": day,
+                    "scheduled_start": st,
+                    "scheduled_end": en,
+                    "client_name": cn,
+                    "site_name": sn or None,
+                    "job_type_name": jn,
+                }
+            )
+        return jsonify({"items": items})
+    finally:
+        cur.close()
+        conn.close()
 
 
 # -------------------------
@@ -2639,7 +2753,55 @@ def api_my_runsheets_create():
     data["lead_user_id"] = int(uid)
     try:
         rs_id = RunsheetService.create_runsheet(data)
-        RunsheetService.ensure_lead_assignment(rs_id, int(uid))
+        ra_id = RunsheetService.ensure_lead_assignment(rs_id, int(uid))
+        # If this runsheet was created from a scheduled shift, link them so the shift becomes
+        # "runsheet-backed" and scheduling changes can mirror scheduled window into the runsheet bundle.
+        schedule_shift_id = data.get("schedule_shift_id")
+        if schedule_shift_id is not None:
+            try:
+                from app.plugins.time_billing_module.services import TimesheetService
+
+                conn = get_db_connection()
+                cur = conn.cursor()
+                try:
+                    cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+                    if cur.fetchone():
+                        cur.execute(
+                            """
+                            UPDATE schedule_shifts
+                            SET runsheet_id=%s, runsheet_assignment_id=%s
+                            WHERE id=%s
+                            """,
+                            (int(rs_id), int(ra_id), int(schedule_shift_id)),
+                        )
+                        conn.commit()
+                finally:
+                    cur.close()
+                    conn.close()
+
+                # Remove any scheduler-prefilled timesheet row for this shift so it doesn't
+                # duplicate the runsheet-backed payroll line.
+                try:
+                    conn2 = get_db_connection()
+                    cur2 = conn2.cursor(dictionary=True)
+                    try:
+                        cur2.execute(
+                            "SELECT work_date FROM schedule_shifts WHERE id=%s LIMIT 1",
+                            (int(schedule_shift_id),),
+                        )
+                        r2 = cur2.fetchone() or {}
+                        wd = r2.get("work_date")
+                    finally:
+                        cur2.close()
+                        conn2.close()
+                    if wd is not None:
+                        TimesheetService.delete_scheduler_prefill_for_shift(
+                            int(schedule_shift_id), int(uid), wd
+                        )
+                except Exception:
+                    pass
+            except Exception:
+                pass
         return jsonify({"ok": True, "id": rs_id}), 201
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400

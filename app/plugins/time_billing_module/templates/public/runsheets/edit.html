@@ -21,6 +21,15 @@
       <option value="">— None —</option>
     </select>
     <p class="small text-muted mb-0 mt-2">Choosing a template loads suggested job type / client and the form below.</p>
+    <div class="mt-3">
+      <label class="form-label small text-muted">Link to scheduled shift (optional)</label>
+      <input type="search" class="form-control form-control-sm mb-2" id="shiftPickFilter" placeholder="Search upcoming shifts by client / date / job type…" autocomplete="off">
+      <select class="form-select form-select-sm" id="shiftPick">
+        <option value="">— Select a scheduled shift —</option>
+      </select>
+      <input type="hidden" id="shiftLinkId" value="">
+      <div class="form-text small text-muted">Pick today/upcoming shift. It will auto-fill job type/client/site/date/window and choose the correct template.</div>
+    </div>
   </div>
 </div>
 
@@ -324,6 +333,48 @@
         o.value = x.id;
         o.textContent = x.name || ('#' + x.id);
         selStaff.appendChild(o);
+      });
+    }
+  }
+
+  async function loadMyUpcomingShifts() {
+    const pick = document.getElementById('shiftPick');
+    if (!pick) return;
+    pick.innerHTML = '<option value="">— Select a scheduled shift —</option>';
+    try {
+      const r = await fetch('/time-billing/api/my/schedule-shifts?days=21', { headers: { Accept: 'application/json' } });
+      const j = await r.json().catch(() => ({}));
+      const items = (j && j.items) || [];
+      for (const it of items) {
+        if (!it || !it.id) continue;
+        const opt = document.createElement('option');
+        opt.value = String(it.id);
+        opt.textContent = it.label || ('Shift #' + it.id);
+        opt.dataset.search = String(opt.textContent || '').toLowerCase();
+        pick.appendChild(opt);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function wireShiftPicker() {
+    const pick = document.getElementById('shiftPick');
+    const hidden = document.getElementById('shiftLinkId');
+    const filter = document.getElementById('shiftPickFilter');
+    if (!pick || !hidden) return;
+    pick.addEventListener('change', () => {
+      hidden.value = pick.value || '';
+      setDirty(true);
+    });
+    if (filter) {
+      filter.addEventListener('input', () => {
+        const q = String(filter.value || '').trim().toLowerCase();
+        for (const opt of Array.from(pick.options)) {
+          if (!opt.value) continue;
+          const hay = (opt.dataset.search || opt.textContent || '').toLowerCase();
+          opt.hidden = q ? (hay.indexOf(q) === -1) : false;
+        }
       });
     }
   }
@@ -900,6 +951,8 @@
     const reqRoleVal = document.getElementById('f_required_role_id').value;
     const staffRoleVal = document.getElementById('f_shift_staff_role_id').value;
     const payRateRaw = (document.getElementById('f_shift_pay_rate').value || '').trim();
+    const shiftLinkRaw = (document.getElementById('shiftLinkId') && document.getElementById('shiftLinkId').value || '').trim();
+    const shiftLinkId = shiftLinkRaw ? parseInt(shiftLinkRaw, 10) : null;
     const payload = {
       client_id,
       site_id,
@@ -924,6 +977,12 @@
       assignments: collectAssignments(),
       crew_segments: collectCrewSegments(),
     };
+    if (!rsId) {
+      const qShift = new URLSearchParams(window.location.search || '').get('shift_id');
+      const qShiftId = qShift ? parseInt(qShift, 10) : null;
+      const effShiftId = (shiftLinkId && !Number.isNaN(shiftLinkId)) ? shiftLinkId : ((qShiftId && !Number.isNaN(qShiftId)) ? qShiftId : null);
+      if (effShiftId) payload.schedule_shift_id = effShiftId;
+    }
     const selTpl = document.getElementById('tplPick');
     if (!rsId && selTpl.value) {
       const opt = selTpl.selectedOptions[0];
@@ -1106,6 +1165,18 @@
       document.getElementById('newOnlyCard').style.display = 'block';
       document.getElementById('pageTitle').textContent = 'New run sheet';
       await loadTemplateList();
+      await loadMyUpcomingShifts();
+      wireShiftPicker();
+      try {
+        const qShift = new URLSearchParams(window.location.search || '').get('shift_id');
+        const qShiftId = qShift ? parseInt(qShift, 10) : null;
+        const hidden = document.getElementById('shiftLinkId');
+        const pick = document.getElementById('shiftPick');
+        if (qShiftId && !Number.isNaN(qShiftId)) {
+          if (hidden) hidden.value = String(qShiftId);
+          if (pick) pick.value = String(qShiftId);
+        }
+      } catch {}
       setFormEnabled(true, true);
       document.getElementById('btnSave').disabled = false;
       document.getElementById('btnPublish').disabled = true;
