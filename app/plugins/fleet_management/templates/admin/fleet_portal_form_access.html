@@ -1,0 +1,66 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% block page_title %}Portal form access{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width:960px">
+  <div class="fleet-page-hero mb-3">
+    <h1 class="h5 mb-1"><i class="bi bi-people text-primary me-2"></i>Portal form access</h1>
+    <p class="fleet-page-hero__sub mb-0">Control which <strong>contractor roles</strong> (employee portal, <code>/fleet</code>) and which <strong>Sparrow user roles</strong> (<code>/VDIs</code>) may open <strong>daily inspections (VDI)</strong> vs <strong>workshop safety checks</strong>. Tick <strong>role groups</strong> from the fleet manifest (parents include every child group’s roles) and/or individual roles from your <strong>roles</strong> table. Leave <strong>all</strong> boxes unticked for a column to keep the default: <strong>VDI</strong> — everyone with portal access; <strong>Safety</strong> — mechanics / fleet managers (legacy behaviour).</p>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-4">
+          <div class="col-md-6">
+            <h2 class="h6 fw-semibold mb-2">VDI (daily inspection)</h2>
+            <p class="small text-muted mb-2">Employee portal vehicle list + <strong>/VDIs</strong> for logged-in Sparrow users.</p>
+            {% if form_visibility_category_rows %}
+            <p class="small fw-semibold text-secondary mb-1">Role groups</p>
+            {% for cat in form_visibility_category_rows %}
+            <div class="form-check" style="margin-left: {{ (cat.depth * 1.1)|round(2) }}rem">
+              <input class="form-check-input" type="checkbox" name="vdi_categories" value="{{ cat.id|e }}" id="vdic-{{ cat.id|e }}"
+                {% if form_role_visibility.vdi_categories and cat.id in form_role_visibility.vdi_categories %}checked{% endif %}>
+              <label class="form-check-label" for="vdic-{{ cat.id|e }}">{{ cat.label|e }}</label>
+            </div>
+            {% endfor %}
+            <p class="small fw-semibold text-secondary mb-1 mt-3">Individual roles</p>
+            {% endif %}
+            {% for slug, label in form_visibility_role_choices %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="vdi_roles" value="{{ slug|e }}" id="vdir-{{ slug|e }}"
+                {% if form_role_visibility.vdi_roles and slug in form_role_visibility.vdi_roles %}checked{% endif %}>
+              <label class="form-check-label" for="vdir-{{ slug|e }}">{{ label|e }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="col-md-6">
+            <h2 class="h6 fw-semibold mb-2">Workshop safety (portal)</h2>
+            <p class="small text-muted mb-2">Primary checklist from each vehicle’s type plus extra forms from <strong>Fleet → Forms</strong> (still respect each form’s <code>portal_roles</code> hints on top of this).</p>
+            {% if form_visibility_category_rows %}
+            <p class="small fw-semibold text-secondary mb-1">Role groups</p>
+            {% for cat in form_visibility_category_rows %}
+            <div class="form-check" style="margin-left: {{ (cat.depth * 1.1)|round(2) }}rem">
+              <input class="form-check-input" type="checkbox" name="safety_categories" value="{{ cat.id|e }}" id="safec-{{ cat.id|e }}"
+                {% if form_role_visibility.safety_categories and cat.id in form_role_visibility.safety_categories %}checked{% endif %}>
+              <label class="form-check-label" for="safec-{{ cat.id|e }}">{{ cat.label|e }}</label>
+            </div>
+            {% endfor %}
+            <p class="small fw-semibold text-secondary mb-1 mt-3">Individual roles</p>
+            {% endif %}
+            {% for slug, label in form_visibility_role_choices %}
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="safety_roles" value="{{ slug|e }}" id="safer-{{ slug|e }}"
+                {% if form_role_visibility.safety_roles and slug in form_role_visibility.safety_roles %}checked{% endif %}>
+              <label class="form-check-label" for="safer-{{ slug|e }}">{{ label|e }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm mt-4">Save</button>
+      </form>
+    </div>
+  </div>
+  <p class="small text-muted mt-3 mb-0">Edit role groups in <code>app/plugins/fleet_management/manifest.json</code> (<code>user_role_categories</code>). Role names are matched case-insensitively; substrings in the manifest lists match longer role titles (e.g. <code>mechanic</code> matches &ldquo;Workshop Mechanic&rdquo;).</p>
+</div>
+{% endblock %}

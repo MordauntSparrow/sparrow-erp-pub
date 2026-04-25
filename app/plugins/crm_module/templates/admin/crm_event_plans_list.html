@@ -1,25 +1,28 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Event plans{% endblock %}
-{% block crm_breadcrumb_current %}
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
-<li class="breadcrumb-item active" aria-current="page">Event plans</li>
-{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}Medical event plans — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Medical event plans</li>
+  </ol>
+</nav>
 <div class="container-fluid px-0 pb-3">
   <div class="crm-page-toolbar">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
       <div>
         <p class="text-muted crm-upper-tight fw-semibold mb-1">Medical planning</p>
         <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-clipboard2-pulse me-2 text-primary"></i>Medical event plans</h1>
-        <p class="small text-muted mb-0 mt-2">Wizard, checklist, branded PDF, and optional Cura handoff.</p>
+        <p class="small text-muted mb-0 mt-2">Wizard, checklist, branded plan document, and <strong class="text-body">Cura sync</strong> from the plan page banner (any time).</p>
       </div>
       {% if can_edit %}
-      <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('crm_module.event_plan_new') }}">New plan</a>
+      <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_new') }}">New plan</a>
       {% endif %}
     </div>
     <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
-      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
-      <a href="{{ url_for('crm_module.event_plan_questions_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-list-check me-1"></i>Plan questions</a>
+      <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-calendar-event me-1"></i>Event manager</a>
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-receipt me-1"></i>CRM overview</a>
+      <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_questions_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-list-check me-1"></i>Plan questions</a>
     </div>
   </div>
   {% if not plans %}
@@ -47,7 +50,7 @@
           <tr>
             <td class="fw-medium">{{ p.title }}</td>
             <td><span class="badge bg-light text-dark border">{{ p.status }}</span></td>
-            <td class="small text-muted text-nowrap">{{ p.wizard_step or 1 }}/8</td>
+            <td class="small text-muted text-nowrap">{{ (p.wizard_step|default(0, true)) + 1 }}/10</td>
             <td>{{ p.account_name or '—' }}</td>
             <td class="small">
               {% if p.quote_id %}
@@ -68,8 +71,11 @@
               {% endif %}
             </td>
             <td class="small text-muted">{{ p.updated_at }}</td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.event_plan_edit', plan_id=p.id) }}">Open</a>
+            <td class="text-end text-nowrap">
+              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_edit', plan_id=p.id) }}">Open</a>
+              {% if can_edit %}
+              <a class="btn btn-sm btn-primary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_edit', plan_id=p.id) }}#crmCuraHandoffBanner" title="Jump to Cura sync">Cura sync</a>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}

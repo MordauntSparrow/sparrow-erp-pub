@@ -1,121 +1,149 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
+{% block tb_page_head %}{% include "admin/runsheets/_runsheets_ui_styles.html" %}{% endblock %}
 {% block content %}
-<div class="container py-3">
+<div class="tb-rs-page">
+  <nav class="tb-rs-breadcrumb mb-3" aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">Time &amp; Billing</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Run sheets</li>
+    </ol>
+  </nav>
 
-    <!-- Header -->
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-        <div>
-            <h4 class="mb-0 d-flex align-items-center">
-                <i class="bi bi-clipboard2-check me-2"></i> Runsheets
-            </h4>
-            <p class="text-muted small mb-0 mt-1">Plan and publish shifts; filter by client, job type, or week.
-                <strong>Publish</strong> on a row pushes crew lines to timesheets — use again after edits{% if industry_visible('medical') %} or Ventus sign-off{% endif %} to <strong>resync</strong>.</p>
-        </div>
-        <a class="btn btn-primary btn-sm" href="#" id="btnNew">
-            <i class="bi bi-plus-lg me-1"></i> New runsheet
-        </a>
+  <div class="tb-rs-hero d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div class="flex-grow-1" style="min-width: 220px;">
+      <p class="tb-rs-hero-kicker mb-0">Time &amp; Billing</p>
+      <h1 class="text-white">Run sheets</h1>
+      <p class="tb-rs-hero-lead mb-0">
+        Plan crew windows, publish to contractor timesheets, and use the staffing board for busy days.
+        <strong class="text-white">Publish</strong> pushes lines from this run sheet — use again after edits{% if industry_visible('medical') %} or Ventus sign-off{% endif %} to <strong class="text-white">resync</strong>.
+      </p>
     </div>
-
-    <div class="btn-group mb-3" role="group" aria-label="View mode">
-        <button type="button" class="btn btn-sm btn-outline-secondary active" id="btnViewList">Table list</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnViewBoard" title="Group by date and event — easier when many runsheets land on the same day">
-            Staffing board
-        </button>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <a class="btn btn-light btn-sm shadow-sm fw-semibold" href="#" id="btnNew">
+        <i class="bi bi-plus-lg me-1"></i> New run sheet
+      </a>
+      <a class="btn btn-outline-light btn-sm" href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}">
+        <i class="bi bi-calendar2-check me-1"></i> Staffing overview
+      </a>
     </div>
+  </div>
 
-    <!-- Filters -->
-    <form class="row g-2 mb-3" id="filterForm">
+  <div class="btn-group tb-rs-view-toggle mb-3" role="group" aria-label="View mode">
+    <button type="button" class="btn btn-sm btn-outline-secondary active" id="btnViewList">
+      <i class="bi bi-table me-1"></i> Table list
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnViewBoard" title="Group by date and event">
+      <i class="bi bi-grid-3x2-gap me-1"></i> Staffing board
+    </button>
+  </div>
+
+  <div class="card tb-rs-panel mb-3">
+    <div class="card-header d-flex align-items-center gap-2">
+      <i class="bi bi-funnel text-primary"></i>
+      <span>Filters</span>
+    </div>
+    <div class="card-body">
+      <form class="row g-3 align-items-end" id="filterForm">
         <div class="col-12 col-md-3">
-            <label class="form-label small text-muted mb-0">Client</label>
-            <input class="form-control form-control-sm" type="text" name="client_name" placeholder="ID or name">
+          <label class="tb-rs-filter-label d-block" for="f_client">Client</label>
+          <input class="form-control form-control-sm" id="f_client" type="text" name="client_name" placeholder="ID or name" autocomplete="organization">
         </div>
         <div class="col-12 col-md-3">
-            <label class="form-label small text-muted mb-0">Job type</label>
-            <input class="form-control form-control-sm" type="text" name="job_type_id" placeholder="ID">
+          <label class="tb-rs-filter-label d-block" for="f_jt">Job type</label>
+          <input class="form-control form-control-sm" id="f_jt" type="text" name="job_type_id" placeholder="Numeric ID" inputmode="numeric">
         </div>
         <div class="col-12 col-md-3">
-            <label class="form-label small text-muted mb-0">Week</label>
-            <input class="form-control form-control-sm" type="text" name="week_id" placeholder="YYYYWW">
+          <label class="tb-rs-filter-label d-block" for="rsWeekPick">Week (ISO)</label>
+          <input type="hidden" name="week_id" id="rsWeekHid" value="">
+          <input class="form-control form-control-sm" type="week" id="rsWeekPick" title="Pick calendar week">
         </div>
-        <div class="col-12 col-md-3 d-flex gap-2 align-items-end">
-            <button class="btn btn-secondary btn-sm" type="submit">
-                <i class="bi bi-search me-1"></i> Apply
+        <div class="col-12 col-md-3 d-flex flex-wrap gap-2">
+          <button class="btn btn-primary btn-sm flex-grow-1" type="submit">
+            <i class="bi bi-search me-1"></i> Apply
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" type="button" id="btnClear">Clear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="listViewWrap">
+    <div class="card tb-rs-panel tb-rs-table-wrap">
+      <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <span class="d-flex align-items-center gap-2">
+          <i class="bi bi-list-ul text-primary"></i>
+          <span>All matching run sheets</span>
+        </span>
+        <span class="small text-muted">Sort by date in data; use filters to narrow</span>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">Work date</th>
+                <th scope="col">Client</th>
+                <th scope="col">Job type</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="rsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="boardViewWrap" class="d-none">
+    <div class="card tb-rs-panel mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-grid-3x2-gap text-primary"></i>
+        <span>Board range</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-6 col-md-3">
+            <label class="tb-rs-filter-label d-block" for="boardFrom">From</label>
+            <input type="date" class="form-control form-control-sm" id="boardFrom">
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="tb-rs-filter-label d-block" for="boardTo">To</label>
+            <input type="date" class="form-control form-control-sm" id="boardTo">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="tb-rs-filter-label d-block" for="boardClient">Client (optional)</label>
+            <input type="text" class="form-control form-control-sm" id="boardClient" placeholder="Name or ID">
+          </div>
+          <div class="col-12 col-md-2">
+            <button type="button" class="btn btn-primary btn-sm w-100" id="boardRefresh">
+              <i class="bi bi-arrow-clockwise me-1"></i> Load
             </button>
-            <button class="btn btn-outline-secondary btn-sm" type="button" id="btnClear">Clear</button>
+          </div>
         </div>
-    </form>
-
-    <div id="listViewWrap">
-    <!-- Runsheets Table -->
-    <div class="card">
-        <div class="card-header py-2 d-flex align-items-center">
-            <i class="bi bi-list-ul me-2"></i> List
-        </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-sm align-middle">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Work Date</th>
-                            <th>Client</th>
-                            <th>Job Type</th>
-                            <th>Status</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="rsBody"></tbody>
-                </table>
-            </div>
-        </div>
+        <p class="text-muted small mb-0 mt-3">
+          Groups by <strong>work date</strong>, then each run sheet as a card with crew lines. Use <strong>Table list</strong> for ISO week filters and quick publish.
+        </p>
+      </div>
     </div>
-    </div>
-
-    <div id="boardViewWrap" class="d-none">
-        <div class="card mb-3">
-            <div class="card-body py-3">
-                <div class="row g-2 align-items-end">
-                    <div class="col-6 col-md-3">
-                        <label class="form-label small text-muted mb-0">From</label>
-                        <input type="date" class="form-control form-control-sm" id="boardFrom">
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <label class="form-label small text-muted mb-0">To</label>
-                        <input type="date" class="form-control form-control-sm" id="boardTo">
-                    </div>
-                    <div class="col-12 col-md-4">
-                        <label class="form-label small text-muted mb-0">Client filter (optional)</label>
-                        <input type="text" class="form-control form-control-sm" id="boardClient" placeholder="Name or ID — same idea as table filters">
-                    </div>
-                    <div class="col-12 col-md-2">
-                        <button type="button" class="btn btn-primary btn-sm w-100" id="boardRefresh">Load board</button>
-                    </div>
-                </div>
-                <p class="text-muted small mb-0 mt-2">
-                    Groups runsheets by <strong>work date</strong>, then shows each event as a card with crew lines (similar to slot lists in dedicated staffing tools).
-                    Large concurrent jobs stay scannable; use <strong>Table list</strong> for week-ID filters and bulk actions.
-                </p>
-            </div>
-        </div>
-        <div id="boardBody" class="tb-staffing-board-root"></div>
-    </div>
-
+    <div id="boardBody" class="tb-rs-board-root"></div>
+  </div>
 </div>
-
-<style>
-.tb-staffing-day { border-left: 4px solid var(--mdb-primary, #0d6efd); padding-left: 0.75rem; margin-bottom: 1.5rem; }
-.tb-staffing-event { border: 1px solid rgba(0,0,0,.08); border-radius: .5rem; margin-bottom: 1rem; overflow: hidden; }
-.tb-staffing-event-hd { padding: .5rem .75rem; background: rgba(0,0,0,.03); display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; justify-content: space-between; }
-.tb-staffing-slot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .45rem .75rem; background: rgba(25, 135, 84, .12); border-bottom: 1px solid rgba(0,0,0,.06); font-size: .9rem; }
-.tb-staffing-slot:last-child { border-bottom: none; }
-.tb-staffing-slot .tw { font-variant-numeric: tabular-nums; color: #6c757d; white-space: nowrap; }
-body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgba(25, 135, 84, .18); }
-</style>
 
 <script>
 (function () {
     const body = document.getElementById('rsBody');
     const form = document.getElementById('filterForm');
+    const rsWeekPick = document.getElementById('rsWeekPick');
+    const rsWeekHid = document.getElementById('rsWeekHid');
+    function yyyymmFromWeekEl(el) {
+        if (!el || !el.value) return '';
+        const m = /^(\d{4})-W(\d{2})$/i.exec(String(el.value).trim());
+        return m ? m[1] + m[2] : '';
+    }
     const btnNew = document.getElementById('btnNew');
     const listWrap = document.getElementById('listViewWrap');
     const boardWrap = document.getElementById('boardViewWrap');
@@ -128,12 +156,9 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
     const btnBoardRefresh = document.getElementById('boardRefresh');
     const LS_VIEW = 'tb_runsheet_admin_view';
 
-    // Build API URLs
     const LIST_URL = "{{ url_for('internal_time_billing.api_list_runsheets') }}";
     const BOARD_URL = "{{ url_for('internal_time_billing.api_runsheets_staffing_board') }}";
     const CREATE_URL = "{{ url_for('internal_time_billing.api_create_runsheet') }}";
-
-    // Publish: use base + id to avoid Jinja int converter errors
     const PUBLISH_BASE = "{{ url_for('internal_time_billing.api_publish_runsheet', rs_id=0) }}".replace(/0\/publish$/, "");
     const EDIT_PAGE = "{{ url_for('internal_time_billing.runsheets_edit_page') }}";
     const SHOW_CURA = {{ industry_visible('medical')|tojson }};
@@ -180,7 +205,7 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
 
     async function loadBoard() {
         if (!boardBody) return;
-        boardBody.innerHTML = '<div class="text-muted py-3">Loading…</div>';
+        boardBody.innerHTML = '<div class="text-muted py-4 px-2"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Loading board…</div>';
         const p = new URLSearchParams();
         if (boardFrom && boardFrom.value) p.set('from', boardFrom.value);
         if (boardTo && boardTo.value) p.set('to', boardTo.value);
@@ -191,24 +216,27 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
             const data = await resp.json();
             const dates = data.dates || [];
             if (!dates.length) {
-                boardBody.innerHTML = '<div class="alert alert-light border text-muted">No runsheets in this range. Widen the dates or clear the client filter.</div>';
+                boardBody.innerHTML = '<div class="alert alert-light border shadow-sm rounded-3 text-muted mb-0">No run sheets in this range. Widen the dates or clear the client filter.</div>';
                 return;
             }
             const frag = document.createDocumentFragment();
             for (const day of dates) {
                 const dayEl = document.createElement('div');
-                dayEl.className = 'tb-staffing-day';
+                dayEl.className = 'tb-rs-day';
                 const n = (day.items || []).length;
-                dayEl.innerHTML = `<h6 class="mb-2 fw-semibold">${day.work_date} <span class="badge bg-light text-dark border">${n} run sheet${n === 1 ? '' : 's'}</span></h6>`;
+                const h2 = document.createElement('h2');
+                h2.className = 'mb-2';
+                h2.innerHTML = `${escHtml(day.work_date)} <span class="badge bg-light text-dark border">${n} run sheet${n === 1 ? '' : 's'}</span>`;
+                dayEl.appendChild(h2);
                 const items = day.items || [];
                 for (const ev of items) {
                     const evEl = document.createElement('div');
-                    evEl.className = 'tb-staffing-event';
+                    evEl.className = 'tb-rs-event';
                     const jt = ev.job_type_name || '';
                     const col = ev.job_type_colour_hex || '#6c757d';
-                    const jtBadge = jt ? `<span class="badge" style="background-color:${col};color:#fff">${jt}</span>` : '';
+                    const jtBadge = jt ? `<span class="badge" style="background-color:${col};color:#fff">${escHtml(jt)}</span>` : '';
                     const hdr = document.createElement('div');
-                    hdr.className = 'tb-staffing-event-hd';
+                    hdr.className = 'tb-rs-event-hd';
                     let curaLine = '';
                     if (SHOW_CURA) {
                         const curaName = (ev.cura_event_name || '').trim();
@@ -220,7 +248,7 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
                             return escHtml(s) + (rl ? ' (' + escHtml(rl) + ')' : '');
                         }).filter(Boolean).join('; ');
                         curaLine = [
-                            curaName ? `<span class="text-dark">${escHtml(curaName)}</span>` : '',
+                            curaName ? `<span class="fw-medium">${escHtml(curaName)}</span>` : '',
                             curaLoc ? `<span class="text-muted">${escHtml(curaLoc)}</span>` : '',
                             curaNotes ? `<span class="text-muted">${escHtml(curaNotes)}${curaNotes.length >= 160 ? '…' : ''}</span>` : '',
                             curaVeh ? `<span class="text-muted">Vehicles: ${curaVeh}</span>` : ''
@@ -228,8 +256,8 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
                     }
                     hdr.innerHTML = `
                         <div class="me-2" style="min-width:0">
-                            <div class="fw-semibold text-truncate" title="${ev.title || ''}">${ev.title || '—'}</div>
-                            <div class="small text-muted text-truncate">${ev.meta_line || ''}${ev.time_window ? ' · ' + ev.time_window : ''}</div>
+                            <div class="fw-semibold text-truncate" title="${escHtml(ev.title || '')}">${escHtml(ev.title || '—')}</div>
+                            <div class="small text-muted text-truncate">${escHtml(ev.meta_line || '')}${ev.time_window ? ' · ' + escHtml(ev.time_window) : ''}</div>
                             ${curaLine ? `<div class="small mt-1">${curaLine}</div>` : ''}
                         </div>
                         <div class="d-flex flex-wrap align-items-center gap-1">
@@ -242,14 +270,14 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
                     const assigns = ev.assignments || [];
                     if (!assigns.length) {
                         const empty = document.createElement('div');
-                        empty.className = 'px-3 py-2 small text-muted';
+                        empty.className = 'px-3 py-2 small text-muted border-top';
                         empty.textContent = 'No assignments yet — open Edit to add crew.';
                         evEl.appendChild(empty);
                     } else {
                         for (const a of assigns) {
                             const row = document.createElement('div');
-                            row.className = 'tb-staffing-slot';
-                            row.innerHTML = `<span class="text-truncate" style="min-width:0">${a.line_label || a.user_name || '—'}</span><span class="tw">${a.time_range || ''}</span>`;
+                            row.className = 'tb-rs-slot';
+                            row.innerHTML = `<span class="text-truncate" style="min-width:0">${escHtml(a.line_label || a.user_name || '—')}</span><span class="tb-rs-slot-time">${escHtml(a.time_range || '')}</span>`;
                             evEl.appendChild(row);
                         }
                     }
@@ -261,7 +289,7 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
             boardBody.appendChild(frag);
         } catch (e) {
             console.error(e);
-            boardBody.innerHTML = '<div class="text-danger">Could not load staffing board.</div>';
+            boardBody.innerHTML = '<div class="alert alert-danger border-0 shadow-sm">Could not load staffing board.</div>';
         }
     }
 
@@ -275,78 +303,60 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
     } catch (e) {}
 
     function normalizeListPayload(data) {
-        // Accept array or {items: [...]}
         if (Array.isArray(data)) return data;
         if (data && Array.isArray(data.items)) return data.items;
         return [];
     }
 
     async function load() {
+        if (rsWeekPick && rsWeekHid) rsWeekHid.value = yyyymmFromWeekEl(rsWeekPick);
         const params = new URLSearchParams(new FormData(form));
         const url = `${LIST_URL}?${params.toString()}`;
-        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</td></tr>';
 
         try {
             const resp = await fetch(url);
             if (!resp.ok) throw new Error('Load failed');
-
             const raw = await resp.json();
             const items = normalizeListPayload(raw);
-
             body.innerHTML = '';
             if (!items.length) {
-                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No runsheets found.</td></tr>';
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-5">No run sheets match these filters.</td></tr>';
                 return;
             }
-
             for (const r of items) {
                 const tr = document.createElement('tr');
                 const status = (r.status || 'draft').toLowerCase();
-                const badge = status === 'published'
-                    ? 'bg-success'
-                    : (status === 'draft' ? 'bg-secondary' : 'bg-dark');
-
+                const badge = status === 'published' ? 'bg-success' : (status === 'draft' ? 'bg-secondary' : 'bg-dark');
                 const jobTypeColour = r.job_type_colour_hex || '#6c757d';
-                const jobTypeBadge = `<span class="badge" style="background-color:${jobTypeColour};color:#fff">${r.job_type_name || r.job_type_id || ''}</span>`;
+                const jobTypeBadge = `<span class="badge" style="background-color:${jobTypeColour};color:#fff">${escHtml(r.job_type_name || r.job_type_id || '')}</span>`;
                 tr.innerHTML = `
-                    <td>${r.id}</td>
-                    <td>${r.work_date || ''}</td>
-                    <td>${r.client_name || r.client_id || ''}</td>
+                    <td class="font-monospace text-muted">${r.id}</td>
+                    <td><span class="fw-medium">${escHtml(r.work_date || '')}</span></td>
+                    <td>${escHtml(r.client_name || r.client_id || '')}</td>
                     <td>${jobTypeBadge}</td>
-                    <td><span class="badge ${badge}">${status}</span></td>
+                    <td><span class="badge ${badge}">${escHtml(status)}</span></td>
                     <td class="text-end">
                         <div class="btn-group btn-group-sm">
-                            <a class="btn btn-outline-primary"
-                               href="{{ url_for('internal_time_billing.runsheets_edit_page') }}#edit-${r.id}">
-                               Edit
-                            </a>
-                            <button class="btn btn-outline-success js-publish"
-                                    data-id="${r.id}">
-                                Publish
-                            </button>
+                            <a class="btn btn-outline-primary" href="{{ url_for('internal_time_billing.runsheets_edit_page') }}#edit-${r.id}">Edit</a>
+                            <button class="btn btn-outline-success js-publish" type="button" data-id="${r.id}">Publish</button>
                         </div>
-                    </td>
-                `;
+                    </td>`;
                 body.appendChild(tr);
             }
-
-            // Bind publish buttons safely
             body.querySelectorAll('.js-publish').forEach(btn => {
                 btn.addEventListener('click', async () => {
-                    if (!confirm('Publish / resync this runsheet to contractor timesheets? (Same as Edit Runsheet → Publish / resync.)')) return;
+                    if (!confirm('Publish / resync this runsheet to contractor timesheets?')) return;
                     const resp = await fetch(`${PUBLISH_BASE}/${btn.dataset.id}/publish`, {
                         method: 'POST',
                         headers: window.tbMergeCsrfHeaders({}, 'POST')
                     });
-                    if (resp.ok) {
-                        load();
-                    } else {
-                        alert('Publish failed');
-                    }
+                    if (resp.ok) load();
+                    else alert('Publish failed');
                 });
             });
         } catch (e) {
-            body.innerHTML = '<tr><td colspan="6" class="text-danger">Load failed</td></tr>';
+            body.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-5">Could not load run sheets.</td></tr>';
             console.error(e);
         }
     }
@@ -363,6 +373,8 @@ body.theme-dark .tb-staffing-slot, body.dark .tb-staffing-slot { background: rgb
 
     document.getElementById('btnClear').addEventListener('click', () => {
         form.reset();
+        if (rsWeekPick) rsWeekPick.value = '';
+        if (rsWeekHid) rsWeekHid.value = '';
         load();
     });
 

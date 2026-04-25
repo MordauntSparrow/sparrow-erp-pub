@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS calendar_policies (
         'NIGHT',
         'OVERTIME_SHIFT',
         'OVERTIME_DAILY',
-        'OVERTIME_WEEKLY'
+        'OVERTIME_WEEKLY',
+        'MINIMUM_HOURS_PER_SHIFT',
+        'MINIMUM_HOURS_DAILY_GLOBAL',
+        'MINIMUM_HOURS_DAILY_CLIENT',
+        'MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT'
     ) NOT NULL,
 
     scope ENUM(
@@ -45,6 +49,8 @@ CREATE TABLE IF NOT EXISTS calendar_policies (
     ot_tier2_threshold_hours DECIMAL(5,2) NULL,
     ot_tier1_mult DECIMAL(5,2) NULL,
     ot_tier2_mult DECIMAL(5,2) NULL,
+
+    minimum_hours DECIMAL(5,2) NULL DEFAULT NULL,
 
     applies_to ENUM('WAGE','BILL','BOTH') NOT NULL DEFAULT 'WAGE',
     stacking ENUM('NONE','OT_ON_TOP','FULL') NOT NULL DEFAULT 'OT_ON_TOP',

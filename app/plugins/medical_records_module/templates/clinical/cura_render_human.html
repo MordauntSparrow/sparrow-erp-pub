@@ -1,0 +1,37 @@
+{# Render dict/list/leaf values as nested tables and lists — no JSON syntax in the page. #}
+{%- macro render_human_value(v) -%}
+  {%- if v is none or v is undefined -%}
+    —
+  {%- elif v is mapping -%}
+    {%- if v|length == 0 -%}
+      <span class="text-muted">—</span>
+    {%- else -%}
+      <table class="table table-sm table-borderless mb-0 align-top">
+        {%- for sk, sv in v.items() %}
+        <tr>
+          <th class="text-muted small align-top pe-2 text-nowrap" scope="row" style="width:32%;max-width:12rem;">{{ sk }}</th>
+          <td class="small align-top">{{ render_human_value(sv) }}</td>
+        </tr>
+        {%- endfor %}
+      </table>
+    {%- endif -%}
+  {%- elif v is string -%}
+    {%- if v | trim | lower == 'unk' -%}
+      Unknown
+    {%- else -%}
+      {{- v -}}
+    {%- endif -%}
+  {%- elif v is sequence -%}
+    {%- if v|length == 0 -%}
+      <span class="text-muted">—</span>
+    {%- else -%}
+      <ul class="small mb-0 ps-3">
+        {%- for item in v %}
+        <li>{{ render_human_value(item) }}</li>
+        {%- endfor %}
+      </ul>
+    {%- endif -%}
+  {%- else -%}
+    {{- v -}}
+  {%- endif -%}
+{%- endmacro %}

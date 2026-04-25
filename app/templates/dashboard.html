@@ -565,4 +565,18 @@ html, body { overflow-x: hidden; }
     }
 })();
 </script>
+
+{% if whats_new and whats_new.show %}
+{% include 'partials/whats_new_modal.html' %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var el = document.getElementById('whatsNewModal');
+  if (!el || typeof mdb === 'undefined' || !mdb.Modal) return;
+  try {
+    var inst = mdb.Modal.getInstance(el) || new mdb.Modal(el);
+    inst.show();
+  } catch (e) { console.warn('whatsNewModal', e); }
+});
+</script>
+{% endif %}
 {% endblock %}

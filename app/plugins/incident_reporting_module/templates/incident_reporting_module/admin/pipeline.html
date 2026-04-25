@@ -1,0 +1,131 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}IR1 &amp; stages · Safety &amp; Incidents{% endblock %}
+{% block incident_admin_inner %}
+<style>
+  /* Kanban: fill space below header/subnav so columns stretch and the horizontal scrollbar sits low in the viewport */
+  .incident-pipeline-layout {
+    display: flex;
+    flex-direction: column;
+    /* Navbar + module bar + breadcrumb/title + footer — keeps board in view without extra page scroll */
+    min-height: max(22rem, calc(100dvh - 16rem));
+  }
+  @media (min-width: 992px) {
+    .incident-pipeline-layout {
+      min-height: max(22rem, calc(100dvh - 14rem));
+    }
+  }
+  .incident-pipeline-scroll-area {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: stretch;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 0.35rem;
+    scrollbar-gutter: stable;
+  }
+  .incident-pipeline-column {
+    flex: 0 0 auto;
+    width: min(20rem, 88vw);
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    max-height: none;
+  }
+  .incident-pipeline-column-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+</style>
+<div class="container-fluid mt-3 px-lg-4 pb-3 {% if view != 'list' %}incident-pipeline-layout{% endif %}">
+  <nav aria-label="Breadcrumb" class="mb-2 flex-shrink-0">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">IR1 &amp; stages</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3 flex-shrink-0">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <h1 class="h4 fw-semibold mb-0">IR1 &amp; stages</h1>
+      <form method="post" action="{{ url_for('internal_incident_reporting.admin_incident_new_draft') }}" class="d-inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-plus-circle me-1"></i>New incident / IR1</button>
+      </form>
+    </div>
+    <div class="btn-group btn-group-sm" role="group" aria-label="View mode">
+      <a class="btn btn-outline-primary {% if view == 'kanban' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_pipeline', view='kanban') }}">Kanban</a>
+      <a class="btn btn-outline-primary {% if view == 'list' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_pipeline', view='list') }}">List</a>
+    </div>
+  </div>
+
+  {% if view == 'list' and flat_rows is not none %}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light"><tr><th>Ref</th><th>Status</th><th>Title</th><th>Severity</th><th>Updated</th><th></th></tr></thead>
+        <tbody>
+          {% for r in flat_rows %}
+          <tr>
+            <td class="font-monospace small">{{ r.reference_code or ('…' ~ (r.public_uuid or '')[:8]) }}</td>
+            <td><span class="badge bg-secondary">{{ status_labels.get(r.status, r.status) }}</span></td>
+            <td>{{ (r.title or '—')|e }}</td>
+            <td class="small text-muted">{{ r.org_severity_code or '—' }}</td>
+            <td class="small text-muted">{{ r.updated_at or r.created_at or '—' }}</td>
+            <td class="text-end text-nowrap">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='summary') }}">Workspace</a>
+              {% if incident_show_ir1_form %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='ir1') }}">IR1</a>{% endif %}
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='factors') }}">Findings</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted small px-3 py-3">No incidents in scope.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="incident-pipeline-scroll-area incident-pipeline-scroll" tabindex="0" role="region" aria-label="Incident pipeline by stage">
+    {% for col in columns %}
+    <div class="incident-pipeline-column border rounded shadow-sm bg-white">
+      <div class="px-3 py-2 border-bottom small fw-semibold text-secondary bg-light rounded-top flex-shrink-0">
+        {{ col.title }}
+        <span class="badge bg-white text-secondary border ms-1">{{ col.rows|length }}</span>
+      </div>
+      <div class="p-2 incident-pipeline-column-body">
+        {% for r in col.rows %}
+        <div class="card border mb-2 shadow-sm">
+          <div class="card-body p-2 small">
+            <div class="d-flex justify-content-between gap-1 mb-1">
+              <span class="badge bg-light text-dark border">{{ status_labels.get(r.status, r.status) }}</span>
+              {% if r.sla_due_at and r.status not in ('closed','withdrawn','merged') %}
+              <span class="text-muted" title="SLA due">{{ r.sla_due_at }}</span>
+              {% endif %}
+            </div>
+            <div class="fw-semibold mb-1">{{ (r.title or 'Incident')|e }}</div>
+            {% if r.reference_code %}<div class="font-monospace text-muted mb-1">{{ r.reference_code|e }}</div>{% endif %}
+            <div class="text-muted mb-2" style="font-size:0.75rem;">{{ r.org_severity_code or '' }} {% if r.category_slug %}· {{ r.category_slug|replace('_',' ')|e }}{% endif %}</div>
+            <div class="d-flex flex-wrap gap-1">
+              <a class="btn btn-sm btn-primary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='summary') }}">Investigate</a>
+              {% if incident_show_ir1_form %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='ir1') }}">IR1</a>{% endif %}
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='factors') }}">Findings</a>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id, tab='people') }}">People</a>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0 px-1 py-2">No incidents in this column.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

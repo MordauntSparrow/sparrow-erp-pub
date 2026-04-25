@@ -304,6 +304,7 @@ def _save_task_form_file_upload(file_storage):
 @public_site_bp.get("/vacancies")
 def vacancies_list():
     items = rec_svc.list_open_vacancies()
+    rec_svc.annotate_vacancies_capacity(items)
     return render_template(
         "recruitment_module/public/vacancies.html",
         vacancies=items,
@@ -322,6 +323,7 @@ def vacancy_detail(slug):
         return redirect(url_for("public_recruitment_site.vacancies_list"))
     u = _applicant_user()
     applicant_profile = rec_svc.get_applicant_by_id(int(u["id"])) if u else None
+    cap_block, cap_msg = rec_svc.opening_blocks_new_applications(opening)
     return render_template(
         "recruitment_module/public/vacancy_detail.html",
         opening=opening,
@@ -330,6 +332,8 @@ def vacancy_detail(slug):
         website_settings=_get_website_settings(),
         applicant=u,
         applicant_profile=applicant_profile,
+        opening_capacity_blocked=cap_block,
+        opening_capacity_message=cap_msg,
     )
 
 
@@ -408,6 +412,12 @@ def applicant_register_post():
     if not ok:
         _flash_public(msg, error=True)
         return redirect(url_for("public_recruitment_site.applicant_register"))
+    try:
+        from . import notifications as rec_notifications
+
+        rec_notifications.notify_applicant_account_registered(email, name)
+    except Exception:
+        pass
     session[SESSION_APPLICANT] = {
         "id": aid,
         "email": (email or "").strip().lower(),
@@ -706,6 +716,23 @@ def admin_roles():
     )
 
 
+@internal_bp.post("/roles/sync-from-time-billing")
+@login_required
+@_rec_require(REC_SETUP)
+def admin_roles_sync_from_time_billing():
+    ok, msg, st = rec_svc.sync_rec_job_roles_from_time_billing_roles()
+    if ok:
+        flash(
+            "Time Billing sync: "
+            f"{st.get('inserted', 0)} added, {st.get('updated', 0)} linked to existing titles, "
+            f"{st.get('already_linked', 0)} already matched.",
+            "success",
+        )
+    else:
+        flash(f"Sync failed: {msg}", "danger")
+    return redirect(url_for("internal_recruitment.admin_roles"))
+
+
 @internal_bp.route("/roles/new", methods=["GET", "POST"])
 @login_required
 @_rec_require(REC_SETUP)
@@ -812,15 +839,33 @@ def admin_opening_new():
             request.form.get("status") or "draft",
             request.form.get("published_at") or None,
             request.form.get("closes_at") or None,
+            rec_svc.parse_optional_positive_int(request.form.get("max_applicants")),
+            rec_svc.parse_optional_positive_int(request.form.get("positions_to_fill")),
+            listing_pay_mode=request.form.get("listing_pay_mode"),
+            listing_pay_wage_card_id=_form_optional_positive_int(
+                "listing_pay_wage_card_id"
+            ),
+            listing_pay_custom_text=request.form.get("listing_pay_custom_text"),
+            hire_employment_type=request.form.get("hire_employment_type"),
         )
         if ok:
-            flash("Opening saved.", "success")
-            return redirect(url_for("internal_recruitment.admin_opening_edit", opening_id=oid))
+            flash(
+                "Job position created. Use Actions on the board to edit, set stages, or view applications.",
+                "success",
+            )
+            return redirect(
+                url_for(
+                    "internal_recruitment.admin_openings",
+                    view="board",
+                    status="all",
+                )
+            )
         flash(msg, "error")
     return render_template(
         "recruitment_module/admin/opening_form.html",
         opening=None,
         roles=roles,
+        wage_cards=rec_svc.time_billing_wage_cards_for_select(),
         config=_core_manifest,
     )
 
@@ -846,6 +891,14 @@ def admin_opening_edit(opening_id):
             request.form.get("status") or "draft",
             request.form.get("published_at") or None,
             request.form.get("closes_at") or None,
+            rec_svc.parse_optional_positive_int(request.form.get("max_applicants")),
+            rec_svc.parse_optional_positive_int(request.form.get("positions_to_fill")),
+            listing_pay_mode=request.form.get("listing_pay_mode"),
+            listing_pay_wage_card_id=_form_optional_positive_int(
+                "listing_pay_wage_card_id"
+            ),
+            listing_pay_custom_text=request.form.get("listing_pay_custom_text"),
+            hire_employment_type=request.form.get("hire_employment_type"),
         )
         if ok:
             flash("Opening updated.", "success")
@@ -855,6 +908,7 @@ def admin_opening_edit(opening_id):
         "recruitment_module/admin/opening_form.html",
         opening=opening,
         roles=roles,
+        wage_cards=rec_svc.time_billing_wage_cards_for_select(),
         config=_core_manifest,
     )
 
@@ -1239,7 +1293,7 @@ def admin_application_detail(application_id):
                 "success" if ok_iv else "error",
             )
         elif action == "prehire_add":
-            ok, msg = rec_svc.admin_create_prehire_request(
+            ok, msg, new_rid = rec_svc.admin_create_prehire_request(
                 application_id,
                 request.form.get("prehire_title") or "",
                 request.form.get("prehire_description"),
@@ -1247,18 +1301,57 @@ def admin_application_detail(application_id):
                 None,
             )
             flash("Pre-hire request added." if ok else msg, "success" if ok else "error")
+            if ok and new_rid:
+                try:
+                    from . import notifications as rec_notifications
+
+                    rec_notifications.notify_applicant_prehire_request_added(
+                        application_id, int(new_rid)
+                    )
+                except Exception:
+                    pass
         elif action == "prehire_approve":
             rid = int(request.form.get("request_id") or 0)
             ok, msg = rec_svc.admin_prehire_approve(
                 rid, application_id, request.form.get("prehire_admin_notes")
             )
             flash("Marked approved." if ok else msg, "success" if ok else "error")
+            if ok and rid:
+                try:
+                    from . import notifications as rec_notifications
+
+                    tit = rec_notifications.fetch_prehire_request_title(
+                        rid, application_id
+                    )
+                    rec_notifications.notify_prehire_outcome(
+                        application_id,
+                        approved=True,
+                        request_title=tit,
+                        admin_notes=request.form.get("prehire_admin_notes"),
+                    )
+                except Exception:
+                    pass
         elif action == "prehire_reject":
             rid = int(request.form.get("request_id") or 0)
             ok, msg = rec_svc.admin_prehire_reject(
                 rid, application_id, request.form.get("prehire_admin_notes")
             )
             flash("Marked rejected — applicant can re-submit." if ok else msg, "success" if ok else "error")
+            if ok and rid:
+                try:
+                    from . import notifications as rec_notifications
+
+                    tit = rec_notifications.fetch_prehire_request_title(
+                        rid, application_id
+                    )
+                    rec_notifications.notify_prehire_outcome(
+                        application_id,
+                        approved=False,
+                        request_title=tit,
+                        admin_notes=request.form.get("prehire_admin_notes"),
+                    )
+                except Exception:
+                    pass
         elif action == "authorize_hire":
             uid = str(getattr(current_user, "id", "") or "")
             ok, msg = rec_svc.admin_authorize_hr_conversion(application_id, uid)

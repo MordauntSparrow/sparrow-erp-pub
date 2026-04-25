@@ -1,0 +1,86 @@
+{# Names use literal __XF__ replaced by JS before insert #}
+<div class="extra-xf-block card border-info mb-4" data-xf-block="">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span class="small fw-semibold">Contractor portal form</span>
+    <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-xf-block">Remove form</button>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 mb-3">
+      <div class="col-md-3">
+        <label class="form-label small mb-0">Form id (slug)</label>
+        <input class="form-control form-control-sm" data-xf-meta="form_id" name="xf___XF___form_id" maxlength="64" placeholder="predelivery" required>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label small mb-0">Title</label>
+        <input class="form-control form-control-sm" data-xf-meta="form_title" name="xf___XF___form_title" maxlength="120" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small mb-0">Portal role hints <span class="text-danger">*</span></label>
+        {% with hidden_name='xf___XF___portal_roles', hidden_value='', compact=true, data_xf_meta='portal_roles' %}
+        {% include 'admin/partials/fleet_safety_role_picker.html' %}
+        {% endwith %}
+        <div class="form-text">At least one role or hint.</div>
+      </div>
+    </div>
+    <div class="xf-sections-root" data-role="xf-sections-root">
+      <div class="section-block card shadow-sm mb-3" data-role="section">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="small fw-semibold">Section</span>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-section">Remove section</button>
+        </div>
+        <div class="card-body">
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Section id</label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="id" maxlength="64">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-0">Section heading</label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="title" maxlength="120" required>
+            </div>
+          </div>
+          <div class="fields-container border rounded p-2 bg-light bg-opacity-50" data-role="fields-container">
+            <div class="field-row border-bottom pb-2 mb-2" data-role="field">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Field id</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="id" maxlength="64">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Type</label>
+                  <select class="form-select form-select-sm" data-field-input="type" data-field-type-select>
+                    <option value="text" selected>Short text</option>
+                    <option value="number">Number</option>
+                    <option value="mileage">Odometer</option>
+                    <option value="bool">Yes / No</option>
+                    <option value="photo">Photo upload</option>
+                  </select>
+                </div>
+                <div class="col-md-5">
+                  <label class="form-label small mb-0">Question / label</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="label" maxlength="255" required>
+                </div>
+                <div class="col-md-2">
+                  <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" value="1" data-field-input="required">
+                    <label class="form-check-label small">Required</label>
+                  </div>
+                </div>
+                <div class="col-md-1 text-end">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-action="remove-field" title="Remove">&times;</button>
+                </div>
+              </div>
+              <div class="row g-2 mt-1 number-opts" data-role="number-opts" style="display:none">
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Min</label><input type="text" class="form-control form-control-sm" data-field-input="min"></div>
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Max</label><input type="text" class="form-control form-control-sm" data-field-input="max"></div>
+                <div class="col-4 col-md-2"><label class="form-label small mb-0">Step</label><input type="text" class="form-control form-control-sm" data-field-input="step"></div>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-field">Add field</button>
+        </div>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary" data-action="xf-add-section">Add section</button>
+  </div>
+</div>

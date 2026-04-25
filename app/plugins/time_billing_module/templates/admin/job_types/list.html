@@ -18,7 +18,9 @@
     </div>
 
     <p class="text-muted small mb-3">
-        Job types are used on runsheets, timesheets, and rate cards. Deleting removes all wage and bill rates for that type; it is blocked if the type is used in any timesheet entries or runsheets.
+        Job types are used on runsheets, timesheets, and rate cards.
+        <strong>Delete</strong> removes unused types (and their wage/bill rate rows via the database).
+        If a type is still referenced by history, delete <strong>archives</strong> it instead: it disappears from new work and staff dropdowns, but old timesheets and runsheets keep the link and show the name as <strong>(Legacy)</strong>.
     </p>
 
     <!-- Table -->
@@ -32,7 +34,7 @@
                             <th>Name</th>
                             <th>Code</th>
                             <th>Colour</th>
-                            <th>Active</th>
+                            <th>Status</th>
                             <th class="text-end">Actions</th>
                         </tr>
                     </thead>
@@ -232,7 +234,7 @@
     }
 
     async function doDelete(id, name) {
-        if (!confirm(`Delete job type "${name}"?\n\nThis will remove all wage and bill rate rows for this job type. It will be blocked if the type is used in any timesheet entries or runsheets.`)) return;
+        if (!confirm(`Remove job type "${name}"?\n\nIf it has never been used on a timesheet or runsheet, it will be deleted permanently (including wage/bill rate rows for that type).\n\nIf it has history, it will be archived instead: inactive and labelled Legacy on old records.`)) return;
         const resp = await fetch(`${DELETE_BASE}${id}`, {
             method: 'DELETE',
             headers: window.tbMergeCsrfHeaders({}, 'DELETE')
@@ -241,6 +243,9 @@
         if (!resp.ok) {
             alert(data.error || 'Delete failed');
             return;
+        }
+        if (data.message) {
+            alert(data.message);
         }
         load();
     }

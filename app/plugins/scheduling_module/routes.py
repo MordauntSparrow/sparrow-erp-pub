@@ -67,19 +67,6 @@ def _scheduling_tenant_industries():
     return industries_from_manifest(_core_manifest)
 
 
-def _require_medical_industry_for_cura():
-    """Cura / Medical Records integration is medical-sector UI."""
-    from app.organization_profile import tenant_matches_industry
-
-    if tenant_matches_industry(_scheduling_tenant_industries(), "medical"):
-        return None
-    flash(
-        "Cura planning is only shown when **Medical** is enabled under Core settings → Industry & categories.",
-        "warning",
-    )
-    return redirect(url_for("internal_scheduling.admin_index"))
-
-
 def _get_website_settings():
     """Return website_settings for templates (website_public_base.html). From website_module or safe default."""
     try:
@@ -1164,7 +1151,7 @@ def api_patch_shift(shift_id):
     if "notes" in data:
         updates["notes"] = data["notes"]
     if updates:
-        ScheduleService.update_shift(shift_id, updates)
+        ScheduleService.update_shift(shift_id, updates, portal_notify=False)
     return jsonify({"ok": True})
 
 
@@ -1528,48 +1515,6 @@ def admin_job_type_requirements_save(job_type_id: int):
     return redirect(url_for("internal_scheduling.admin_job_type_requirements"))
 
 
-@internal_bp.get("/cura-events/planning")
-@_admin_required_scheduling
-def admin_cura_event_planning():
-    """
-    Planned staffing vs Cura Event Manager roster (not timesheet / billing actuals).
-    """
-    gate = _require_medical_industry_for_cura()
-    if gate:
-        return gate
-    _ensure_scheduling_tables()
-    df_s = request.args.get("from")
-    dt_s = request.args.get("to")
-    try:
-        date_from = date.fromisoformat(df_s) if df_s else date.today()
-    except ValueError:
-        date_from = date.today()
-    try:
-        date_to = date.fromisoformat(dt_s) if dt_s else (date_from + timedelta(days=30))
-    except ValueError:
-        date_to = date_from + timedelta(days=30)
-    if date_to < date_from:
-        date_to = date_from
-
-    data = ScheduleService.cura_event_planning_overview(date_from, date_to)
-
-    def cura_detail_url(eid: int):
-        return _safe_url_for(
-            "medical_records_internal.cura_ops_operational_event_detail",
-            event_id=int(eid),
-        )
-
-    return render_template(
-        "scheduling_module/admin/cura_event_planning.html",
-        planning=data,
-        date_from=date_from,
-        date_to=date_to,
-        time_display=_time_display,
-        cura_detail_url=cura_detail_url,
-        config=_core_manifest,
-    )
-
-
 @internal_bp.get("/schedule/week")
 @_admin_required_scheduling
 def admin_schedule_week():
@@ -1591,11 +1536,19 @@ def admin_schedule_week():
     week_end = week_start + timedelta(days=6)
     contractor_id = request.args.get("contractor_id", type=int)
     client_id = request.args.get("client_id", type=int)
+    view_mode = (request.args.get("view") or "staff").strip().lower()
+    if view_mode not in ("staff", "job"):
+        view_mode = "staff"
     shifts = ScheduleService.list_shifts(
         date_from=week_start,
         date_to=week_end,
         contractor_id=contractor_id,
         client_id=client_id,
+    )
+    job_bundles = (
+        ScheduleService.week_job_bundle_rows(shifts, week_start, week_end)
+        if view_mode == "job"
+        else []
     )
     contractors = ScheduleService.list_contractors()
     # Add pseudo-row for unassigned (open) shifts.
@@ -1663,6 +1616,8 @@ def admin_schedule_week():
         unavailability_by_contractor=unavailability_by_contractor,
         contractor_id=contractor_id,
         client_id=client_id,
+        view_mode=view_mode,
+        job_bundles=job_bundles,
         timedelta=timedelta,
         time_display=_time_display,
         config=_core_manifest,
@@ -2021,6 +1976,15 @@ def admin_analytics():
     )
 
 
+@internal_bp.get("/schedule/shifts-search")
+@_admin_required_scheduling
+def admin_shifts_search():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    return jsonify(ScheduleService.search_shifts_for_picker(q, limit=20))
+
+
 @internal_bp.get("/schedule/audit")
 @_admin_required_scheduling
 def admin_audit_log():
@@ -2028,10 +1992,29 @@ def admin_audit_log():
     shift_id = request.args.get("shift_id", type=int)
     limit = min(200, max(1, request.args.get("limit", type=int) or 100))
     entries = ScheduleService.list_shift_audit_recent(limit=limit, shift_id=shift_id)
+    shift_filter_label = None
+    if shift_id:
+        s = ScheduleService.get_shift(int(shift_id))
+        if s:
+            wd = s.get("work_date")
+            day = (
+                wd.isoformat()[:10]
+                if hasattr(wd, "isoformat")
+                else (str(wd)[:10] if wd else "—")
+            )
+            shift_filter_label = (
+                f"#{int(shift_id)} · {day} · "
+                f"{(s.get('client_name') or '').strip() or '—'} · "
+                f"{(s.get('contractor_name') or '').strip() or '—'} · "
+                f"{(s.get('status') or '').strip()}"
+            )
+        else:
+            shift_filter_label = f"Shift #{int(shift_id)}"
     return render_template(
         "scheduling_module/admin/audit_log.html",
         entries=entries,
         shift_id=shift_id,
+        shift_filter_label=shift_filter_label,
         limit=limit,
         config=_core_manifest,
     )
@@ -2282,6 +2265,13 @@ def admin_shift_create():
         except (TypeError, ValueError):
             labour_cost = None
     contractor_ids = [int(x) for x in request.form.getlist("contractor_ids") if x and str(x).strip().isdigit()]
+    slab_raw = (request.form.get("shared_labour_hours") or "").strip()
+    shared_labour_hours = None
+    if slab_raw:
+        try:
+            shared_labour_hours = float(slab_raw)
+        except (TypeError, ValueError):
+            shared_labour_hours = None
     data = {
         "client_id": request.form.get("client_id", type=int),
         "site_id": request.form.get("site_id", type=int) or None,
@@ -2296,6 +2286,8 @@ def admin_shift_create():
         "required_count": max(1, request.form.get("required_count", type=int) or 1),
         "contractor_ids": contractor_ids,
     }
+    if shared_labour_hours is not None and shared_labour_hours > 0:
+        data["shared_labour_hours"] = shared_labour_hours
     # Require client, job type, date, and times
     if not data["client_id"] or not data["job_type_id"] or not data["work_date"] or not data["scheduled_start"] or not data["scheduled_end"]:
         flash("Please fill in client, job type, date, and start/end times.", "error")
@@ -2418,11 +2410,19 @@ def admin_team_event_create():
         return redirect(url_for("internal_scheduling.admin_team_event_new"))
 
     n = len(out.get("shift_ids") or [])
-    flash(
-        f"Team event created: run sheet #{out['runsheet_id']} with {n} linked schedule shifts. "
-        "Staff enter actual times on their run sheet in the employee portal; timesheets update automatically.",
-        "success",
-    )
+    rs_id = out.get("runsheet_id")
+    if publish_runsheet:
+        flash(
+            f"Team event: published run sheet #{rs_id} with {n} linked rota shifts. "
+            "Staff can enter actual start/end on the run sheet in the employee portal; timesheets follow those actuals.",
+            "success",
+        )
+    else:
+        flash(
+            f"Team event: {n} rota shifts created, linked to draft run sheet #{rs_id}. "
+            "Scheduling is the plan; publish the run sheet in Time Billing when you want run-sheet timesheet rows—or use standard timesheets from scheduled shifts.",
+            "success",
+        )
     monday = work_date - timedelta(days=work_date.weekday())
     return redirect(
         url_for("internal_scheduling.admin_schedule_week") + "?week=" + monday.strftime("%Y-%m-%d")
@@ -2474,7 +2474,20 @@ def admin_shift_update(shift_id):
         flash("Shift not found.", "error")
         return redirect(url_for("internal_scheduling.admin_shifts"))
     data = {}
-    for key in ("client_id", "site_id", "job_type_id", "work_date", "scheduled_start", "scheduled_end", "break_mins", "notes", "status", "labour_cost", "required_count"):
+    for key in (
+        "client_id",
+        "site_id",
+        "job_type_id",
+        "work_date",
+        "scheduled_start",
+        "scheduled_end",
+        "break_mins",
+        "notes",
+        "status",
+        "labour_cost",
+        "required_count",
+        "shared_labour_hours",
+    ):
         val = request.form.get(key)
         if val is not None:
             if key == "break_mins":
@@ -2489,6 +2502,11 @@ def admin_shift_update(shift_id):
             elif key == "labour_cost":
                 try:
                     data[key] = float(val) if val not in (None, "") else None
+                except (TypeError, ValueError):
+                    data[key] = None
+            elif key == "shared_labour_hours":
+                try:
+                    data[key] = float(val) if val not in (None, "") and str(val).strip() else None
                 except (TypeError, ValueError):
                     data[key] = None
             else:
@@ -3151,7 +3169,86 @@ def api_check_conflicts():
         scheduled_end=end_time,
         exclude_shift_id=exclude_shift_id,
     )
-    return jsonify({"conflicts": conflicts})
+    overlap_shifts = ScheduleService.get_contractor_shift_overlap_rows(
+        contractor_id=contractor_id,
+        work_date=work_date,
+        scheduled_start=start_time,
+        scheduled_end=end_time,
+        exclude_shift_id=exclude_shift_id,
+    )
+    return jsonify({"conflicts": conflicts, "overlap_shifts": overlap_shifts})
+
+
+@internal_bp.get("/api/contractors-slot-status")
+@_admin_required_scheduling
+def api_contractors_slot_status():
+    """Who is free vs already booked vs time off for a proposed slot (week view / shift form)."""
+    work_date_s = request.args.get("date")
+    start_time_s = request.args.get("start")
+    end_time_s = request.args.get("end")
+    exclude_shift_id = request.args.get("exclude_shift_id", type=int)
+    if not work_date_s or not start_time_s or not end_time_s:
+        return jsonify({"error": "date, start, end required"}), 400
+    try:
+        work_date = date.fromisoformat(work_date_s)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    start_time = _parse_time(start_time_s)
+    end_time = _parse_time(end_time_s)
+    if start_time is None or end_time is None:
+        return jsonify({"error": "Invalid start or end time (use HH:MM)"}), 400
+    rows = ScheduleService.list_contractors_slot_status(
+        work_date=work_date,
+        scheduled_start=start_time,
+        scheduled_end=end_time,
+        exclude_shift_id=exclude_shift_id,
+    )
+    return jsonify({"contractors": rows})
+
+
+@internal_bp.post("/api/unassign-slot-overlap")
+@_admin_required_scheduling
+def api_unassign_slot_overlap():
+    """
+    Remove the contractor from existing shifts that overlap this slot (scheduler override).
+    JSON: contractor_id, date, start, end, exclude_shift_id (optional).
+    """
+    data = request.get_json(silent=True) or {}
+    contractor_id = data.get("contractor_id")
+    work_date_s = (data.get("date") or "").strip()
+    start_time_s = (data.get("start") or "").strip()
+    end_time_s = (data.get("end") or "").strip()
+    exclude_shift_id = data.get("exclude_shift_id")
+    if exclude_shift_id is not None and str(exclude_shift_id).strip().isdigit():
+        exclude_shift_id = int(exclude_shift_id)
+    else:
+        exclude_shift_id = None
+    try:
+        contractor_id = int(contractor_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "contractor_id required"}), 400
+    if not work_date_s or not start_time_s or not end_time_s:
+        return jsonify({"error": "date, start, end required"}), 400
+    try:
+        work_date = date.fromisoformat(work_date_s)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    start_time = _parse_time(start_time_s)
+    end_time = _parse_time(end_time_s)
+    if start_time is None or end_time is None:
+        return jsonify({"error": "Invalid start or end time"}), 400
+    uid = getattr(current_user, "id", None)
+    uname = getattr(current_user, "username", None) or getattr(current_user, "email", None)
+    cleared = ScheduleService.unassign_contractor_from_overlapping_shifts(
+        contractor_id,
+        work_date,
+        start_time,
+        end_time,
+        exclude_shift_id=exclude_shift_id,
+        actor_user_id=uid,
+        actor_username=uname,
+    )
+    return jsonify({"ok": True, "cleared_shift_ids": cleared})
 
 
 # ---------- Sling sync (admin) ----------

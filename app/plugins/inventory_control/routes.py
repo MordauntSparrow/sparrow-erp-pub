@@ -552,7 +552,80 @@ def dashboard():
         fleet_links_available=_app_blueprint_registered("fleet_management"),
         ventus_links_available=_app_blueprint_registered("medical_response_internal"),
         medical_links_available=_app_blueprint_registered("medical_records_internal"),
+        inventory_can_transact=_session_inventory_transact(),
     )
+
+
+@internal.route("/stock/ood-to-training-pool", methods=["POST"])
+@login_required
+def stock_ood_to_training_pool_post():
+    if not _permission_inventory():
+        flash("Access denied: You do not have permission to access Inventory Control.", "danger")
+        return redirect(url_for("routes.dashboard"))
+    if not _session_inventory_transact():
+        flash("You need inventory transaction (or edit) permission to move stock.", "danger")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+    try:
+        batch_id = int(request.form.get("batch_id") or 0)
+        from_location_id = int(request.form.get("from_location_id") or 0)
+        quantity = float(request.form.get("quantity") or 0)
+    except (TypeError, ValueError):
+        flash("Invalid batch, location, or quantity.", "danger")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+    svc = get_inventory_service()
+    out = svc.transfer_batch_stock_to_training_pool(
+        batch_id=batch_id,
+        from_location_id=from_location_id,
+        quantity=quantity,
+        performed_by_user_id=_effective_user_id(),
+    )
+    if out.get("ok"):
+        flash("Stock moved to the training pool (still on hand, excluded from patient-care expiry alerts there).", "success")
+    else:
+        err = out.get("error", "error")
+        if err == "training_pool_missing":
+            flash("Training pool location is not set up — run Inventory plugin install/upgrade.", "danger")
+        elif err == "quantity_invalid":
+            flash(f"Quantity must be between 0 and on-hand ({out.get('on_hand', '')}).", "danger")
+        else:
+            flash(f"Could not move stock: {err}", "danger")
+    return redirect(url_for("inventory_control_internal.dashboard"))
+
+
+@internal.route("/stock/ood-dispose", methods=["POST"])
+@login_required
+def stock_ood_dispose_post():
+    if not _permission_inventory():
+        flash("Access denied: You do not have permission to access Inventory Control.", "danger")
+        return redirect(url_for("routes.dashboard"))
+    if not _session_inventory_transact():
+        flash("You need inventory transaction (or edit) permission to dispose stock.", "danger")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+    try:
+        batch_id = int(request.form.get("batch_id") or 0)
+        from_location_id = int(request.form.get("from_location_id") or 0)
+        quantity = float(request.form.get("quantity") or 0)
+    except (TypeError, ValueError):
+        flash("Invalid batch, location, or quantity.", "danger")
+        return redirect(url_for("inventory_control_internal.dashboard"))
+    notes = (request.form.get("notes") or "").strip() or None
+    svc = get_inventory_service()
+    out = svc.dispose_batch_stock_ood(
+        batch_id=batch_id,
+        from_location_id=from_location_id,
+        quantity=quantity,
+        performed_by_user_id=_effective_user_id(),
+        notes=notes,
+    )
+    if out.get("ok"):
+        flash("Out-of-date stock removed from inventory (disposal recorded).", "success")
+    else:
+        err = out.get("error", "error")
+        if err == "quantity_invalid":
+            flash(f"Quantity must be between 0 and on-hand ({out.get('on_hand', '')}).", "danger")
+        else:
+            flash(f"Could not dispose stock: {err}", "danger")
+    return redirect(url_for("inventory_control_internal.dashboard"))
 
 
 @internal.route("/items")

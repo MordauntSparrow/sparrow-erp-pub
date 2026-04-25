@@ -2,6 +2,8 @@
 {% block page_title %}{% if quote %}Quote #{{ quote.id }}{% else %}New quote{% endif %}{% endblock %}
 {% block content %}
 <div class="container-fluid py-3">
+  <p class="small text-muted mb-2 d-md-none">Use <strong>Save &amp; event plan</strong> when you are ready for medical planning.</p>
+  {% include 'admin/partials/crm_pipeline_flow_bar.html' %}
   {% if quote and can_edit and (quote.status or '')|lower != 'accepted' %}
   <div class="alert alert-info border-0 shadow-sm mb-3 d-flex flex-wrap align-items-start justify-content-between gap-3">
     <div>
@@ -19,7 +21,7 @@
     <div class="d-flex gap-2">
       <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.quotes_list') }}">All quotes</a>
       {% if quote and can_edit and industry_visible('medical') %}
-      <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', quote_id=quote.id) }}">Event plan</a>
+      <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_new', quote_id=quote.id) }}">Event plan</a>
       <form method="post" action="{{ url_for('crm_module.quote_new_revision', quote_id=quote.id) }}" class="d-inline" onsubmit="return confirm('Create a new draft revision copying this quote?');">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-outline-primary btn-sm rounded-pill">New revision</button>
@@ -36,7 +38,7 @@
   <div class="alert alert-light border small mb-3">
     <strong>Event medical plans</strong> linked to this quote —
     {% for ep in linked_event_plans %}
-    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('crm_module.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
+    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
     <span class="text-muted small">({{ ep.status }})</span>
     {% endfor %}
   </div>
@@ -48,6 +50,9 @@
     <div class="col-lg-8">
       <form method="post" id="crmQuoteForm">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if request.args.get('flow') == '1' %}
+        <input type="hidden" name="crm_flow_active" value="1">
+        {% endif %}
 
         <div class="card border-0 shadow-sm mb-3">
           <div class="card-body">
@@ -147,7 +152,19 @@
         </div>
 
         {% if can_edit %}
-        <button type="submit" class="btn btn-primary rounded-pill">Save quote</button>
+        <div class="d-grid gap-2 d-md-flex flex-md-wrap align-items-md-center">
+          {% if quote %}
+          <button type="submit" name="crm_flow_next" value="stay" class="btn btn-primary btn-lg rounded-pill">Save quote</button>
+          {% if industry_visible('medical') %}
+          <button type="submit" name="crm_flow_next" value="plan" class="btn btn-outline-primary btn-lg rounded-pill">Save &amp; event plan</button>
+          {% endif %}
+          {% else %}
+          <button type="submit" name="crm_flow_next" value="stay" class="btn btn-primary btn-lg rounded-pill">Create quote</button>
+          {% if industry_visible('medical') %}
+          <button type="submit" name="crm_flow_next" value="plan" class="btn btn-outline-primary btn-lg rounded-pill">Create quote &amp; event plan</button>
+          {% endif %}
+          {% endif %}
+        </div>
         {% endif %}
       </form>
     </div>
@@ -175,6 +192,30 @@
           {% endif %}
         </div>
       </div>
+
+      {% if quote and (crm_active_accounting != 'none' or quote.accounting_push_status or quote.accounting_external_id) %}
+      <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+          <h2 class="h6 text-uppercase text-muted mb-2">Accounting</h2>
+          <p class="small text-muted mb-2">Draft invoices use the connection under <a href="{{ core_integrations_url }}">Integrations</a> (no separate CRM login).</p>
+          {% if quote.accounting_external_id %}
+          <p class="small mb-2">Draft recorded in <strong>{{ quote.accounting_provider or 'accounting' }}</strong>. Reference: <code class="small">{{ quote.accounting_external_id }}</code>{% if quote.accounting_pushed_at %} · {{ quote.accounting_pushed_at }}{% endif %}</p>
+          {% elif quote.accounting_push_status == 'failed' %}
+          <p class="small text-danger mb-2">{{ quote.accounting_last_error or 'Last push failed.' }}</p>
+          {% endif %}
+          {% if can_edit and crm_active_accounting != 'none' and not quote.accounting_external_id %}
+          <form method="post" action="{{ url_for('crm_module.quote_push_draft_invoice', quote_id=quote.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-outline-secondary btn-sm rounded-pill">Create draft in accounting</button>
+          </form>
+          {% elif quote.accounting_external_id %}
+          <p class="small text-muted mb-0">Open your accounting app to review or send this draft.</p>
+          {% elif crm_active_accounting == 'none' %}
+          <p class="small text-muted mb-0">Connect a provider under Integrations to push drafts from here.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
 
       {% if quote and revisions|length > 1 %}
       <div class="card border-0 shadow-sm mb-3">

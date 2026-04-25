@@ -27,7 +27,7 @@ from .services import (
     get_messages,
     get_todos,
     count_pending_todos,
-    get_module_links,
+    get_portal_module_tiles_for_contractor,
     get_pending_counts,
     get_pending_training_count,
     is_scheduling_enabled,
@@ -50,6 +50,15 @@ from .services import (
     admin_get_portal_stats,
     admin_get_report_stats,
     get_dashboard_data_for_contractor,
+    admin_list_roles_for_portal_access,
+    admin_get_role_portal_module_keys,
+    admin_upsert_role_portal_module_access,
+    admin_delete_role_portal_module_access,
+    admin_get_contractor_portal_module_keys,
+    admin_upsert_contractor_portal_module_access,
+    admin_delete_contractor_portal_module_access,
+    admin_get_contractor_for_portal_access,
+    portal_access_key_choices,
     get_message_by_id_for_contractor,
     mark_message_read,
     equipment_portal_enabled,
@@ -619,7 +628,15 @@ def dashboard():
             ai_summary = get_ai_dashboard_summary(uid, summary_context)
     except Exception:
         pass
-    module_links = get_module_links(plugin_manager)
+    tiles = get_portal_module_tiles_for_contractor(uid, plugin_manager)
+    module_links = tiles["module_links"]
+    portal_show_equipment_tile = tiles["portal_show_equipment_tile"]
+    portal_show_inventory_tiles = tiles["portal_show_inventory_tiles"]
+    portal_show_assistant_tile = tiles["portal_show_assistant_tile"]
+    portal_show_scheduling_actions = tiles["portal_show_scheduling_actions"]
+    portal_show_compliance_actions = tiles["portal_show_compliance_actions"]
+    portal_show_hr_actions = tiles["portal_show_hr_actions"]
+    portal_show_training_actions = tiles["portal_show_training_actions"]
     for mod in module_links:
         if mod.get("launch_slug") and mod.get("enabled"):
             mod["url"] = url_for(
@@ -629,7 +646,7 @@ def dashboard():
     eq_portal_on = equipment_portal_enabled(plugin_manager)
     contractor_equipment_count = (
         contractor_assigned_equipment_count(
-            uid) if (eq_portal_on and uid) else 0
+            uid) if (eq_portal_on and uid and portal_show_equipment_tile) else 0
     )
     inv_requests_on = inventory_contractor_requests_portal_enabled(
         plugin_manager)
@@ -663,6 +680,13 @@ def dashboard():
         equipment_portal_enabled=eq_portal_on,
         contractor_equipment_count=contractor_equipment_count,
         inventory_contractor_requests_portal_enabled=inv_requests_on,
+        portal_show_equipment_tile=portal_show_equipment_tile,
+        portal_show_inventory_tiles=portal_show_inventory_tiles,
+        portal_show_assistant_tile=portal_show_assistant_tile,
+        portal_show_scheduling_actions=portal_show_scheduling_actions,
+        portal_show_compliance_actions=portal_show_compliance_actions,
+        portal_show_hr_actions=portal_show_hr_actions,
+        portal_show_training_actions=portal_show_training_actions,
         website_settings=_get_website_settings(),
         push_notifications_available=push_notifications_available,
     )
@@ -1238,6 +1262,117 @@ def admin_contractor_portal(cid):
         **data,
         config=core_manifest or {},
     )
+
+
+# -----------------------------------------------------------------------------
+# Admin: Portal module tiles (by job role and per contractor)
+# -----------------------------------------------------------------------------
+
+
+@internal_bp.get("/module-access/roles")
+@login_required
+@_admin_required_ep
+def admin_module_access_roles():
+    roles = admin_list_roles_for_portal_access()
+    return render_template(
+        "employee_portal_module/admin/module_access_roles.html",
+        roles=roles,
+        config=core_manifest or {},
+    )
+
+
+@internal_bp.get("/module-access/roles/<int:rid>")
+@login_required
+@_admin_required_ep
+def admin_module_access_role_edit(rid):
+    roles = admin_list_roles_for_portal_access()
+    role = next((r for r in roles if int(r["id"]) == int(rid)), None)
+    if not role:
+        flash("Role not found.", "error")
+        return redirect(url_for("internal_employee_portal.admin_module_access_roles"))
+    stored = admin_get_role_portal_module_keys(int(rid))
+    restrict = stored is not None
+    selected = set(stored) if stored is not None else set()
+    return render_template(
+        "employee_portal_module/admin/module_access_role_edit.html",
+        role=role,
+        restrict=restrict,
+        selected=selected,
+        choices=portal_access_key_choices(),
+        config=core_manifest or {},
+    )
+
+
+@internal_bp.post("/module-access/roles/<int:rid>")
+@login_required
+@_admin_required_ep
+def admin_module_access_role_save(rid):
+    roles = admin_list_roles_for_portal_access()
+    role = next((r for r in roles if int(r["id"]) == int(rid)), None)
+    if not role:
+        flash("Role not found.", "error")
+        return redirect(url_for("internal_employee_portal.admin_module_access_roles"))
+    if request.form.get("apply_restriction") != "1":
+        admin_delete_role_portal_module_access(int(rid))
+        flash("Role restriction cleared. Staff in this role follow only per-person rules (if any) and tenant defaults.", "success")
+        return redirect(url_for("internal_employee_portal.admin_module_access_role_edit", rid=rid))
+    keys = {k for k in request.form.getlist("module_key") if k}
+    if not keys:
+        flash("Choose at least one module tile, or turn off “Limit modules for this role”.", "error")
+        return redirect(url_for("internal_employee_portal.admin_module_access_role_edit", rid=rid))
+    if admin_upsert_role_portal_module_access(int(rid), keys):
+        flash("Role portal modules saved.", "success")
+    else:
+        flash("Could not save role settings.", "error")
+    return redirect(url_for("internal_employee_portal.admin_module_access_role_edit", rid=rid))
+
+
+@internal_bp.get("/module-access/contractors/<int:cid>")
+@login_required
+@_admin_required_ep
+def admin_module_access_contractor(cid):
+    contractor = admin_get_contractor_for_portal_access(int(cid))
+    if not contractor:
+        flash("Contractor not found.", "error")
+        return redirect(url_for("internal_employee_portal.admin_contractors"))
+    stored = admin_get_contractor_portal_module_keys(int(cid))
+    restrict = stored is not None
+    selected = set(stored) if stored is not None else set()
+    return render_template(
+        "employee_portal_module/admin/module_access_contractor.html",
+        contractor=contractor,
+        restrict=restrict,
+        selected=selected,
+        choices=portal_access_key_choices(),
+        config=core_manifest or {},
+    )
+
+
+@internal_bp.post("/module-access/contractors/<int:cid>")
+@login_required
+@_admin_required_ep
+def admin_module_access_contractor_save(cid):
+    contractor = admin_get_contractor_for_portal_access(int(cid))
+    if not contractor:
+        flash("Contractor not found.", "error")
+        return redirect(url_for("internal_employee_portal.admin_contractors"))
+    if request.form.get("apply_restriction") != "1":
+        admin_delete_contractor_portal_module_access(int(cid))
+        flash("Per-person restriction cleared. They follow the job role rule (if any) only.", "success")
+        return redirect(
+            url_for("internal_employee_portal.admin_module_access_contractor", cid=cid)
+        )
+    keys = {k for k in request.form.getlist("module_key") if k}
+    if not keys:
+        flash("Choose at least one module tile, or turn off the per-person limit.", "error")
+        return redirect(
+            url_for("internal_employee_portal.admin_module_access_contractor", cid=cid)
+        )
+    if admin_upsert_contractor_portal_module_access(int(cid), keys):
+        flash("Portal modules for this person saved.", "success")
+    else:
+        flash("Could not save settings.", "error")
+    return redirect(url_for("internal_employee_portal.admin_module_access_contractor", cid=cid))
 
 
 # -----------------------------------------------------------------------------

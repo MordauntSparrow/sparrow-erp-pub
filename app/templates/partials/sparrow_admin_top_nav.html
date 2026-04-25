@@ -34,7 +34,7 @@
         {% endif %}
         {% if current_user.is_authenticated and can_open_org_admin_nav() %}
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
+          <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' or request.path.startswith('/core/integrations') %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
             <i class="bi bi-wrench-adjustable me-1"></i> System
           </a>
           <ul class="dropdown-menu dropdown-menu-end shadow-3" aria-labelledby="systemAdminDropdown">
@@ -51,6 +51,11 @@
             </li>
             <li><hr class="dropdown-divider"></li>
             <li>
+              <a class="dropdown-item {% if request.path.startswith('/core/integrations') %}active{% endif %}" href="{{ url_for('routes.core_integrations') }}">
+                <i class="bi bi-bank me-2 text-secondary"></i> Integrations
+              </a>
+            </li>
+            <li>
               <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}">
                 <i class="bi bi-gear me-2 text-secondary"></i> Core settings
               </a>
@@ -62,10 +67,14 @@
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle py-2 px-3 d-flex align-items-center" href="#" id="userDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
             <i class="bi bi-person-circle me-1"></i>
-            <span class="text-truncate" style="max-width:160px">{{ session.get('first_name') or _site.get('user_name', 'User') }}</span>
+            <span class="text-truncate" style="max-width:160px">{{ session.get('first_name') or session.get('site_settings', {}).get('user_name', 'User') }}</span>
           </a>
           <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
             <li><h6 class="dropdown-header d-flex align-items-center"><i class="bi bi-person-badge me-2"></i> {{ current_user.username if current_user.is_authenticated else 'Account' }}</h6></li>
+            {% if current_user.is_authenticated %}
+            <li><a class="dropdown-item" href="{{ url_for('routes.account_personal_pin') }}"><i class="bi bi-key me-2"></i> Personal PIN</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('routes.account_notification_settings') }}"><i class="bi bi-envelope-paper me-2"></i> Email notifications</a></li>
+            {% endif %}
             <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
           </ul>
         </li>

@@ -90,6 +90,17 @@
       <input class="form-check-input" type="checkbox" name="mandatory" value="1" id="mandatory" {% if not policy or policy.mandatory %}checked{% endif %}>
       <label class="form-check-label" for="mandatory">Mandatory acknowledgement (portal to-do + blocks “cleared” counts)</label>
     </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="expose_on_website" value="1" id="expose_on_website"
+        {% if policy and policy.expose_on_website|default(0)|int == 1 %}checked{% endif %}>
+      <label class="form-check-label" for="expose_on_website">
+        Show on public website (<code>/policies</code>)
+      </label>
+      <div class="form-text">
+        When the document is <strong>Active</strong>, it can appear on your marketing site for transparency (e.g. CQC).
+        Only the published title, topic, version, review dates, full text, and official file are shown — not the staff summary.
+      </div>
+    </div>
     <div class="row g-3 mb-4">
       <div class="col-md-6">
         <label class="form-label" for="next_review_date">Next review due</label>

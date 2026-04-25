@@ -1,14 +1,22 @@
 {
+    "organization_profile": {
+        "industries": ["hospitality"]
+    },
     "theme_settings": {
         "theme": "default",
         "custom_css_path": ""
     },
     "site_settings": {
-        "company_name": "Sparrow ERP",
+        "company_name": "Dragons Estae Pubs Limited",
         "branding": "logo",
-        "logo_path": "uploads/logo-whitebg.png"
+        "logo_path": "uploads/logo-whitebg.png",
+        "logo_navbar_max_height_px": 48,
+        "logo_navbar_max_width_px": 300,
+        "logo_auth_max_height_px": 128,
+        "logo_auth_max_width_px": 380
     },
     "name": "Core Module",
     "system_name": "Sparrow_ERP_Core",
-    "version": "1.1.4"
+    "version": "1.5.0",
+    "changelog": "Dashboard product debrief modal (readable sections); Website volume-safe deploys; Ventus CAD/MDT (W3W, breaks policy, sessions/messages, major incidents/IR1); CRM→Cura naming; Cura clinical and settings; recruitment; scheduling and timesheets; compliance; fleet; inventory med bags; broad QA and docs."
 }

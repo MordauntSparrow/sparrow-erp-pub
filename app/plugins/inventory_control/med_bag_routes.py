@@ -4,7 +4,9 @@ Admin UI + JSON API for med/kit bag register (INV-MEDS / INV-KIT / CURA-DRUG-INV
 
 from __future__ import annotations
 
+import csv
 from functools import wraps
+from io import BytesIO, StringIO
 
 from flask import (
     current_app,
@@ -14,6 +16,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     url_for,
 )
 from flask_login import current_user, login_required
@@ -23,7 +26,10 @@ from app.organization_profile import normalize_organization_industries, tenant_m
 
 from .med_bag_service import (
     BAG_KINDS,
+    BAG_USAGE_CONTEXT_LABELS,
+    BAG_USAGE_CONTEXTS,
     RETURN_STATUSES,
+    RETURN_STATUS_LABELS,
     TAMPER_TAG_COLOUR_LABELS,
     TAMPER_TAG_COLOURS,
     get_med_bag_service,
@@ -353,11 +359,292 @@ def register_med_bag_routes(bp):
             lot_query=lot_q,
             lot_hits=lot_hits,
             return_statuses=RETURN_STATUSES,
+            return_status_labels=RETURN_STATUS_LABELS,
             can_edit=_inv_edit(),
             can_transact=_inv_transact(),
             templates_for_nested=nested_tpls,
             tamper_tag_colours=TAMPER_TAG_COLOURS,
             tamper_tag_colour_labels=TAMPER_TAG_COLOUR_LABELS,
+            bag_usage_context_labels=BAG_USAGE_CONTEXT_LABELS,
+            bag_usage_contexts=BAG_USAGE_CONTEXTS,
+        )
+
+    @bp.route("/med-bags/instances/<int:instance_id>/usage-context", methods=["POST"])
+    @login_required
+    @med_bag_medical_industry_required
+    @med_bag_edit_required
+    def med_bags_instance_usage_context(instance_id: int):
+        raw = (request.form.get("usage_context") or "").strip().lower()
+        if raw not in BAG_USAGE_CONTEXTS:
+            raw = "patient_care"
+        try:
+            svc.set_instance_usage_context(instance_id, raw)
+            flash("Bag use context updated.", "success")
+        except ValueError as e:
+            flash(str(e), "danger")
+        return redirect(
+            url_for("inventory_control_internal.med_bags_instance_detail", instance_id=instance_id)
+        )
+
+    @bp.route("/med-bags/instances/<int:instance_id>/loadlist.pdf")
+    @login_required
+    @med_bag_medical_industry_required
+    @med_bag_ui_required
+    def med_bags_instance_loadlist_pdf(instance_id: int):
+        """Recursive kit loadlist: this bag, nested modules, lots and expiries (print-ready PDF)."""
+        data = svc.build_hierarchical_loadlist(instance_id)
+        if not data:
+            flash("Instance not found.", "danger")
+            return redirect(url_for("inventory_control_internal.med_bags_instances_list"))
+        from .med_bag_loadlist_pdf import render_med_bag_loadlist_pdf
+
+        pdf_bytes = render_med_bag_loadlist_pdf(data)
+        label = data.get("root") or {}
+        asset = str(label.get("public_asset_number") or instance_id)
+        for ch in ('/', "\\", ":", "*", "?", '"', "<", ">", "|"):
+            asset = asset.replace(ch, "-")
+        fname = f"med-bag-loadlist-{asset[:120] or instance_id}.pdf"
+        return send_file(
+            BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=fname,
+        )
+
+    def _loadlist_check_line_ids_from_form():
+        lids = set()
+        for k in request.form:
+            if k.startswith("status_"):
+                suf = k[7:]
+                if suf.isdigit():
+                    lids.add(int(suf))
+            elif k.startswith("lot_") and not k.startswith("orig_lot_"):
+                suf = k[4:]
+                if suf.isdigit():
+                    lids.add(int(suf))
+            elif k.startswith("exp_") and not k.startswith("orig_exp_"):
+                suf = k[4:]
+                if suf.isdigit():
+                    lids.add(int(suf))
+        return sorted(lids)
+
+    def _rows_from_loadlist_check_form():
+        rows = []
+        for lid in _loadlist_check_line_ids_from_form():
+            row = {"line_id": lid}
+            sk = f"status_{lid}"
+            if sk in request.form:
+                row["return_status"] = request.form.get(sk, "")
+            lot = (request.form.get(f"lot_{lid}") or "").strip()
+            exp = (request.form.get(f"exp_{lid}") or "").strip()
+            orig_lot = (request.form.get(f"orig_lot_{lid}") or "").strip()
+            orig_exp = (request.form.get(f"orig_exp_{lid}") or "").strip()
+            row["lot_number"] = lot
+            row["expiry_date"] = exp
+            row["trace_changed"] = (lot != orig_lot) or (exp != orig_exp)
+            rows.append(row)
+        return rows
+
+    def _movement_line_ids_from_form():
+        lids = set()
+        for k in request.form:
+            if k.startswith("mov_qty_"):
+                suf = k[8:]
+                if suf.isdigit():
+                    lids.add(int(suf))
+        return sorted(lids)
+
+    def _parse_movement_rows_from_form():
+        """Parse inline restock/disposal rows; optional default witnesses apply when per-row blank."""
+        dw1 = (request.form.get("default_witness_1") or "").strip() or None
+        dw2 = (request.form.get("default_witness_2") or "").strip() or None
+        rows = []
+        parse_warnings: list[str] = []
+        for lid in _movement_line_ids_from_form():
+            raw_qty = (request.form.get(f"mov_qty_{lid}") or "").strip()
+            raw_evt = (request.form.get(f"mov_evt_{lid}") or "").strip()
+            if not raw_qty and not raw_evt:
+                continue
+            if not raw_qty or not raw_evt:
+                parse_warnings.append(
+                    f"Line {lid}: enter both quantity and movement type, or leave both blank."
+                )
+                continue
+            try:
+                qty = float(raw_qty)
+            except ValueError:
+                parse_warnings.append(f"Line {lid}: quantity must be a number.")
+                continue
+            inst_raw = (request.form.get(f"mov_inst_{lid}") or "").strip()
+            item_raw = (request.form.get(f"mov_item_{lid}") or "").strip()
+            if not inst_raw.isdigit() or not item_raw.isdigit():
+                parse_warnings.append(f"Line {lid}: missing bag or item — refresh the page.")
+                continue
+            w1 = (request.form.get(f"mov_w1_{lid}") or "").strip() or None
+            w2 = (request.form.get(f"mov_w2_{lid}") or "").strip() or None
+            if not w1 and dw1:
+                w1 = dw1
+            if not w2 and dw2:
+                w2 = dw2
+            rows.append(
+                {
+                    "line_id": lid,
+                    "instance_id": int(inst_raw),
+                    "inventory_item_id": int(item_raw),
+                    "quantity": qty,
+                    "event_type": raw_evt,
+                    "witness_user_id": w1,
+                    "witness_user_id_2": w2,
+                    "notes": (request.form.get(f"mov_notes_{lid}") or "").strip() or None,
+                }
+            )
+        return rows, parse_warnings
+
+    @bp.route(
+        "/med-bags/instances/<int:instance_id>/loadlist-check",
+        methods=["GET", "POST"],
+    )
+    @login_required
+    @med_bag_medical_industry_required
+    @med_bag_ui_required
+    def med_bags_instance_loadlist_check(instance_id: int):
+        """Digital kit loadlist: parent + nested bags, checklist, lot/expiry, date hints."""
+        loadlist = svc.build_hierarchical_loadlist(instance_id)
+        if not loadlist:
+            flash("Instance not found.", "danger")
+            return redirect(url_for("inventory_control_internal.med_bags_instances_list"))
+        if request.method == "POST":
+            perf = str(
+                getattr(current_user, "username", "") or getattr(current_user, "id", "") or ""
+            )
+            mov_rows: list = []
+            mov_parse_warnings: list[str] = []
+            mov_n = 0
+            if _inv_transact():
+                mov_rows, mov_parse_warnings = _parse_movement_rows_from_form()
+                for msg in mov_parse_warnings[:8]:
+                    flash(msg, "warning")
+                if mov_rows:
+                    mout = svc.apply_loadlist_inline_movements(
+                        instance_id,
+                        mov_rows,
+                        performed_by=perf,
+                    )
+                    for msg in (mout.get("errors") or [])[:8]:
+                        flash(msg, "danger")
+                    mov_n = int(mout.get("movements_recorded") or 0)
+                    if mov_n:
+                        flash(f"{mov_n} stock movement(s) recorded.", "success")
+
+            rows = _rows_from_loadlist_check_form()
+            if not rows and not mov_rows and not mov_parse_warnings:
+                flash(
+                    "Nothing to save — update the checklist, lot/expiry, or fill a stock movement row.",
+                    "warning",
+                )
+                return redirect(
+                    url_for(
+                        "inventory_control_internal.med_bags_instance_loadlist_check",
+                        instance_id=instance_id,
+                    )
+                )
+
+            if rows:
+                out = svc.apply_loadlist_check_updates(
+                    instance_id,
+                    rows,
+                    can_edit_trace=_inv_edit(),
+                )
+                if out.get("errors"):
+                    for msg in out["errors"][:8]:
+                        flash(msg, "danger")
+                if out.get("ok"):
+                    parts = []
+                    if out.get("status_updates"):
+                        parts.append(f"{out['status_updates']} checklist update(s)")
+                    if out.get("trace_updates"):
+                        parts.append(f"{out['trace_updates']} lot/expiry update(s)")
+                    if parts:
+                        flash("Saved: " + "; ".join(parts) + ".", "success")
+                    elif not mov_rows:
+                        flash("No checklist changes.", "info")
+                elif not out.get("errors"):
+                    flash("No checklist changes.", "info")
+            return redirect(
+                url_for(
+                    "inventory_control_internal.med_bags_instance_loadlist_check",
+                    instance_id=instance_id,
+                )
+            )
+        return render_template(
+            "admin/med_bags_loadlist_check.html",
+            loadlist=loadlist,
+            return_statuses=RETURN_STATUSES,
+            return_status_labels=RETURN_STATUS_LABELS,
+            can_edit=_inv_edit(),
+            can_transact=_inv_transact(),
+        )
+
+    @bp.route("/med-bags/instances/<int:instance_id>/loadlist.csv")
+    @login_required
+    @med_bag_medical_industry_required
+    @med_bag_ui_required
+    def med_bags_instance_loadlist_csv(instance_id: int):
+        """Flattened CSV for spreadsheet date checks (same tree as PDF)."""
+        data = svc.build_hierarchical_loadlist(instance_id)
+        if not data:
+            flash("Instance not found.", "danger")
+            return redirect(url_for("inventory_control_internal.med_bags_instances_list"))
+        buf = StringIO()
+        w = csv.writer(buf)
+        w.writerow(
+            [
+                "bag_instance_id",
+                "section_depth",
+                "section_title",
+                "line_id",
+                "sku",
+                "item_name",
+                "quantity_expected",
+                "quantity_on_bag",
+                "lot_number",
+                "expiry_date",
+                "expiry_hint",
+                "checklist_status",
+            ]
+        )
+        for sec in data.get("sections") or []:
+            sid = sec.get("instance_id")
+            depth = sec.get("depth", 0)
+            title = sec.get("title") or ""
+            for ln in sec.get("lines") or []:
+                w.writerow(
+                    [
+                        sid,
+                        depth,
+                        title,
+                        ln.get("id"),
+                        ln.get("sku"),
+                        ln.get("item_name"),
+                        ln.get("quantity_expected"),
+                        ln.get("quantity_on_bag"),
+                        ln.get("lot_number") or "",
+                        ln.get("expiry_date") or "",
+                        ln.get("expiry_hint") or "",
+                        ln.get("return_status") or "",
+                    ]
+                )
+        raw = buf.getvalue().encode("utf-8-sig")
+        label = data.get("root") or {}
+        asset = str(label.get("public_asset_number") or instance_id)
+        for ch in ('/', "\\", ":", "*", "?", '"', "<", ">", "|"):
+            asset = asset.replace(ch, "-")
+        fname = f"med-bag-loadlist-{asset[:120] or instance_id}.csv"
+        return send_file(
+            BytesIO(raw),
+            mimetype="text/csv; charset=utf-8",
+            as_attachment=True,
+            download_name=fname,
         )
 
     @bp.route("/med-bags/instances/<int:instance_id>/status", methods=["POST"])

@@ -66,7 +66,7 @@
 
     <!-- Hours (This Year) -->
     <div class="col-12 col-md-6 col-lg-3">
-      <div class="card h-100">
+      <div class="card h-100 border-0 shadow-sm">
         <div class="card-body d-flex align-items-center">
           <div class="me-3"><i class="bi bi-hourglass-split fs-2"></i></div>
           <div>
@@ -76,14 +76,12 @@
             </div>
           </div>
         </div>
-        <div class="card-footer text-end">
-        </div>
       </div>
     </div>
 
     <!-- Pay (This Year) -->
     <div class="col-12 col-md-6 col-lg-3">
-      <div class="card h-100">
+      <div class="card h-100 border-0 shadow-sm">
         <div class="card-body d-flex align-items-center">
           <div class="me-3"><i class="bi bi-currency-pound fs-2"></i></div>
           <div>
@@ -93,32 +91,33 @@
             </div>
           </div>
         </div>
-        <div class="card-footer text-end">
-        </div>
       </div>
     </div>
 
     <!-- Submission Status -->
     <div class="col-12 col-md-6 col-lg-3">
-      <div class="card h-100">
+      <div class="card h-100 border-0 shadow-sm">
         <div class="card-body d-flex align-items-center">
           <div class="me-3"><i class="bi bi-send-check fs-2"></i></div>
           <div>
             <div class="text-muted small">Submission Status</div>
             <div class="fs-6">
-              {% if kpis.submission_status == 'approved' %}
+              {% set kst = (kpis.submission_status or '')|lower %}
+              {% if kst == 'approved' %}
                 <span class="badge bg-success">Approved</span>
-              {% elif kpis.submission_status == 'submitted' %}
+              {% elif kst == 'submitted' %}
                 <span class="badge bg-primary">Submitted</span>
-              {% elif kpis.submission_status == 'rejected' %}
+              {% elif kst == 'rejected' %}
                 <span class="badge bg-danger">Rejected</span>
+              {% elif kst == 'invoiced' %}
+                <span class="badge bg-success">Invoiced</span>
               {% else %}
                 <span class="badge bg-secondary">Draft</span>
               {% endif %}
             </div>
           </div>
         </div>
-        <div class="card-footer text-end">
+        <div class="card-footer bg-transparent border-0 text-end pt-0">
           <a
             href="{{ url_for('public_time_billing.public_week_page', week_id=latest_week_id or example_week_id) }}"
             class="btn btn-sm btn-secondary"
@@ -128,6 +127,57 @@
         </div>
       </div>
     </div>
+
+    {% if invoice_kpis %}
+    <div class="col-12">
+      <h5 class="fw-semibold mb-3 mt-1 d-flex align-items-center flex-wrap gap-2">
+        <i class="bi bi-receipt-cutoff me-2"></i> Invoices
+        <span class="badge bg-light text-muted border small fw-normal">{{ invoice_kpis.year }} · self-employed</span>
+      </h5>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-primary fs-2"><i class="bi bi-check-circle"></i></div>
+          <div>
+            <div class="text-muted small">Paid (YTD)</div>
+            <div class="fs-5 fw-semibold">£{{ '{:,.2f}'.format(invoice_kpis.ytd_paid or 0) }}</div>
+            <div class="small text-muted">{{ invoice_kpis.ytd_paid_n }} invoice(s)</div>
+          </div>
+        </div>
+        <div class="card-footer bg-transparent border-0 text-end pt-0">
+          <a href="{{ url_for('public_time_billing.public_invoices_list_page') }}" class="btn btn-sm btn-outline-primary">My invoices</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-secondary fs-2"><i class="bi bi-hourglass-split"></i></div>
+          <div>
+            <div class="text-muted small">Current (not finalised)</div>
+            <div class="fs-5 fw-semibold">£{{ '{:,.2f}'.format(invoice_kpis.current_total or 0) }}</div>
+            <div class="small text-muted">{{ invoice_kpis.current_n }} invoice(s)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-info fs-2"><i class="bi bi-collection"></i></div>
+          <div>
+            <div class="text-muted small">On file (excl. void)</div>
+            <div class="fs-5 fw-semibold">{{ invoice_kpis.invoice_count }}</div>
+            <div class="small text-muted">Includes current &amp; paid</div>
+          </div>
+        </div>
+        <div class="card-footer bg-transparent border-0 text-end pt-0">
+          <a href="{{ url_for('public_time_billing.public_billing_settings_page') }}" class="btn btn-sm btn-outline-secondary">Billing details</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
 
     <!-- Exports -->
     <!-- <div class="col-12 col-md-6 col-lg-3">
@@ -161,7 +211,7 @@
 
 <!-- Recent activity -->
 <section>
-  <div class="card">
+  <div class="card border-0 shadow-sm">
     <div class="card-body">
       <h5 class="card-title d-flex align-items-center mb-3">
         <i class="bi bi-clock me-2"></i> Recent Weeks
@@ -194,12 +244,15 @@
                   £{{ '{:,.2f}'.format(w.total_pay or 0) }}
                 </td>
                 <td class="text-center">
-                  {% if w.status == 'approved' %}
+                  {% set st = (w.status or '')|lower %}
+                  {% if st == 'approved' %}
                     <span class="badge bg-success">Approved</span>
-                  {% elif w.status == 'submitted' %}
+                  {% elif st == 'submitted' %}
                     <span class="badge bg-primary">Submitted</span>
-                  {% elif w.status == 'rejected' %}
+                  {% elif st == 'rejected' %}
                     <span class="badge bg-danger">Rejected</span>
+                  {% elif st == 'invoiced' %}
+                    <span class="badge bg-success">Invoiced</span>
                   {% else %}
                     <span class="badge bg-secondary">Draft</span>
                   {% endif %}
@@ -243,12 +296,15 @@
                   <span class="text-muted small d-block js-week-ending" data-iso="{{ w.week_ending }}">{{ w.week_ending }}</span>
                 </div>
                 <div>
-                  {% if w.status == 'approved' %}
+                  {% set st = (w.status or '')|lower %}
+                  {% if st == 'approved' %}
                     <span class="badge bg-success">Approved</span>
-                  {% elif w.status == 'submitted' %}
+                  {% elif st == 'submitted' %}
                     <span class="badge bg-primary">Submitted</span>
-                  {% elif w.status == 'rejected' %}
+                  {% elif st == 'rejected' %}
                     <span class="badge bg-danger">Rejected</span>
+                  {% elif st == 'invoiced' %}
+                    <span class="badge bg-success">Invoiced</span>
                   {% else %}
                     <span class="badge bg-secondary">Draft</span>
                   {% endif %}

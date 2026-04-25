@@ -1,0 +1,36 @@
+{
+  "repository": "official",
+  "system_name": "incident_reporting_module",
+  "name": "Safety & Incidents",
+  "current_version": "2.1.0",
+  "compatible_with": ">=1.2.0",
+  "force_update": false,
+  "description": "Datix-class safety & incident reporting — native Sparrow: near misses, hazards, patient safety overlay, CAPA, SLA routing, in-app notifications, executive exports, Cura safeguarding linkage.",
+  "dashboard_category": "Compliance & risk",
+  "icon": "icon.png",
+  "dashboard_icon": "bi-shield-exclamation",
+  "download_url": "",
+  "dependencies": ["employee_portal_module", "website_module"],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "2.1.0",
+      "date": "2026-04-15",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "IR1-style incident fields (occurred/discovered times, location, witnesses, equipment, RIDDOR flag, reporter role, supplementary JSON) for NHS-style reporting alignment.",
+        "HSE walkaround templates with editable interval_days, JSON checklist, pending/overdue completion queue, optional link to an incident."
+      ]
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-04-15",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "Safety & Incident Reporting v2 — admin command centre, incident workspace, portal wizard, safeguarding bridge, routing/SLA, Pareto analytics."
+      ]
+    }
+  ]
+}

@@ -81,14 +81,23 @@ def create_default_admin():
     db = get_db_connection()
     # Buffered cursor prevents "Unread result found" when closing cursor/connection.
     cursor = db.cursor(dictionary=True, buffered=True)
-    cursor.execute("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+    default_username = "admin"
+    default_email = "admin@example.com"
+    # Must align with UNIQUE(username), UNIQUE(email), and the intent to only seed when
+    # no admin account exists — otherwise redeploys fail (e.g. username admin, non-admin role).
+    cursor.execute(
+        """
+        SELECT id FROM users
+        WHERE role = 'admin' OR username = %s OR email = %s
+        LIMIT 1
+        """,
+        (default_username, default_email),
+    )
     admin = cursor.fetchone()
 
     if admin:
-        print("Admin user already exists.")
+        print("Default admin bootstrap skipped (admin role and/or default username/email already present).")
     else:
-        default_username = "admin"
-        default_email = "admin@example.com"
         default_password = "ChangeMe123!"
         password_hash = AuthManager.hash_password(default_password)
         admin_id = str(uuid.uuid4())
@@ -109,8 +118,11 @@ def run_predeploy_install_upgrades():
     Railway ``preDeployCommand`` uses this module; failures exit non-zero so deploy does not proceed.
 
     Safe when Core **Industry & categories** differ from earlier deploys: upgrades are
-    idempotent and industry-aware seeds only add or upsert — they do not remove HR,
-    contractors, triage history, etc. based on the current category list.
+    idempotent for schema and neutral SQL. Time & Billing **industry** job-type/role packs
+    (e.g. medical ``Care visit``) are **off by default**; set
+    ``SPARROW_ENABLE_TIME_BILLING_INDUSTRY_SEEDS=1`` to apply once per DB, or
+    ``SPARROW_FORCE_TIME_BILLING_INDUSTRY_SEEDS=1`` to re-run on the next upgrade. See
+    ``time_billing_module.industry_seeds``.
 
     Set SPARROW_SKIP_PREDEPLOY_UPGRADES=1 to skip (e.g. debugging).
     """

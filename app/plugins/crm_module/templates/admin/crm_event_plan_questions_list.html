@@ -1,10 +1,13 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Plan questions{% endblock %}
-{% block crm_breadcrumb_current %}
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
-<li class="breadcrumb-item active" aria-current="page">Plan checklist questions</li>
-{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}Event plan checklist questions — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Checklist questions</li>
+  </ol>
+</nav>
 <div class="container-fluid px-0 pb-3">
   <div class="crm-page-toolbar">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
@@ -15,8 +18,8 @@
       </div>
     </div>
     <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
-      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
-      <a href="{{ url_for('crm_module.event_plans_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-clipboard2-pulse me-1"></i>Event plans</a>
+      <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-calendar-event me-1"></i>Event manager</a>
+      <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-clipboard2-pulse me-1"></i>Event plans</a>
     </div>
   </div>
   <div class="crm-table-wrap">
@@ -44,7 +47,7 @@
             <td class="small">{% if q.help_url and (q.help_url.startswith('http://') or q.help_url.startswith('https://')) %}<a href="{{ q.help_url }}" target="_blank" rel="noopener noreferrer">Open</a>{% else %}—{% endif %}</td>
             <td class="text-end">
               {% if can_edit %}
-              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.event_plan_question_edit', qid=q.id) }}">Edit</a>
+              <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_question_edit', qid=q.id) }}">Edit</a>
               {% endif %}
             </td>
           </tr>

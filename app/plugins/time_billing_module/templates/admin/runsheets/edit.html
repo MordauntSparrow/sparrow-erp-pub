@@ -1,136 +1,214 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
+{% block tb_page_head %}{% include "admin/runsheets/_runsheets_ui_styles.html" %}{% endblock %}
 {% block content %}
-<div class="container py-3">
+<div class="tb-rs-page">
+  <nav class="tb-rs-breadcrumb mb-3" aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">Time &amp; Billing</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_time_billing.runsheets_page') }}">Run sheets</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Edit</li>
+    </ol>
+  </nav>
 
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-clipboard2-plus me-2"></i> Edit Runsheet (admin)
-        </h4>
-        <div class="d-flex gap-2">
-            <button id="btnSave" class="btn btn-primary btn-sm">
-                <i class="bi bi-save me-1"></i> Save
-            </button>
-            <button id="btnPublish" class="btn btn-success btn-sm">
-                <i class="bi bi-upload me-1"></i> Publish / resync
-            </button>
+  <div class="tb-rs-hero d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+    <div class="flex-grow-1" style="min-width:200px">
+      <p class="tb-rs-hero-kicker mb-0">Admin</p>
+      <h1 class="text-white mb-1"><i class="bi bi-clipboard2-pulse me-2"></i> Edit run sheet</h1>
+      <p class="tb-rs-hero-lead mb-0">
+        Fix data or create a run sheet <strong class="text-white">on behalf of</strong> crew (numeric <strong class="text-white">Contractor ID</strong> per row).
+        Contractor self-service uses the portal UI. <strong class="text-white">Publish / resync</strong> upserts timesheet rows (<code class="text-white-50">payroll_included</code> only){% if industry_visible('medical') %}; use after <strong class="text-white">Ventus sign-off</strong> if actuals look stale{% endif %}.
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <button id="btnSave" type="button" class="btn btn-light btn-sm shadow-sm fw-semibold">
+        <i class="bi bi-save me-1"></i> Save
+      </button>
+      <button id="btnPublish" type="button" class="btn btn-outline-light btn-sm">
+        <i class="bi bi-upload me-1"></i> Publish / resync
+      </button>
+      <a class="btn btn-outline-light btn-sm" href="{{ url_for('internal_time_billing.runsheets_page') }}">
+        <i class="bi bi-arrow-left me-1"></i> List
+      </a>
+    </div>
+  </div>
+
+  <div class="alert alert-info border-0 shadow-sm small mb-3" role="note">
+    <i class="bi bi-info-circle me-1"></i>
+    Crew search (contractor UI): <code>/time-billing/api/refs/contractors?q=</code>. Below the ladder: tick <strong>Override</strong> and enter a reason (audited).
+  </div>
+
+  <div id="rsForm">
+    <div class="card tb-rs-panel mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-building text-primary"></i>
+        <span>Header &amp; status</span>
+      </div>
+      <div class="card-body">
+        <p class="tb-rs-section-title mb-0">Core</p>
+        <div class="row g-3">
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="client_id">Client ID</label>
+            <input class="form-control form-control-sm" id="client_id" placeholder="e.g. 12">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="job_type_id">Job type ID</label>
+            <input class="form-control form-control-sm" id="job_type_id">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="work_date">Work date</label>
+            <input class="form-control form-control-sm" id="work_date" placeholder="YYYY-MM-DD">
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="status">Status</label>
+            <select class="form-select form-select-sm" id="status">
+              <option value="draft">Draft</option>
+              <option value="published">Published</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-semibold text-muted" for="required_role_id">Min. crew role ID</label>
+            <input class="form-control form-control-sm" id="required_role_id" placeholder="roles.id — blank = any">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-semibold text-muted" for="shift_staff_role_id">Shift staff role ID</label>
+            <input class="form-control form-control-sm" id="shift_staff_role_id" placeholder="Optional label role">
+          </div>
         </div>
+      </div>
     </div>
 
-    <p class="text-muted small mb-3">
-        Use this screen to fix data or create a runsheet <strong>on behalf of</strong> crew (enter numeric <strong>Contractor ID</strong> per row).
-        Day-to-day crew selection and template forms belong on the <strong>contractor</strong> time-billing UI (crew search API: <code>/time-billing/api/refs/contractors?q=</code>).
-        <strong>Publish / resync</strong> runs the same server step every time: upserts each contractor’s timesheet row from this runsheet (assignments with <code>payroll_included = 1</code> only). Use when timesheets look stale: after fixing times, after reactivating crew{% if industry_visible('medical') %}, or after <strong>Ventus sign-off</strong> updates <code>actual_end</code>{% endif %}.
-    </p>
-
-    <div id="rsForm" class="card">
-        <div class="card-body">
-
-            <div class="row g-2">
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Client ID</label>
-                    <input class="form-control form-control-sm" id="client_id" placeholder="e.g. 12">
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Job Type ID</label>
-                    <input class="form-control form-control-sm" id="job_type_id">
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Work Date</label>
-                    <input class="form-control form-control-sm" id="work_date" placeholder="YYYY-MM-DD">
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Status</label>
-                    <select class="form-select form-select-sm" id="status">
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Min. crew role ID</label>
-                    <input class="form-control form-control-sm" id="required_role_id" placeholder="roles.id — blank = any">
-                </div>
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Shift staff role ID</label>
-                    <input class="form-control form-control-sm" id="shift_staff_role_id" placeholder="optional label role">
-                </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Pay model</label>
-                    <select class="form-select form-select-sm" id="shift_pay_model">
-                        <option value="inherit">Wage card</option>
-                        <option value="hourly">Hourly</option>
-                        <option value="day">Day flat</option>
-                    </select>
-                </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Pay rate</label>
-                    <input class="form-control form-control-sm" id="shift_pay_rate" placeholder="amount">
-                </div>
-                <div class="col-12 col-md-6">
-                    <label class="form-label">Shift address line 1</label>
-                    <input class="form-control form-control-sm" id="shift_address_line1">
-                </div>
-                <div class="col-12 col-md-6">
-                    <label class="form-label">Shift address line 2</label>
-                    <input class="form-control form-control-sm" id="shift_address_line2">
-                </div>
-                <div class="col-12 col-md-4">
-                    <label class="form-label">City</label>
-                    <input class="form-control form-control-sm" id="shift_city">
-                </div>
-                <div class="col-12 col-md-4">
-                    <label class="form-label">Postcode</label>
-                    <input class="form-control form-control-sm" id="shift_postcode">
-                </div>
-            </div>
-            <p class="text-muted small mb-0">To assign someone below the ladder, tick <strong>Override</strong> and enter a reason (audited).</p>
-            <hr>
-
-            {% if industry_visible('medical') %}
-            <h6 class="mb-2">Cura operational event (Medical Records)</h6>
-            <div class="row g-2 align-items-end mb-2">
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Cura event ID</label>
-                    <input class="form-control form-control-sm" id="cura_operational_event_id" placeholder="e.g. 42">
-                </div>
-                <div class="col-12 col-md-9 d-flex flex-wrap gap-2">
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="btnCuraApply" title="Copy name, location, config notes into run sheet">
-                        Apply Cura details to header
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCuraSync" title="Add crew from Cura expected roster (principal username → contractor)">
-                        Sync roster from Cura
-                    </button>
-                </div>
-            </div>
-            <div id="curaPreview" class="small text-muted border rounded p-2 mb-3" style="display:none;"></div>
-            {% endif %}
-
-            <div class="d-flex align-items-center justify-content-between mb-2">
-                <h6 class="mb-0">Assignments (contractor IDs)</h6>
-                <button class="btn btn-outline-secondary btn-sm" id="btnAddAssign">
-                    <i class="bi bi-plus-lg"></i> Add row
-                </button>
-            </div>
-
-            <div class="table-responsive">
-                <table class="table table-sm align-middle" id="assignTbl">
-                    <thead>
-                        <tr>
-                            <th>Contractor ID</th>
-                            <th>Vehicle ID</th>
-                            <th>Scheduled</th>
-                            <th>Actual</th>
-                            <th>Notes</th>
-                            <th>Override</th>
-                            <th>Override reason</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
-            </div>
-
+    <div class="card tb-rs-panel mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-cash-stack text-primary"></i>
+        <span>Pay &amp; shift location</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="shift_pay_model">Pay model</label>
+            <select class="form-select form-select-sm" id="shift_pay_model">
+              <option value="inherit">Wage card</option>
+              <option value="hourly">Hourly</option>
+              <option value="day">Day flat</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small fw-semibold text-muted" for="shift_pay_rate">Pay rate</label>
+            <input class="form-control form-control-sm" id="shift_pay_rate" placeholder="Amount">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-semibold text-muted" for="shift_address_line1">Address line 1</label>
+            <input class="form-control form-control-sm" id="shift_address_line1">
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small fw-semibold text-muted" for="shift_address_line2">Address line 2</label>
+            <input class="form-control form-control-sm" id="shift_address_line2">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-semibold text-muted" for="shift_city">City</label>
+            <input class="form-control form-control-sm" id="shift_city">
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-semibold text-muted" for="shift_postcode">Postcode</label>
+            <input class="form-control form-control-sm" id="shift_postcode">
+          </div>
         </div>
+      </div>
     </div>
+
+    {% if industry_visible('medical') %}
+    <div class="card tb-rs-panel mb-3">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-hospital text-primary"></i>
+        <span>Cura operational event</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-12 col-md-4">
+            <label class="form-label small fw-semibold text-muted" for="cura_operational_event_id">Cura event ID</label>
+            <input class="form-control form-control-sm" id="cura_operational_event_id" placeholder="e.g. 42">
+          </div>
+          <div class="col-12 col-md-8 d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnCuraApply" title="Copy name, location, config notes into run sheet">
+              <i class="bi bi-arrow-down-circle me-1"></i> Apply Cura details to header
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCuraSync" title="Add crew from Cura expected roster">
+              <i class="bi bi-people me-1"></i> Sync roster from Cura
+            </button>
+          </div>
+        </div>
+        <div id="curaPreview" class="small text-muted border rounded-3 p-3 mt-3" style="display:none;"></div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card tb-rs-panel tb-rs-table-wrap">
+      <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span class="d-flex align-items-center gap-2">
+          <i class="bi bi-person-lines-fill text-primary"></i>
+          <span>Assignments</span>
+        </span>
+        <button class="btn btn-primary btn-sm" type="button" id="btnAddAssign">
+          <i class="bi bi-plus-lg me-1"></i> Add row
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover table-sm align-middle mb-0" id="assignTbl">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Contractor ID</th>
+                <th scope="col">Role</th>
+                <th scope="col">Vehicle ID</th>
+                <th scope="col">Scheduled</th>
+                <th scope="col">Actual</th>
+                <th scope="col">Notes</th>
+                <th scope="col">Override</th>
+                <th scope="col">Override reason</th>
+                <th scope="col" class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card tb-rs-panel mb-3">
+      <div class="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+        <span class="d-flex align-items-center gap-2">
+          <i class="bi bi-sign-turn-right text-primary"></i>
+          <span>Journey roles</span>
+        </span>
+        <button class="btn btn-outline-primary btn-sm" type="button" id="btnAddSeg">
+          <i class="bi bi-plus-lg me-1"></i> Add leg
+        </button>
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Optional: who was in each role between which times (several rows for handovers). Pay rule is stored for future payroll; <em>Audit only</em> does not change published timesheets today.
+        </p>
+        <div class="table-responsive">
+          <table class="table table-hover table-sm align-middle mb-0" id="segTbl">
+            <thead class="table-light">
+              <tr>
+                <th scope="col">Contractor</th>
+                <th scope="col">Role</th>
+                <th scope="col">From</th>
+                <th scope="col">To</th>
+                <th scope="col">Pay rule</th>
+                <th scope="col">Notes</th>
+                <th scope="col" class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 {% endblock %}
@@ -145,14 +223,38 @@
         const SHOW_CURA = {{ industry_visible('medical')|tojson }};
         const URL_CURA_APPLY = "{{ url_for('internal_time_billing.api_runsheet_cura_apply_details', rs_id=999999) }}";
         const URL_CURA_SYNC = "{{ url_for('internal_time_billing.api_runsheet_cura_sync_roster', rs_id=999999) }}";
+        const URL_CONTRACTORS = "{{ url_for('internal_time_billing.api_admin_refs_contractors') }}";
+
+        const CREW_ROLE_OPTIONS = [
+            { value: '', label: '—' },
+            { value: 'driver', label: 'Driver' },
+            { value: 'lead', label: 'Lead' },
+            { value: 'client_contact', label: 'Client contact' },
+            { value: 'attendant', label: 'Attendant' },
+            { value: 'crew', label: 'Crew' },
+            { value: 'other', label: 'Other' },
+        ];
+        const SEG_PAY_OPTIONS = [
+            { value: 'audit', label: 'Audit only' },
+            { value: 'full_shift', label: 'Pay full crew line' },
+            { value: 'journey', label: 'Journey legs (future)' },
+            { value: 'on_site', label: 'At client only (future)' },
+        ];
 
         function addAssignmentRow(a = {}) {
             const tbody = q('#assignTbl tbody');
             const tr = document.createElement('tr');
             const cid = a.contractor_id || a.user_id || '';
+            const cr = (a.crew_role != null && String(a.crew_role)) ? String(a.crew_role) : '';
+            const roleOpts = CREW_ROLE_OPTIONS.map(o =>
+                `<option value="${o.value}"${cr === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+            ).join('');
             tr.innerHTML = `
       <td>
         <input class="form-control form-control-sm js" data-field="contractor_id" value="${cid}">
+      </td>
+      <td>
+        <select class="form-select form-select-sm js" data-field="crew_role">${roleOpts}</select>
       </td>
       <td>
         <input class="form-control form-control-sm js" data-field="fleet_vehicle_id" placeholder="fleet id" value="${a.fleet_vehicle_id != null && a.fleet_vehicle_id !== '' ? a.fleet_vehicle_id : ''}">
@@ -197,6 +299,136 @@
             return tr;
         }
 
+        function closeSegDd(except) {
+            document.querySelectorAll('.seg-crew-dd').forEach(dd => {
+                if (!except || !except.contains(dd)) { dd.classList.add('d-none'); dd.innerHTML = ''; }
+            });
+        }
+
+        function pickSegCrew(tr, id, name) {
+            const hid = tr.querySelector('[data-field="contractor_id"]');
+            if (hid) hid.value = String(id);
+            const lab = tr.querySelector('.seg-crew-label');
+            if (lab) lab.textContent = '#' + id + (name ? ' — ' + name : '');
+            const inp = tr.querySelector('.seg-crew-search');
+            if (inp) inp.value = '';
+            closeSegDd();
+        }
+
+        async function runSegSearch(tr) {
+            const inp = tr.querySelector('.seg-crew-search');
+            const qv = (inp && inp.value || '').trim();
+            if (qv.length < 2) { alert('Type at least 2 characters to search contractors.'); return; }
+            const u = new URL(URL_CONTRACTORS, window.location.origin);
+            u.searchParams.set('q', qv);
+            const r = await fetch(u.pathname + u.search, { headers: { 'Accept': 'application/json' } });
+            if (!r.ok) return;
+            const d = await r.json();
+            const dd = tr.querySelector('.seg-crew-dd');
+            if (!dd) return;
+            dd.innerHTML = '';
+            (d.items || []).forEach(it => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'list-group-item list-group-item-action py-1 px-2 text-start';
+                b.textContent = '#' + it.id + ' — ' + (it.name || '') + (it.email ? ' (' + it.email + ')' : '');
+                b.addEventListener('click', () => pickSegCrew(tr, it.id, it.name || ''));
+                dd.appendChild(b);
+            });
+            if (!(d.items || []).length) {
+                const z = document.createElement('div');
+                z.className = 'list-group-item small text-muted';
+                z.textContent = 'No matches';
+                dd.appendChild(z);
+            }
+            dd.classList.remove('d-none');
+        }
+
+        function wireSegRow(tr) {
+            const btn = tr.querySelector('.seg-crew-search-btn');
+            const sInp = tr.querySelector('.seg-crew-search');
+            if (btn) btn.addEventListener('click', () => runSegSearch(tr));
+            if (sInp) sInp.addEventListener('keydown', ev => {
+                if (ev.key === 'Enter') { ev.preventDefault(); runSegSearch(tr); }
+            });
+            const del = tr.querySelector('.js-seg-del');
+            if (del) del.addEventListener('click', () => tr.remove());
+        }
+
+        function addSegRow(seg = {}) {
+            const tbody = q('#segTbl tbody');
+            if (!tbody) return null;
+            const tr = document.createElement('tr');
+            const cid = seg.contractor_id || seg.user_id || '';
+            const roleOpts = CREW_ROLE_OPTIONS.map(o =>
+                `<option value="${o.value}"${String(seg.role_code || '') === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+            ).join('');
+            const payOpts = SEG_PAY_OPTIONS.map(o =>
+                `<option value="${o.value}"${String(seg.pay_mode || 'audit') === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+            ).join('');
+            const ts = seg.time_start != null ? String(seg.time_start).slice(0, 5) : '';
+            const te = seg.time_end != null ? String(seg.time_end).slice(0, 5) : '';
+            tr.innerHTML = `
+      <td class="align-top position-relative" style="min-width:160px">
+        <input type="hidden" class="js-seg" data-field="contractor_id" value="${cid}">
+        <div class="input-group input-group-sm mb-1">
+          <input type="text" class="form-control seg-crew-search" placeholder="Search…" autocomplete="off">
+          <button type="button" class="btn btn-outline-secondary seg-crew-search-btn"><i class="bi bi-search"></i></button>
+        </div>
+        <div class="small seg-crew-label text-muted"></div>
+        <div class="list-group position-absolute shadow-sm seg-crew-dd d-none border rounded" style="z-index:25;max-height:180px;overflow-y:auto;left:0;right:0;top:100%;"></div>
+      </td>
+      <td><select class="form-select form-select-sm js-seg" data-field="role_code">${roleOpts}</select></td>
+      <td><input type="time" class="form-control form-control-sm js-seg" data-field="time_start" value="${ts}"></td>
+      <td><input type="time" class="form-control form-control-sm js-seg" data-field="time_end" value="${te}"></td>
+      <td><select class="form-select form-select-sm js-seg" data-field="pay_mode">${payOpts}</select></td>
+      <td><input class="form-control form-control-sm js-seg" data-field="notes" value=""></td>
+      <td class="text-end"><button type="button" class="btn btn-outline-danger btn-sm js-seg-del"><i class="bi bi-trash"></i></button></td>
+    `;
+            tbody.appendChild(tr);
+            const lab = tr.querySelector('.seg-crew-label');
+            if (cid && lab) lab.textContent = '#' + cid + (seg.user_name ? ' — ' + seg.user_name : '');
+            const notesEl = tr.querySelector('[data-field="notes"]');
+            if (notesEl && seg.notes) notesEl.value = seg.notes;
+            wireSegRow(tr);
+            return tr;
+        }
+
+        function collectCrewSegments() {
+            const rows = [];
+            let i = 0;
+            const segBody = q('#segTbl tbody');
+            if (!segBody) return rows;
+            segBody.querySelectorAll('tr').forEach(tr => {
+                const get = f => {
+                    const el = tr.querySelector(`[data-field="${f}"]`);
+                    return el ? el.value : '';
+                };
+                const contractor_id = get('contractor_id') ? parseInt(get('contractor_id'), 10) : null;
+                if (!contractor_id) return;
+                const roleSel = tr.querySelector('[data-field="role_code"]');
+                const role_code = (roleSel && roleSel.value) ? roleSel.value : null;
+                rows.push({
+                    contractor_id,
+                    role_code: role_code || null,
+                    time_start: get('time_start') || null,
+                    time_end: get('time_end') || null,
+                    pay_mode: get('pay_mode') || 'audit',
+                    notes: (get('notes') || '').trim() || null,
+                    sort_order: i,
+                });
+                i++;
+            });
+            return rows;
+        }
+
+        function renderCrewSegments(segments) {
+            const segBody = q('#segTbl tbody');
+            if (!segBody) return;
+            segBody.innerHTML = '';
+            (segments || []).forEach(s => addSegRow(s));
+        }
+
         async function load() {
             if (!rsId) return;
             const resp = await fetch(`{{ url_for('internal_time_billing.api_get_runsheet', rs_id=0) }}`.replace(/\/0$/, '/' + rsId));
@@ -223,6 +455,7 @@
             const tbody = q('#assignTbl tbody');
             tbody.innerHTML = '';
             (d.assignments || []).forEach(addAssignmentRow);
+            renderCrewSegments(d.crew_segments || []);
         }
 
         function renderCuraPreview(bundle) {
@@ -269,7 +502,8 @@
                 shift_address_line2: (q('#shift_address_line2').value || '').trim() || null,
                 shift_city: (q('#shift_city').value || '').trim() || null,
                 shift_postcode: (q('#shift_postcode').value || '').trim() || null,
-                assignments: []
+                assignments: [],
+                crew_segments: collectCrewSegments(),
             };
             if (SHOW_CURA) {
                 payload.cura_operational_event_id = Number.isFinite(curaParsed) ? curaParsed : null;
@@ -282,8 +516,11 @@
                 const ovrEl = tr.querySelector('.js[data-field="role_eligibility_override"]');
                 const fvRaw = (get('fleet_vehicle_id') || '').trim();
                 const fvParsed = fvRaw ? parseInt(fvRaw, 10) : NaN;
+                const crewEl = tr.querySelector('.js[data-field="crew_role"]');
+                const crew_role = (crewEl && crewEl.value) ? crewEl.value : null;
                 payload.assignments.push({
                     contractor_id: get('contractor_id') ? parseInt(get('contractor_id'), 10) : null,
+                    crew_role: crew_role || null,
                     fleet_vehicle_id: Number.isFinite(fvParsed) ? fvParsed : null,
                     scheduled_start: get('scheduled_start') || null,
                     scheduled_end: get('scheduled_end') || null,
@@ -381,6 +618,11 @@
         }
 
         document.getElementById('btnAddAssign').addEventListener('click', () => addAssignmentRow());
+        const btnAddSeg = document.getElementById('btnAddSeg');
+        if (btnAddSeg) btnAddSeg.addEventListener('click', () => addSegRow({}));
+        document.addEventListener('click', ev => {
+            if (!ev.target.closest('#segTbl')) closeSegDd();
+        });
         document.getElementById('btnSave').addEventListener('click', save);
         document.getElementById('btnPublish').addEventListener('click', publish);
         if (SHOW_CURA) {

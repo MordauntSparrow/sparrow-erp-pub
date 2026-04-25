@@ -1,0 +1,129 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Assurance schedules{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Scheduled assurance exports</h1>
+<p class="text-muted small mb-2">
+  Each schedule runs <strong>once per hour</strong> when the current <strong>UTC hour</strong> matches the time you set (useful for a fixed “overnight” slot). Every run builds a <strong>ZIP evidence pack</strong> (PDF summary, spreadsheet, and machine-readable copy) and stores it in your site’s uploads folder. Packs older than about <strong>three days</strong> are removed automatically.
+</p>
+<p class="text-muted small mb-3">
+  Automatic runs are listed in the export log <strong>without</strong> a personal PIN step-up, because no individual is clicking export at that moment—this is expected for scheduled jobs. Your organisation can stop the background scheduler via server configuration if required.
+</p>
+
+{% if can_export and not inspection_mode|default(false) %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header">Run every enabled schedule now</div>
+  <div class="card-body">
+    <p class="small text-muted mb-2">Starts an immediate run for all schedules that are turned on (same ZIP output as the hourly job).</p>
+    <form method="post" action="{{ url_for('compliance_audit_internal.scheduled_run_now') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-primary btn-sm">Run all now</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if can_export and not inspection_mode|default(false) %}
+<div class="card shadow-sm mb-4">
+  <div class="card-header">Add a schedule</div>
+  <div class="card-body">
+    <form method="post">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="add">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label small">Name</label>
+          <input class="form-control form-control-sm" name="label" value="Nightly assurance" maxlength="128" placeholder="e.g. Weekly board pack">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Run at hour (UTC, 0–23)</label>
+          <input class="form-control form-control-sm" type="number" name="run_hour_utc" min="0" max="23" value="6" title="Whole hour in Coordinated Universal Time">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Days to look back</label>
+          <input class="form-control form-control-sm" type="number" name="lookback_days" min="1" max="90" value="7">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Max rows per source</label>
+          <input class="form-control form-control-sm" type="number" name="row_cap" min="100" max="50000" value="8000" title="Upper bound per data source before merging">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Redaction</label>
+          <select class="form-select form-select-sm" name="redaction_profile">
+            <option value="standard" selected>Standard</option>
+            <option value="strict">Strict</option>
+            <option value="minimal">Minimal</option>
+          </select>
+        </div>
+      </div>
+      <div class="mt-3">
+        <span class="small text-muted d-block mb-1">Data sources (tick none to include <strong>all</strong>)</span>
+        <div class="d-flex flex-wrap gap-2" style="max-height:10rem;overflow:auto;">
+          {% for opt in domain_options|default([]) %}
+          <label class="small mb-0"><input type="checkbox" class="form-check-input me-1" name="sdom_{{ opt.key }}" value="1"> {{ opt.label }}</label>
+          {% endfor %}
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm mt-2">Add schedule</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm">
+  <div class="card-header">Schedules</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Hour (UTC)</th>
+          <th>Lookback</th>
+          <th>On</th>
+          <th>Last run</th>
+          <th>Status</th>
+          <th>Last file</th>
+          {% if can_export and not inspection_mode|default(false) %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for j in jobs|default([]) %}
+        <tr>
+          <td>{{ j.id }}</td>
+          <td>{{ j.label }}</td>
+          <td>{{ j.run_hour_utc }}</td>
+          <td>{{ j.lookback_days }} days</td>
+          <td>{% if j.enabled %}Yes{% else %}No{% endif %}</td>
+          <td class="small text-nowrap">{{ j.last_run_at or '—' }}</td>
+          <td class="small">{{ j.last_status or '—' }}</td>
+          <td class="small text-break">{{ (j.last_file_path or '—')[:48] }}{% if j.last_file_path and j.last_file_path|length > 48 %}…{% endif %}</td>
+          {% if can_export and not inspection_mode|default(false) %}
+          <td class="text-nowrap">
+            <form method="post" class="d-inline">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="toggle">
+              <input type="hidden" name="job_id" value="{{ j.id }}">
+              <button type="submit" class="btn btn-link btn-sm p-0">Turn on/off</button>
+            </form>
+            <form method="post" class="d-inline ms-1" onsubmit="return confirm('Delete this schedule?');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="job_id" value="{{ j.id }}">
+              <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Delete</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-muted p-3">No schedules yet. Add one above, or run the module database upgrade if this list never appears.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% for j in jobs|default([]) %}
+    {% if j.last_error %}
+    <div class="card-footer small text-danger">{{ j.last_error[:500] }}</div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

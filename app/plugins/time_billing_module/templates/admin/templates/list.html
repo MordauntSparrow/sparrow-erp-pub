@@ -14,6 +14,7 @@
   <p class="text-muted small mb-3">
     Templates define the form staff complete on a job. Link a <strong>job type</strong> so published runsheets create timesheet rows under that job type.
     Add <strong>multiple contractors</strong> on the runsheet (crew) — each assignment gets their own timesheet line when you publish.
+    Each template gets an <strong>internal code</strong> automatically (for exports and integrations); you only name the template.
   </p>
 
   <div class="card">
@@ -24,7 +25,7 @@
             <tr>
               <th>ID</th>
               <th>Name</th>
-              <th>Code</th>
+              <th>Internal code</th>
               <th>Job type</th>
               <th>Client</th>
               <th>Site</th>
@@ -54,11 +55,6 @@
           <div class="col-12">
             <label class="form-label">Template name <span class="text-danger">*</span></label>
             <input type="text" class="form-control form-control-sm" id="ctName" placeholder="e.g. Commercial clean – site checklist" required>
-          </div>
-          <div class="col-12 col-md-6">
-            <label class="form-label">Short code (optional)</label>
-            <input type="text" class="form-control form-control-sm" id="ctCode" placeholder="e.g. COMM_CHECK" maxlength="80">
-            <div class="form-text">Unique if set; used for integrations.</div>
           </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Job type <span class="text-danger">*</span></label>
@@ -102,7 +98,7 @@
   const CREATE_URL = "{{ url_for('internal_time_billing.create_template') }}";
   const EDIT_BASE = "{{ url_for('internal_time_billing.templates_edit_page') }}";
   const PREVIEW_BASE = "{{ url_for('internal_time_billing.templates_preview_page') }}";
-  const REF_JT = "{{ url_for('internal_time_billing.api_refs_job_types') }}";
+  const REF_JT = "{{ url_for('internal_time_billing.api_internal_refs_job_types') }}";
   const REF_CL = "{{ url_for('internal_time_billing.api_admin_refs_clients') }}";
   const REF_SI = "{{ url_for('internal_time_billing.api_admin_refs_sites') }}";
 
@@ -232,7 +228,6 @@
     const btn = document.getElementById('ctSubmit');
     const sp = btn.querySelector('.spinner-border');
     const lab = btn.querySelector('.ct-label');
-    const code = document.getElementById('ctCode').value.trim() || null;
     const client_id = document.getElementById('ctClient').value ? parseInt(document.getElementById('ctClient').value, 10) : null;
     const site_id = document.getElementById('ctSite').value ? parseInt(document.getElementById('ctSite').value, 10) : null;
     btn.disabled = true;
@@ -244,7 +239,6 @@
         headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json' }, 'POST'),
         body: JSON.stringify({
           name,
-          code,
           job_type_id: parseInt(job_type_id, 10),
           client_id,
           site_id,
@@ -261,7 +255,6 @@
       const m = window.mdb && mdb.Modal ? mdb.Modal.getInstance(createModalEl) : null;
       if (m) m.hide();
       document.getElementById('ctName').value = '';
-      document.getElementById('ctCode').value = '';
       if (id) {
         window.location.href = EDIT_BASE + '#edit-' + id;
         return;

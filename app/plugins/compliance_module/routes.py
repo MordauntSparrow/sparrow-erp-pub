@@ -26,6 +26,7 @@ from .audit_bridge import (
     note_policy_admin_action,
     note_policy_contractor_acknowledge,
 )
+from .compliance_website_public import website_compliance_policies_bp
 
 _plugin_manager = PluginManager(os.path.abspath("app/plugins"))
 _core_manifest = _plugin_manager.get_core_manifest() or {}
@@ -317,6 +318,7 @@ def admin_policy_new():
             request.form.get("lifecycle_status"),
             lifecycle_change_reason=request.form.get("lifecycle_change_reason"),
             actor_label=_compliance_actor_label(),
+            expose_on_website=request.form.get("expose_on_website") == "1",
         )
         if ok and pid:
             f = request.files.get("file")
@@ -384,6 +386,7 @@ def admin_policy_edit(policy_id):
                 else request.form.get("lifecycle_status"),
                 lifecycle_change_reason=request.form.get("lifecycle_change_reason"),
                 actor_label=_compliance_actor_label(),
+                expose_on_website=request.form.get("expose_on_website") == "1",
             )
 
         def _save_uploaded_file():
@@ -474,5 +477,6 @@ def get_blueprint():
     return internal_bp
 
 
-def get_public_blueprint():
-    return public_bp
+def get_public_blueprints():
+    """Staff portal under ``/compliance``; marketing site library mirror at ``/policies``."""
+    return [public_bp, website_compliance_policies_bp]

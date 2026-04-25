@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ (r.report_reference or 'Walkaround')|e }} · Debrief pack{% endblock %}
+{% block content %}
+<style>
+  @media print {
+    .no-print,
+    .navbar,
+    .nav-module.erp-module-subnav { display: none !important; }
+    a[href]:after { content: ""; }
+    .walkaround-pack { font-size: 10.5pt; color: #1a1a1a; }
+    .walkaround-pack .pack-cover { border: 1px solid #ccc; }
+    .walkaround-pack img.pack-thumb { max-height: 120px; width: auto; }
+    .walkaround-pack .table th { background: #f4f6f8 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  .walkaround-pack .pack-cover {
+    background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+    color: #fff;
+    border-radius: 0.35rem;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .walkaround-pack .pack-meta {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 0.35rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .walkaround-pack .pack-meta dt { font-weight: 600; color: #495057; }
+  .walkaround-pack .pack-meta dd { margin-bottom: 0.35rem; }
+</style>
+<div class="container-fluid mt-3 px-lg-4 walkaround-pack">
+  <div class="no-print d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <nav aria-label="Breadcrumb" class="small">
+      <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">Walkarounds</a></li>
+        <li class="breadcrumb-item active">Debrief pack</li>
+      </ol>
+    </nav>
+    <div>
+      <button type="button" class="btn btn-primary btn-sm" onclick="window.print()"><i class="bi bi-printer me-1"></i>Print / Save as PDF</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">Back</a>
+    </div>
+  </div>
+
+  <header class="pack-cover shadow-sm">
+    <p class="text-uppercase small mb-1 opacity-75" style="letter-spacing:0.08em;">{{ ((config.get('name') if config is mapping else None) or 'Safety & Incidents')|e }}</p>
+    <h1 class="h4 fw-semibold mb-2">{{ document_title|e }}</h1>
+    <p class="mb-0 small opacity-90">{{ (r.template_name or '')|e }}{% if r.site_label %} · {{ r.site_label|e }}{% endif %}</p>
+  </header>
+
+  <dl class="row pack-meta small mb-4 gx-3">
+    <dt class="col-sm-3 col-md-2">Reference</dt>
+    <dd class="col-sm-9 col-md-4">{{ (r.report_reference or '')|e }}</dd>
+    <dt class="col-sm-3 col-md-2">Due date</dt>
+    <dd class="col-sm-9 col-md-4">{{ r.due_at or '—' }}</dd>
+    <dt class="col-sm-3 col-md-2">Prepared by</dt>
+    <dd class="col-sm-9 col-md-4">{{ (r.completed_by_label or '—')|e }}</dd>
+    <dt class="col-sm-3 col-md-2">Completed on</dt>
+    <dd class="col-sm-9 col-md-4">{{ r.completed_at or '—' }}</dd>
+    {% if organization_line %}
+    <dt class="col-sm-3 col-md-2">Organisation</dt>
+    <dd class="col-sm-9 col-md-10">{{ organization_line|e }}</dd>
+    {% endif %}
+    <dt class="col-sm-3 col-md-2 no-print">View generated</dt>
+    <dd class="col-sm-9 col-md-10 no-print text-muted">{{ printed_at }} UTC <span class="small">(browser print uses your local time in the print dialog)</span></dd>
+  </dl>
+
+  {% if r.template_description %}
+  <section class="mb-4">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Scope &amp; intent</h2>
+    <p class="small mb-0" style="white-space:pre-wrap;">{{ r.template_description|e }}</p>
+  </section>
+  {% endif %}
+
+  {% if overview_attachments %}
+  <section class="mb-4">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Site photographs</h2>
+    <div class="d-flex flex-wrap gap-2">
+      {% for a in overview_attachments %}
+      <figure class="figure border rounded p-2 mb-0 bg-white shadow-sm">
+        <img class="figure-img img-fluid mb-1 pack-thumb" src="{{ url_for('static', filename=a.file_path) }}" alt="">
+        <figcaption class="figure-caption small mb-0">{{ (a.file_name or 'Attachment')|e }}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="mb-4">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Walkaround checklist — responses</h2>
+    {% if checklist_human %}
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle">
+        <thead class="table-light"><tr><th style="width:40%">Item</th><th>Response</th></tr></thead>
+        <tbody>
+          {% for row in checklist_human %}
+          <tr><td>{{ row.label|e }}</td><td>{{ row.answer|e }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="small text-muted mb-0">No checklist items were recorded for this walkaround.</p>
+    {% endif %}
+  </section>
+
+  <section class="mb-4">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Observations &amp; rectification</h2>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th style="width:30%">Finding</th>
+            <th style="width:12%">Rating</th>
+            <th style="width:11%">Rectify by</th>
+            <th style="width:17%">Guidance reference</th>
+            <th style="width:18%">Management note</th>
+            <th style="width:12%">Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          {% set fs = f.get('finding_sort') %}
+          {% set imgs = attachments_by_finding.get(fs | int, []) if fs is not none else [] %}
+          {% set sev = f.get('severity') %}
+          <tr>
+            <td>{{ (f.get('point') or '')|e }}</td>
+            <td>
+              <span class="{{ severity_badge_class.get(sev, 'badge rounded-pill bg-secondary') }}">{{ severity_labels.get(sev, 'Not set')|e }}</span>
+            </td>
+            <td>{{ (f.get('rectify_by') or '—')|e }}</td>
+            <td class="small">{{ (f.get('guidance_ref') or '—')|e }}</td>
+            <td class="small text-muted">{{ (severity_guidance.get(sev) or '')|e }}</td>
+            <td>
+              {% if imgs %}
+              <div class="d-flex flex-wrap gap-1">
+                {% for a in imgs %}
+                <a href="{{ url_for('static', filename=a.file_path) }}" target="_blank" rel="noopener" class="d-inline-block">
+                  <img class="rounded border pack-thumb" src="{{ url_for('static', filename=a.file_path) }}" alt="">
+                </a>
+                {% endfor %}
+              </div>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-muted small">No separate observations were logged; checklist responses above may still record the tour outcome.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if r.notes %}
+  <section class="mb-4">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Additional notes</h2>
+    <p class="small mb-0 border-start border-4 ps-3 py-1" style="border-color:#2d5a87!important;white-space:pre-wrap;background:#fafbfc;">{{ r.notes|e }}</p>
+  </section>
+  {% endif %}
+
+  <section class="mb-5">
+    <h2 class="h6 fw-semibold text-secondary text-uppercase small">Severity scale (for readers)</h2>
+    <p class="small text-muted">Plain-language banding for this pack. Align final decisions with your local risk assessment and health &amp; safety policy.</p>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered">
+        <thead class="table-light"><tr><th style="width:14%">Band</th><th>What it implies</th></tr></thead>
+        <tbody>
+          {% for code, label in severity_choices %}
+          <tr>
+            <td><span class="{{ severity_badge_class.get(code, 'badge rounded-pill bg-secondary') }}">{{ label|e }}</span></td>
+            <td class="small">{{ (severity_guidance.get(code) or '')|e }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="border-top pt-3 small text-muted">
+    <p class="mb-1"><strong>{{ (r.report_reference or '')|e }}</strong> — {{ document_title }}.</p>
+    <p class="mb-0">Prepared by <strong>{{ (r.completed_by_label or '—')|e }}</strong> on <strong>{{ r.completed_at or '—' }}</strong>.</p>
+  </footer>
+</div>
+{% endblock %}

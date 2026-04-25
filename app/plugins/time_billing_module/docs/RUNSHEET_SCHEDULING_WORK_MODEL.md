@@ -73,3 +73,7 @@ Future optional: `runsheets.voided_at` for whole-job mistakes (separate from per
 - `GET /api/refs/contractors?q=` — staff contractor search (min 2 chars).
 
 Admin internal APIs unchanged except behaviour of publish respecting `payroll_included`.
+
+## 8. Calendar pay policies (timesheet line rates)
+
+Night **PRORATA**, **TIME_BANDS**, legacy night max-of-line, weekday anchoring, and bonus limitations are documented for admins and implementers in [`POLICY_PAY_OPERATING_NOTES.md`](POLICY_PAY_OPERATING_NOTES.md) (see `RateResolver` in the time billing `services.py`).

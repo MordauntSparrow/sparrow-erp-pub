@@ -1,0 +1,221 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Desk intake layout{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Desk intake layout</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Quotes &amp; rules</p>
+        <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-sliders me-2 text-primary"></i>Desk intake layout</h1>
+        <p class="small text-muted mb-0 mt-2">Configure the internal <strong>event desk</strong> and <strong>private transfer</strong> forms using only the controls below — tick sections to hide them, add optional extra fields, then save. Core required inputs on each intake screen always stay visible. You never paste JSON or edit raw config here.</p>
+      </div>
+      <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.opportunity_intake') }}">Event intake</a>
+        <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.opportunity_intake_private_transfer') }}">Private transfer</a>
+      </div>
+    </div>
+  </div>
+
+  {% if not can_edit %}
+  <p class="small text-muted">Read-only CRM access — saving needs permission to edit CRM settings.</p>
+  {% endif %}
+
+  <div class="row g-4">
+    <div class="col-12 col-xl-6">
+      <form method="post" class="card crm-panel border-0 shadow-sm h-100">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="layout_save_target" value="event">
+        <fieldset class="border-0 m-0 p-0" {% if not can_edit %}disabled{% endif %}>
+        <div class="card-header bg-white py-3"><h2 class="h5 mb-0"><i class="bi bi-telephone me-2 text-primary"></i>Event desk intake</h2></div>
+        <div class="card-body">
+          <h3 class="h6 text-uppercase text-muted mb-3">Hide sections</h3>
+          <div class="row g-2">
+            {% for sid, title, help in event_section_choices %}
+            <div class="col-12">
+              <div class="form-check border rounded p-3 bg-light bg-opacity-50">
+                <input class="form-check-input" type="checkbox" name="hidden[]" value="{{ sid }}" id="ev_hide_{{ sid }}"
+                       {% if sid in event_hidden_sections %}checked{% endif %}>
+                <label class="form-check-label fw-semibold" for="ev_hide_{{ sid }}">{{ title }}</label>
+                <p class="small text-muted mb-0 mt-1">{{ help }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <hr class="my-4">
+          <h3 class="h6 text-uppercase text-muted mb-2">Extra fields</h3>
+          <p class="small text-muted mb-3">Keys: lowercase, letter first, then letters/digits/underscore. Posted as <code>intake_extra_…</code> on the form.</p>
+          <div class="table-responsive border rounded">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>Key</th><th>Label</th><th>Type</th><th>Req</th><th></th></tr></thead>
+              <tbody id="crm-ev-extra-rows">
+                {% for row in event_extra_fields %}
+                <tr class="crm-ev-extra-row">
+                  <td><input class="form-control form-control-sm" name="extra_key[]" value="{{ row.key }}" required pattern="[a-z][a-z0-9_]*" maxlength="41"></td>
+                  <td><input class="form-control form-control-sm" name="extra_label[]" value="{{ row.label }}" maxlength="200"></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="extra_type[]">
+                      <option value="text" {% if row.type == 'text' %}selected{% endif %}>Single line</option>
+                      <option value="textarea" {% if row.type == 'textarea' %}selected{% endif %}>Multi line</option>
+                    </select>
+                  </td>
+                  <td class="text-center">
+                    <input type="hidden" name="extra_required[]" value="{{ '1' if row.required else '0' }}" class="crm-ev-req-h">
+                    <input type="checkbox" class="form-check-input mt-0 crm-ev-req-cb" {% if row.required %}checked{% endif %} aria-label="Required">
+                  </td>
+                  <td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-ev-rm" title="Remove">&times;</button></td>
+                </tr>
+                {% endfor %}
+                {% if not event_extra_fields %}
+                <tr class="crm-ev-extra-row">
+                  <td><input class="form-control form-control-sm" name="extra_key[]" value="" pattern="[a-z][a-z0-9_]*" maxlength="41"></td>
+                  <td><input class="form-control form-control-sm" name="extra_label[]" value=""></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="extra_type[]">
+                      <option value="text">Single line</option>
+                      <option value="textarea">Multi line</option>
+                    </select>
+                  </td>
+                  <td class="text-center">
+                    <input type="hidden" name="extra_required[]" value="0" class="crm-ev-req-h">
+                    <input type="checkbox" class="form-check-input mt-0 crm-ev-req-cb" aria-label="Required">
+                  </td>
+                  <td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-ev-rm" title="Remove">&times;</button></td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill mt-2" id="crm-ev-add-row"><i class="bi bi-plus-lg"></i> Add field</button>
+        </div>
+        <div class="card-footer bg-light">
+          <button type="submit" class="btn btn-primary rounded-pill px-4">Save event layout</button>
+        </div>
+        </fieldset>
+      </form>
+    </div>
+
+    <div class="col-12 col-xl-6">
+      <form method="post" class="card crm-panel border-0 shadow-sm h-100">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="layout_save_target" value="private_transfer">
+        <fieldset class="border-0 m-0 p-0" {% if not can_edit %}disabled{% endif %}>
+        <div class="card-header bg-white py-3"><h2 class="h5 mb-0"><i class="bi bi-truck-front me-2 text-primary"></i>Private transfer intake</h2></div>
+        <div class="card-body">
+          <h3 class="h6 text-uppercase text-muted mb-3">Hide sections</h3>
+          <p class="small text-muted mb-3">Only hides <strong>optional</strong> UI; required clinical and journey fields stay.</p>
+          <div class="row g-2">
+            {% for sid, title, help in pt_section_choices %}
+            <div class="col-12">
+              <div class="form-check border rounded p-3 bg-light bg-opacity-50">
+                <input class="form-check-input" type="checkbox" name="pt_hidden[]" value="{{ sid }}" id="pt_hide_{{ sid }}"
+                       {% if sid in pt_hidden_sections %}checked{% endif %}>
+                <label class="form-check-label fw-semibold" for="pt_hide_{{ sid }}">{{ title }}</label>
+                <p class="small text-muted mb-0 mt-1">{{ help }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <hr class="my-4">
+          <h3 class="h6 text-uppercase text-muted mb-2">Extra fields</h3>
+          <p class="small text-muted mb-3">Same <code>intake_extra_…</code> posting as event intake. Keys must not match any built-in transfer field name.</p>
+          <div class="table-responsive border rounded">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light"><tr><th>Key</th><th>Label</th><th>Type</th><th>Req</th><th></th></tr></thead>
+              <tbody id="crm-pt-extra-rows">
+                {% for row in pt_extra_fields %}
+                <tr class="crm-pt-extra-row">
+                  <td><input class="form-control form-control-sm" name="pt_extra_key[]" value="{{ row.key }}" required pattern="[a-z][a-z0-9_]*" maxlength="41"></td>
+                  <td><input class="form-control form-control-sm" name="pt_extra_label[]" value="{{ row.label }}" maxlength="200"></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="pt_extra_type[]">
+                      <option value="text" {% if row.type == 'text' %}selected{% endif %}>Single line</option>
+                      <option value="textarea" {% if row.type == 'textarea' %}selected{% endif %}>Multi line</option>
+                    </select>
+                  </td>
+                  <td class="text-center">
+                    <input type="hidden" name="pt_extra_required[]" value="{{ '1' if row.required else '0' }}" class="crm-pt-req-h">
+                    <input type="checkbox" class="form-check-input mt-0 crm-pt-req-cb" {% if row.required %}checked{% endif %} aria-label="Required">
+                  </td>
+                  <td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-pt-rm" title="Remove">&times;</button></td>
+                </tr>
+                {% endfor %}
+                {% if not pt_extra_fields %}
+                <tr class="crm-pt-extra-row">
+                  <td><input class="form-control form-control-sm" name="pt_extra_key[]" value="" pattern="[a-z][a-z0-9_]*" maxlength="41"></td>
+                  <td><input class="form-control form-control-sm" name="pt_extra_label[]" value=""></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="pt_extra_type[]">
+                      <option value="text">Single line</option>
+                      <option value="textarea">Multi line</option>
+                    </select>
+                  </td>
+                  <td class="text-center">
+                    <input type="hidden" name="pt_extra_required[]" value="0" class="crm-pt-req-h">
+                    <input type="checkbox" class="form-check-input mt-0 crm-pt-req-cb" aria-label="Required">
+                  </td>
+                  <td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-pt-rm" title="Remove">&times;</button></td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill mt-2" id="crm-pt-add-row"><i class="bi bi-plus-lg"></i> Add field</button>
+        </div>
+        <div class="card-footer bg-light">
+          <button type="submit" class="btn btn-primary rounded-pill px-4">Save private transfer layout</button>
+        </div>
+        </fieldset>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(function () {
+  function wire(tbodyId, addId, rowClass, reqH, reqCb, rmSel, rowHtml) {
+    var tbody = document.getElementById(tbodyId);
+    var addBtn = document.getElementById(addId);
+    if (!tbody || !addBtn) return;
+    function syncReq(tr) {
+      var h = tr.querySelector(reqH);
+      var c = tr.querySelector(reqCb);
+      if (h && c) h.value = c.checked ? '1' : '0';
+    }
+    tbody.addEventListener('change', function (e) {
+      var t = e.target;
+      if (t && t.classList && t.classList.contains(reqCb)) syncReq(t.closest('tr'));
+    });
+    tbody.querySelectorAll('.' + rowClass).forEach(syncReq);
+    tbody.addEventListener('click', function (e) {
+      if (e.target.closest(rmSel)) {
+        var tr = e.target.closest('tr');
+        if (tr) tr.remove();
+      }
+    });
+    addBtn.addEventListener('click', function () {
+      var tr = document.createElement('tr');
+      tr.className = rowClass;
+      tr.innerHTML = rowHtml;
+      tbody.appendChild(tr);
+    });
+  }
+  wire('crm-ev-extra-rows', 'crm-ev-add-row', 'crm-ev-extra-row', '.crm-ev-req-h', 'crm-ev-req-cb', '.crm-ev-rm',
+    '<td><input class="form-control form-control-sm" name="extra_key[]" value="" pattern="[a-z][a-z0-9_]*" maxlength="41"></td>' +
+    '<td><input class="form-control form-control-sm" name="extra_label[]" value=""></td>' +
+    '<td><select class="form-select form-select-sm" name="extra_type[]"><option value="text">Single line</option><option value="textarea">Multi line</option></select></td>' +
+    '<td class="text-center"><input type="hidden" name="extra_required[]" value="0" class="crm-ev-req-h"><input type="checkbox" class="form-check-input mt-0 crm-ev-req-cb" aria-label="Required"></td>' +
+    '<td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-ev-rm" title="Remove">&times;</button></td>');
+  wire('crm-pt-extra-rows', 'crm-pt-add-row', 'crm-pt-extra-row', '.crm-pt-req-h', 'crm-pt-req-cb', '.crm-pt-rm',
+    '<td><input class="form-control form-control-sm" name="pt_extra_key[]" value="" pattern="[a-z][a-z0-9_]*" maxlength="41"></td>' +
+    '<td><input class="form-control form-control-sm" name="pt_extra_label[]" value=""></td>' +
+    '<td><select class="form-select form-select-sm" name="pt_extra_type[]"><option value="text">Single line</option><option value="textarea">Multi line</option></select></td>' +
+    '<td class="text-center"><input type="hidden" name="pt_extra_required[]" value="0" class="crm-pt-req-h"><input type="checkbox" class="form-check-input mt-0 crm-pt-req-cb" aria-label="Required"></td>' +
+    '<td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-pt-rm" title="Remove">&times;</button></td>');
+})();
+</script>
+{% endblock %}

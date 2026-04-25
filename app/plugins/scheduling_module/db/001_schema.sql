@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS schedule_shifts (
   runsheet_id BIGINT DEFAULT NULL,
   runsheet_assignment_id BIGINT DEFAULT NULL,
   labour_cost DECIMAL(10,2) DEFAULT NULL,
+  shared_labour_hours DECIMAL(6,2) DEFAULT NULL COMMENT 'Fixed person-hours, duration shrinks as crew or required headcount grows',
   recurrence_id BIGINT DEFAULT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

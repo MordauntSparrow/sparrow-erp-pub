@@ -1,10 +1,13 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Event plan PDF{% endblock %}
-{% block crm_breadcrumb_current %}
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
-<li class="breadcrumb-item active" aria-current="page">Event plan PDF</li>
-{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}Event plan PDF cover — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item active" aria-current="page">PDF cover</li>
+  </ol>
+</nav>
 <div class="container-fluid py-3" style="max-width: 52rem;">
   <h1 class="h4 mb-2">Event plan PDF — cover &amp; about</h1>
   <p class="text-muted small mb-4">

@@ -3,9 +3,19 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
-from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
-from flask_login import login_required
+from flask import (
+    Blueprint,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from flask_login import current_user, login_required
 
 from app.objects import get_db_connection
 
@@ -17,9 +27,37 @@ from .crm_common import (
     uid,
 )
 from .crm_event_plan_links import fetch_plans_for_opportunity
-from .crm_event_risk import enrich_lead_meta_with_staffing_breakdown, parse_public_calculator_form
+from .crm_geo_utils import resolve_w3w_to_latlng, routing_hint_for_intake
+from .crm_event_risk import (
+    calculator_template_values,
+    compute_event_risk_from_parsed,
+    enrich_lead_meta_with_staffing_breakdown,
+    parse_public_calculator_form,
+)
 from .crm_guide_staffing_costs import estimate_guide_staffing_costs
-from .crm_lead_intake import intake_from_parsed_form
+from .crm_lead_intake import (
+    LeadIntakeInvalidAccount,
+    LeadIntakeMissingRequiredFields,
+    build_lead_meta,
+    intake_from_parsed_form,
+)
+from .crm_private_transfer_intake import parse_private_transfer_form
+from .crm_pipeline_flow import (
+    flow_active,
+    opportunity_edit_url,
+    quote_new_url,
+)
+from .crm_purple_guide import (
+    TIER_MEDIC_BASE,
+    TIER_VEHICLE_BASE,
+    public_tier_resource_rows,
+)
+from .crm_event_intake_layout import (
+    collect_intake_extras_from_form,
+    load_event_intake_layout,
+    load_private_transfer_intake_layout,
+    validate_required_extras,
+)
 from .crm_stage_history import log_opportunity_stage_change
 
 BASE_PATH = "/plugin/crm_module"
@@ -79,6 +117,98 @@ def _maybe_tb_wage_cards_url():
         return url_for("internal_time_billing.wage_cards_page")
     except Exception:
         return None
+
+
+def _accounts_select_options(limit: int = 400) -> list[dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, name FROM crm_accounts ORDER BY name ASC LIMIT %s",
+            (int(limit),),
+        )
+        return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _crm_scheduling_form_context(
+    opportunity_row: dict | None, lead_meta: dict | None
+) -> dict[str, Any]:
+    """Template kwargs for linking an opportunity to ``schedule_shifts`` (when TB + scheduling exist)."""
+    from datetime import datetime, timedelta
+
+    from .crm_scheduling_bridge import (
+        list_active_clients,
+        list_active_sites,
+        list_job_types,
+        scheduling_stack_available,
+    )
+
+    empty: dict[str, Any] = {
+        "scheduling_available": False,
+        "schedule_clients": [],
+        "schedule_job_types": [],
+        "schedule_sites": [],
+        "schedule_shift_edit_url": None,
+        "schedule_work_date_default": "",
+        "schedule_start_default": "",
+        "schedule_end_default": "",
+    }
+    if not opportunity_row:
+        return empty
+    if not scheduling_stack_available():
+        return empty
+    out = {
+        "scheduling_available": True,
+        "schedule_clients": list_active_clients(),
+        "schedule_job_types": list_job_types(),
+        "schedule_sites": list_active_sites(),
+        "schedule_shift_edit_url": None,
+        "schedule_work_date_default": "",
+        "schedule_start_default": "",
+        "schedule_end_default": "",
+    }
+    sid = opportunity_row.get("schedule_shift_id")
+    if sid:
+        try:
+            out["schedule_shift_edit_url"] = url_for(
+                "internal_scheduling.admin_shift_edit", shift_id=int(sid)
+            )
+        except Exception:
+            out["schedule_shift_edit_url"] = None
+    pt: dict[str, Any] = {}
+    if isinstance(lead_meta, dict):
+        raw_pt = lead_meta.get("private_transfer")
+        if isinstance(raw_pt, dict):
+            pt = raw_pt
+    out["schedule_work_date_default"] = (pt.get("transfer_date") or "").strip()
+    st_raw = (pt.get("pickup_time") or "").strip()
+    if len(st_raw) >= 5:
+        out["schedule_start_default"] = st_raw[:5]
+        try:
+            t0 = datetime.strptime(st_raw[:5], "%H:%M")
+            base = datetime(2000, 1, 1, t0.hour, t0.minute)
+            out["schedule_end_default"] = (base + timedelta(hours=4)).strftime("%H:%M")
+        except ValueError:
+            out["schedule_end_default"] = ""
+    return out
+
+
+def _pipeline_flow_template_kwargs(
+    request,
+    *,
+    step: str,
+    opp_id: int | None,
+    quote_id: int | None = None,
+) -> dict[str, Any]:
+    return {
+        "pipeline_flow_enabled": flow_active(request),
+        "pipeline_step": step,
+        "pipeline_opp_id": opp_id,
+        "pipeline_quote_id": quote_id,
+    }
 
 
 def _list_accounts(conn):
@@ -326,9 +456,9 @@ def dashboard():
     conn = get_db_connection()
     n_quotes = 0
     n_activities = 0
-    n_event_plans = 0
-    n_event_plans_draft = 0
     n_accounts = n_contacts = n_opps = 0
+    n_intake_forms = 0
+    n_intake_forms_public = 0
     extras = _crm_dashboard_extras(conn)
     try:
         n_accounts = len(_list_accounts(conn))
@@ -343,13 +473,19 @@ def dashboard():
             cur.execute("SELECT COUNT(*) FROM crm_activities")
             row = cur.fetchone()
             n_activities = int(row[0]) if row else 0
-            if crm_medical_surface_available():
-                cur.execute("SELECT COUNT(*) FROM crm_event_plans")
+            try:
+                cur.execute(
+                    "SELECT COUNT(*) FROM crm_intake_form_definitions WHERE is_active=1"
+                )
                 row = cur.fetchone()
-                n_event_plans = int(row[0]) if row else 0
-                cur.execute("SELECT COUNT(*) FROM crm_event_plans WHERE status='draft'")
+                n_intake_forms = int(row[0]) if row else 0
+                cur.execute(
+                    "SELECT COUNT(*) FROM crm_intake_form_definitions WHERE is_active=1 AND is_public=1"
+                )
                 row = cur.fetchone()
-                n_event_plans_draft = int(row[0]) if row else 0
+                n_intake_forms_public = int(row[0]) if row else 0
+            except Exception:
+                pass
         except Exception:
             pass
         finally:
@@ -371,14 +507,32 @@ def dashboard():
         n_opportunities=n_opps,
         n_quotes=n_quotes,
         n_activities=n_activities,
-        n_event_plans=n_event_plans,
-        n_event_plans_draft=n_event_plans_draft,
+        n_intake_forms=n_intake_forms,
+        n_intake_forms_public=n_intake_forms_public,
         can_edit=can_edit(),
         stage_labels=dict(OPP_STAGES),
         public_enquiry_url=public_enquiry_url,
         show_financials=can_edit(),
         **extras,
     )
+
+
+def _operating_base_from_form() -> tuple[str | None, str | None, float | None, float | None]:
+    label = (request.form.get("operating_base_label") or "").strip() or None
+    postcode = (request.form.get("operating_base_postcode") or "").strip() or None
+    lat_raw = (request.form.get("operating_base_lat") or "").strip()
+    lng_raw = (request.form.get("operating_base_lng") or "").strip()
+    lat: float | None = None
+    lng: float | None = None
+    if lat_raw and lng_raw:
+        try:
+            lat = float(lat_raw)
+            lng = float(lng_raw)
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                lat, lng = None, None
+        except (TypeError, ValueError):
+            lat, lng = None, None
+    return label, postcode, lat, lng
 
 
 def _crm_search_like_term(raw_q: str) -> str:
@@ -481,16 +635,25 @@ def account_new():
         name = (request.form.get("name") or "").strip()
         if not name:
             flash("Account name is required.", "danger")
-            return render_template("admin/crm_account_form.html", account=None, can_edit=True)
+            return render_template(
+                "admin/crm_account_form.html",
+                account=None,
+                can_edit=True,
+                w3w_resolve_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
+            )
         website = (request.form.get("website") or "").strip() or None
         phone = (request.form.get("phone") or "").strip() or None
         notes = (request.form.get("notes") or "").strip() or None
+        obl, obp, obla, obln = _operating_base_from_form()
         conn = get_db_connection()
         cur = conn.cursor()
         try:
             cur.execute(
-                "INSERT INTO crm_accounts (name, website, phone, notes) VALUES (%s,%s,%s,%s)",
-                (name, website, phone, notes),
+                """INSERT INTO crm_accounts
+                (name, website, phone, notes, operating_base_label, operating_base_postcode,
+                 operating_base_lat, operating_base_lng)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (name, website, phone, notes, obl, obp, obla, obln),
             )
             conn.commit()
             new_id = int(cur.lastrowid)
@@ -499,7 +662,12 @@ def account_new():
         finally:
             cur.close()
             conn.close()
-    return render_template("admin/crm_account_form.html", account=None, can_edit=True)
+    return render_template(
+        "admin/crm_account_form.html",
+        account=None,
+        can_edit=True,
+        w3w_resolve_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
+    )
 
 
 @crm_bp.route("/accounts/<int:account_id>/edit", methods=["GET", "POST"])
@@ -523,17 +691,23 @@ def account_edit(account_id: int):
         if not name:
             flash("Account name is required.", "danger")
             return render_template(
-                "admin/crm_account_form.html", account=row, can_edit=True
+                "admin/crm_account_form.html",
+                account=row,
+                can_edit=True,
+                w3w_resolve_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
             )
         website = (request.form.get("website") or "").strip() or None
         phone = (request.form.get("phone") or "").strip() or None
         notes = (request.form.get("notes") or "").strip() or None
+        obl, obp, obla, obln = _operating_base_from_form()
         conn = get_db_connection()
         cur2 = conn.cursor()
         try:
             cur2.execute(
-                """UPDATE crm_accounts SET name=%s, website=%s, phone=%s, notes=%s WHERE id=%s""",
-                (name, website, phone, notes, account_id),
+                """UPDATE crm_accounts SET name=%s, website=%s, phone=%s, notes=%s,
+                operating_base_label=%s, operating_base_postcode=%s,
+                operating_base_lat=%s, operating_base_lng=%s WHERE id=%s""",
+                (name, website, phone, notes, obl, obp, obla, obln, account_id),
             )
             conn.commit()
             flash("Account updated.", "success")
@@ -541,7 +715,12 @@ def account_edit(account_id: int):
         finally:
             cur2.close()
             conn.close()
-    return render_template("admin/crm_account_form.html", account=row, can_edit=True)
+    return render_template(
+        "admin/crm_account_form.html",
+        account=row,
+        can_edit=True,
+        w3w_resolve_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
+    )
 
 
 @crm_bp.route("/accounts/<int:account_id>/delete", methods=["POST"])
@@ -794,49 +973,620 @@ def api_opportunity_stage(opp_id: int):
     return jsonify({"ok": True, "stage": stage})
 
 
+def _intake_account_search_rows(q_like: str) -> list[dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, name FROM crm_accounts WHERE name LIKE %s ORDER BY name LIMIT 30",
+            (q_like,),
+        )
+        return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+@crm_bp.route("/opportunities/intake/accounts-search", methods=["GET"])
+@login_required
+@crm_access_required
+def opportunity_intake_accounts_search():
+    raw = (request.args.get("q") or "").strip()
+    q = _crm_search_like_term(raw)
+    if len(q) < 2:
+        return jsonify({"ok": True, "accounts": []})
+    rows = _intake_account_search_rows(f"%{q}%")
+    return jsonify({"ok": True, "accounts": rows})
+
+
+@crm_bp.route("/opportunities/intake/resolve-w3w", methods=["POST"])
+@login_required
+@crm_access_required
+def opportunity_intake_resolve_w3w():
+    words = (request.form.get("words") or "").strip()
+    if not words:
+        return jsonify({"ok": False, "error": "Enter a what3words address"}), 400
+    result = resolve_w3w_to_latlng(words)
+    if "error" in result:
+        code = 503 if "not installed" in (result.get("error") or "") else 400
+        return jsonify({"ok": False, "error": result["error"]}), code
+    return jsonify(
+        {
+            "ok": True,
+            "lat": result["lat"],
+            "lng": result["lng"],
+            "normalized": result.get("normalized", words),
+        }
+    )
+
+
+@crm_bp.route("/opportunities/intake/account-summary", methods=["GET"])
+@login_required
+@crm_access_required
+def opportunity_intake_account_summary():
+    raw = (request.args.get("account_id") or "").strip()
+    if not raw.isdigit():
+        return jsonify({"ok": False, "error": "account_id required"}), 400
+    account_id = int(raw)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT id FROM crm_accounts WHERE id=%s", (account_id,))
+        if not cur.fetchone():
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        cur.execute(
+            """
+            SELECT id, name, stage, updated_at, lead_meta_json
+            FROM crm_opportunities
+            WHERE account_id=%s
+            ORDER BY updated_at DESC
+            LIMIT 8
+            """,
+            (account_id,),
+        )
+        rows = cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+    out_rows: list[dict[str, Any]] = []
+    for r in rows:
+        snippet = ""
+        raw_meta = r.get("lead_meta_json")
+        if raw_meta:
+            try:
+                if isinstance(raw_meta, (bytes, bytearray)):
+                    raw_meta = raw_meta.decode("utf-8", errors="replace")
+                meta = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                if isinstance(meta, dict):
+                    ri = meta.get("risk") if isinstance(meta.get("risk"), dict) else {}
+                    lbl = ri.get("label")
+                    if lbl:
+                        snippet = f"Guide risk band on file: {lbl}"
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+        dt = r.get("updated_at")
+        out_rows.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "stage": r["stage"],
+                "updated_at": dt.isoformat() if hasattr(dt, "isoformat") else None,
+                "snippet": snippet,
+            }
+        )
+    return jsonify({"ok": True, "opportunities": out_rows})
+
+
+@crm_bp.route("/opportunities/intake/dispatch-bases", methods=["GET"])
+@login_required
+@crm_access_required
+def opportunity_intake_dispatch_bases():
+    """Tenant dispatch departure points for intake mileage (dropdown when more than one)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, label, postcode, lat, lng FROM crm_dispatch_bases "
+            "ORDER BY sort_order ASC, id ASC"
+        )
+        rows = cur.fetchall() or []
+    except Exception:
+        rows = []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"ok": True, "bases": rows})
+
+
+@crm_bp.route("/opportunities/intake/saved-venues", methods=["GET"])
+@login_required
+@crm_access_required
+def opportunity_intake_saved_venues():
+    raw = (request.args.get("account_id") or "").strip()
+    if not raw.isdigit():
+        return jsonify({"ok": True, "venues": []})
+    account_id = int(raw)
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("SELECT id FROM crm_accounts WHERE id=%s", (account_id,))
+        if not cur.fetchone():
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        cur.execute(
+            """
+            SELECT id, label, venue_address, venue_postcode, venue_what3words,
+                   venue_lat, venue_lng
+            FROM crm_account_saved_venues
+            WHERE account_id=%s
+            ORDER BY label ASC, id ASC
+            """,
+            (account_id,),
+        )
+        rows = cur.fetchall() or []
+    except Exception:
+        rows = []
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"ok": True, "venues": rows})
+
+
+@crm_bp.route("/opportunities/intake/save-venue", methods=["POST"])
+@login_required
+@crm_access_required
+def opportunity_intake_save_venue():
+    """Persist current venue fields as a reusable template on the linked CRM account."""
+    if not can_edit():
+        return jsonify({"ok": False, "error": "read_only"}), 403
+    aid_raw = (request.form.get("account_id") or "").strip()
+    if not aid_raw.isdigit():
+        return jsonify({"ok": False, "error": "account_id required"}), 400
+    account_id = int(aid_raw)
+    label = (request.form.get("label") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "error": "label required"}), 400
+    va = (request.form.get("venue_address") or "").strip() or None
+    vpc = (request.form.get("venue_postcode") or "").strip() or None
+    vw3w = (request.form.get("venue_what3words") or "").strip() or None
+    lat_r = (request.form.get("venue_lat") or "").strip()
+    lng_r = (request.form.get("venue_lng") or "").strip()
+    lat = lng = None
+    if lat_r and lng_r:
+        try:
+            lat = float(lat_r)
+            lng = float(lng_r)
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                lat = lng = None
+        except (TypeError, ValueError):
+            lat = lng = None
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM crm_accounts WHERE id=%s", (account_id,))
+        if not cur.fetchone():
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        cur.execute(
+            """
+            INSERT INTO crm_account_saved_venues
+            (account_id, label, venue_address, venue_postcode, venue_what3words, venue_lat, venue_lng)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                account_id,
+                label[:255],
+                va[:512] if va else None,
+                vpc[:32] if vpc else None,
+                vw3w[:128] if vw3w else None,
+                lat,
+                lng,
+            ),
+        )
+        conn.commit()
+        new_id = int(cur.lastrowid)
+    finally:
+        cur.close()
+        conn.close()
+    return jsonify({"ok": True, "id": new_id})
+
+
 @crm_bp.route("/opportunities/intake", methods=["GET", "POST"])
 @login_required
 @crm_access_required
 def opportunity_intake():
     """Staff / call-centre intake — same payload shape as the public calculator."""
-    conn = get_db_connection()
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("SELECT id, name FROM crm_accounts ORDER BY name")
-        accounts = cur.fetchall() or []
-    finally:
-        cur.close()
-        conn.close()
 
+    app = current_app._get_current_object()
+    event_intake_hidden, event_intake_extra_fields = load_event_intake_layout(app)
+
+    def _intake_extra_prefill() -> dict[str, str]:
+        if request.method != "POST":
+            return {
+                str(fd.get("key") or ""): ""
+                for fd in event_intake_extra_fields
+                if fd.get("key")
+            }
+        return {
+            str(fd["key"]): (request.form.get(f"intake_extra_{fd['key']}") or "")
+            for fd in event_intake_extra_fields
+            if fd.get("key")
+        }
+
+    form_values = {}
     if request.method == "POST":
         if not can_edit():
             flash("You do not have permission to create pipeline records.", "danger")
             return redirect(url_for("crm_module.opportunities_board"))
+        miss_ex = validate_required_extras(request.form, event_intake_extra_fields)
+        if miss_ex:
+            flash(
+                "Please complete required extra fields: " + ", ".join(miss_ex) + ".",
+                "danger",
+            )
+            form_values = calculator_template_values(
+                request.form,
+                extra={
+                    "account_id": (request.form.get("account_id") or "").strip(),
+                    "stage": (request.form.get("stage") or "prospecting").strip(),
+                },
+            )
+            prefill_account_name = None
+            aid = (form_values.get("account_id") or "").strip()
+            if aid.isdigit():
+                c2 = get_db_connection()
+                c2c = c2.cursor()
+                try:
+                    c2c.execute("SELECT name FROM crm_accounts WHERE id=%s", (int(aid),))
+                    row = c2c.fetchone()
+                    if row:
+                        prefill_account_name = row[0]
+                finally:
+                    c2c.close()
+                    c2.close()
+            return render_template(
+                "admin/crm_opportunity_intake.html",
+                stages=OPP_STAGES,
+                can_edit=can_edit(),
+                form_values=form_values,
+                prefill_account_name=prefill_account_name,
+                tier_resource_rows=public_tier_resource_rows(),
+                tier_medic_base=dict(TIER_MEDIC_BASE),
+                tier_vehicle_base=dict(TIER_VEHICLE_BASE),
+                intake_preview_url=url_for("crm_module.opportunity_intake_preview"),
+                intake_accounts_search_url=url_for(
+                    "crm_module.opportunity_intake_accounts_search"
+                ),
+                intake_resolve_w3w_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
+                intake_account_summary_url=url_for(
+                    "crm_module.opportunity_intake_account_summary"
+                ),
+                intake_dispatch_bases_url=url_for(
+                    "crm_module.opportunity_intake_dispatch_bases"
+                ),
+                intake_saved_venues_url=url_for(
+                    "crm_module.opportunity_intake_saved_venues"
+                ),
+                intake_save_venue_url=url_for("crm_module.opportunity_intake_save_venue"),
+                tb_wage_cards_url=_maybe_tb_wage_cards_url(),
+                event_intake_hidden=event_intake_hidden,
+                event_intake_extra_fields=event_intake_extra_fields,
+                intake_extra_prefill=_intake_extra_prefill(),
+            )
         parsed = parse_public_calculator_form(request.form)
         acc_raw = (request.form.get("account_id") or "").strip()
         acc_override = int(acc_raw) if acc_raw.isdigit() else None
         stage = (request.form.get("stage") or "prospecting").strip()
         if stage not in {s for s, _ in OPP_STAGES}:
             stage = "prospecting"
+        extras_rows = collect_intake_extras_from_form(
+            request.form, event_intake_extra_fields
+        )
+        meta_add: dict[str, Any] | None = (
+            {"event_intake_extras": extras_rows} if event_intake_extra_fields else None
+        )
         try:
             opp_id, _cid, _meta = intake_from_parsed_form(
                 parsed,
                 source="staff_intake",
                 stage=stage,
                 account_id_override=acc_override,
+                lead_meta_additions=meta_add,
             )
             flash(f"Opportunity #{opp_id} created.", "success")
-            return redirect(url_for("crm_module.opportunity_edit", opp_id=opp_id))
-        except ValueError:
+            return redirect(opportunity_edit_url(opp_id=int(opp_id), flow=True))
+        except LeadIntakeMissingRequiredFields:
             flash("Organisation, contact, email, and event name are required.", "danger")
+        except LeadIntakeInvalidAccount:
+            flash("That CRM account was not found.", "danger")
         except Exception as ex:
             flash(f"Could not create opportunity: {ex}", "danger")
+        form_values = calculator_template_values(
+            request.form,
+            extra={
+                "account_id": (request.form.get("account_id") or "").strip(),
+                "stage": (request.form.get("stage") or "prospecting").strip(),
+            },
+        )
+
+    prefill_account_name = None
+    aid = (form_values.get("account_id") or "").strip()
+    if aid.isdigit():
+        c2 = get_db_connection()
+        c2c = c2.cursor()
+        try:
+            c2c.execute("SELECT name FROM crm_accounts WHERE id=%s", (int(aid),))
+            row = c2c.fetchone()
+            if row:
+                prefill_account_name = row[0]
+        finally:
+            c2c.close()
+            c2.close()
 
     return render_template(
         "admin/crm_opportunity_intake.html",
-        accounts=accounts,
         stages=OPP_STAGES,
         can_edit=can_edit(),
+        form_values=form_values,
+        prefill_account_name=prefill_account_name,
+        tier_resource_rows=public_tier_resource_rows(),
+        tier_medic_base=dict(TIER_MEDIC_BASE),
+        tier_vehicle_base=dict(TIER_VEHICLE_BASE),
+        intake_preview_url=url_for("crm_module.opportunity_intake_preview"),
+        intake_accounts_search_url=url_for("crm_module.opportunity_intake_accounts_search"),
+        intake_resolve_w3w_url=url_for("crm_module.opportunity_intake_resolve_w3w"),
+        intake_account_summary_url=url_for("crm_module.opportunity_intake_account_summary"),
+        intake_dispatch_bases_url=url_for("crm_module.opportunity_intake_dispatch_bases"),
+        intake_saved_venues_url=url_for("crm_module.opportunity_intake_saved_venues"),
+        intake_save_venue_url=url_for("crm_module.opportunity_intake_save_venue"),
+        tb_wage_cards_url=_maybe_tb_wage_cards_url(),
+        event_intake_hidden=event_intake_hidden,
+        event_intake_extra_fields=event_intake_extra_fields,
+        intake_extra_prefill=_intake_extra_prefill(),
+    )
+
+
+@crm_bp.route("/opportunities/intake-private-transfer", methods=["GET", "POST"])
+@login_required
+@crm_access_required
+def opportunity_intake_private_transfer():
+    """Staff intake for private patient transfer / non-event (bookAmbulance-style fields; no Cura)."""
+    app = current_app._get_current_object()
+    pt_intake_hidden, pt_intake_extra_fields = load_private_transfer_intake_layout(app)
+
+    def _pt_intake_extra_prefill() -> dict[str, str]:
+        if request.method != "POST":
+            return {
+                str(fd.get("key") or ""): ""
+                for fd in pt_intake_extra_fields
+                if fd.get("key")
+            }
+        return {
+            str(fd["key"]): (request.form.get(f"intake_extra_{fd['key']}") or "")
+            for fd in pt_intake_extra_fields
+            if fd.get("key")
+        }
+
+    form_values: dict[str, Any] = {}
+    if request.method == "POST":
+        if not can_edit():
+            flash("You do not have permission to create pipeline records.", "danger")
+            return redirect(url_for("crm_module.opportunities_board"))
+        miss_ex = validate_required_extras(request.form, pt_intake_extra_fields)
+        if miss_ex:
+            flash(
+                "Please complete required extra fields: " + ", ".join(miss_ex) + ".",
+                "danger",
+            )
+            form_values = {}
+            for k in request.form.keys():
+                if k == "infectious[]":
+                    continue
+                form_values[k] = request.form.get(k) or ""
+            form_values["infectious_sel"] = request.form.getlist("infectious[]")
+            accounts = _accounts_select_options()
+            return render_template(
+                "admin/crm_opportunity_intake_private_transfer.html",
+                stages=OPP_STAGES,
+                can_edit=can_edit(),
+                form_values=form_values,
+                intake_private_accounts=accounts,
+                tb_wage_cards_url=_maybe_tb_wage_cards_url(),
+                pt_intake_hidden=pt_intake_hidden,
+                pt_intake_extra_fields=pt_intake_extra_fields,
+                intake_extra_prefill=_pt_intake_extra_prefill(),
+            )
+        parsed = parse_private_transfer_form(request.form)
+        acc_raw = (request.form.get("account_id") or "").strip()
+        acc_override = int(acc_raw) if acc_raw.isdigit() else None
+        stage = (request.form.get("stage") or "prospecting").strip()
+        if stage not in {s for s, _ in OPP_STAGES}:
+            stage = "prospecting"
+        meta_add: dict[str, Any] | None = None
+        if pt_intake_extra_fields:
+            meta_add = {
+                "private_transfer_intake_extras": collect_intake_extras_from_form(
+                    request.form, pt_intake_extra_fields
+                )
+            }
+        try:
+            opp_id, _cid, _meta = intake_from_parsed_form(
+                parsed,
+                source="staff_intake_private_transfer",
+                stage=stage,
+                account_id_override=acc_override,
+                lead_meta_additions=meta_add,
+            )
+            flash(
+                f"Opportunity #{opp_id} created (private transfer). "
+                "Use Scheduling on the opportunity to roster work in job view.",
+                "success",
+            )
+            return redirect(opportunity_edit_url(opp_id=int(opp_id), flow=True))
+        except LeadIntakeMissingRequiredFields:
+            flash(
+                "Applicant name, email, payee / organisation, and patient + journey fields are required.",
+                "danger",
+            )
+        except LeadIntakeInvalidAccount:
+            flash("That CRM account was not found.", "danger")
+        except Exception as ex:
+            flash(f"Could not create opportunity: {ex}", "danger")
+        form_values: dict[str, Any] = {}
+        for k in request.form.keys():
+            if k == "infectious[]":
+                continue
+            form_values[k] = request.form.get(k) or ""
+        form_values["infectious_sel"] = request.form.getlist("infectious[]")
+
+    accounts = _accounts_select_options()
+    return render_template(
+        "admin/crm_opportunity_intake_private_transfer.html",
+        stages=OPP_STAGES,
+        can_edit=can_edit(),
+        form_values=form_values,
+        intake_private_accounts=accounts,
+        tb_wage_cards_url=_maybe_tb_wage_cards_url(),
+        pt_intake_hidden=pt_intake_hidden,
+        pt_intake_extra_fields=pt_intake_extra_fields,
+        intake_extra_prefill=_pt_intake_extra_prefill(),
+    )
+
+
+@crm_bp.route("/opportunities/<int:opp_id>/schedule-sync", methods=["POST"])
+@login_required
+@crm_access_required
+@crm_edit_required
+def opportunity_schedule_sync(opp_id: int):
+    from datetime import datetime as dt_mod
+
+    from .crm_scheduling_bridge import scheduling_stack_available, sync_opportunity_to_schedule_shift
+
+    if not scheduling_stack_available():
+        flash("Scheduling module or schedule_shifts table is not available.", "warning")
+        return redirect(
+            opportunity_edit_url(
+                opp_id=opp_id,
+                flow=(request.form.get("crm_flow_active") or "").strip() == "1",
+            )
+        )
+    cid_raw = (request.form.get("schedule_client_id") or "").strip()
+    jt_raw = (request.form.get("schedule_job_type_id") or "").strip()
+    wd_raw = (request.form.get("schedule_work_date") or "").strip()
+    st_raw = (request.form.get("schedule_start") or "").strip()
+    en_raw = (request.form.get("schedule_end") or "").strip()
+    br_raw = (request.form.get("schedule_break_mins") or "0").strip()
+    rc_raw = (request.form.get("schedule_required_count") or "1").strip()
+    status = (request.form.get("schedule_status") or "draft").strip()
+    site_raw = (request.form.get("schedule_site_id") or "").strip()
+    if not cid_raw.isdigit() or not jt_raw.isdigit():
+        flash("Client and job type are required for scheduling.", "danger")
+        return redirect(
+            opportunity_edit_url(
+                opp_id=opp_id,
+                flow=(request.form.get("crm_flow_active") or "").strip() == "1",
+            )
+        )
+    try:
+        work_date = dt_mod.strptime(wd_raw, "%Y-%m-%d").date()
+        scheduled_start = dt_mod.strptime(st_raw, "%H:%M").time()
+        scheduled_end = dt_mod.strptime(en_raw, "%H:%M").time()
+    except ValueError:
+        flash("Work date must be YYYY-MM-DD and times HH:MM (24h).", "danger")
+        return redirect(
+            opportunity_edit_url(
+                opp_id=opp_id,
+                flow=(request.form.get("crm_flow_active") or "").strip() == "1",
+            )
+        )
+    site_id = int(site_raw) if site_raw.isdigit() else None
+    try:
+        break_mins = max(0, int(br_raw))
+    except ValueError:
+        break_mins = 0
+    try:
+        required_count = max(1, int(rc_raw))
+    except ValueError:
+        required_count = 1
+    actor_uid = None
+    actor_uname = None
+    if getattr(current_user, "is_authenticated", False):
+        try:
+            actor_uid = int(getattr(current_user, "id", 0) or 0) or None
+        except (TypeError, ValueError):
+            actor_uid = None
+        actor_uname = (
+            str(getattr(current_user, "username", "") or "").strip()
+            or str(getattr(current_user, "email", "") or "").strip()
+            or None
+        )
+    res = sync_opportunity_to_schedule_shift(
+        opportunity_id=opp_id,
+        client_id=int(cid_raw),
+        job_type_id=int(jt_raw),
+        work_date=work_date,
+        scheduled_start=scheduled_start,
+        scheduled_end=scheduled_end,
+        site_id=site_id,
+        break_mins=break_mins,
+        required_count=required_count,
+        status=status or "draft",
+        actor_user_id=actor_uid,
+        actor_username=actor_uname,
+    )
+    if res.get("ok"):
+        flash(
+            "Scheduling shift saved. Open Shifts / roster to assign staff — this path does not use Cura.",
+            "success",
+        )
+    else:
+        flash(res.get("error") or "Could not save scheduling shift.", "danger")
+    keep_flow = (request.form.get("crm_flow_active") or "").strip() == "1"
+    nxt = (request.form.get("crm_flow_next") or "").strip().lower()
+    if res.get("ok") and nxt == "quote":
+        return redirect(quote_new_url(opportunity_id=int(opp_id), flow=True))
+    return redirect(opportunity_edit_url(opp_id=opp_id, flow=keep_flow))
+
+
+@crm_bp.route("/opportunities/intake-preview", methods=["POST"])
+@login_required
+@crm_access_required
+def opportunity_intake_preview():
+    """JSON tier + rough wage cost for call-centre intake (same pipeline logic as create)."""
+    parsed = parse_public_calculator_form(request.form)
+    risk = compute_event_risk_from_parsed(parsed)
+    lm = build_lead_meta(source="intake_preview", parsed=parsed, risk=risk)
+    lm = enrich_lead_meta_with_staffing_breakdown(lm)
+    cost = estimate_guide_staffing_costs(lm) or {}
+    pg = risk.get("purple_guide") or {}
+    acc_raw = (request.form.get("account_id") or "").strip()
+    acc_id = int(acc_raw) if acc_raw.isdigit() else None
+    routing_hint = None
+    conn_r = get_db_connection()
+    try:
+        routing_hint = routing_hint_for_intake(
+            conn_r,
+            dispatch_base_id=parsed.get("dispatch_base_id"),
+            account_id=acc_id,
+            venue=lm.get("venue") if isinstance(lm.get("venue"), dict) else None,
+        )
+    except Exception:
+        routing_hint = None
+    finally:
+        conn_r.close()
+    return jsonify(
+        {
+            "ok": True,
+            "purple_score": pg.get("purple_score"),
+            "tier": pg.get("tier"),
+            "tier_title": pg.get("tier_title"),
+            "tier_summary": ((pg.get("tier_summary") or "")[:400]),
+            "conversion_row": pg.get("conversion_row"),
+            "band_label": risk.get("label"),
+            "suggested_medics": risk.get("suggested_medics"),
+            "suggested_vehicles": risk.get("suggested_vehicles"),
+            "customer_resource_matrix": risk.get("customer_resource_matrix"),
+            "cost": cost,
+            "routing_hint": routing_hint,
+        }
     )
 
 
@@ -875,6 +1625,10 @@ def opportunity_new():
                 guide_cost_estimate=None,
                 tb_wage_cards_url=_maybe_tb_wage_cards_url(),
                 can_edit=True,
+                **_crm_scheduling_form_context(None, None),
+                **_pipeline_flow_template_kwargs(
+                    request, step="opportunity", opp_id=None
+                ),
             )
         conn = get_db_connection()
         cur = conn.cursor()
@@ -888,7 +1642,22 @@ def opportunity_new():
             new_id = int(cur.lastrowid)
             log_opportunity_stage_change(new_id, None, stage, uid())
             flash("Opportunity created.", "success")
-            return redirect(url_for("crm_module.opportunity_edit", opp_id=new_id))
+            nxt = (request.form.get("crm_flow_next") or "stay").strip().lower()
+            if nxt == "quote":
+                return redirect(quote_new_url(opportunity_id=new_id, flow=True))
+            if nxt == "plan":
+                if crm_medical_surface_available():
+                    flash(
+                        "Create a quote first, then start the event plan from the quote.",
+                        "info",
+                    )
+                    return redirect(quote_new_url(opportunity_id=new_id, flow=True))
+                flash(
+                    "Event plans are available when Medical is enabled for this tenant.",
+                    "info",
+                )
+            keep = (request.form.get("crm_flow_active") or "").strip() == "1"
+            return redirect(opportunity_edit_url(opp_id=new_id, flow=keep or flow_active(request)))
         finally:
             cur.close()
             conn.close()
@@ -902,6 +1671,8 @@ def opportunity_new():
         guide_cost_estimate=None,
         tb_wage_cards_url=_maybe_tb_wage_cards_url(),
         can_edit=True,
+        **_crm_scheduling_form_context(None, None),
+        **_pipeline_flow_template_kwargs(request, step="opportunity", opp_id=None),
     )
 
 
@@ -953,6 +1724,10 @@ def opportunity_edit(opp_id: int):
                 guide_cost_estimate=_guide_cost_estimate(lm),
                 tb_wage_cards_url=_maybe_tb_wage_cards_url(),
                 can_edit=True,
+                **_crm_scheduling_form_context(row, lm),
+                **_pipeline_flow_template_kwargs(
+                    request, step="opportunity", opp_id=opp_id
+                ),
             )
         old_stage = (row.get("stage") or "").strip()
         conn = get_db_connection()
@@ -967,7 +1742,22 @@ def opportunity_edit(opp_id: int):
             if old_stage != stage:
                 log_opportunity_stage_change(opp_id, old_stage, stage, uid())
             flash("Opportunity updated.", "success")
-            return redirect(url_for("crm_module.opportunity_edit", opp_id=opp_id))
+            nxt = (request.form.get("crm_flow_next") or "stay").strip().lower()
+            if nxt == "quote":
+                return redirect(quote_new_url(opportunity_id=opp_id, flow=True))
+            if nxt == "plan":
+                if crm_medical_surface_available():
+                    flash(
+                        "Create a quote first, then start the event plan from the quote.",
+                        "info",
+                    )
+                    return redirect(quote_new_url(opportunity_id=opp_id, flow=True))
+                flash(
+                    "Event plans are available when Medical is enabled for this tenant.",
+                    "info",
+                )
+            keep = (request.form.get("crm_flow_active") or "").strip() == "1"
+            return redirect(opportunity_edit_url(opp_id=opp_id, flow=keep))
         finally:
             cur2.close()
             conn.close()
@@ -987,6 +1777,8 @@ def opportunity_edit(opp_id: int):
         guide_cost_estimate=_guide_cost_estimate(lm),
         tb_wage_cards_url=_maybe_tb_wage_cards_url(),
         can_edit=True,
+        **_crm_scheduling_form_context(row, lm),
+        **_pipeline_flow_template_kwargs(request, step="opportunity", opp_id=opp_id),
     )
 
 
@@ -1012,13 +1804,15 @@ def opportunity_delete(opp_id: int):
 
 from .quote_routes import register_crm_quote_routes  # noqa: E402
 from .activities_routes import register_crm_activities_routes  # noqa: E402
-from .planner_routes import register_crm_planner_routes  # noqa: E402
+from .planner_routes import register_crm_event_planner_legacy_redirects  # noqa: E402
 from .crm_settings_routes import register_crm_settings_routes  # noqa: E402
+from .crm_intake_forms_routes import register_crm_intake_form_routes  # noqa: E402
 
 register_crm_quote_routes(crm_bp)
 register_crm_activities_routes(crm_bp)
-register_crm_planner_routes(crm_bp)
+register_crm_event_planner_legacy_redirects(crm_bp)
 register_crm_settings_routes(crm_bp)
+register_crm_intake_form_routes(crm_bp)
 
 
 @crm_bp.context_processor
@@ -1033,6 +1827,12 @@ def _crm_cross_module_nav():
 
 
 def get_blueprints():
+    """Admin ERP app only (`register_admin_routes`). Public calculator is `get_public_blueprints`."""
+    return [crm_bp]
+
+
+def get_public_blueprints():
+    """Website / public host + admin app second pass (`register_public_routes`): /event-risk-calculator, /quoting."""
     from .crm_public_routes import crm_public_bp
 
-    return [crm_public_bp, crm_bp]
+    return [crm_public_bp]

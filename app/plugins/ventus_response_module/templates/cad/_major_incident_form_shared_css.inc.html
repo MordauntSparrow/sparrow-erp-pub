@@ -1,0 +1,81 @@
+{# Included inside <style> — Declare MI field styling shared by dashboard modal (incl. popout=1) and major_incident_declare.html #}
+.cad-mi-declare-error {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--cad-soft-red-bg);
+  color: var(--cad-soft-red-text);
+  border: 1px solid var(--accent-danger);
+  display: none;
+}
+.cad-mi-declare-error:not(:empty) {
+  display: block;
+}
+.cad-mi-label, .cad-mi-label-sm {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.cad-mi-label-sm {
+  margin-bottom: 8px;
+}
+.cad-mi-input, .cad-mi-textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.cad-mi-input::placeholder,
+.cad-mi-textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.78;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.cad-mi-mono {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+.cad-mi-textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+.cad-mi-fieldset {
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.cad-mi-fieldset legend {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 6px;
+  color: var(--text-primary);
+}
+.cad-mi-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+/* Top-level optional phase (API body.phase) — hidden for METHANE */
+#cadMiDeclareOverlay[data-mi-template="methane"] .cad-mi-phase-row,
+#cadMiDeclarePageRoot[data-mi-template="methane"] .cad-mi-phase-row {
+  display: none !important;
+  visibility: hidden;
+  height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  pointer-events: none;
+  border: 0;
+}

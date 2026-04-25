@@ -6,11 +6,13 @@ payload, writes an audit row, and optionally simulates success when
 ``SPARROW_CRM_EVENT_HANDOFF_MODE=simulate`` is set (for QA).
 
 Env:
-- ``SPARROW_CRM_EVENT_HANDOFF_MODE``: unset / ``off`` → log only, status skipped_disabled.
+- ``SPARROW_CRM_EVENT_HANDOFF_MODE``: **default ``live``** (unset or empty) — calls Cura when the user runs
+  **Push to Cura** with **Cura ops sync** turned on (medical industry / integration permitting). Plans can stay CRM-only
+  with sync off.
+- ``off`` / ``0`` / ``false`` / ``no`` → log only, status skipped_disabled (opt-out for sandboxes).
 - ``simulate`` → sets plan handoff fields to a synthetic external ref (no Cura call).
 - ``dry_run`` → logs payload summary in handoff log, does not claim sync.
-- ``live`` → calls ``medical_records_module.cura_crm_event_plan_handoff.sync_crm_event_plan_to_cura`` (requires
-  that plugin and DB tables). Pass the Flask app into ``process_event_plan_handoff`` so PDF paths resolve.
+- ``live`` → same as default; explicit ``live`` is optional.
 
 - ``SPARROW_CRM_HANDOFF_REQUIRE_PDF``: when set to ``1`` / ``true`` / ``yes`` / ``on``, ``live`` handoff fails if
   the plan has no stored PDF row (strict production guard).
@@ -19,7 +21,7 @@ Env:
   **Send to Cura** (UI or API) is blocked until that quote's status is ``accepted`` (client agreed pricing).
   Set to ``0`` / ``false`` / ``off`` to skip (e.g. QA or opportunity-only plans with stale quote links).
 
-Handoff is **only** triggered by the explicit **Send to Cura** action (no automatic sync on quote save).
+Handoff is **only** triggered by **Push to Cura** on the event plan page (top banner or review step; no automatic sync on quote save). The same action re-syncs after plan, roster, or PDF changes.
 """
 from __future__ import annotations
 
@@ -41,7 +43,12 @@ HANDOFF_REQUIRE_QUOTE_ACCEPTED_ENV = "SPARROW_CRM_HANDOFF_REQUIRE_QUOTE_ACCEPTED
 
 
 def handoff_mode() -> str:
-    return (os.environ.get(HANDOFF_ENV_MODE) or "off").strip().lower()
+    """Default ``live`` so Cura sync works without extra env wiring; set ``off`` / ``simulate`` / ``dry_run`` to opt out."""
+    raw = os.environ.get(HANDOFF_ENV_MODE)
+    if raw is None:
+        return "live"
+    s = str(raw).strip().lower()
+    return s if s else "live"
 
 
 def build_handoff_payload(
@@ -270,7 +277,7 @@ def process_event_plan_handoff(
                 plan_id=plan_id,
                 trigger=trigger,
                 status="skipped_disabled",
-                detail="Set SPARROW_CRM_EVENT_HANDOFF_MODE to simulate, dry_run, or live.",
+                detail="Handoff disabled: SPARROW_CRM_EVENT_HANDOFF_MODE is off. Unset env for default live, or set live/simulate/dry_run.",
                 pdf_hash=latest_hash,
                 external_ref=None,
                 user_key=user_key,

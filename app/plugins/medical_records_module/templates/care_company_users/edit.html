@@ -1,0 +1,44 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Edit Care Company User - VITA PRS{% endblock %}
+{% block content %}
+<div class="container mt-5">
+  <h1>Edit Care Company User: {{ user.username }}</h1>
+  <form action="{{ url_for('medical_records_internal.edit_care_company_user', user_id=user.id) }}" method="POST">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3">
+      <label for="email" class="form-label">Email</label>
+      <input type="email" class="form-control" id="email" name="email" value="{{ user.email }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="company_name" class="form-label">Company Name</label>
+      <input type="text" class="form-control" id="company_name" name="company_name" value="{{ user.company_name }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="contact_phone" class="form-label">Contact Phone</label>
+      <input type="text" class="form-control" id="contact_phone" name="contact_phone" value="{{ user.contact_phone }}">
+    </div>
+    <div class="mb-3">
+      <label for="contact_address" class="form-label">Contact Address</label>
+      <textarea class="form-control" id="contact_address" name="contact_address">{{ user.contact_address }}</textarea>
+    </div>
+    <hr>
+    <h4>Optional Password Reset</h4>
+    <div class="mb-3">
+      <label for="new_password" class="form-label">New Password (leave blank if unchanged)</label>
+      <input type="password" class="form-control" id="new_password" name="new_password">
+    </div>
+    <div class="mb-3">
+      <label for="confirm_new_password" class="form-label">Confirm New Password</label>
+      <input type="password" class="form-control" id="confirm_new_password" name="confirm_new_password">
+    </div>
+    <hr>
+    <h4>Optional Company PIN Update</h4>
+    <div class="mb-3">
+      <label for="new_company_pin" class="form-label">New Company PIN (leave blank if unchanged)</label>
+      <input type="text" class="form-control" id="new_company_pin" name="new_company_pin" maxlength="6" placeholder="6-digit PIN">
+    </div>
+    <button type="submit" class="btn btn-primary">Update User</button>
+    <a href="{{ url_for('medical_records_internal.list_care_company_users') }}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

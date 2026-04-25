@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Portal modules by role – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_index') }}">Employee Portal</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Portal modules by role</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Portal modules by job role</h1>
+  <p class="text-muted mb-4">Limit which <strong>dashboard module tiles</strong> appear for everyone with that Time&nbsp;&amp;&nbsp;Billing role. You can tighten further per person on the contractor’s <strong>Portal modules</strong> screen.</p>
+  <p class="small text-muted mb-4">Effective access is the <strong>intersection</strong> of role rule, per-person rule (if any), plugin enablement, and tenant industry defaults. No row means “no restriction” at that layer.</p>
+
+  {% if roles %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Code</th>
+          <th>Role rule</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in roles %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td class="text-muted small">{{ r.code or '—' }}</td>
+          <td>{% if r.has_portal_rule %}<span class="badge bg-warning text-dark">Custom list</span>{% else %}<span class="badge bg-secondary">None (all allowed at role layer)</span>{% endif %}</td>
+          <td><a href="{{ url_for('internal_employee_portal.admin_module_access_role_edit', rid=r.id) }}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No active roles found (Time&nbsp;&amp;&nbsp;Billing <code>roles</code> table).</p>
+  {% endif %}
+
+  <a href="{{ url_for('internal_employee_portal.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Employee Portal admin</a>
+</div>
+{% endblock %}

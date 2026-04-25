@@ -8,11 +8,9 @@
 <div class="container-fluid py-3">
   <h1 class="h4 mb-2">Event guide ↔ wage card job types</h1>
   <p class="text-muted small mb-4">
-    Intake and opportunities use a <strong>staffing guide</strong> (counts only). Wage hints use £/h from Time &amp; Billing
-    <strong>job types</strong> on the active guide wage card. Map the two CRM lines below to your real <code>job_types</code> IDs
-    so naming differences (e.g. “Clinical officer” vs “Medic”) do not break costing.
+    The guide breakdown uses granular <strong>wage slots</strong> (clinical lead, advanced paramedic, paramedic, technician, first aider, ECA, solo, optional event doctor) plus <strong>vehicle crew</strong>.
+    Map each slot to a <code>job_types</code> row with an effective £/h on your guide wage card. Legacy <strong>ALS / EMT</strong> slots remain as fallbacks when a granular slot is not set.
     Active card: {% if card_id %}<strong>#{{ card_id }}</strong> {{ card_name or '' }}{% else %}<span class="text-warning">none — add a card or set <code>SPARROW_CRM_GUIDE_WAGE_CARD_ID</code></span>{% endif %}.
-    Each mapped type must have an effective rate row on that card for today’s date.
   </p>
 
   {% set on_ids = job_types_on_card | map(attribute='id') | list %}
@@ -21,20 +19,117 @@
   <form method="post" class="card border-0 shadow-sm mb-4">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Per-role maps (recommended)</h2>
+      <p class="small text-muted mb-3">These match <code>wage_slot</code> on each line in the guide staffing breakdown. Empty granular slots chain to legacy ALS/EMT then <strong>blended clinical</strong> below.</p>
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label fw-semibold" for="clinical_job_type_id">{% if industry_visible('medical') %}Clinical / medic line{% else %}Primary guide role (clinical slot){% endif %}</label>
+          <label class="form-label fw-semibold" for="clinical_lead_job_type_id">Event clinical lead</label>
+          <select class="form-select" id="clinical_lead_job_type_id" name="clinical_lead_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('clinical_lead') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="doctor_job_type_id">Event physician / doctor</label>
+          <select class="form-select" id="doctor_job_type_id" name="doctor_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('doctor') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="paramedic_advanced_job_type_id">Advanced paramedic / FCP-grade ALS</label>
+          <select class="form-select" id="paramedic_advanced_job_type_id" name="paramedic_advanced_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('paramedic_advanced') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="paramedic_job_type_id">Registered paramedic (ALS)</label>
+          <select class="form-select" id="paramedic_job_type_id" name="paramedic_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('paramedic') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="technician_job_type_id">EMT / technician</label>
+          <select class="form-select" id="technician_job_type_id" name="technician_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('technician') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="first_aider_job_type_id">Qualified first aider</label>
+          <select class="form-select" id="first_aider_job_type_id" name="first_aider_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('first_aider') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="eca_job_type_id">Emergency care assistant (ECA)</label>
+          <select class="form-select" id="eca_job_type_id" name="eca_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('eca') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="solo_clinical_job_type_id">Solo clinical cover</label>
+          <select class="form-select" id="solo_clinical_job_type_id" name="solo_clinical_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('solo_clinical') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="als_job_type_id">Legacy — ALS / paramedic (single bucket)</label>
+          <select class="form-select" id="als_job_type_id" name="als_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('als') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="emt_job_type_id">Legacy — EMT / mixed support (single bucket)</label>
+          <select class="form-select" id="emt_job_type_id" name="emt_job_type_id">
+            <option value="">— Not set —</option>
+            {% for j in all_job_types %}
+            <option value="{{ j.id }}" {% if slot_map.get('emt') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <hr class="my-4">
+      <h2 class="h6 text-uppercase text-muted mb-3">Blended fallback &amp; vehicles</h2>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold" for="clinical_job_type_id">Blended clinical (legacy / remainder)</label>
           <select class="form-select" id="clinical_job_type_id" name="clinical_job_type_id">
-            <option value="">— Auto-detect from names (legacy) —</option>
+            <option value="">— Auto-detect from names —</option>
             {% for j in all_job_types %}
             <option value="{{ j.id }}" {% if slot_map.get('clinical') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
             {% endfor %}
           </select>
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold" for="driver_job_type_id">{% if industry_visible('medical') %}Driver / response crew line{% else %}Secondary crew / driver slot{% endif %}</label>
+          <label class="form-label fw-semibold" for="driver_job_type_id">{% if industry_visible('medical') %}Vehicle crew — driver / ECA (blue light){% else %}Crew / driver{% endif %}</label>
+          <p class="small text-muted mb-1">Many ambulance drivers are <strong>ECAs</strong> (e.g. FREC4 responder with blue-light training). Map this slot to that wage line, or leave it unset and map <strong>ECA</strong> above — vehicle costing will try driver, then ECA, then legacy EMT.</p>
           <select class="form-select" id="driver_job_type_id" name="driver_job_type_id">
-            <option value="">— Auto-detect from names (legacy) —</option>
+            <option value="">— Auto-detect from names —</option>
             {% for j in all_job_types %}
             <option value="{{ j.id }}" {% if slot_map.get('driver') == j.id %}selected{% endif %}>{{ j.name }} (#{{ j.id }}){% if j.id in on_ids %} · on card{% endif %}</option>
             {% endfor %}
@@ -51,7 +146,8 @@
   {% if preview_estimate %}
   <div class="card border-0 shadow-sm">
     <div class="card-body">
-      <h2 class="h6 text-uppercase text-muted mb-3">{% if industry_visible('medical') %}Live preview (2 medics, 1 vehicle, 8 h){% else %}Live preview (sample headcount, 1 vehicle, 8 h){% endif %}</h2>
+      <h2 class="h6 text-uppercase text-muted mb-3">Live preview (sample tier mix, 8 h)</h2>
+      <p class="small text-muted mb-2">Uses the same breakdown as opportunities after mapping — 10 on-foot clinical posts, 2 vehicles.</p>
       {% if preview_estimate.tb_note %}
       <div class="alert alert-warning small py-2">{{ preview_estimate.tb_note }}</div>
       {% endif %}
@@ -69,8 +165,9 @@
       <p class="small text-muted mb-0">No lines — configure wage card rates or mappings.</p>
       {% endif %}
       <p class="small text-muted mt-2 mb-0">
-        Using explicit CRM map — {% if industry_visible('medical') %}clinical{% else %}primary slot{% endif %}: {{ 'yes' if preview_estimate.get('used_clinical_mapping') else 'no' }},
-        {% if industry_visible('medical') %}driver{% else %}secondary slot{% endif %}: {{ 'yes' if preview_estimate.get('used_driver_mapping') else 'no' }}.
+        Per-role lines: {{ 'yes' if preview_estimate.get('used_per_role_lines') else 'no' }} ·
+        Blended clinical map: {{ 'yes' if preview_estimate.get('used_clinical_mapping') else 'no' }} ·
+        Driver map: {{ 'yes' if preview_estimate.get('used_driver_mapping') else 'no' }}
       </p>
     </div>
   </div>

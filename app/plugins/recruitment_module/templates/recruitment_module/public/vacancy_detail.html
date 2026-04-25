@@ -3,10 +3,18 @@
 <nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('public_recruitment_site.vacancies_list') }}">Vacancies</a></li><li class="breadcrumb-item active" aria-current="page">{{ opening.title }}</li></ol></nav>
 <h1 class="h3 mb-2">{{ opening.title }}</h1>
 <p class="text-muted mb-3"><span class="badge bg-primary-subtle text-primary border">{{ opening.role_title }}</span></p>
+{% if opening_capacity_blocked %}
+<div class="alert alert-warning">{{ opening_capacity_message }}</div>
+{% endif %}
 {% if opening.summary %}<p class="lead">{{ opening.summary }}</p>{% endif %}
+{% if opening.listing_pay_display %}
+<div class="alert alert-light border mb-3 py-2 px-3 small">
+  <span class="text-muted text-uppercase fw-semibold me-2">Pay</span>{{ opening.listing_pay_display }}
+</div>
+{% endif %}
 {% if opening.description %}<div class="mb-4 text-break" style="white-space:pre-wrap;">{{ opening.description }}</div>{% endif %}
 
-{% if applicant %}
+{% if applicant and not opening_capacity_blocked %}
 <div class="card border-primary">
   <div class="card-header fw-semibold">Apply</div>
   <div class="card-body">
@@ -61,6 +69,8 @@
     </form>
   </div>
 </div>
+{% elif applicant and opening_capacity_blocked %}
+<div class="alert alert-secondary">You are signed in, but this vacancy is not accepting new applications.</div>
 {% else %}
 <div class="alert alert-info">
   <a href="{{ url_for('public_recruitment_site.applicant_login', next=request.path) }}">Sign in</a> or

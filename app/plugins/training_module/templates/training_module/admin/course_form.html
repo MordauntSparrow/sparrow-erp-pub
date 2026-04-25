@@ -40,8 +40,14 @@
       <input class="form-control" type="number" name="grace_days" value="0" min="0">
     </div>
     <div class="mb-3">
-      <label class="form-label">Linked compliance policy ID (optional)</label>
-      <input class="form-control" type="number" name="comp_policy_id" placeholder="comp_policies.id — read-only link for staff">
+      <label class="form-label">Linked compliance policy (optional)</label>
+      <select class="form-select" name="comp_policy_id">
+        <option value="">— None —</option>
+        {% for p in compliance_policies %}
+        <option value="{{ p.id }}">{{ (p.title or ('Policy ' ~ p.id))|e }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Reading reference for assigned staff; acknowledgements stay in Compliance.</div>
     </div>
     <div class="form-check mb-3">
       <input class="form-check-input" type="checkbox" name="require_verify" value="1" id="rv" checked>

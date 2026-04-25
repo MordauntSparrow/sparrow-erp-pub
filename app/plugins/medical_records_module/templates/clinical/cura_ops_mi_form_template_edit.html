@@ -1,0 +1,224 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Edit MI form #{{ tpl.id }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_mi_form_templates') }}">MI custom forms</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Edit #{{ tpl.id }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <h1 class="h4 mb-0">Edit form template</h1>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('medical_records_internal.cura_ops_mi_form_templates') }}">Back to list</a>
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width: 42rem;">
+  <div class="card-body">
+    <form method="post" action="{{ url_for('medical_records_internal.cura_ops_mi_form_template_edit', template_id=tpl.id) }}" id="mi_ft_form" novalidate>
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label" for="mi_ft_name">Display name</label>
+        <input class="form-control" id="mi_ft_name" name="name" required maxlength="255" value="{{ tpl.name }}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="mi_ft_slug">Slug</label>
+        <input class="form-control font-monospace" id="mi_ft_slug" name="slug" required maxlength="64" pattern="[a-z0-9][a-z0-9_-]*" value="{{ tpl.slug }}">
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="mi_ft_desc">Description (optional)</label>
+        <input class="form-control" id="mi_ft_desc" name="description" maxlength="512" value="{{ tpl.description or '' }}">
+      </div>
+      <div class="mb-3 form-check">
+        <input class="form-check-input" type="checkbox" name="is_active" value="1" id="mi_ft_active" {% if tpl.is_active %}checked{% endif %}>
+        <label class="form-check-label" for="mi_ft_active">Active (inactive templates cannot be assigned to new events)</label>
+      </div>
+      <div class="mb-3">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <label class="form-label mb-0">Questions</label>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="mi_ft_add_q">Add question</button>
+        </div>
+        <div id="mi_ft_questions" class="d-flex flex-column gap-2"></div>
+      </div>
+      <input type="hidden" name="schema_json" id="mi_ft_schema_json" value="">
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </div>
+</div>
+
+<script type="application/json" id="mi_ft_initial_schema">{{ tpl.schema | tojson }}</script>
+
+<template id="mi_ft_q_tpl">
+  <div class="mi-ft-q-row border rounded p-3 bg-light position-relative">
+    <button type="button" class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-2 mi-ft-q-remove" title="Remove question" aria-label="Remove question">&times;</button>
+    <div class="row g-2 pe-4">
+      <div class="col-md-4">
+        <label class="form-label small text-muted mb-0">Field key</label>
+        <input type="text" class="form-control form-control-sm font-monospace mi-ft-key" maxlength="64" pattern="[a-z][a-z0-9_]*" placeholder="e.g. zone">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label small text-muted mb-0">Label</label>
+        <input type="text" class="form-control form-control-sm mi-ft-label" maxlength="255" placeholder="e.g. Zone">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small text-muted mb-0">Type</label>
+        <select class="form-select form-select-sm mi-ft-type">
+          <option value="text">Short text</option>
+          <option value="textarea">Long text</option>
+          <option value="number">Number</option>
+          <option value="select">Single choice</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 d-flex align-items-end">
+        <div class="form-check mb-1">
+          <input class="form-check-input mi-ft-required" type="checkbox">
+          <label class="form-check-label small mi-ft-required-label">Required</label>
+        </div>
+      </div>
+    </div>
+    <div class="mi-ft-q-opts mt-2 d-none">
+      <label class="form-label small text-muted mb-1">Choices (one per line)</label>
+      <textarea class="form-control form-control-sm font-monospace mi-ft-options" rows="3"></textarea>
+    </div>
+    <div class="mi-ft-q-num mt-2 d-none">
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label small text-muted mb-0">Min (optional)</label>
+          <input type="number" class="form-control form-control-sm mi-ft-min" step="any">
+        </div>
+        <div class="col-6">
+          <label class="form-label small text-muted mb-0">Max (optional)</label>
+          <input type="number" class="form-control form-control-sm mi-ft-max" step="any">
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById('mi_ft_form');
+  const list = document.getElementById('mi_ft_questions');
+  const tpl = document.getElementById('mi_ft_q_tpl');
+  const hidden = document.getElementById('mi_ft_schema_json');
+  const addBtn = document.getElementById('mi_ft_add_q');
+  const initialEl = document.getElementById('mi_ft_initial_schema');
+  if (!form || !list || !tpl || !hidden || !addBtn) return;
+
+  function syncTypeRow(row) {
+    const t = row.querySelector('.mi-ft-type').value;
+    row.querySelector('.mi-ft-q-opts').classList.toggle('d-none', t !== 'select');
+    row.querySelector('.mi-ft-q-num').classList.toggle('d-none', t !== 'number');
+  }
+
+  function wireRow(node) {
+    const id = 'mi_ft_req_' + Math.random().toString(36).slice(2, 9);
+    const cb = node.querySelector('.mi-ft-required');
+    const lbl = node.querySelector('.mi-ft-required-label');
+    cb.id = id;
+    lbl.setAttribute('for', id);
+    node.querySelector('.mi-ft-type').addEventListener('change', function () { syncTypeRow(node); });
+    node.querySelector('.mi-ft-q-remove').addEventListener('click', function () {
+      node.remove();
+      if (!list.querySelector('.mi-ft-q-row')) addRow();
+    });
+  }
+
+  function addRow() {
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    wireRow(node);
+    list.appendChild(node);
+    syncTypeRow(node);
+    return node;
+  }
+
+  function fillRowFromQuestion(node, q) {
+    if (!q || typeof q !== 'object') return;
+    const key = (q.key || '').toString();
+    const label = (q.label || '').toString();
+    const type = (q.type || 'text').toString().toLowerCase();
+    node.querySelector('.mi-ft-key').value = key;
+    node.querySelector('.mi-ft-label').value = label;
+    const sel = node.querySelector('.mi-ft-type');
+    if (['text', 'textarea', 'number', 'select'].indexOf(type) >= 0) sel.value = type;
+    node.querySelector('.mi-ft-required').checked = !!q.required;
+    if (type === 'select' && Array.isArray(q.options)) {
+      node.querySelector('.mi-ft-options').value = q.options.join('\n');
+    }
+    if (type === 'number') {
+      if (q.min != null && q.min !== '') node.querySelector('.mi-ft-min').value = q.min;
+      if (q.max != null && q.max !== '') node.querySelector('.mi-ft-max').value = q.max;
+    }
+    syncTypeRow(node);
+  }
+
+  addBtn.addEventListener('click', function () { addRow(); });
+
+  function buildSchemaFromDom() {
+    const questions = [];
+    const seen = Object.create(null);
+    const rows = list.querySelectorAll('.mi-ft-q-row');
+    rows.forEach(function (row, idx) {
+      const key = (row.querySelector('.mi-ft-key').value || '').trim().toLowerCase();
+      const label = (row.querySelector('.mi-ft-label').value || '').trim();
+      const type = (row.querySelector('.mi-ft-type').value || 'text').toLowerCase();
+      const required = row.querySelector('.mi-ft-required').checked;
+      if (!key && !label) return;
+      if (!key) throw new Error('Question ' + (idx + 1) + ': enter a field key.');
+      if (!/^[a-z][a-z0-9_]*$/.test(key)) throw new Error('Question "' + key + '": invalid key.');
+      if (seen[key]) throw new Error('Duplicate field key: ' + key);
+      seen[key] = true;
+      const o = { key: key, label: label || key, type: type };
+      if (required) o.required = true;
+      if (type === 'select') {
+        const raw = (row.querySelector('.mi-ft-options').value || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+        if (!raw.length) throw new Error('Question "' + label + '": add choices for single-choice fields.');
+        o.options = raw;
+      }
+      if (type === 'number') {
+        const minEl = row.querySelector('.mi-ft-min');
+        const maxEl = row.querySelector('.mi-ft-max');
+        if (minEl.value !== '' && minEl.value != null) {
+          const n = Number(minEl.value);
+          if (Number.isNaN(n)) throw new Error('Min must be a number.');
+          o.min = n;
+        }
+        if (maxEl.value !== '' && maxEl.value != null) {
+          const n = Number(maxEl.value);
+          if (Number.isNaN(n)) throw new Error('Max must be a number.');
+          o.max = n;
+        }
+      }
+      questions.push(o);
+    });
+    if (!questions.length) throw new Error('Add at least one question.');
+    return { questions: questions };
+  }
+
+  form.addEventListener('submit', function (e) {
+    try {
+      hidden.value = JSON.stringify(buildSchemaFromDom());
+    } catch (err) {
+      e.preventDefault();
+      alert(err.message || String(err));
+    }
+  });
+
+  list.innerHTML = '';
+  try {
+    const sch = initialEl ? JSON.parse(initialEl.textContent || '{}') : {};
+    const qs = Array.isArray(sch.questions) ? sch.questions : [];
+    if (qs.length) {
+      qs.forEach(function (q) { fillRowFromQuestion(addRow(), q); });
+    } else {
+      addRow();
+    }
+  } catch (e) {
+    addRow();
+  }
+})();
+</script>
+{% endblock %}

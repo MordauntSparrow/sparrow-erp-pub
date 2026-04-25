@@ -6,7 +6,10 @@ Hospital suggestions for the medical event planner (PRD §5.1 step 5, CRM-HOSP-0
    Nearby Search (type=hospital) and rank by distance.
 3. Otherwise fall back to the static catalogue ranked by haversine.
 
-Enable **Places API** (Nearby Search) on the GCP project for that key. If the call fails
+4. If the query is not a geocodable postcode, **Places Text Search** (type=hospital, region=uk)
+   runs when a key is set, so name searches (e.g. ``Royal Bournemouth``) still return rows.
+
+Enable **Places API** (Nearby Search and Text Search) on the GCP project for that key. If the call fails
 or returns no rows, behaviour falls back to the catalogue without breaking the UI.
 """
 from __future__ import annotations
@@ -21,6 +24,7 @@ import requests
 
 POSTCODES_IO_BASE = "https://api.postcodes.io"
 PLACES_NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+PLACES_TEXTSEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 REQUEST_TIMEOUT_S = 8
 _MAX_SUGGESTIONS = 12
 # Metres — NHS catchment-style radius from postcode centroid (Places max 50_000).
@@ -164,14 +168,39 @@ def _geocode_uk_query(q: str) -> tuple[float, float] | None:
     return None
 
 
-def _text_filter_catalog(q_norm: str) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+def _text_filter_catalog(q_raw: str) -> list[dict[str, Any]]:
+    """
+    Match catalogue rows when the query is not a geocodable postcode.
+    Uses token AND matching on name + postcode so short queries like
+    ``dorset`` or ``royal london`` still hit rows.
+    """
+    q_norm = _normalize_query(q_raw)
+    if not q_norm:
+        return []
+    tokens = [t for t in re.split(r"\s+", q_norm) if len(t) >= 2]
+    if not tokens:
+        tokens = [q_norm.replace(" ", "")]
     q_compact = q_norm.replace(" ", "")
+    out: list[dict[str, Any]] = []
     for r in _HOSPITALS:
         pc = (r["postcode"] or "").upper().replace(" ", "")
         nm = (r["name"] or "").upper()
-        if q_norm in nm or q_compact and q_compact in pc or q_norm.replace(" ", "") in pc:
-            out.append({"name": r["name"], "postcode": r["postcode"]})
+        hay = f"{nm} {pc}"
+        token_ok = all(tok in hay for tok in tokens)
+        legacy_sub = (
+            q_norm in nm
+            or (bool(q_compact) and q_compact in pc)
+            or q_norm.replace(" ", "") in pc
+        )
+        if token_ok or legacy_sub:
+            pc_disp = (r["postcode"] or "").strip()
+            out.append(
+                {
+                    "name": r["name"],
+                    "postcode": pc_disp,
+                    "address": pc_disp,
+                }
+            )
         if len(out) >= _MAX_SUGGESTIONS:
             break
     return out
@@ -180,7 +209,11 @@ def _text_filter_catalog(q_norm: str) -> list[dict[str, Any]]:
 def _rows_sorted_by_name(limit: int) -> list[dict[str, str]]:
     rows = sorted(_HOSPITALS, key=lambda x: (x["name"] or "").lower())
     return [
-        {"name": r["name"], "postcode": r["postcode"]}
+        {
+            "name": r["name"],
+            "postcode": r["postcode"],
+            "address": (r["postcode"] or "").strip(),
+        }
         for r in rows[:limit]
     ]
 
@@ -189,7 +222,13 @@ def _rows_by_distance(lat: float, lng: float, limit: int) -> list[dict[str, Any]
     scored: list[tuple[float, dict[str, Any]]] = []
     for r in _HOSPITALS:
         d = _haversine_km(lat, lng, float(r["lat"]), float(r["lng"]))
-        item = {"name": r["name"], "postcode": r["postcode"], "distance_km": round(d, 1)}
+        pc_disp = (r["postcode"] or "").strip()
+        item = {
+            "name": r["name"],
+            "postcode": pc_disp,
+            "address": pc_disp,
+            "distance_km": round(d, 1),
+        }
         scored.append((d, item))
     scored.sort(key=lambda x: x[0])
     return [x[1] for x in scored[:limit]]
@@ -256,9 +295,13 @@ def _places_nearby_hospital_rows(
         vicinity = pl.get("vicinity")
         vic_str = vicinity.strip() if isinstance(vicinity, str) else ""
         pc = _postcode_from_vicinity(vic_str)
+        addr_line = (pl.get("formatted_address") or "").strip()
+        if not addr_line:
+            addr_line = vic_str or pc
         row: dict[str, Any] = {
             "name": name,
             "postcode": pc,
+            "address": addr_line or pc,
             "distance_km": round(d, 1),
         }
         if vic_str and not pc:
@@ -269,6 +312,59 @@ def _places_nearby_hospital_rows(
 
     rows.sort(key=lambda x: x[0])
     return [x[1] for x in rows]
+
+
+def _places_text_search_hospitals(query: str, api_key: str) -> list[dict[str, Any]] | None:
+    """
+    Google Places Text Search (legacy JSON) for free-text hospital names.
+
+    Returns:
+        non-empty list on OK with results,
+        [] on ZERO_RESULTS,
+        None on transport errors or API denial (caller should fall back).
+    """
+    q = (query or "").strip()
+    if len(q) < 2:
+        return None
+    try:
+        r = requests.get(
+            PLACES_TEXTSEARCH_URL,
+            params={
+                "query": q,
+                "type": "hospital",
+                "key": api_key,
+                "region": "uk",
+            },
+            timeout=REQUEST_TIMEOUT_S,
+        )
+        data = r.json()
+    except (OSError, ValueError, TypeError, requests.RequestException):
+        return None
+
+    status = data.get("status")
+    if status == "ZERO_RESULTS":
+        return []
+    if status != "OK":
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for pl in data.get("results") or []:
+        name = (pl.get("name") or "").strip() or "Hospital"
+        addr_line = (pl.get("formatted_address") or "").strip()
+        vicinity = pl.get("vicinity")
+        vic_str = vicinity.strip() if isinstance(vicinity, str) else ""
+        pc = _postcode_from_vicinity(addr_line) or _postcode_from_vicinity(vic_str)
+        addr_out = addr_line or vic_str or pc
+        row: dict[str, Any] = {
+            "name": name,
+            "postcode": pc,
+            "address": addr_out,
+        }
+        pid = pl.get("place_id")
+        if pid:
+            row["place_id"] = pid
+        rows.append(row)
+    return rows
 
 
 def hospital_suggest_payload(query: str | None) -> dict[str, Any]:
@@ -307,20 +403,30 @@ def hospital_suggest_payload(query: str | None) -> dict[str, Any]:
             "source": "catalogue",
         }
 
-    n = _normalize_query(raw)
-    text_hits = _text_filter_catalog(n)
+    key = (os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
+    if key and len(raw) >= 2:
+        text_places = _places_text_search_hospitals(raw, key)
+        if text_places is not None and len(text_places) > 0:
+            return {
+                "suggestions": text_places[:_MAX_SUGGESTIONS],
+                "stub": False,
+                "message": None,
+                "source": "google_places_text",
+            }
+
+    text_hits = _text_filter_catalog(raw)
     if text_hits:
         return {
             "suggestions": text_hits,
             "stub": True,
-            "message": "Could not geocode that location; showing name or postcode matches.",
+            "message": "Could not geocode that as a postcode; showing built-in catalogue matches (token search).",
             "source": "catalogue_text",
         }
 
     return {
         "suggestions": [],
         "stub": True,
-        "message": "Could not find that UK postcode. Try a full postcode or outcode (e.g. DT7).",
+        "message": "No matches for that text. Try a UK postcode, a hospital name, or add a row manually in the table.",
         "source": "none",
     }
 

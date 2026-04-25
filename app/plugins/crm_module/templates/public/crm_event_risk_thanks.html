@@ -24,32 +24,49 @@
 </div>
 {% set pg = lead_meta.risk.get('purple_guide') if lead_meta and lead_meta.get('risk') is mapping else none %}
 {% if pg is mapping and pg %}
-<div class="container py-4" style="max-width: 48rem;">
-  <div class="card border-0 shadow-sm">
-    <div class="card-body">
-      <h2 class="h5 fw-bold mb-3">Indicative planning summary</h2>
-      <p class="small text-muted mb-2">Planning score: <strong>{{ pg.purple_score }}</strong> · Tier: <strong>{{ pg.tier }}</strong> — {{ pg.tier_title or '' }}</p>
-      <p class="small mb-3">{{ pg.tier_summary or '' }}</p>
-      {% set cr = pg.conversion_row or {} %}
-      <h3 class="h6 text-uppercase text-muted mb-2">Conversion band {{ cr.score_range or '—' }} (indicative staffing)</h3>
-      <ul class="small mb-3">
-        <li>First responders: <strong>{{ cr.first_responder }}</strong></li>
-        <li>Ambulances / crew (indicative): <strong>{{ cr.ambulances }}</strong> / <strong>{{ cr.ambulance_crew }}</strong></li>
-        <li>Doctors / nurses (indicative): <strong>{{ cr.doctor }}</strong> / <strong>{{ cr.nurse }}</strong></li>
-        <li>NHS ambulance liaison (where applicable): <strong>{{ cr.nhs_ambulance_manager }}</strong></li>
-        <li>Support unit: <strong>{{ cr.support_unit }}</strong></li>
-      </ul>
-      {% if pg.cqc_compliance %}
-      <h3 class="h6 text-uppercase text-muted mb-2">CQC &amp; medical post</h3>
-      <ul class="small text-muted ps-3 mb-0">
-        {% for line in pg.cqc_compliance %}
-        <li>{{ line }}</li>
+{# Use crm-pu-card so text inherits dark body colour; plain Bootstrap .card inherited the page’s light body text and was unreadable on white. #}
+<div class="crm-pu-card p-4 p-md-5 mb-4 mx-auto" style="max-width: 48rem;">
+  <h2 class="h5 fw-bold mb-3">Planning summary (Purple Guide framework)</h2>
+  {% set cr = pg.conversion_row or {} %}
+  <p class="small text-muted mb-2">Planning score: <strong class="text-body">{{ pg.purple_score }}</strong> · <strong class="text-body">{{ cr.score_range or ('Tier ' ~ pg.tier|string) }}</strong> — <span class="text-body">{{ pg.tier_title or '' }}</span></p>
+  <p class="small text-body mb-3">{{ pg.tier_summary or '' }}</p>
+  {% set mx = lead_meta.risk.get('customer_resource_matrix') if lead_meta and lead_meta.get('risk') is mapping else none %}
+  {% if mx is mapping and mx.get('rows') %}
+  <h3 class="h6 text-uppercase mb-2" style="color: var(--crm-pu-mid);">Indicative headcount (same logic as the live calculator)</h3>
+  <div class="table-responsive border rounded mb-3">
+    <table class="table table-sm mb-0">
+      <thead><tr><th class="small">Role / resource</th><th class="small text-end">Indicative #</th></tr></thead>
+      <tbody>
+        {% for row in mx.rows %}
+        <tr>
+          <td class="small">{{ row.category }}<br><span class="text-muted">{{ row.detail }}</span></td>
+          <td class="small text-end fw-semibold text-nowrap">{{ row.count }}</td>
+        </tr>
         {% endfor %}
-      </ul>
-      {% endif %}
-      <p class="small text-muted mt-3 mb-0">{{ pg.disclaimer or '' }}</p>
-    </div>
+      </tbody>
+    </table>
   </div>
+  <p class="small text-muted mb-3">{{ mx.footer or '' }}</p>
+  {% endif %}
+  <h3 class="h6 text-uppercase mb-2" style="color: var(--crm-pu-mid);">Typical medical resource themes for this tier</h3>
+  <p class="small text-muted mb-3">Aligned with the five-tier medical approach described in <cite>The Purple Guide</cite> (EIF). Your coordinator and medical provider confirm exact posts in the MNA and with the SAG.</p>
+  <ul class="small text-body mb-3 ps-0 list-unstyled">
+    <li class="mb-3"><div class="fw-semibold">On-site medical / first-response provision</div><div class="text-muted">{{ cr.first_responder }}</div></li>
+    <li class="mb-3"><div class="fw-semibold">Ambulances (patient transfer)</div><div class="text-muted">{{ cr.ambulances }}{% if cr.ambulance_crew and cr.ambulance_crew != '—' %} · crew: {{ cr.ambulance_crew }}{% endif %}</div></li>
+    <li class="mb-3"><div class="fw-semibold">Doctors</div><div class="text-muted">{{ cr.doctor }}</div></li>
+    <li class="mb-3"><div class="fw-semibold">Nurses / paramedics</div><div class="text-muted">{{ cr.nurse }}</div></li>
+    <li class="mb-3"><div class="fw-semibold">NHS ambulance liaison</div><div class="text-muted">{{ cr.nhs_ambulance_manager }}</div></li>
+    <li class="mb-0"><div class="fw-semibold">Support / coordination</div><div class="text-muted">{{ cr.support_unit }}</div></li>
+  </ul>
+  {% if pg.cqc_compliance %}
+  <h3 class="h6 text-uppercase mb-2" style="color: var(--crm-pu-mid);">CQC &amp; medical post</h3>
+  <ul class="small text-muted ps-3 mb-0">
+    {% for line in pg.cqc_compliance %}
+    <li class="mb-1">{{ line }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="small text-muted mt-3 mb-0">{{ pg.disclaimer or '' }}</p>
 </div>
 {% endif %}
 <div class="text-center mt-4">

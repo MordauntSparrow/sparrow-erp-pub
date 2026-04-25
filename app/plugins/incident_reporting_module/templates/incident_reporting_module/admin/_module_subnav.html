@@ -1,0 +1,34 @@
+{# Second-row navigation for Safety & Incidents admin (matches Time Billing module pattern). #}
+{% set ep = request.endpoint or '' %}
+<nav class="nav-module erp-module-subnav border-bottom py-2 px-3" aria-label="Safety and incidents sections">
+  <div class="container-fluid px-lg-4">
+    <div class="d-flex flex-wrap align-items-center gap-1">
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_index' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_index') }}">
+        <i class="bi bi-speedometer2 me-1"></i> Overview
+      </a>
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_pipeline' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_pipeline') }}">
+        <i class="bi bi-kanban me-1"></i> IR1 &amp; stages
+      </a>
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_browse' %}active{% elif ep == 'internal_incident_reporting.admin_detail' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_browse') }}">
+        <i class="bi bi-list-ul me-1"></i> All incidents
+      </a>
+      <form method="post" action="{{ url_for('internal_incident_reporting.admin_incident_new_draft') }}" class="d-inline ms-lg-auto">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-primary my-1"><i class="bi bi-plus-circle me-1"></i>New incident / IR1</button>
+      </form>
+      {% if incident_nav_can_configure and incident_show_hse_form %}
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_walkarounds' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">
+        <i class="bi bi-clipboard-check me-1"></i> HSE walkarounds
+      </a>
+      {% endif %}
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_analytics' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_analytics') }}">
+        <i class="bi bi-graph-up-arrow me-1"></i> Analytics
+      </a>
+      {% if incident_nav_can_configure %}
+      <a class="nav-link {% if ep == 'internal_incident_reporting.admin_configuration' or ep == 'internal_incident_reporting.admin_configuration_walkarounds' %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_configuration') }}">
+        <i class="bi bi-gear me-1"></i> Settings
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</nav>

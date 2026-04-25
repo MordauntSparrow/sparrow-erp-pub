@@ -1,0 +1,57 @@
+{# Human-readable fleet vehicle status (DB values unchanged: off_road, maintenance, …) #}
+{% macro admin_status_select(current) %}
+<select class="form-select form-select-sm" name="status">
+  <option value="active" {% if current == 'active' %}selected{% endif %}>Active (in service)</option>
+  <option value="off_road" {% if current == 'off_road' %}selected{% endif %}>VOR — Vehicle off road</option>
+  <option value="maintenance" {% if current == 'maintenance' %}selected{% endif %}>Maintenance / workshop (not in active service)</option>
+  <option value="pending_road_test" {% if current == 'pending_road_test' %}selected{% endif %}>Pending road test</option>
+  <option value="decommissioned" {% if current == 'decommissioned' %}selected{% endif %}>Decommissioned</option>
+</select>
+{% endmacro %}
+
+{% macro admin_status_filter_options(current) %}
+<option value="">All statuses</option>
+<option value="active" {% if current == 'active' %}selected{% endif %}>Active (in service)</option>
+<option value="off_road" {% if current == 'off_road' %}selected{% endif %}>VOR (Vehicle off road)</option>
+<option value="maintenance" {% if current == 'maintenance' %}selected{% endif %}>Maintenance (not in active service)</option>
+<option value="pending_road_test" {% if current == 'pending_road_test' %}selected{% endif %}>Pending road test</option>
+<option value="decommissioned" {% if current == 'decommissioned' %}selected{% endif %}>Decommissioned</option>
+{% endmacro %}
+
+{% macro status_title_line(status) %}
+{%- if status == 'off_road' -%}VOR (Vehicle off road)
+{%- elif status == 'maintenance' -%}Maintenance (not in active service)
+{%- elif status == 'pending_road_test' -%}Pending road test
+{%- elif status == 'decommissioned' -%}Decommissioned
+{%- elif status == 'active' -%}Active (in service)
+{%- else -%}{{ status|replace('_',' ')|title }}
+{%- endif -%}
+{% endmacro %}
+
+{% macro table_status_cell(v) -%}
+  {% if v.status == 'off_road' %}
+    <strong>VOR</strong>
+    {% if v.off_road_reason == 'compliance' %}<span class="badge bg-warning text-dark">Compliance</span>{% elif v.off_road_reason == 'issue' %}<span class="badge bg-secondary">Issue</span>{% endif %}
+  {% elif v.status == 'maintenance' %}
+    <strong>Maintenance</strong> <span class="text-muted small">(not in active service)</span>
+  {% elif v.status == 'pending_road_test' %}Pending road test
+  {% elif v.status == 'decommissioned' %}Decommissioned
+  {% elif v.status == 'active' %}Active (in service)
+  {% else %}{{ v.status|replace('_',' ')|title }}
+  {% endif %}
+{%- endmacro %}
+
+{% macro crew_vehicle_badges(v) -%}
+  {% if v.status == 'off_road' %}
+    <span class="badge bg-danger vor-badge">VOR</span>
+    {% if v.off_road_reason == 'compliance' %}<span class="badge bg-warning text-dark vor-badge">Compliance</span>{% endif %}
+    {% if v.off_road_reason == 'issue' %}<span class="badge bg-secondary vor-badge">Mechanical / issue</span>{% endif %}
+  {% elif v.status == 'maintenance' %}
+    <span class="badge bg-warning text-dark vor-badge">Maintenance</span>
+    <span class="badge bg-secondary vor-badge">Not in active service</span>
+  {% elif v.status == 'pending_road_test' %}
+    <span class="badge bg-info text-dark vor-badge">Pending road test</span>
+  {% else %}
+    <span class="badge bg-success vor-badge">Available</span>
+  {% endif %}
+{%- endmacro %}

@@ -1,0 +1,65 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Governance assurance{% endblock %}
+{% block content %}
+
+<h1 class="h3 mb-4">Governance assurance</h1>
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 card-title mb-1">Supplier</h2>
+        <p class="text-muted small mb-4">Manufacturer reference — DCB0129, security disclosure, ICO.</p>
+        <div class="d-grid gap-2">
+          <a class="btn btn-outline-primary text-start" href="mailto:jordan@mordauntgroup.co.uk?subject=Sparrow%20security%20%2F%20assurance">
+            <i class="bi bi-envelope me-2"></i>Security contact
+          </a>
+          <a class="btn btn-outline-secondary text-start" href="https://www.gov.uk/government/publications/software-security-code-of-practice/software-security-code-of-practice" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right me-2"></i>Software Security Code of Practice (DSIT)
+          </a>
+          <a class="btn btn-outline-secondary text-start" href="https://digital.nhs.uk/data-and-information/information-standards/information-standards-and-data-collections-including-extractions/publications-and-notifications/standards-and-collections/dcb0129-clinical-risk-management-its-application-in-the-manufacture-of-health-it-systems" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right me-2"></i>DCB0129 — NHS England
+          </a>
+        </div>
+        <p class="text-muted small mt-4 mb-0">ICO registration ZC128822 (Mordaunt Group).</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="h5 card-title mb-1">Organisation</h2>
+        <p class="text-muted small mb-4">Deployer evidence — DSPT, DCB0160, policies, exports.</p>
+        <div class="d-grid gap-2">
+          <a class="btn btn-outline-secondary text-start" href="https://www.dsptoolkit.nhs.uk/" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right me-2"></i>DSPT — NHS England
+          </a>
+          <a class="btn btn-outline-secondary text-start" href="https://digital.nhs.uk/data-and-information/information-standards/information-standards-and-data-collections-including-extractions/publications-and-notifications/standards-and-collections/dcb0160-clinical-risk-management-its-application-in-the-deployment-and-use-of-health-it-systems" target="_blank" rel="noopener">
+            <i class="bi bi-box-arrow-up-right me-2"></i>DCB0160 — NHS England
+          </a>
+          <a class="btn btn-outline-primary text-start" href="{{ url_for('compliance_audit_internal.dspt_checklist') }}">
+            <i class="bi bi-list-check me-2"></i>DSPT evidence map (this module)
+          </a>
+          <a class="btn btn-outline-primary text-start" href="{{ url_for('internal_compliance.admin_index') }}">
+            <i class="bi bi-file-earmark-text me-2"></i>Published documents
+          </a>
+          {% if can_export|default(false) %}
+          <a class="btn btn-primary text-start" href="{{ url_for('compliance_audit_internal.export_wizard') }}">
+            <i class="bi bi-download me-2"></i>Export wizard
+          </a>
+          <a class="btn btn-outline-primary text-start" href="{{ url_for('compliance_audit_internal.scheduled_admin') }}">
+            <i class="bi bi-calendar-week me-2"></i>Scheduled exports
+          </a>
+          <a class="btn btn-outline-primary text-start" href="{{ url_for('compliance_audit_internal.trust_board_pack') }}">
+            <i class="bi bi-journal-text me-2"></i>Trust board pack
+          </a>
+          {% endif %}
+          <a class="btn btn-outline-primary text-start" href="{{ url_for('compliance_audit_internal.export_log') }}">
+            <i class="bi bi-clock-history me-2"></i>Export log
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

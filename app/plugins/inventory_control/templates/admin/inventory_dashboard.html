@@ -518,11 +518,60 @@
   </div>
 
   {% if command_center.expired_lot_rows %}
-  <div class="alert alert-danger d-flex align-items-start gap-2 mb-4">
+  <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
     <i class="bi bi-exclamation-octagon-fill mt-1"></i>
     <div>
-      <strong>Expired lots still on hand.</strong> {{ command_center.expired_lot_rows | length }} batch line(s) with expiry in the past — quarantine or dispose and adjust stock.
+      <strong>Expired lots still on hand (patient-care locations).</strong> {{ command_center.expired_lot_rows | length }} line(s) — remove from patient-facing stock by <strong>disposing</strong> (writes stock out) or moving to the <strong>training pool</strong> (stays on hand for drills; not shown in these alerts while there).
       <a href="{{ url_for('inventory_control_internal.batches_page') }}" class="alert-link fw-semibold">Review batches</a>
+    </div>
+  </div>
+  <div class="card inv-panel mb-4">
+    <div class="card-header fw-semibold">Out-of-date stock: dispose or training pool</div>
+    <div class="card-body p-0">
+      {% if inventory_can_transact %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>SKU</th><th>Item</th><th>Expiry</th><th class="text-end">Qty</th><th>Location</th>
+              <th>Training pool</th><th>Dispose (remove)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in command_center.expired_lot_rows %}
+            <tr>
+              <td class="small text-nowrap">{{ r.sku }}</td>
+              <td class="small">{{ r.item_name }}</td>
+              <td class="small text-nowrap">{{ r.expiry_date }}</td>
+              <td class="text-end small">{{ r.qty | float | round(4) }}</td>
+              <td class="small"><span class="text-muted">{{ r.location_code }}</span><br>{{ r.location_name }}</td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('inventory_control_internal.stock_ood_to_training_pool_post') }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="batch_id" value="{{ r.batch_id }}">
+                  <input type="hidden" name="from_location_id" value="{{ r.location_id }}">
+                  <input class="form-control form-control-sm text-end" type="number" step="any" min="0.0001" name="quantity" value="{{ r.qty }}" style="max-width:6rem" aria-label="Quantity to training pool for {{ r.sku }}">
+                  <button type="submit" class="btn btn-sm btn-outline-primary mt-1">Training pool</button>
+                </form>
+              </td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('inventory_control_internal.stock_ood_dispose_post') }}" class="d-inline">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="batch_id" value="{{ r.batch_id }}">
+                  <input type="hidden" name="from_location_id" value="{{ r.location_id }}">
+                  <input class="form-control form-control-sm text-end" type="number" step="any" min="0.0001" name="quantity" value="{{ r.qty }}" style="max-width:6rem" aria-label="Quantity to dispose for {{ r.sku }}">
+                  <input class="form-control form-control-sm mt-1" type="text" name="notes" placeholder="OOD disposal note" maxlength="240">
+                  <button type="submit" class="btn btn-sm btn-outline-danger mt-1">Dispose (remove)</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0 p-3">Transaction permission is required to move or dispose stock from this panel.</p>
+      {% endif %}
     </div>
   </div>
   {% endif %}

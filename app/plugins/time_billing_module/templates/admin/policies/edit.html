@@ -2,183 +2,557 @@
 {% block content %}
 <div class="container py-3">
 
-    <!-- Header -->
     <div class="d-flex align-items-center justify-content-between mb-3">
         <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-sliders2-vertical me-2"></i> Edit Policy
+            <i class="bi bi-sliders2-vertical me-2"></i> Calendar policy
         </h4>
         <div class="d-flex gap-2">
-            <button id="btnValidate" class="btn btn-outline-secondary btn-sm">
-                <i class="bi bi-spellcheck me-1"></i> Validate
-            </button>
+            <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.policies_list_page') }}">← Policies (wizard &amp; holidays)</a>
             <button id="btnSave" class="btn btn-primary btn-sm">
                 <i class="bi bi-save me-1"></i> Save
             </button>
         </div>
     </div>
 
-    <!-- Policy Header -->
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="row g-2">
-                <div class="col-12 col-md-4">
-                    <label class="form-label">Name</label>
-                    <input class="form-control form-control-sm" id="pol_name">
-                </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Scope</label>
-                    <select class="form-select form-select-sm" id="pol_scope">
-                        <option value="global">global</option>
-                        <option value="client">client</option>
-                        <option value="site">site</option>
-                        <option value="job_type">job_type</option>
-                        <option value="role">role</option>
-                    </select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label">Version</label>
-                    <input class="form-control form-control-sm" id="pol_version" type="number" min="1" step="1">
-                </div>
-                <div class="col-6 col-md-2 d-flex align-items-end">
-                    <div class="form-check">
-                        <input class="form-check-input" id="pol_active" type="checkbox">
-                        <label class="form-check-label" for="pol_active">Active</label>
+    <p class="text-muted small mb-3">
+        Policies adjust <strong>wage rate / pay</strong> for timesheet shifts (weekends, bank holidays, night window, optional clock-split night, JSON time bands, overtime tiers).
+        <strong>Overtime (shift)</strong> uses the hours on each line: hours up to the first threshold are paid at the effective rate; beyond that, the tier multiplier applies.
+    </p>
+
+    <div class="accordion" id="polWizard">
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#w1">
+                    1. Name, type &amp; who it applies to
+                </button>
+            </h2>
+            <div id="w1" class="accordion-collapse collapse show" data-bs-parent="#polWizard">
+                <div class="accordion-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Policy name <span class="text-danger">*</span></label>
+                            <input class="form-control form-control-sm" id="pol_name" placeholder="e.g. Night premium – crews">
+                        </div>
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Policy type <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm" id="pol_type">
+                                <option value="WEEKEND">Weekend (Sat–Sun)</option>
+                                <option value="BANK_HOLIDAY">Bank holiday</option>
+                                <option value="NIGHT">Night window</option>
+                                <option value="TIME_BANDS">Time bands (JSON clock overlap)</option>
+                                <option value="OVERTIME_SHIFT">Overtime (per shift hours)</option>
+                                <option value="OVERTIME_DAILY">Overtime (daily total) — reserved</option>
+                                <option value="OVERTIME_WEEKLY">Overtime (weekly total) — reserved</option>
+                            </select>
+                            <div class="form-text" id="pol_type_hint"></div>
+                        </div>
+                        <div class="col-12 col-md-3">
+                            <label class="form-label">Scope <span class="text-danger">*</span></label>
+                            <select class="form-select form-select-sm" id="pol_scope">
+                                <option value="GLOBAL">Everyone (global)</option>
+                                <option value="ROLE">Specific staff role</option>
+                                <option value="JOB_TYPE">Specific job type</option>
+                                <option value="CLIENT">Specific client</option>
+                                <option value="CONTRACTOR_CLIENT">One contractor + client pair</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_role">
+                            <label class="form-label">Staff role</label>
+                            <select class="form-select form-select-sm" id="pol_role_id"><option value="">— Select —</option></select>
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_job">
+                            <label class="form-label">Job type</label>
+                            <select class="form-select form-select-sm" id="pol_job_type_id"><option value="">— Select —</option></select>
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_client">
+                            <label class="form-label">Client</label>
+                            <select class="form-select form-select-sm" id="pol_client_id"><option value="">— Select —</option></select>
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_contractor">
+                            <label class="form-label">Contractor (with client above)</label>
+                            <select class="form-select form-select-sm" id="pol_contractor_id"><option value="">— Select —</option></select>
+                        </div>
                     </div>
                 </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Priority</label>
-                    <input class="form-control form-control-sm" id="pol_priority" type="number" step="1" value="0">
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#w2">
+                    2. Pay rule (rate multiplier or fixed £/h)
+                </button>
+            </h2>
+            <div id="w2" class="accordion-collapse collapse" data-bs-parent="#polWizard">
+                <div class="accordion-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Mode</label>
+                            <select class="form-select form-select-sm" id="pol_mode">
+                                <option value="OFF">Off (no effect)</option>
+                                <option value="MULTIPLIER">Multiply base wage rate</option>
+                                <option value="ABSOLUTE">Replace with fixed hourly £</option>
+                                <option value="PRORATA">Night: split pay by clock overlap with window</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-4" id="wrap_mult">
+                            <label class="form-label">Multiplier</label>
+                            <input class="form-control form-control-sm" id="pol_multiplier" type="number" step="0.01" min="0" placeholder="e.g. 1.25">
+                        </div>
+                        <div class="col-6 col-md-4" id="wrap_abs">
+                            <label class="form-label">Absolute £/hour</label>
+                            <input class="form-control form-control-sm" id="pol_absolute_rate" type="number" step="0.01" min="0" placeholder="e.g. 18.50">
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_night_win">
+                            <label class="form-label">Night window start</label>
+                            <input class="form-control form-control-sm" id="pol_window_start" type="time">
+                        </div>
+                        <div class="col-12 col-md-4 d-none" id="wrap_night_win2">
+                            <label class="form-label">Night window end</label>
+                            <input class="form-control form-control-sm" id="pol_window_end" type="time">
+                        </div>
+                        <div class="col-12 d-none" id="wrap_time_bands_json">
+                            <label class="form-label mb-2">Time bands</label>
+                            <div class="form-text small mb-2">
+                                End before start on one row = crosses midnight. Uncheck all day letters for every day.
+                            </div>
+                            <div class="table-responsive border rounded">
+                                <table class="table table-sm align-middle mb-0" id="timeBandsTbl">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Days</th>
+                                            <th>From</th>
+                                            <th>To</th>
+                                            <th>× mult</th>
+                                            <th>£/h abs</th>
+                                            <th>+£/h</th>
+                                            <th>£/shift</th>
+                                            <th>Label</th>
+                                            <th class="text-end"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="timeBandsTbody"></tbody>
+                                </table>
+                            </div>
+                            <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnAddTimeBand">Add band</button>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Applies to</label>
+                            <select class="form-select form-select-sm" id="pol_applies_to">
+                                <option value="WAGE">Wage (timesheet pay)</option>
+                                <option value="BILL">Bill rate only</option>
+                                <option value="BOTH">Both</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Stacking with overtime</label>
+                            <select class="form-select form-select-sm" id="pol_stacking">
+                                <option value="OT_ON_TOP">Overtime on top (default)</option>
+                                <option value="NONE">None</option>
+                                <option value="FULL">Full (advanced)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#w3">
+                    3. Overtime thresholds (shift overtime only)
+                </button>
+            </h2>
+            <div id="w3" class="accordion-collapse collapse" data-bs-parent="#polWizard">
+                <div class="accordion-body">
+                    <div class="alert alert-light border small mb-3">
+                        <strong>How this maps to a timesheet line</strong><br>
+                        For <strong>Overtime (per shift)</strong>, the system uses <strong>actual start / end minus break</strong> as shift hours.
+                        Hours up to <em>First threshold (hours)</em> use the normal chosen rate (after weekend/BH/night). Hours <em>beyond</em> that use
+                        <em>Tier 1 multiplier</em> on the rate. If you set a second threshold and tier-2 multiplier, hours beyond the second threshold use tier 2.
+                    </div>
+                    <div class="row g-3" id="ot_fields">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">First threshold (hours)</label>
+                            <input class="form-control form-control-sm" id="pol_ot_th" type="number" step="0.01" min="0" placeholder="e.g. 8">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Tier 1 multiplier</label>
+                            <input class="form-control form-control-sm" id="pol_ot_m1" type="number" step="0.01" min="0" placeholder="e.g. 1.5">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Second threshold (hours, optional)</label>
+                            <input class="form-control form-control-sm" id="pol_ot_th2" type="number" step="0.01" min="0" placeholder="e.g. 12">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Tier 2 multiplier (optional)</label>
+                            <input class="form-control form-control-sm" id="pol_ot_m2" type="number" step="0.01" min="0" placeholder="e.g. 2.0">
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-0 mt-2" id="ot_nonshift_note"></p>
+                </div>
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#w4">
+                    4. Effective dates &amp; status
+                </button>
+            </h2>
+            <div id="w4" class="accordion-collapse collapse" data-bs-parent="#polWizard">
+                <div class="accordion-body">
+                    <div class="row g-3">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Effective from <span class="text-danger">*</span></label>
+                            <input class="form-control form-control-sm" id="pol_eff_from" type="date">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Effective to (optional)</label>
+                            <input class="form-control form-control-sm" id="pol_eff_to" type="date">
+                        </div>
+                        <div class="col-12 col-md-3 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="pol_active" checked>
+                                <label class="form-check-label" for="pol_active">Active</label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Rules JSON -->
-    <div class="card">
-        <div class="card-body">
-            <div class="d-flex align-items-center justify-content-between">
-                <h6 class="mb-2">Rules (JSON)</h6>
-                <button id="btnInsertExample" class="btn btn-outline-dark btn-sm">Insert example</button>
-            </div>
-            <textarea id="rules" class="form-control" rows="16" spellcheck="false" placeholder='[]'></textarea>
-            <div class="form-text">
-                Tips: Provide an array of rules. Each rule supports keys like "when", "apply", and "notes".
-            </div>
-            <pre id="validation" class="small mt-2 text-muted"></pre>
-        </div>
-    </div>
-
+    <pre id="validation" class="small mt-3 text-muted mb-0"></pre>
 </div>
 
-<script>
-    (async function () {
-        const polId = (location.hash.match(/edit-(\d+)/) || [])[1];
-        const $ = (s) => document.querySelector(s);
-        const validation = $('#validation');
+<script data-cfasync="false">
+(function () {
+    const polId = (location.hash.match(/edit-(\d+)/) || [])[1];
+    const $ = (s) => document.querySelector(s);
+    const validation = $("#validation");
+    const URL_LIST = "{{ url_for('internal_time_billing.get_policies') }}";
+    const URL_SAVE = "{{ url_for('internal_time_billing.create_policy') }}";
+    const URL_ROLES = "{{ url_for('internal_time_billing.api_list_roles') }}";
+    const URL_JT = "{{ url_for('internal_time_billing.api_internal_refs_job_types') }}";
+    const URL_CL = "{{ url_for('internal_time_billing.api_admin_refs_clients') }}";
+    const URL_CT = "{{ url_for('internal_time_billing.api_admin_refs_contractors') }}";
 
-        async function load() {
-            const r = await fetch(`{{ url_for('internal_time_billing.get_policies') }}`);
-            const list = await r.json();
-            const p = (list || []).find(x => String(x.id) === String(polId));
+    if (!polId) {
+        alert("Open this page from Policies with #edit-<id> in the URL.");
+        return;
+    }
 
-            if (!p) {
-                alert('Policy not found');
-                history.back();
-                return;
+    function numOrNull(id) {
+        const v = ($(id).value || "").trim();
+        if (v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    const TB_WD_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+    function tbWdCellHtml() {
+        let h = '<div class="d-flex flex-wrap gap-1 small">';
+        for (let d = 0; d < 7; d++) {
+            h += `<label class="form-check form-check-inline mb-0"><input type="checkbox" class="form-check-input tb-wd" data-wd="${d}"><span class="form-check-label">${TB_WD_LABELS[d]}</span></label>`;
+        }
+        h += "</div>";
+        return h;
+    }
+    function addTimeBandRow(prefill) {
+        const tb = document.getElementById("timeBandsTbody");
+        if (!tb) return;
+        const tr = document.createElement("tr");
+        tr.className = "tb-band-row";
+        tr.innerHTML = `
+      <td class="align-top">${tbWdCellHtml()}</td>
+      <td><input type="time" class="form-control form-control-sm tb-ws" step="60"></td>
+      <td><input type="time" class="form-control form-control-sm tb-we" step="60"></td>
+      <td><input type="number" class="form-control form-control-sm tb-mult" step="0.01" min="0" placeholder="×"></td>
+      <td><input type="number" class="form-control form-control-sm tb-abs" step="0.01" min="0" placeholder="£/h"></td>
+      <td><input type="number" class="form-control form-control-sm tb-upl" step="0.01" placeholder="+£/h"></td>
+      <td><input type="number" class="form-control form-control-sm tb-flat" step="0.01" min="0" placeholder="once"></td>
+      <td><input type="text" class="form-control form-control-sm tb-lab" placeholder="Optional"></td>
+      <td class="text-end align-middle"><button type="button" class="btn btn-outline-danger btn-sm tb-del" title="Remove">&times;</button></td>`;
+        tb.appendChild(tr);
+        tr.querySelector(".tb-del").addEventListener("click", () => { tr.remove(); });
+        if (prefill && typeof prefill === "object") {
+            const ws = (prefill.window_start || "").toString().slice(0, 5);
+            const we = (prefill.window_end || "").toString().slice(0, 5);
+            if (ws) tr.querySelector(".tb-ws").value = ws;
+            if (we) tr.querySelector(".tb-we").value = we;
+            if (prefill.multiplier != null && prefill.multiplier !== "") tr.querySelector(".tb-mult").value = String(prefill.multiplier);
+            if (prefill.absolute_rate != null && prefill.absolute_rate !== "") tr.querySelector(".tb-abs").value = String(prefill.absolute_rate);
+            const upl = prefill.uplift_per_hour != null ? prefill.uplift_per_hour : prefill.bonus_per_hour;
+            if (upl != null && upl !== "") tr.querySelector(".tb-upl").value = String(upl);
+            const bf = prefill.bonus_flat != null ? prefill.bonus_flat : prefill.flat_bonus_per_shift;
+            if (bf != null && bf !== "") tr.querySelector(".tb-flat").value = String(bf);
+            if (prefill.label) tr.querySelector(".tb-lab").value = prefill.label;
+            if (Array.isArray(prefill.weekdays)) {
+                prefill.weekdays.forEach((d) => {
+                    const c = tr.querySelector(`.tb-wd[data-wd="${parseInt(d, 10)}"]`);
+                    if (c) c.checked = true;
+                });
             }
-
-            $('#pol_name').value = p.name || '';
-            $('#pol_scope').value = p.scope || 'global';
-            $('#pol_version').value = p.version || 1;
-            $('#pol_active').checked = !!p.active;
-            $('#pol_priority').value = p.priority != null ? p.priority : 0;
-            $('#rules').value = p.rules_json || JSON.stringify(p.rules || [], null, 2);
         }
-
-        function getPayload() {
-            let rules = [];
-            const rulesRaw = $('#rules').value;
-
-            try { rules = JSON.parse(rulesRaw || '[]'); } catch (e) { /* validation will catch */ }
-
-            return {
-                name: $('#pol_name').value || '',
-                scope: $('#pol_scope').value || 'global',
-                version: parseInt($('#pol_version').value || '1', 10),
-                active: $('#pol_active').checked,
-                priority: parseInt($('#pol_priority').value || '0', 10),
-                rules: rules,
-                rules_json: rulesRaw // optional raw JSON text
-            };
+    }
+    function clearTimeBandsTable() {
+        const tb = document.getElementById("timeBandsTbody");
+        if (tb) tb.innerHTML = "";
+    }
+    function renderTimeBandsFromPolicy(obj) {
+        clearTimeBandsTable();
+        let bands = [];
+        if (Array.isArray(obj)) bands = obj;
+        else if (obj && typeof obj === "string") {
+            try { bands = JSON.parse(obj); } catch (e) { bands = []; }
         }
-
-        function validatePayload() {
-            validation.textContent = '';
-            try {
-                const p = getPayload();
-                if (!p.name) throw new Error('Name is required');
-                if (!Array.isArray(p.rules)) throw new Error('Rules must be an array');
-
-                // Minimal rule schema check
-                for (const [i, r] of p.rules.entries()) {
-                    if (typeof r !== 'object' || r === null) throw new Error(`Rule ${i + 1} must be an object`);
-                    if (r.when && typeof r.when !== 'object') throw new Error(`Rule ${i + 1} "when" must be an object`);
-                    if (r.apply && typeof r.apply !== 'object') throw new Error(`Rule ${i + 1} "apply" must be an object`);
-                }
-
-                validation.textContent = 'Looks good.';
-                validation.className = 'small mt-2 text-success';
-                return true;
-            } catch (e) {
-                validation.textContent = e.message || 'Invalid';
-                validation.className = 'small mt-2 text-danger';
-                return false;
-            }
-        }
-
-        $('#btnInsertExample').addEventListener('click', () => {
-            const example = [
-                {
-                    notes: "Time-of-day premium 20% for night work",
-                    when: { time_range: ["22:00", "06:00"] },
-                    apply: { pay_multiplier: 1.2 }
-                },
-                {
-                    notes: "Weekend uplift flat £15 per shift",
-                    when: { weekday_in: ["Sat", "Sun"] },
-                    apply: { pay_add: 15.0 }
-                },
-                {
-                    notes: "Travel cap",
-                    when: { travel_cost_gt: 30 },
-                    apply: { travel_cap: 30 }
-                }
-            ];
-            $('#rules').value = JSON.stringify(example, null, 2);
-        });
-
-        $('#btnValidate').addEventListener('click', validatePayload);
-
-        $('#btnSave').addEventListener('click', async () => {
-            if (!validatePayload()) return;
-            const payload = getPayload();
-
-            const r = await fetch('{{ url_for("internal_time_billing.create_policy") }}', {
-                method: 'POST',
-                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
-                body: JSON.stringify(Object.assign({ id: polId }, payload))
+        if (!bands.length) { addTimeBandRow(null); return; }
+        bands.forEach((b) => addTimeBandRow(b));
+    }
+    function collectTimeBandRows() {
+        const tb = document.getElementById("timeBandsTbody");
+        if (!tb) return [];
+        const out = [];
+        tb.querySelectorAll("tr.tb-band-row").forEach((tr) => {
+            const ws = (tr.querySelector(".tb-ws") && tr.querySelector(".tb-ws").value || "").trim();
+            const we = (tr.querySelector(".tb-we") && tr.querySelector(".tb-we").value || "").trim();
+            if (!ws || !we) return;
+            const o = { window_start: ws, window_end: we };
+            const wds = [];
+            tr.querySelectorAll(".tb-wd:checked").forEach((c) => {
+                const d = parseInt(c.getAttribute("data-wd"), 10);
+                if (Number.isFinite(d)) wds.push(d);
             });
-
-            if (!r.ok) {
-                alert('Save failed');
-                return;
-            }
-
-            alert('Saved');
+            if (wds.length) o.weekdays = wds.sort((a, b) => a - b);
+            const mult = (tr.querySelector(".tb-mult") && tr.querySelector(".tb-mult").value || "").trim();
+            const abs = (tr.querySelector(".tb-abs") && tr.querySelector(".tb-abs").value || "").trim();
+            const upl = (tr.querySelector(".tb-upl") && tr.querySelector(".tb-upl").value || "").trim();
+            const lab = (tr.querySelector(".tb-lab") && tr.querySelector(".tb-lab").value || "").trim();
+            if (mult !== "") o.multiplier = parseFloat(mult);
+            if (abs !== "") o.absolute_rate = parseFloat(abs);
+            if (upl !== "") o.uplift_per_hour = parseFloat(upl);
+            const flat = (tr.querySelector(".tb-flat") && tr.querySelector(".tb-flat").value || "").trim();
+            if (flat !== "") o.bonus_flat = parseFloat(flat);
+            if (lab) o.label = lab;
+            out.push(o);
         });
+        return out;
+    }
+    function validateTimeBandsPolicy() {
+        if ($("#pol_type").value !== "TIME_BANDS") return "";
+        const rows = collectTimeBandRows();
+        if (!rows.length) return "Add at least one band with From and To times.";
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            if (r.multiplier == null && r.absolute_rate == null && r.uplift_per_hour == null && r.bonus_flat == null) {
+                return `Band ${i + 1}: set × mult, absolute £/h, +£/h, and/or £/shift flat.`;
+            }
+        }
+        return "";
+    }
 
-        // Initial load
-        load();
-    })();
+    function syncScopeUI() {
+        const sc = $("#pol_scope").value;
+        ["wrap_role", "wrap_job", "wrap_client", "wrap_contractor"].forEach((w) => $(`#${w}`).classList.add("d-none"));
+        if (sc === "ROLE") $("#wrap_role").classList.remove("d-none");
+        if (sc === "JOB_TYPE") $("#wrap_job").classList.remove("d-none");
+        if (sc === "CLIENT") $("#wrap_client").classList.remove("d-none");
+        if (sc === "CONTRACTOR_CLIENT") {
+            $("#wrap_client").classList.remove("d-none");
+            $("#wrap_contractor").classList.remove("d-none");
+        }
+    }
+
+    function syncTypeHints() {
+        const t = $("#pol_type").value;
+        const hint = $("#pol_type_hint");
+        const night = t === "NIGHT";
+        const timeB = t === "TIME_BANDS";
+        $("#wrap_night_win").classList.toggle("d-none", !night || timeB);
+        $("#wrap_night_win2").classList.toggle("d-none", !night || timeB);
+        const wtb = document.getElementById("wrap_time_bands_json");
+        if (wtb) wtb.classList.toggle("d-none", !timeB);
+        $("#ot_fields").style.opacity = t.startsWith("OVERTIME") ? "1" : "0.45";
+        $("#ot_nonshift_note").textContent =
+            t === "OVERTIME_SHIFT"
+                ? ""
+                : t.startsWith("OVERTIME")
+                ? "Daily / weekly overtime types are stored for future use; pay engine currently applies shift overtime only."
+                : "";
+        if (t === "WEEKEND") hint.textContent = "Applies when the shift work date is Saturday or Sunday.";
+        else if (t === "BANK_HOLIDAY") hint.textContent = "Applies on dates listed in Bank holidays.";
+        else if (t === "NIGHT") hint.textContent = "Whole line at max(day, night) unless mode is clock overlap split.";
+        else if (t === "TIME_BANDS") {
+            hint.textContent = "Use the table below — the server stores structured JSON; you do not edit raw JSON.";
+            const tbody = document.getElementById("timeBandsTbody");
+            if (tbody && !tbody.querySelector("tr.tb-band-row")) addTimeBandRow(null);
+        }
+        else if (t.startsWith("OVERTIME")) hint.textContent = "Configure thresholds in section 3.";
+        else hint.textContent = "";
+    }
+
+    function syncModeUI() {
+        const m = $("#pol_mode").value;
+        const pr = m === "PRORATA";
+        $("#wrap_mult").style.display = (m === "MULTIPLIER" || pr) ? "" : "none";
+        $("#wrap_abs").style.display = (m === "ABSOLUTE" || pr) ? "" : "none";
+    }
+
+    async function loadRefs() {
+        async function fillSelect(url, selCss, mapFn) {
+            const sel = document.querySelector(selCss);
+            if (!sel) return;
+            sel.innerHTML = "";
+            const o0 = document.createElement("option");
+            o0.value = "";
+            o0.textContent = "— Select —";
+            sel.appendChild(o0);
+            try {
+                const r = await fetch(url, { headers: { Accept: "application/json" } });
+                const d = r.ok ? await r.json() : {};
+                const items = Array.isArray(d.items) ? d.items : Array.isArray(d) ? d : [];
+                items.forEach((x) => mapFn(x, sel));
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        await fillSelect(URL_ROLES, "#pol_role_id", (x, sel) => {
+            const o = document.createElement("option");
+            o.value = x.id;
+            o.textContent = x.name || ("Role #" + x.id);
+            sel.appendChild(o);
+        });
+        await fillSelect(URL_JT, "#pol_job_type_id", (x, sel) => {
+            const o = document.createElement("option");
+            o.value = x.id;
+            o.textContent = x.name || ("Job #" + x.id);
+            sel.appendChild(o);
+        });
+        await fillSelect(URL_CL, "#pol_client_id", (x, sel) => {
+            const o = document.createElement("option");
+            o.value = x.id;
+            o.textContent = x.name || ("Client #" + x.id);
+            sel.appendChild(o);
+        });
+        await fillSelect(URL_CT, "#pol_contractor_id", (x, sel) => {
+            const o = document.createElement("option");
+            o.value = x.id;
+            const nm = x.name || x.email || ("#" + x.id);
+            o.textContent = nm;
+            sel.appendChild(o);
+        });
+    }
+
+    async function load() {
+        await loadRefs();
+        const r = await fetch(URL_LIST);
+        const list = await r.json();
+        const p = (list || []).find((x) => String(x.id) === String(polId));
+        if (!p) {
+            alert("Policy not found");
+            history.back();
+            return;
+        }
+        $("#pol_name").value = p.name || "";
+        $("#pol_type").value = (p.type || "WEEKEND").toUpperCase();
+        $("#pol_scope").value = (p.scope || "GLOBAL").toUpperCase();
+        $("#pol_mode").value = (p.mode || "OFF").toUpperCase();
+        $("#pol_multiplier").value = p.multiplier != null ? String(p.multiplier) : "";
+        $("#pol_absolute_rate").value = p.absolute_rate != null ? String(p.absolute_rate) : "";
+        $("#pol_window_start").value = (p.window_start || "").toString().slice(0, 5);
+        $("#pol_window_end").value = (p.window_end || "").toString().slice(0, 5);
+        $("#pol_ot_th").value = p.ot_threshold_hours != null ? String(p.ot_threshold_hours) : "";
+        $("#pol_ot_th2").value = p.ot_tier2_threshold_hours != null ? String(p.ot_tier2_threshold_hours) : "";
+        $("#pol_ot_m1").value = p.ot_tier1_mult != null ? String(p.ot_tier1_mult) : "";
+        $("#pol_ot_m2").value = p.ot_tier2_mult != null ? String(p.ot_tier2_mult) : "";
+        $("#pol_applies_to").value = (p.applies_to || "WAGE").toUpperCase();
+        $("#pol_stacking").value = (p.stacking || "OT_ON_TOP").toUpperCase();
+        $("#pol_eff_from").value = (p.effective_from || "").toString().slice(0, 10);
+        $("#pol_eff_to").value = (p.effective_to || "").toString().slice(0, 10);
+        $("#pol_active").checked = !!p.active;
+        if (p.role_id) $("#pol_role_id").value = String(p.role_id);
+        if (p.job_type_id) $("#pol_job_type_id").value = String(p.job_type_id);
+        if (p.client_id) $("#pol_client_id").value = String(p.client_id);
+        if (p.contractor_id) $("#pol_contractor_id").value = String(p.contractor_id);
+        renderTimeBandsFromPolicy(p.time_bands_json);
+        syncScopeUI();
+        syncTypeHints();
+        syncModeUI();
+    }
+
+    function buildPayload() {
+        return {
+            id: parseInt(polId, 10),
+            name: ($("#pol_name").value || "").trim(),
+            type: $("#pol_type").value,
+            scope: $("#pol_scope").value,
+            role_id: $("#pol_role_id").value ? parseInt($("#pol_role_id").value, 10) : null,
+            job_type_id: $("#pol_job_type_id").value ? parseInt($("#pol_job_type_id").value, 10) : null,
+            client_id: $("#pol_client_id").value ? parseInt($("#pol_client_id").value, 10) : null,
+            contractor_id: $("#pol_contractor_id").value ? parseInt($("#pol_contractor_id").value, 10) : null,
+            mode: $("#pol_mode").value,
+            multiplier: numOrNull("#pol_multiplier"),
+            absolute_rate: numOrNull("#pol_absolute_rate"),
+            window_start: ($("#pol_window_start").value || "") || null,
+            window_end: ($("#pol_window_end").value || "") || null,
+            time_band_rows: $("#pol_type").value === "TIME_BANDS" ? collectTimeBandRows() : undefined,
+            ot_threshold_hours: numOrNull("#pol_ot_th"),
+            ot_tier2_threshold_hours: numOrNull("#pol_ot_th2"),
+            ot_tier1_mult: numOrNull("#pol_ot_m1"),
+            ot_tier2_mult: numOrNull("#pol_ot_m2"),
+            applies_to: $("#pol_applies_to").value,
+            stacking: $("#pol_stacking").value,
+            effective_from: $("#pol_eff_from").value,
+            effective_to: ($("#pol_eff_to").value || "").trim() || null,
+            active: $("#pol_active").checked ? 1 : 0,
+        };
+    }
+
+    function validatePayload() {
+        validation.textContent = "";
+        const p = buildPayload();
+        if (!p.name) {
+            validation.textContent = "Name is required.";
+            validation.className = "small mt-3 text-danger mb-0";
+            return false;
+        }
+        if (!p.effective_from) {
+            validation.textContent = "Effective from is required.";
+            validation.className = "small mt-3 text-danger mb-0";
+            return false;
+        }
+        const tbErr = validateTimeBandsPolicy();
+        if (tbErr) {
+            validation.textContent = tbErr;
+            validation.className = "small mt-3 text-danger mb-0";
+            return false;
+        }
+        validation.textContent = "Ready to save.";
+        validation.className = "small mt-3 text-success mb-0";
+        return true;
+    }
+
+    $("#pol_scope").addEventListener("change", syncScopeUI);
+    $("#pol_type").addEventListener("change", () => { syncTypeHints(); syncModeUI(); });
+    $("#pol_mode").addEventListener("change", syncModeUI);
+    const btnAddTimeBand = document.getElementById("btnAddTimeBand");
+    if (btnAddTimeBand) btnAddTimeBand.addEventListener("click", () => addTimeBandRow(null));
+
+    $("#btnSave").addEventListener("click", async () => {
+        if (!validatePayload()) return;
+        const payload = buildPayload();
+        const r = await fetch(URL_SAVE, {
+            method: "POST",
+            headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "POST"),
+            body: JSON.stringify(payload),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            alert(j.error || "Save failed");
+            return;
+        }
+        alert("Saved");
+    });
+
+    load();
+})();
 </script>
 {% endblock %}

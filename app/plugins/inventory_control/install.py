@@ -124,6 +124,56 @@ def _ensure_default_holding_location(conn) -> None:
             pass
 
 
+def _ensure_training_pool_location(conn) -> None:
+    """
+    Central pool for dated consumables that are out of date for patient use but kept
+    for staff training (industry practice). Stock remains on hand; patient-care expiry
+    dashboards exclude this location type.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id FROM inventory_locations WHERE code = %s LIMIT 1",
+            ("TRAINING-POOL",),
+        )
+        if cur.fetchone():
+            return
+        meta = json.dumps(
+            {
+                "purpose": (
+                    "Training-only stock pool. Transfer OOD lots here instead of disposing "
+                    "to retain real kit for drills; figures stay on hand. Not counted toward "
+                    "patient-facing expiry alerts. Move back to a patient store to re-enable alerts."
+                ),
+            }
+        )
+        cur.execute(
+            """
+            INSERT INTO inventory_locations (name, code, type, parent_location_id, address, metadata)
+            VALUES (%s, %s, %s, NULL, NULL, CAST(%s AS JSON))
+            """,
+            (
+                "Training stock pool",
+                "TRAINING-POOL",
+                "training",
+                meta,
+            ),
+        )
+        conn.commit()
+        print("[inventory_control] Ensured training pool location TRAINING-POOL")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"[inventory_control] Training pool location: {e}")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+
+
 def _ensure_med_bag_schema(conn) -> None:
     """
     Drug / response kit bag templates, instances, traceability (INV-MEDS-001–003,
@@ -271,6 +321,7 @@ def _ensure_med_bag_schema(conn) -> None:
         "tamper_seal_set_at TIMESTAMP NULL",
         "tamper_seal_set_by VARCHAR(128) NULL",
         "tamper_seal_initial VARCHAR(16) NULL",
+        "usage_context VARCHAR(24) NOT NULL DEFAULT 'patient_care'",
     ):
         _alter_add_column(conn, "inventory_med_bag_instances", col)
 
@@ -949,6 +1000,7 @@ def install():
             )
         _ensure_asset_extension_schema(conn)
         _ensure_default_holding_location(conn)
+        _ensure_training_pool_location(conn)
     finally:
         try:
             conn.close()

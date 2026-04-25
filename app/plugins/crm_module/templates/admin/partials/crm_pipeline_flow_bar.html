@@ -1,0 +1,48 @@
+{# Guided flow: opportunity → quote → event plan (mobile-friendly). #}
+{% set pipeline_flow_enabled = pipeline_flow_enabled if pipeline_flow_enabled is defined else false %}
+{% set pipeline_step = pipeline_step if pipeline_step is defined else '' %}
+{% set pipeline_opp_id = pipeline_opp_id if pipeline_opp_id is defined else none %}
+{% set pipeline_quote_id = pipeline_quote_id if pipeline_quote_id is defined else none %}
+{% if pipeline_flow_enabled %}
+<nav class="card border-0 shadow-sm mb-3 crm-pipeline-flow" aria-label="Guided pipeline">
+  <div class="card-body py-2 px-3 d-flex flex-column flex-lg-row flex-lg-wrap align-items-lg-center gap-2">
+    <p class="small text-muted mb-0 fw-semibold text-uppercase flex-shrink-0">Guided flow</p>
+    <div class="d-flex flex-wrap align-items-center gap-1 gap-sm-2 small flex-grow-1">
+      {% set o = pipeline_opp_id %}
+      {% set q = pipeline_quote_id %}
+      {% set st = pipeline_step %}
+      <span class="crm-pipeline-step {% if st == 'opportunity' %}crm-pipeline-step--current{% elif o %}crm-pipeline-step--done{% endif %}">
+        {% if o %}
+        <a href="{{ url_for('crm_module.opportunity_edit', opp_id=o, flow=1) }}" class="text-decoration-none">1. Opportunity</a>
+        {% else %}
+        <span class="text-muted">1. Opportunity</span>
+        {% endif %}
+      </span>
+      <span class="text-muted d-none d-sm-inline">→</span>
+      <span class="crm-pipeline-step {% if st == 'quote' %}crm-pipeline-step--current{% elif q %}crm-pipeline-step--done{% endif %}">
+        {% if o %}
+        <a href="{{ url_for('crm_module.quote_new') }}?opportunity_id={{ o }}&flow=1" class="text-decoration-none">2. Quote</a>
+        {% else %}
+        <span class="text-muted">2. Quote</span>
+        {% endif %}
+      </span>
+      {% if industry_visible('medical') %}
+      <span class="text-muted d-none d-sm-inline">→</span>
+      <span class="crm-pipeline-step {% if st == 'plan' %}crm-pipeline-step--current{% endif %}">
+        {% if q and industry_visible('medical') %}
+        <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_new') }}?quote_id={{ q }}{% if o %}&opportunity_id={{ o }}{% endif %}&flow=1" class="text-decoration-none">3. Event plan</a>
+        {% else %}
+        <span class="text-muted">3. Event plan</span>
+        {% endif %}
+      </span>
+      {% endif %}
+    </div>
+    <p class="small text-muted mb-0 flex-shrink-0">Use <strong>Save &amp; next</strong> below when you can.</p>
+  </div>
+</nav>
+<style>
+  .crm-pipeline-flow .crm-pipeline-step { padding: 0.2rem 0.5rem; border-radius: 999px; }
+  .crm-pipeline-step--current { background: rgba(79, 70, 229, 0.12); font-weight: 600; color: #4338ca; }
+  .crm-pipeline-step--done a { color: #0f766e; }
+</style>
+{% endif %}

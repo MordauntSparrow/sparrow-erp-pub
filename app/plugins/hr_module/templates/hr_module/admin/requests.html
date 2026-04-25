@@ -18,9 +18,13 @@
 
   <form method="get" action="{{ url_for('internal_hr.admin_requests') }}" class="card card-body mb-4">
     <div class="row g-2">
-      <div class="col-md-2">
-        <label class="form-label small">Contractor ID</label>
-        <input type="number" class="form-control form-control-sm" name="contractor_id" value="{{ contractor_id or '' }}" placeholder="ID">
+      <div class="col-md-4">
+        <label class="form-label small">Staff member</label>
+        <input type="hidden" name="contractor_id" id="hrReqFiltCid" value="{{ contractor_id or '' }}">
+        <input type="search" class="form-control form-control-sm mb-1" id="hrReqFiltQ" autocomplete="off" placeholder="Search name — type at least 2 characters" data-hr-csearch="{{ url_for('internal_hr.admin_contractors_search_json') }}">
+        <ul class="list-group list-group-flush small border rounded d-none mb-1" id="hrReqFiltUl" style="max-height:9rem;overflow:auto;"></ul>
+        <div class="small text-muted mb-0" id="hrReqFiltPicked">{% if contractor_filter_label %}{{ contractor_filter_label|e }}{% else %}All staff{% endif %}</div>
+        <button type="button" class="btn btn-link btn-sm p-0 {% if not contractor_id %}d-none{% endif %}" id="hrReqFiltClear">Clear staff filter</button>
       </div>
       <div class="col-md-2">
         <label class="form-label small">Status</label>
@@ -92,4 +96,59 @@
 
   <a href="{{ url_for('internal_hr.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to HR admin</a>
 </div>
+<script>
+(function () {
+  var hid = document.getElementById("hrReqFiltCid");
+  var qinp = document.getElementById("hrReqFiltQ");
+  var ul = document.getElementById("hrReqFiltUl");
+  var picked = document.getElementById("hrReqFiltPicked");
+  var clr = document.getElementById("hrReqFiltClear");
+  if (!hid || !qinp || !ul || !qinp.dataset.hrCsearch) return;
+  var t;
+  function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+  function setPicked(text, showClear) {
+    if (picked) picked.textContent = text;
+    if (clr) clr.classList.toggle("d-none", !showClear);
+  }
+  qinp.addEventListener("input", function () {
+    clearTimeout(t);
+    var q = (qinp.value || "").trim();
+    if (q.length < 2) { hide(); return; }
+    t = setTimeout(function () {
+      fetch(qinp.dataset.hrCsearch + "?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (rows) {
+          ul.innerHTML = "";
+          if (!rows || !rows.length) { hide(); return; }
+          rows.forEach(function (row) {
+            var li = document.createElement("li");
+            li.className = "list-group-item list-group-item-action py-1";
+            li.textContent = row.label;
+            li.addEventListener("click", function () {
+              hid.value = String(row.id);
+              setPicked(row.label, true);
+              qinp.value = "";
+              hide();
+            });
+            ul.appendChild(li);
+          });
+          ul.classList.remove("d-none");
+        })
+        .catch(function () { hide(); });
+    }, 250);
+  });
+  if (clr) {
+    clr.addEventListener("click", function (e) {
+      e.preventDefault();
+      hid.value = "";
+      setPicked("All staff", false);
+      qinp.value = "";
+      hide();
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (!ul.contains(e.target) && e.target !== qinp) hide();
+  });
+})();
+</script>
 {% endblock %}

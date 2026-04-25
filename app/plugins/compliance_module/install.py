@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS comp_policies (
   published TINYINT(1) NOT NULL DEFAULT 0,
   lifecycle_status VARCHAR(16) NOT NULL DEFAULT 'draft',
   mandatory TINYINT(1) NOT NULL DEFAULT 1,
+  expose_on_website TINYINT(1) NOT NULL DEFAULT 0,
   published_at DATETIME DEFAULT NULL,
   next_review_date DATE DEFAULT NULL,
   last_reviewed_date DATE DEFAULT NULL,
@@ -317,6 +318,19 @@ def _ensure_policy_lifecycle_audit_table(conn):
         _run_sql(conn, SQL_CREATE_POLICY_LIFECYCLE_AUDIT)
 
 
+def _ensure_expose_on_website_column(conn):
+    """Opt-in: show Active documents on the public marketing site at /policies."""
+    cur = conn.cursor()
+    try:
+        if not _column_exists(conn, "comp_policies", "expose_on_website"):
+            cur.execute(
+                "ALTER TABLE comp_policies ADD COLUMN expose_on_website TINYINT(1) NOT NULL DEFAULT 0 AFTER mandatory"
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def install():
     conn = get_db_connection()
     try:
@@ -325,6 +339,7 @@ def install():
         _ensure_document_types_schema(conn)
         _ensure_policy_lifecycle_status(conn)
         _ensure_policy_lifecycle_audit_table(conn)
+        _ensure_expose_on_website_column(conn)
     finally:
         conn.close()
 

@@ -1,0 +1,85 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Medical records — module home{% endblock %}
+{% block content %}
+<div class="mr-page-header">
+  <h1 class="h2 mb-2">Medical records</h1>
+  <p class="lead mb-0">Choose a workspace. Access follows your Sparrow role (crew, clinical, admin, and clinical lead where shown).</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-clinical"><i class="bi bi-heart-pulse"></i></div>
+        <h2 class="card-title h5">Clinical lead</h2>
+        <p class="card-text">Admin PIN generation, audit review, and shortcuts to EPCR and Cura operations.</p>
+        <a href="{{ url_for('medical_records_internal.clinical_view') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open clinical dashboard <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-cura"><i class="bi bi-calendar-event"></i></div>
+        <h2 class="card-title h5">Cura event manager</h2>
+        <p class="card-text">Operational periods, rosters, documents, activity snapshots, and debrief exports.</p>
+        <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open event manager <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-clinical"><i class="bi bi-gear-wide-connected"></i></div>
+        <h2 class="card-title h5">Cura settings</h2>
+        <p class="card-text">Clinical reference files and connection options for the Cura app (no operational roster here).</p>
+        <a href="{{ url_for('medical_records_internal.cura_ops_settings') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open Cura settings <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-admin"><i class="bi bi-clipboard2-pulse"></i></div>
+        <h2 class="card-title h5">EPCR cases</h2>
+        <p class="card-text">Browse case list, open detail views, and manage cases where permitted.</p>
+        <a href="{{ url_for('medical_records_internal.view_epcr') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open EPCR list <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-clinical"><i class="bi bi-shield-exclamation"></i></div>
+        <h2 class="card-title h5">Safeguarding manager</h2>
+        <p class="card-text">Referrals from Cura / EPCR, audit trail, and oversight notes in one place.</p>
+        <a href="{{ url_for('medical_records_internal.safeguarding_manager_home') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open safeguarding <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  {% if legacy_patient_features_enabled %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-admin"><i class="bi bi-hospital"></i></div>
+        <h2 class="card-title h5">Legacy patient records</h2>
+        <p class="card-text">Deprecated patient record UI from the legacy urgent-care design (disabled by default).</p>
+        <a href="{{ url_for('medical_records_internal.admin_patients') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open legacy patients <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  {% if care_company_feature_enabled %}
+  <div class="col-md-6 col-xl-4">
+    <div class="card mr-dashboard-card">
+      <div class="card-body position-relative">
+        <div class="card-icon mr-icon-care"><i class="bi bi-building"></i></div>
+        <h2 class="card-title h5">Care company users</h2>
+        <p class="card-text">Manage portal users linked to care companies (optional feature).</p>
+        <a href="{{ url_for('medical_records_internal.list_care_company_users') }}" class="stretched-link text-decoration-none text-primary fw-semibold">Open care company <i class="bi bi-arrow-right-short"></i></a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

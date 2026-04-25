@@ -1,0 +1,43 @@
+{
+  "repository": "official",
+  "system_name": "medical_records_module",
+  "name": "Medical Records",
+  "current_version": "0.0.3",
+  "compatible_with": ">=1.1.0",
+  "force_update": true,
+  "description": "Medical records module.",
+  "dashboard_category": "Clinical & care",
+  "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/medical_records_module/icon.png",
+  "download_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fmedical_records_module%2Fmedical_records_module_v0.0.2.zip/raw?ref=main",
+  "dependencies": [],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "0.0.3",
+      "date": "2026-03-08",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fmedical_records_module%2Fmedical_records_module_v0.0.3.zip/raw?ref=main",
+      "changes": [
+        "Maintenance release — upload medical_records_module_v0.0.3.zip before clients update."
+      ]
+    },
+    {
+      "version": "0.0.2",
+      "date": "2026-03-20",
+      "artifact_type": "complete",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fmedical_records_module%2Fmedical_records_module_v0.0.2.zip/raw?ref=main",
+      "changes": [
+        "Complete release package — upload full medical_records_module_v0.0.2.zip to the repository before clients update."
+      ]
+    },
+    {
+      "version": "0.0.1",
+      "date": "2025-09-20",
+      "artifact_type": "partial",
+      "artifact_url": "https://gitlab.com/api/v4/projects/65546585/repository/files/plugins%2Fmedical_records_module%2Fmedical_records_module_v0.0.1.zip/raw?ref=main",
+      "changes": [
+        "Initial release."
+      ]
+    }
+  ]
+}

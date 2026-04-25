@@ -6,20 +6,79 @@ import logging
 import json
 import os
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from app.objects import get_db_connection
 
-from .cura_planning_staffing import (
-    build_role_coverage,
-    parse_cura_event_config,
-    vehicle_gap_hint,
-)
 import base64
 import hashlib
 from cryptography.fernet import Fernet
 import requests
 
 logger = logging.getLogger(__name__)
+
+
+def _portal_shift_notify(
+    contractor_ids: Sequence[int],
+    kind: str,
+    shift_id: Optional[int] = None,
+) -> None:
+    """Web push for contractors with portal PWA subscriptions (best-effort)."""
+    try:
+        from app.plugins.employee_portal_module.push_service import (
+            schedule_push_for_shift_contractors,
+        )
+
+        schedule_push_for_shift_contractors(contractor_ids, kind, shift_id)
+    except Exception:
+        logger.debug(
+            "employee portal shift push skipped kind=%s shift_id=%s",
+            kind,
+            shift_id,
+            exc_info=True,
+        )
+
+
+def _crm_propagate_schedule_shift_change(shift_id: int) -> None:
+    """When shifts are CRM-linked, push roster/times back into CRM (best-effort)."""
+    try:
+        from app.plugins.crm_module.scheduling_to_crm_sync import (
+            propagate_schedule_shift_to_crm,
+        )
+
+        propagate_schedule_shift_to_crm(int(shift_id))
+    except Exception:
+        logger.debug(
+            "Schedule→CRM propagate skipped or failed shift_id=%s",
+            shift_id,
+            exc_info=True,
+        )
+    try:
+        from app.plugins.medical_records_module.scheduling_cura_roster_sync import (
+            try_sync_schedule_shift_to_cura_roster,
+        )
+
+        try_sync_schedule_shift_to_cura_roster(int(shift_id))
+    except Exception:
+        logger.debug(
+            "Schedule→Cura roster sync skipped or failed shift_id=%s",
+            shift_id,
+            exc_info=True,
+        )
+
+
+def _timesheet_sync_schedule_shift(shift_id: int, *, deleted: bool = False) -> None:
+    """Mirror scheduling changes into Time Billing weekly timesheets (best-effort)."""
+    try:
+        from app.plugins.time_billing_module.services import TimesheetService
+
+        TimesheetService.notify_schedule_shift_changed(int(shift_id), deleted=deleted)
+    except Exception:
+        logger.debug(
+            "Schedule→timesheet sync skipped shift_id=%s deleted=%s",
+            shift_id,
+            deleted,
+            exc_info=True,
+        )
 
 
 def _safe_float(x: Any) -> Optional[float]:
@@ -38,6 +97,49 @@ def _safe_int_id(val: Any) -> Optional[int]:
         return None
     try:
         return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_db_date(val: Any) -> Optional[date]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    try:
+        return date.fromisoformat(str(val)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_db_time(val: Any) -> Optional[time]:
+    """Normalize MySQL TIME (time, timedelta, or string) to datetime.time."""
+    if val is None:
+        return None
+    if isinstance(val, time):
+        return val
+    if isinstance(val, timedelta):
+        secs = int(val.total_seconds()) % 86400
+        if secs < 0:
+            secs += 86400
+        h, r = divmod(secs, 3600)
+        m, s = divmod(r, 60)
+        return time(int(h), int(m), int(s))
+    if isinstance(val, datetime):
+        return val.time()
+    s = str(val).strip()
+    if not s:
+        return None
+    parts = s.replace(".", ":").split(":")
+    if len(parts) < 2:
+        return None
+    try:
+        h = int(parts[0]) % 24
+        m = int(parts[1])
+        sec = int(float(parts[2])) if len(parts) > 2 else 0
+        return time(h, m, min(sec, 59))
     except (TypeError, ValueError):
         return None
 
@@ -427,6 +529,78 @@ class ScheduleService:
             conn.close()
 
     @staticmethod
+    def recalculate_shared_labour_scheduled_end(shift_id: int) -> bool:
+        """
+        When shared_labour_hours is set, scheduled_end = scheduled_start + (person_hours / N),
+        where N is assignment count if any, else required_count (min 1).
+        """
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SHOW COLUMNS FROM schedule_shifts LIKE 'shared_labour_hours'")
+            if not cur.fetchone():
+                return False
+            cur.execute(
+                """
+                SELECT work_date, scheduled_start, shared_labour_hours, required_count
+                FROM schedule_shifts WHERE id = %s
+                """,
+                (int(shift_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            slab = row.get("shared_labour_hours")
+            if slab is None:
+                return False
+            try:
+                slab_f = float(slab)
+            except (TypeError, ValueError):
+                return False
+            if slab_f <= 0:
+                return False
+
+            n_assign = 0
+            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            if cur.fetchone():
+                cur.execute(
+                    "SELECT COUNT(*) AS c FROM schedule_shift_assignments WHERE shift_id = %s",
+                    (int(shift_id),),
+                )
+                r2 = cur.fetchone() or {}
+                n_assign = int(r2.get("c") or 0)
+            if n_assign >= 1:
+                n = max(1, n_assign)
+            else:
+                n = max(1, int(row.get("required_count") or 1))
+
+            d = _coerce_db_date(row.get("work_date"))
+            start = _coerce_db_time(row.get("scheduled_start"))
+            if d is None or start is None:
+                return False
+
+            dt_start = datetime.combine(d, start)
+            duration_sec = (slab_f * 3600.0) / float(n)
+            dt_end = dt_start + timedelta(seconds=duration_sec)
+            if dt_end.date() > d:
+                dt_end = datetime.combine(d, time(23, 59, 59))
+            new_end = dt_end.time()
+
+            cur2 = conn.cursor()
+            try:
+                cur2.execute(
+                    "UPDATE schedule_shifts SET scheduled_end = %s WHERE id = %s",
+                    (new_end, int(shift_id)),
+                )
+                conn.commit()
+            finally:
+                cur2.close()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
     def add_shift_assignment(shift_id: int, contractor_id: int) -> bool:
         conn = get_db_connection()
         cur = conn.cursor()
@@ -438,8 +612,14 @@ class ScheduleService:
                 "INSERT IGNORE INTO schedule_shift_assignments (shift_id, contractor_id) VALUES (%s, %s)",
                 (shift_id, contractor_id),
             )
+            changed = cur.rowcount > 0
             conn.commit()
-            return cur.rowcount > 0
+            if changed:
+                ScheduleService.recalculate_shared_labour_scheduled_end(int(shift_id))
+                _crm_propagate_schedule_shift_change(int(shift_id))
+                _portal_shift_notify([int(contractor_id)], "assigned", int(shift_id))
+                _timesheet_sync_schedule_shift(int(shift_id))
+            return changed
         finally:
             cur.close()
             conn.close()
@@ -456,8 +636,14 @@ class ScheduleService:
                 "DELETE FROM schedule_shift_assignments WHERE shift_id = %s AND contractor_id = %s",
                 (shift_id, contractor_id),
             )
+            changed = cur.rowcount > 0
             conn.commit()
-            return cur.rowcount > 0
+            if changed:
+                ScheduleService.recalculate_shared_labour_scheduled_end(int(shift_id))
+                _crm_propagate_schedule_shift_change(int(shift_id))
+                _portal_shift_notify([int(contractor_id)], "removed", int(shift_id))
+                _timesheet_sync_schedule_shift(int(shift_id))
+            return changed
         finally:
             cur.close()
             conn.close()
@@ -471,15 +657,34 @@ class ScheduleService:
             cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
             if not cur.fetchone():
                 return
+            cur.execute(
+                "SELECT contractor_id FROM schedule_shift_assignments WHERE shift_id = %s",
+                (shift_id,),
+            )
+            old_ids = {
+                int(r[0])
+                for r in (cur.fetchall() or [])
+                if r and r[0] is not None
+            }
             cur.execute("DELETE FROM schedule_shift_assignments WHERE shift_id = %s", (shift_id,))
+            new_ids: Set[int] = set()
             for cid in (contractor_ids or []):
                 if cid is None:
                     continue
+                new_ids.add(int(cid))
                 cur.execute(
                     "INSERT IGNORE INTO schedule_shift_assignments (shift_id, contractor_id) VALUES (%s, %s)",
                     (shift_id, int(cid)),
                 )
             conn.commit()
+            ScheduleService.recalculate_shared_labour_scheduled_end(int(shift_id))
+            _crm_propagate_schedule_shift_change(int(shift_id))
+            sid = int(shift_id)
+            for cid in sorted(new_ids - old_ids):
+                _portal_shift_notify([cid], "assigned", sid)
+            for cid in sorted(old_ids - new_ids):
+                _portal_shift_notify([cid], "removed", sid)
+            _timesheet_sync_schedule_shift(sid)
         finally:
             cur.close()
             conn.close()
@@ -1263,6 +1468,7 @@ class ScheduleService:
                     WHERE id=%s
                 """, (resolved_by_user_id, admin_notes, claim_id))
                 conn.commit()
+                _portal_shift_notify([claimer_id], "assigned", shift_id)
                 return True, "Approved."
             # reject
             cur.execute("""
@@ -1441,6 +1647,90 @@ class ScheduleService:
             conn.close()
 
     @staticmethod
+    def _shift_portal_recipient_ids(shift_id: int) -> List[int]:
+        """Contractors who should receive roster pushes for this shift (primary + assignments)."""
+        sh = ScheduleService.get_shift(int(shift_id))
+        if not sh:
+            return []
+        out: List[int] = []
+        for a in sh.get("assignments") or []:
+            cid = _safe_int_id(a.get("contractor_id"))
+            if cid:
+                out.append(cid)
+        if not out:
+            cid = _safe_int_id(sh.get("contractor_id"))
+            if cid:
+                out.append(cid)
+        return sorted(set(out))
+
+    @staticmethod
+    def week_job_bundle_rows(
+        shifts: List[Dict[str, Any]],
+        week_start: date,
+        week_end: date,
+    ) -> List[Dict[str, Any]]:
+        """
+        Rows for **Job / event** week view: CRM-linked slots share ``external_id`` and appear
+        as one row; standalone shifts are one row each.
+        """
+        from collections import OrderedDict
+
+        bundles: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+
+        def bundle_key(s: Dict[str, Any]) -> str:
+            ext = str(s.get("external_id") or "").strip()
+            if ext.startswith("crm_opportunity:") or ext.startswith("crm_event_plan:"):
+                return ext
+            return f"_shift_{int(s.get('id') or 0)}"
+
+        for s in shifts:
+            wd = s.get("work_date")
+            if wd is None:
+                continue
+            if isinstance(wd, datetime):
+                d = wd.date()
+            elif isinstance(wd, date):
+                d = wd
+            else:
+                try:
+                    d = date.fromisoformat(str(wd)[:10])
+                except ValueError:
+                    continue
+            if not (week_start <= d <= week_end):
+                continue
+            k = bundle_key(s)
+            if k not in bundles:
+                bundles[k] = []
+            bundles[k].append(s)
+
+        rows_out: List[Dict[str, Any]] = []
+        for k, group in bundles.items():
+            group = sorted(group, key=lambda x: int(x.get("id") or 0))
+            first = group[0]
+            ext = str(first.get("external_id") or "").strip()
+            if ext.startswith("crm_opportunity:"):
+                label = ext.replace("crm_opportunity:", "CRM opp ")
+            elif ext.startswith("crm_event_plan:"):
+                label = ext.replace("crm_event_plan:", "CRM plan ")
+            elif k.startswith("_shift_"):
+                cn = (str(first.get("client_name") or "").strip()) or "Shift"
+                jn = str(first.get("job_type_name") or "").strip() or "—"
+                label = f"{cn} · {jn}"
+            else:
+                label = k
+            rows_out.append(
+                {
+                    "bundle_key": k,
+                    "label": label,
+                    "client_name": first.get("client_name"),
+                    "job_type_name": first.get("job_type_name"),
+                    "external_id": first.get("external_id"),
+                    "shifts": group,
+                }
+            )
+        return rows_out
+
+    @staticmethod
     def list_shift_tasks(shift_id: int) -> List[Dict[str, Any]]:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
@@ -1591,6 +1881,75 @@ class ScheduleService:
             conn.close()
 
     @staticmethod
+    def search_shifts_for_picker(q: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Autocomplete labels for admin shift pickers (audit filter, etc.)."""
+        qs = (q or "").strip()
+        if len(qs) < 2:
+            return []
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            like = f"%{qs}%"
+            sid_match: Optional[int] = None
+            if qs.isdigit():
+                try:
+                    cand = int(qs)
+                    if 1 <= cand <= 2147483647:
+                        sid_match = cand
+                except (TypeError, ValueError):
+                    sid_match = None
+            lim = max(1, min(int(limit or 20), 50))
+            if sid_match is not None:
+                cur.execute(
+                    """
+                    SELECT s.id, s.work_date, s.status, c.name AS client_name,
+                           COALESCE(u.name, '') AS contractor_name
+                    FROM schedule_shifts s
+                    JOIN clients c ON c.id = s.client_id
+                    LEFT JOIN tb_contractors u ON u.id = s.contractor_id
+                    WHERE s.id = %s OR c.name LIKE %s OR u.name LIKE %s
+                    ORDER BY s.work_date DESC, s.id DESC
+                    LIMIT %s
+                    """,
+                    (sid_match, like, like, lim),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT s.id, s.work_date, s.status, c.name AS client_name,
+                           COALESCE(u.name, '') AS contractor_name
+                    FROM schedule_shifts s
+                    JOIN clients c ON c.id = s.client_id
+                    LEFT JOIN tb_contractors u ON u.id = s.contractor_id
+                    WHERE c.name LIKE %s OR u.name LIKE %s OR CAST(s.id AS CHAR) LIKE %s
+                    ORDER BY s.work_date DESC, s.id DESC
+                    LIMIT %s
+                    """,
+                    (like, like, like, lim),
+                )
+            rows = cur.fetchall() or []
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                wd = r.get("work_date")
+                day = wd.isoformat()[:10] if hasattr(wd, "isoformat") else str(wd)[:10]
+                cname = (r.get("client_name") or "").strip() or "—"
+                cn = (r.get("contractor_name") or "").strip() or "—"
+                st = (r.get("status") or "").strip()
+                iid = int(r["id"])
+                out.append(
+                    {
+                        "id": iid,
+                        "label": f"#{iid} · {day} · {cname} · {cn} · {st}",
+                    }
+                )
+            return out
+        except Exception:
+            return []
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
     def create_shift(
         data: Dict[str, Any],
         actor_user_id: Optional[int] = None,
@@ -1668,8 +2027,40 @@ class ScheduleService:
                             (sid, int(cid)),
                         )
                 conn.commit()
+            cur.execute("SHOW COLUMNS FROM schedule_shifts LIKE 'shared_labour_hours'")
+            if cur.fetchone():
+                slab = _safe_float(data.get("shared_labour_hours"))
+                if slab is not None and slab > 0:
+                    cur.execute(
+                        "UPDATE schedule_shifts SET shared_labour_hours = %s WHERE id = %s",
+                        (slab, sid),
+                    )
+                    conn.commit()
+                elif data.get("shared_labour_hours") is not None and str(data.get("shared_labour_hours")).strip() == "":
+                    cur.execute(
+                        "UPDATE schedule_shifts SET shared_labour_hours = NULL WHERE id = %s",
+                        (sid,),
+                    )
+                    conn.commit()
+            ScheduleService.recalculate_shared_labour_scheduled_end(int(sid))
             if actor_user_id is not None or actor_username:
                 ScheduleService.log_shift_audit(sid, "created", actor_user_id, actor_username, details=data)
+            _crm_propagate_schedule_shift_change(int(sid))
+            notify_cids: Set[int] = set()
+            for x in contractor_ids or []:
+                if x is not None:
+                    try:
+                        notify_cids.add(int(x))
+                    except (TypeError, ValueError):
+                        pass
+            if first_contractor_id is not None:
+                try:
+                    notify_cids.add(int(first_contractor_id))
+                except (TypeError, ValueError):
+                    pass
+            if notify_cids:
+                _portal_shift_notify(sorted(notify_cids), "assigned", int(sid))
+            _timesheet_sync_schedule_shift(int(sid))
             return sid
         finally:
             cur.close()
@@ -1681,32 +2072,74 @@ class ScheduleService:
         data: Dict[str, Any],
         actor_user_id: Optional[int] = None,
         actor_username: Optional[str] = None,
+        *,
+        portal_notify: bool = True,
     ) -> None:
         allowed = {
             "contractor_id", "client_id", "site_id", "job_type_id", "work_date",
             "scheduled_start", "scheduled_end", "actual_start", "actual_end",
             "break_mins", "notes", "status", "labour_cost", "required_count",
+            "shared_labour_hours",
         }
         conn = get_db_connection()
         cur = conn.cursor()
         try:
+            cur.execute("SHOW COLUMNS FROM schedule_shifts LIKE 'shared_labour_hours'")
+            has_slab_col = bool(cur.fetchone())
+            if not has_slab_col:
+                data = {k: v for k, v in data.items() if k != "shared_labour_hours"}
             updates = []
             params: List[Any] = []
             for k in allowed:
                 if k in data:
                     updates.append(f"{k} = %s")
-                    params.append(data[k])
+                    if k == "shared_labour_hours":
+                        slab = _safe_float(data[k])
+                        params.append(slab if slab is not None and slab > 0 else None)
+                    else:
+                        params.append(data[k])
             if not updates:
                 return
+            old_recipients: List[int] = []
+            if portal_notify:
+                old_recipients = ScheduleService._shift_portal_recipient_ids(int(shift_id))
             params.append(shift_id)
             cur.execute(
                 f"UPDATE schedule_shifts SET {', '.join(updates)} WHERE id = %s",
                 params,
             )
             conn.commit()
+            ScheduleService.recalculate_shared_labour_scheduled_end(int(shift_id))
             if actor_user_id is not None or actor_username:
                 action = "cancelled" if data.get("status") == "cancelled" else "updated"
                 ScheduleService.log_shift_audit(shift_id, action, actor_user_id, actor_username, details=data)
+            _crm_propagate_schedule_shift_change(int(shift_id))
+            if portal_notify:
+                sid = int(shift_id)
+                st = str(data.get("status") or "").lower()
+                if st == "cancelled":
+                    _portal_shift_notify(old_recipients, "cancelled", sid)
+                else:
+                    new_recipients = ScheduleService._shift_portal_recipient_ids(sid)
+                    merged = sorted(set(old_recipients) | set(new_recipients))
+                    if merged:
+                        _portal_shift_notify(merged, "updated", sid)
+            _timesheet_sync_schedule_shift(int(shift_id))
+            if any(
+                k in data
+                for k in ("work_date", "scheduled_start", "scheduled_end", "status")
+            ):
+                try:
+                    cur.execute(
+                        """
+                        UPDATE schedule_shifts SET portal_reminder_sent_at = NULL
+                        WHERE id = %s
+                        """,
+                        (int(shift_id),),
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
         finally:
             cur.close()
             conn.close()
@@ -1764,7 +2197,7 @@ class ScheduleService:
             updates["notes"] = notes
         if updates:
             updates["status"] = "completed" if actual_end else "in_progress"
-            ScheduleService.update_shift(shift_id, updates)
+            ScheduleService.update_shift(shift_id, updates, portal_notify=False)
 
     @staticmethod
     def _sync_linked_runsheet_after_clock(shift_id: int) -> None:
@@ -2635,6 +3068,113 @@ class ScheduleService:
     # ---------- Smart scheduling: conflicts, suggest staff, copy week ----------
 
     @staticmethod
+    def _clock_str(val: Any) -> str:
+        """Format DB time / timedelta / string as HH:MM for APIs and messages."""
+        if val is None:
+            return ""
+        if hasattr(val, "strftime"):
+            return val.strftime("%H:%M")
+        if hasattr(val, "total_seconds"):
+            s = int(val.total_seconds()) % (24 * 3600)
+            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}"
+        s = str(val).strip()[:8]
+        if len(s) >= 5 and s[2] == ":":
+            return s[:5]
+        return s[:5]
+
+    @staticmethod
+    def get_contractor_shift_overlap_rows(
+        contractor_id: int,
+        work_date: date,
+        scheduled_start: time,
+        scheduled_end: time,
+        exclude_shift_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Shifts already assigned to this contractor that overlap the proposed window (same calendar day)."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            use_assignments = bool(cur.fetchone())
+            if use_assignments:
+                cur.execute(
+                    """
+                    SELECT s.id, s.work_date, s.scheduled_start, s.scheduled_end, c.name AS client_name
+                    FROM schedule_shifts s
+                    JOIN schedule_shift_assignments a ON a.shift_id = s.id AND a.contractor_id = %s
+                    JOIN clients c ON c.id = s.client_id
+                    WHERE s.work_date = %s AND s.status NOT IN ('cancelled')
+                    AND s.scheduled_start < %s AND s.scheduled_end > %s
+                    """,
+                    (contractor_id, work_date, scheduled_end, scheduled_start),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT s.id, s.work_date, s.scheduled_start, s.scheduled_end, c.name AS client_name
+                    FROM schedule_shifts s
+                    JOIN clients c ON c.id = s.client_id
+                    WHERE s.contractor_id = %s AND s.work_date = %s AND s.status NOT IN ('cancelled')
+                    AND s.scheduled_start < %s AND s.scheduled_end > %s
+                    """,
+                    (contractor_id, work_date, scheduled_end, scheduled_start),
+                )
+            rows = cur.fetchall() or []
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                if exclude_shift_id and r.get("id") == exclude_shift_id:
+                    continue
+                out.append(
+                    {
+                        "id": int(r["id"]),
+                        "client_name": r.get("client_name") or "—",
+                        "scheduled_start": ScheduleService._clock_str(r.get("scheduled_start")),
+                        "scheduled_end": ScheduleService._clock_str(r.get("scheduled_end")),
+                    }
+                )
+            return out
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def check_time_off_conflicts(
+        contractor_id: int,
+        work_date: date,
+        scheduled_start: time,
+        scheduled_end: time,
+    ) -> List[str]:
+        """Human-readable time-off messages for this contractor and slot."""
+        conflicts: List[str] = []
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT type, start_date, end_date, start_time, end_time FROM schedule_time_off
+                WHERE contractor_id = %s AND status IN ('requested', 'approved')
+                AND start_date <= %s AND end_date >= %s
+                """,
+                (contractor_id, work_date, work_date),
+            )
+            to_rows = cur.fetchall() or []
+            for r in to_rows:
+                st, et = r.get("start_time"), r.get("end_time")
+                if st is None and et is None:
+                    conflicts.append(f"Time off ({r.get('type', '—')}) on this date")
+                else:
+                    window_start = st if st is not None else time(0, 0)
+                    window_end = et if et is not None else time(23, 59, 59)
+                    if not (scheduled_end <= window_start or scheduled_start >= window_end):
+                        conflicts.append(
+                            f"Time off ({r.get('type', '—')}) {window_start}–{window_end} on this date"
+                        )
+            return conflicts
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
     def check_shift_conflicts(
         contractor_id: int,
         work_date: date,
@@ -2643,55 +3183,124 @@ class ScheduleService:
         exclude_shift_id: Optional[int] = None,
     ) -> List[str]:
         """Return list of conflict messages (double-book, time off)."""
-        conflicts: List[str] = []
+        overlaps = ScheduleService.get_contractor_shift_overlap_rows(
+            contractor_id,
+            work_date,
+            scheduled_start,
+            scheduled_end,
+            exclude_shift_id=exclude_shift_id,
+        )
+        conflicts = [
+            f"Overlaps existing shift at {o['client_name']} ({o['scheduled_start']}–{o['scheduled_end']})"
+            for o in overlaps
+        ]
+        conflicts.extend(
+            ScheduleService.check_time_off_conflicts(
+                contractor_id, work_date, scheduled_start, scheduled_end
+            )
+        )
+        return conflicts
+
+    @staticmethod
+    def unassign_contractor_from_overlapping_shifts(
+        contractor_id: int,
+        work_date: date,
+        scheduled_start: time,
+        scheduled_end: time,
+        exclude_shift_id: Optional[int] = None,
+        *,
+        actor_user_id: Optional[int] = None,
+        actor_username: Optional[str] = None,
+    ) -> List[int]:
+        """
+        Remove this contractor from every shift that overlaps the given slot (same day).
+        Used when a scheduler explicitly moves someone onto a new shift and clears the old booking.
+        """
+        rows = ScheduleService.get_contractor_shift_overlap_rows(
+            contractor_id,
+            work_date,
+            scheduled_start,
+            scheduled_end,
+            exclude_shift_id=exclude_shift_id,
+        )
+        cleared: List[int] = []
         conn = get_db_connection()
-        cur = conn.cursor(dictionary=True)
+        cur = conn.cursor()
         try:
             cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
             use_assignments = bool(cur.fetchone())
-            if use_assignments:
-                cur.execute("""
-                    SELECT s.id, s.work_date, s.scheduled_start, s.scheduled_end, c.name AS client_name
-                    FROM schedule_shifts s
-                    JOIN schedule_shift_assignments a ON a.shift_id = s.id AND a.contractor_id = %s
-                    JOIN clients c ON c.id = s.client_id
-                    WHERE s.work_date = %s AND s.status NOT IN ('cancelled')
-                    AND s.scheduled_start < %s AND s.scheduled_end > %s
-                """, (contractor_id, work_date, scheduled_end, scheduled_start))
-            else:
-                cur.execute("""
-                    SELECT s.id, s.work_date, s.scheduled_start, s.scheduled_end, c.name AS client_name
-                    FROM schedule_shifts s
-                    JOIN clients c ON c.id = s.client_id
-                    WHERE s.contractor_id = %s AND s.work_date = %s AND s.status NOT IN ('cancelled')
-                    AND s.scheduled_start < %s AND s.scheduled_end > %s
-                """, (contractor_id, work_date, scheduled_end, scheduled_start))
-            rows = cur.fetchall() or []
-            for r in rows:
-                if exclude_shift_id and r.get("id") == exclude_shift_id:
-                    continue
-                conflicts.append(f"Overlaps existing shift at {r.get('client_name', '—')} ({r.get('scheduled_start')}–{r.get('scheduled_end')})")
-            # Time off on this day (whole day or overlapping window)
-            cur.execute("""
-                SELECT type, start_date, end_date, start_time, end_time FROM schedule_time_off
-                WHERE contractor_id = %s AND status IN ('requested', 'approved')
-                AND start_date <= %s AND end_date >= %s
-            """, (contractor_id, work_date, work_date))
-            to_rows = cur.fetchall() or []
-            for r in to_rows:
-                st, et = r.get("start_time"), r.get("end_time")
-                if st is None and et is None:
-                    conflicts.append(f"Time off ({r.get('type', '—')}) on this date")
-                else:
-                    # Partial day: conflict only if shift overlaps the window
-                    window_start = st if st is not None else time(0, 0)
-                    window_end = et if et is not None else time(23, 59, 59)
-                    if not (scheduled_end <= window_start or scheduled_start >= window_end):
-                        conflicts.append(f"Time off ({r.get('type', '—')}) {window_start}–{window_end} on this date")
-            return conflicts
         finally:
             cur.close()
             conn.close()
+        for o in rows:
+            sid = int(o["id"])
+            if use_assignments:
+                if ScheduleService.remove_shift_assignment(sid, int(contractor_id)):
+                    cleared.append(sid)
+            else:
+                sh = ScheduleService.get_shift(sid)
+                if sh and sh.get("contractor_id") == int(contractor_id):
+                    ScheduleService.update_shift(
+                        sid,
+                        {"contractor_id": None},
+                        actor_user_id=actor_user_id,
+                        actor_username=actor_username,
+                    )
+                    cleared.append(sid)
+        return cleared
+
+    @staticmethod
+    def list_contractors_slot_status(
+        work_date: date,
+        scheduled_start: time,
+        scheduled_end: time,
+        exclude_shift_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        All active contractors with coarse status for this slot: free, busy (assigned elsewhere), or time_off.
+        """
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT id, name, email FROM tb_contractors WHERE status = 'active' ORDER BY name"
+            )
+            rows = cur.fetchall() or []
+        finally:
+            cur.close()
+            conn.close()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            cid = int(r["id"])
+            overlaps = ScheduleService.get_contractor_shift_overlap_rows(
+                cid, work_date, scheduled_start, scheduled_end, exclude_shift_id=exclude_shift_id
+            )
+            to_msgs = ScheduleService.check_time_off_conflicts(
+                cid, work_date, scheduled_start, scheduled_end
+            )
+            if to_msgs:
+                slot_status = "time_off"
+                detail = "; ".join(to_msgs)
+            elif overlaps:
+                slot_status = "busy"
+                detail = "; ".join(
+                    f"{o['client_name']} {o['scheduled_start']}–{o['scheduled_end']}" for o in overlaps[:3]
+                )
+                if len(overlaps) > 3:
+                    detail += f" (+{len(overlaps) - 3} more)"
+            else:
+                slot_status = "free"
+                detail = None
+            out.append(
+                {
+                    "id": cid,
+                    "name": r.get("name") or "",
+                    "email": r.get("email") or "",
+                    "slot_status": slot_status,
+                    "slot_detail": detail,
+                }
+            )
+        return out
 
     @staticmethod
     def suggest_available_contractors(
@@ -3083,25 +3692,50 @@ class ScheduleService:
             return 0
         recurrence_id = shift.get("recurrence_id")
         work_date = shift.get("work_date")
+        notify_ids: Set[int] = set()
+        shift_ids_to_delete: List[int] = []
+        if scope == "this":
+            shift_ids_to_delete = [int(shift_id)]
+        elif scope == "future" and recurrence_id is not None and work_date is not None:
+            for row in ScheduleService.list_shifts_in_series(int(recurrence_id)):
+                wd = row.get("work_date")
+                if wd is None:
+                    continue
+                wd_cmp = wd if isinstance(wd, date) else date.fromisoformat(str(wd)[:10])
+                if wd_cmp >= (work_date if isinstance(work_date, date) else date.fromisoformat(str(work_date)[:10])):
+                    shift_ids_to_delete.append(int(row["id"]))
+        elif scope == "all" and recurrence_id is not None:
+            for row in ScheduleService.list_shifts_in_series(int(recurrence_id)):
+                shift_ids_to_delete.append(int(row["id"]))
+        else:
+            shift_ids_to_delete = [int(shift_id)]
+        for sid in shift_ids_to_delete:
+            notify_ids.update(ScheduleService._shift_portal_recipient_ids(sid))
+        for sid in shift_ids_to_delete:
+            _timesheet_sync_schedule_shift(int(sid), deleted=True)
         conn = get_db_connection()
         cur = conn.cursor()
         try:
             if scope == "this":
                 cur.execute("DELETE FROM schedule_shifts WHERE id = %s", (shift_id,))
-                return cur.rowcount
-            if scope == "future" and recurrence_id is not None and work_date is not None:
+                n = cur.rowcount
+            elif scope == "future" and recurrence_id is not None and work_date is not None:
                 cur.execute(
                     "DELETE FROM schedule_shifts WHERE recurrence_id = %s AND work_date >= %s",
                     (recurrence_id, work_date),
                 )
-                return cur.rowcount
-            if scope == "all" and recurrence_id is not None:
+                n = cur.rowcount
+            elif scope == "all" and recurrence_id is not None:
                 cur.execute("DELETE FROM schedule_shifts WHERE recurrence_id = %s", (recurrence_id,))
-                return cur.rowcount
-            cur.execute("DELETE FROM schedule_shifts WHERE id = %s", (shift_id,))
-            return cur.rowcount
-        finally:
+                n = cur.rowcount
+            else:
+                cur.execute("DELETE FROM schedule_shifts WHERE id = %s", (shift_id,))
+                n = cur.rowcount
             conn.commit()
+            if notify_ids:
+                _portal_shift_notify(sorted(notify_ids), "cancelled", int(shift_id))
+            return n
+        finally:
             cur.close()
             conn.close()
 
@@ -3237,425 +3871,6 @@ class ScheduleService:
             conn.close()
 
     @staticmethod
-    def cura_event_planning_overview(
-        from_date: date,
-        to_date: date,
-    ) -> Dict[str, Any]:
-        """
-        Planning view: Cura operational events vs schedule_shifts linked through run sheets.
-
-        - Expected roster: ``cura_operational_event_assignments`` (Medical Records).
-        - Planned cover: ``schedule_shifts`` where ``runsheet_id`` points at a runsheet
-          with ``cura_operational_event_id`` (Time Billing run sheet as planning link).
-
-        This is intentionally separate from timesheet actuals / billing.
-        """
-        if to_date < from_date:
-            from_date, to_date = to_date, from_date
-
-        out: Dict[str, Any] = {
-            "from_date": from_date.isoformat(),
-            "to_date": to_date.isoformat(),
-            "events": [],
-            "note": (
-                "Roster expectations come from Cura Event Manager. Where the event came from "
-                "the CRM medical event planner, recommended grades/roles are taken from the "
-                "linked opportunity (same guide as the planner) and compared to planned shifts. "
-                "Planned shifts are schedule rows linked to a run sheet that references this Cura event."
-            ),
-        }
-
-        conn = get_db_connection()
-        cur = conn.cursor(dictionary=True)
-        try:
-            cur.execute("SHOW TABLES LIKE 'cura_operational_events'")
-            if not cur.fetchone():
-                out["warning"] = (
-                    "Cura operational tables are not installed (Medical Records / Cura ops)."
-                )
-                return out
-
-            cur.execute("SHOW TABLES LIKE 'runsheets'")
-            has_runsheets = bool(cur.fetchone())
-            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
-            has_ssa = bool(cur.fetchone())
-
-            cur.execute(
-                "SHOW COLUMNS FROM runsheets LIKE 'cura_operational_event_id'"
-            )
-            has_cura_col = bool(cur.fetchone()) if has_runsheets else False
-
-            cur.execute("SHOW TABLES LIKE 'cura_operational_event_resources'")
-            has_cura_resources = bool(cur.fetchone())
-            cur.execute("SHOW TABLES LIKE 'fleet_vehicles'")
-            has_fleet_vehicles_tbl = bool(cur.fetchone())
-            cur.execute("SHOW TABLES LIKE 'crm_event_plans'")
-            has_crm_plans_tbl = bool(cur.fetchone())
-
-            dt_start = datetime.combine(from_date, time.min)
-            dt_end = datetime.combine(to_date, time.max)
-
-            cur.execute(
-                """
-                SELECT id, name, slug, status, starts_at, ends_at, location_summary, config
-                FROM cura_operational_events
-                WHERE (starts_at IS NULL OR starts_at <= %s)
-                  AND (ends_at IS NULL OR ends_at >= %s)
-                ORDER BY COALESCE(starts_at, ends_at) ASC, id DESC
-                LIMIT 120
-                """,
-                (dt_end, dt_start),
-            )
-            ev_rows = cur.fetchall() or []
-
-            for ev in ev_rows:
-                eid = _safe_int_id(ev.get("id"))
-                if eid is None:
-                    continue
-                ev_name = (ev.get("name") or "").strip() or f"Event #{eid}"
-
-                sa = ev.get("starts_at")
-                ea = ev.get("ends_at")
-                if hasattr(sa, "date"):
-                    ev_start_d = sa.date()
-                elif isinstance(sa, date):
-                    ev_start_d = sa
-                else:
-                    ev_start_d = from_date
-                if hasattr(ea, "date"):
-                    ev_end_d = ea.date()
-                elif isinstance(ea, date):
-                    ev_end_d = ea
-                else:
-                    ev_end_d = to_date
-                shift_from = max(from_date, ev_start_d)
-                shift_to = min(to_date, ev_end_d)
-                if shift_to < shift_from:
-                    shift_from, shift_to = from_date, to_date
-
-                cur.execute(
-                    """
-                    SELECT id, principal_username, expected_callsign, assigned_by, created_at
-                    FROM cura_operational_event_assignments
-                    WHERE operational_event_id = %s
-                    ORDER BY id ASC
-                    """,
-                    (eid,),
-                )
-                assign_rows = cur.fetchall() or []
-
-                roster: List[Dict[str, Any]] = []
-                uname_set = set()
-                for ar in assign_rows:
-                    pu = (ar.get("principal_username") or "").strip().lower()
-                    if pu:
-                        uname_set.add(pu)
-                    roster.append(
-                        {
-                            "username": (ar.get("principal_username") or "").strip(),
-                            "expected_callsign": (ar.get("expected_callsign") or "").strip()
-                            or None,
-                            "assigned_by": (ar.get("assigned_by") or "").strip() or None,
-                            "created_at": ar.get("created_at"),
-                            "contractor_id": None,
-                            "contractor_name": None,
-                            "on_schedule": False,
-                        }
-                    )
-
-                if uname_set:
-                    ph = ",".join(["%s"] * len(uname_set))
-                    cur.execute(
-                        f"""
-                        SELECT id, name, username
-                        FROM tb_contractors
-                        WHERE LOWER(TRIM(username)) IN ({ph})
-                        """,
-                        tuple(uname_set),
-                    )
-                    by_u: Dict[str, Dict[str, Any]] = {}
-                    for urow in cur.fetchall() or []:
-                        key = (urow.get("username") or "").strip().lower()
-                        if key:
-                            by_u[key] = urow
-                    for row in roster:
-                        key = (row.get("username") or "").strip().lower()
-                        hit = by_u.get(key)
-                        if hit:
-                            row["contractor_id"] = _safe_int_id(hit.get("id"))
-                            row["contractor_name"] = (hit.get("name") or "").strip() or None
-
-                runsheet_ids: List[int] = []
-                if has_runsheets and has_cura_col:
-                    cur.execute(
-                        """
-                        SELECT id, work_date, status, job_type_id
-                        FROM runsheets
-                        WHERE cura_operational_event_id = %s
-                        ORDER BY work_date ASC, id ASC
-                        """,
-                        (eid,),
-                    )
-                    rs_rows = cur.fetchall() or []
-                    runsheet_ids = [
-                        rid
-                        for r in rs_rows
-                        if (rid := _safe_int_id(r.get("id"))) is not None
-                    ]
-                else:
-                    rs_rows = []
-
-                planned_cids: Set[int] = set()
-                shift_lines: List[Dict[str, Any]] = []
-
-                if runsheet_ids and shift_to >= shift_from:
-                    ph_r = ",".join(["%s"] * len(runsheet_ids))
-                    cur.execute(
-                        f"""
-                        SELECT s.id, s.work_date, s.scheduled_start, s.scheduled_end,
-                               s.runsheet_id, s.contractor_id, s.status,
-                               jt.name AS job_type_name,
-                               u.name AS contractor_name, u.username AS contractor_username
-                        FROM schedule_shifts s
-                        JOIN job_types jt ON jt.id = s.job_type_id
-                        LEFT JOIN tb_contractors u ON u.id = s.contractor_id
-                        WHERE s.runsheet_id IN ({ph_r})
-                          AND s.work_date BETWEEN %s AND %s
-                          AND COALESCE(LOWER(s.status), '') NOT IN ('cancelled', 'no_show')
-                        ORDER BY s.work_date ASC, s.scheduled_start ASC, s.id ASC
-                        """,
-                        tuple(runsheet_ids + [shift_from, shift_to]),
-                    )
-                    s_rows = cur.fetchall() or []
-                    shift_ids = [
-                        sid
-                        for s in s_rows
-                        if (sid := _safe_int_id(s.get("id"))) is not None
-                    ]
-                    extra_by_shift: Dict[int, List[int]] = {}
-                    if has_ssa and shift_ids:
-                        ph_s = ",".join(["%s"] * len(shift_ids))
-                        cur.execute(
-                            f"""
-                            SELECT shift_id, contractor_id
-                            FROM schedule_shift_assignments
-                            WHERE shift_id IN ({ph_s})
-                            """,
-                            tuple(shift_ids),
-                        )
-                        for xr in cur.fetchall() or []:
-                            sid = _safe_int_id(xr.get("shift_id"))
-                            cid_x = _safe_int_id(xr.get("contractor_id"))
-                            if sid is not None and cid_x is not None:
-                                extra_by_shift.setdefault(sid, []).append(cid_x)
-
-                    for sr in s_rows:
-                        sid = _safe_int_id(sr.get("id"))
-                        if sid is None:
-                            continue
-                        cid = _safe_int_id(sr.get("contractor_id"))
-                        assignee_ids: List[int] = []
-                        assignee_seen: Set[int] = set()
-                        if cid is not None:
-                            assignee_ids.append(cid)
-                            assignee_seen.add(cid)
-                            planned_cids.add(cid)
-                        for xc in extra_by_shift.get(sid, []):
-                            planned_cids.add(xc)
-                            if xc not in assignee_seen:
-                                assignee_seen.add(xc)
-                                assignee_ids.append(xc)
-                        shift_lines.append(
-                            {
-                                "shift_id": sid,
-                                "work_date": sr.get("work_date"),
-                                "scheduled_start": sr.get("scheduled_start"),
-                                "scheduled_end": sr.get("scheduled_end"),
-                                "runsheet_id": sr.get("runsheet_id"),
-                                "job_type_name": (sr.get("job_type_name") or "").strip(),
-                                "contractor_name": (sr.get("contractor_name") or "").strip()
-                                or None,
-                                "contractor_username": (
-                                    sr.get("contractor_username") or ""
-                                ).strip()
-                                or None,
-                                "contractor_id": cid,
-                                "assignee_ids": assignee_ids,
-                            }
-                        )
-
-                for row in roster:
-                    rcid = _safe_int_id(row.get("contractor_id"))
-                    if rcid is not None and rcid in planned_cids:
-                        row["on_schedule"] = True
-
-                roster_n = len(roster)
-                matched_cids = {
-                    _safe_int_id(r["contractor_id"])
-                    for r in roster
-                    if r.get("contractor_id") is not None and r.get("on_schedule")
-                }
-                matched_cids.discard(None)
-                roster_matched = len(matched_cids)
-                planned_unique = len(planned_cids)
-                if roster_n == 0:
-                    required_headcount = 0
-                    headcount_gap = None
-                else:
-                    required_headcount = roster_n
-                    headcount_gap = max(0, roster_n - roster_matched)
-
-                fleet_resources: List[Dict[str, Any]] = []
-                if has_cura_resources:
-                    if has_fleet_vehicles_tbl:
-                        cur.execute(
-                            """
-                            SELECT r.id, r.resource_kind, r.resource_id, r.role_label,
-                                   r.notes, r.sort_order,
-                                   fv.registration, fv.internal_code
-                            FROM cura_operational_event_resources r
-                            LEFT JOIN fleet_vehicles fv
-                              ON fv.id = r.resource_id
-                             AND r.resource_kind = 'fleet_vehicle'
-                            WHERE r.operational_event_id = %s
-                            ORDER BY r.sort_order ASC, r.id ASC
-                            """,
-                            (eid,),
-                        )
-                    else:
-                        cur.execute(
-                            """
-                            SELECT id, resource_kind, resource_id, role_label, notes, sort_order
-                            FROM cura_operational_event_resources
-                            WHERE operational_event_id = %s
-                            ORDER BY sort_order ASC, id ASC
-                            """,
-                            (eid,),
-                        )
-                    for fr in cur.fetchall() or []:
-                        kind = (fr.get("resource_kind") or "").strip()
-                        summary = ""
-                        if kind == "fleet_vehicle" and fr.get("registration"):
-                            summary = (fr.get("registration") or "").strip()
-                            ic = (fr.get("internal_code") or "").strip()
-                            if ic:
-                                summary = f"{summary} ({ic})"
-                        elif fr.get("resource_id") is not None:
-                            summary = f"{kind} #{fr.get('resource_id')}"
-                        else:
-                            summary = kind or "Resource"
-                        fleet_resources.append(
-                            {
-                                "kind": kind,
-                                "summary": summary,
-                                "role_label": (fr.get("role_label") or "").strip()
-                                or None,
-                                "notes": (fr.get("notes") or "").strip() or None,
-                            }
-                        )
-
-                parsed_cfg = parse_cura_event_config(ev.get("config"))
-                crm_staffing: Optional[Dict[str, Any]] = None
-                crm_staffing_source: Optional[str] = None
-                packed = parsed_cfg.get("crm_recommended_staffing")
-                if isinstance(packed, dict) and isinstance(
-                    packed.get("staffing_breakdown"), dict
-                ):
-                    crm_staffing = packed
-                    crm_staffing_source = "cura_event_config"
-                if crm_staffing is None:
-                    raw_pid = parsed_cfg.get("crm_event_plan_id")
-                    if raw_pid is not None:
-                        try:
-                            plan_id_int = int(raw_pid)
-                        except (TypeError, ValueError):
-                            plan_id_int = None
-                        if plan_id_int is not None and has_crm_plans_tbl:
-                            try:
-                                from app.plugins.crm_module.crm_event_plan_staffing import (
-                                    staffing_snapshot_for_crm_plan_id,
-                                )
-
-                                live = staffing_snapshot_for_crm_plan_id(
-                                    cur, plan_id_int
-                                )
-                                if live:
-                                    crm_staffing = live
-                                    crm_staffing_source = "crm_opportunity_lookup"
-                            except ImportError:
-                                pass
-                            except Exception as crm_ex:
-                                logger.debug(
-                                    "cura_event_planning CRM staffing lookup: %s",
-                                    crm_ex,
-                                    exc_info=True,
-                                )
-                sb_crm = (
-                    (crm_staffing or {}).get("staffing_breakdown")
-                    if isinstance(crm_staffing, dict)
-                    else None
-                )
-                fleet_vehicle_n = sum(
-                    1
-                    for f in fleet_resources
-                    if (f.get("kind") or "").strip() == "fleet_vehicle"
-                )
-                role_coverage = (
-                    build_role_coverage(sb_crm if isinstance(sb_crm, dict) else None, shift_lines)
-                    if sb_crm
-                    else []
-                )
-                vehicle_guide = (
-                    vehicle_gap_hint(
-                        sb_crm if isinstance(sb_crm, dict) else None,
-                        fleet_vehicle_n,
-                    )
-                    if sb_crm
-                    else None
-                )
-
-                out["events"].append(
-                    {
-                        "id": eid,
-                        "name": ev_name,
-                        "slug": (ev.get("slug") or "").strip() or None,
-                        "status": (ev.get("status") or "").strip() or None,
-                        "starts_at": sa,
-                        "ends_at": ea,
-                        "location_summary": (ev.get("location_summary") or "").strip()
-                        or None,
-                        "shift_date_from": shift_from.isoformat(),
-                        "shift_date_to": shift_to.isoformat(),
-                        "roster": roster,
-                        "roster_count": roster_n,
-                        "required_headcount": required_headcount,
-                        "roster_matched_on_schedule": roster_matched,
-                        "planned_distinct_people": planned_unique,
-                        "headcount_gap": headcount_gap,
-                        "runsheet_count": len(runsheet_ids),
-                        "runsheet_ids": runsheet_ids,
-                        "planned_shifts": shift_lines,
-                        "fleet_resources": fleet_resources,
-                        "has_runsheet_link": bool(has_runsheets and has_cura_col),
-                        "crm_event_plan_id": parsed_cfg.get("crm_event_plan_id"),
-                        "crm_recommended_staffing": crm_staffing,
-                        "crm_staffing_source": crm_staffing_source,
-                        "crm_role_coverage": role_coverage,
-                        "crm_vehicle_guide": vehicle_guide,
-                    }
-                )
-
-        except Exception as ex:
-            logger.warning("cura_event_planning_overview: %s", ex, exc_info=True)
-            out["warning"] = "Could not load Cura planning data (check DB / modules)."
-            out["events"] = []
-        finally:
-            cur.close()
-            conn.close()
-
-        return out
-
-    @staticmethod
     def create_team_event_with_runsheet(
         *,
         client_id: int,
@@ -3667,7 +3882,7 @@ class ScheduleService:
         contractor_ids: List[int],
         notes: Optional[str] = None,
         shift_status: str = "published",
-        publish_runsheet: bool = True,
+        publish_runsheet: bool = False,
         cura_operational_event_id: Optional[int] = None,
         lead_user_id: Optional[int] = None,
         actor_user_id: Optional[int] = None,
@@ -3675,13 +3890,15 @@ class ScheduleService:
         eligibility_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        One run sheet for a multi-person event (e.g. training day), plus one schedule shift
-        per assignee linked to the same run sheet / assignment row.
+        Multi-person **rota** event: one ``schedule_shift`` per assignee (source of truth for the plan).
 
-        After publish, each person gets a timesheet line from the run sheet; they record
-        **actual** start/end on the run sheet (contractor portal), which syncs to timesheets.
+        A Time Billing **run sheet** is still created and linked (``runsheet_id`` on shifts) so
+        crews can optionally record **actual** times there and for ad-hoc / urgent jobs that
+        are not worth modelling only on scheduling first.
 
-        Shifts use ``runsheet_id`` so scheduler prefill does not duplicate those rows.
+        ``publish_runsheet`` controls whether the run sheet is published immediately (creates
+        timesheet rows from the scheduled window). Leave false when timesheets should come
+        from the normal scheduled-shift path until you explicitly publish in Time Billing.
         """
         seen: Set[int] = set()
         unique_ids: List[int] = []
@@ -3812,8 +4029,21 @@ class SlingSyncService:
     def _derive_fernet() -> Fernet:
         from flask import current_app
 
-        secret = current_app.config.get("SECRET_KEY") or "defaultsecretkey"
-        key = hashlib.sha256(str(secret).encode("utf-8")).digest()
+        secret = current_app.config.get("SECRET_KEY")
+        if secret is None or (isinstance(secret, str) and not str(secret).strip()):
+            raise RuntimeError(
+                "SECRET_KEY must be set in the Flask app config to encrypt or decrypt "
+                "Sling credentials (scheduling_module Sling sync)."
+            )
+        secret_s = str(secret).strip()
+        _flask_env = (os.environ.get("FLASK_ENV") or "").strip().lower()
+        _railway_env = (os.environ.get("RAILWAY_ENVIRONMENT") or "").strip().lower()
+        _prod = _flask_env == "production" or _railway_env == "production"
+        if _prod and secret_s == "defaultsecretkey":
+            raise RuntimeError(
+                "SECRET_KEY cannot be the default placeholder in production when using Sling sync."
+            )
+        key = hashlib.sha256(secret_s.encode("utf-8")).digest()
         # Fernet expects a urlsafe base64-encoded 32-byte key
         fernet_key = base64.urlsafe_b64encode(key)
         return Fernet(fernet_key)

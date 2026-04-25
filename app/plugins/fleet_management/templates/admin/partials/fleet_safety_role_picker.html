@@ -1,0 +1,10 @@
+{# hidden_name, hidden_value, compact (optional), data_xf_meta (optional) #}
+<div class="fleet-role-picker position-relative" data-fleet-role-picker>
+  <input type="hidden" name="{{ hidden_name }}" value="{{ hidden_value }}" class="fleet-role-picker-hidden"
+    {% if data_xf_meta %}data-xf-meta="{{ data_xf_meta }}"{% endif %}>
+  <div class="d-flex flex-wrap gap-1 mb-2 fleet-role-picker-chips" data-chips></div>
+  <input type="text" class="form-control{% if compact %} form-control-sm{% endif %}" data-role-search
+    placeholder="Search roles to add…" autocomplete="off" aria-label="Search roles">
+  <ul class="list-group fleet-role-picker-suggestions position-absolute w-100 shadow border rounded mt-1 bg-white"
+    style="z-index:50;max-height:220px;overflow-y:auto;display:none;top:100%;left:0" data-suggestions hidden></ul>
+</div>

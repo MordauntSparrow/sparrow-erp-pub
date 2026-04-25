@@ -1,0 +1,77 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}NHS data security (DSPT){% endblock %}
+{% block content %}
+
+<div class="alert alert-warning mb-4 py-2 small mb-3">
+  DSPT self-assessment and submission are only on <a href="https://www.dsptoolkit.nhs.uk/" target="_blank" rel="noopener" class="alert-link">dsptoolkit.nhs.uk</a>. This module does not submit to NHS systems.
+</div>
+
+<h1 class="h3 mb-4">NHS data security — evidence map</h1>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.timeline') }}">
+      <i class="bi bi-clock-history d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Timeline</span>
+      <span class="d-block small text-muted">Audit trail across configured domains</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.export_log') }}">
+      <i class="bi bi-list-ul d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Export log</span>
+      <span class="d-block small text-muted">Operator, scope, file hash</span>
+    </a>
+  </div>
+  {% if can_export|default(false) %}
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.export_wizard') }}">
+      <i class="bi bi-download d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Export wizard</span>
+      <span class="d-block small text-muted">Governed extracts</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.scheduled_admin') }}">
+      <i class="bi bi-calendar-week d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Scheduled exports</span>
+    </a>
+  </div>
+  {% endif %}
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.gap_report') }}">
+      <i class="bi bi-ui-checks d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Gap report</span>
+      <span class="d-block small text-muted">Structural ePCR checks</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.governance_evidence_packs') }}">
+      <i class="bi bi-shield-lock d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Governance assurance</span>
+      <span class="d-block small text-muted">Supplier / organisation entry points</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.ediscovery') }}">
+      <i class="bi bi-search d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Evidence matters</span>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-4">
+    <a class="btn btn-outline-primary w-100 py-3 text-start" href="{{ url_for('compliance_audit_internal.siem_dashboard') }}">
+      <i class="bi bi-activity d-block mb-1 fs-5"></i>
+      <span class="fw-semibold">Monitoring &amp; SIEM</span>
+    </a>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header">External</div>
+  <div class="card-body d-flex flex-wrap gap-2">
+    <a class="btn btn-outline-secondary" href="https://www.dsptoolkit.nhs.uk/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>DSPT</a>
+    <a class="btn btn-outline-secondary" href="https://www.dsptoolkit.nhs.uk/Help" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>DSPT help</a>
+    <a class="btn btn-outline-secondary" href="https://ico.org.uk/for-organisations/" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>ICO</a>
+  </div>
+</div>
+{% endblock %}

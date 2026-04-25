@@ -33,12 +33,34 @@ def crm_event_plan_maps_relative_subpath() -> str:
     return "uploads/crm_event_plans/maps"
 
 
+def crm_event_plan_branding_logo_relative_subpath() -> str:
+    """Tenant-wide PDF cover logo (manifest ``event_plan_pdf_logo_path``)."""
+    return "uploads/crm_event_plans/branding"
+
+
+def crm_event_plan_covers_relative_subpath() -> str:
+    """Per-plan optional cover hero image (``plan_cover_image_path``)."""
+    return "uploads/crm_event_plans/covers"
+
+
 def crm_event_plan_pdf_write_dir(app) -> str:
     return os.path.join(crm_static_dir_for_app(app), crm_event_plan_pdf_relative_subpath())
 
 
 def crm_event_plan_maps_write_dir(app) -> str:
     return os.path.join(crm_static_dir_for_app(app), crm_event_plan_maps_relative_subpath())
+
+
+def crm_event_plan_branding_logo_write_dir(app) -> str:
+    return os.path.join(
+        crm_static_dir_for_app(app), crm_event_plan_branding_logo_relative_subpath()
+    )
+
+
+def crm_event_plan_covers_write_dir(app) -> str:
+    return os.path.join(
+        crm_static_dir_for_app(app), crm_event_plan_covers_relative_subpath()
+    )
 
 
 def crm_event_plan_diagrams_relative_subpath() -> str:
@@ -122,6 +144,47 @@ def crm_event_map_path_is_allowed(rel: str | None) -> bool:
     rel = _normalize_upload_rel(rel or "")
     prefix = f"{crm_event_plan_maps_relative_subpath()}/"
     return bool(rel and rel.startswith(prefix))
+
+
+def crm_event_plan_pdf_logo_path_is_allowed(rel: str | None) -> bool:
+    rel = _normalize_upload_rel(rel or "")
+    prefix = f"{crm_event_plan_branding_logo_relative_subpath()}/"
+    return bool(rel and rel.startswith(prefix))
+
+
+def crm_plan_cover_image_path_is_allowed(rel: str | None) -> bool:
+    rel = _normalize_upload_rel(rel or "")
+    prefix = f"{crm_event_plan_covers_relative_subpath()}/"
+    return bool(rel and rel.startswith(prefix))
+
+
+def _crm_resolve_under_prefix(app, rel: str, prefix: str) -> str | None:
+    rel = _normalize_upload_rel(rel)
+    if not rel or not rel.startswith(prefix):
+        return None
+    segs = [s for s in rel.split("/") if s]
+    for root in _crm_static_search_roots(app):
+        candidate = os.path.abspath(os.path.join(root, *segs))
+        try:
+            if os.path.commonpath([candidate, root]) != root:
+                continue
+        except ValueError:
+            continue
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def crm_resolve_event_plan_pdf_logo_path(app, rel: str) -> str | None:
+    return _crm_resolve_under_prefix(
+        app, rel, f"{crm_event_plan_branding_logo_relative_subpath()}/"
+    )
+
+
+def crm_resolve_plan_cover_image_path(app, rel: str) -> str | None:
+    return _crm_resolve_under_prefix(
+        app, rel, f"{crm_event_plan_covers_relative_subpath()}/"
+    )
 
 
 def crm_event_plan_diagram_src_allowed(rel: str | None) -> bool:

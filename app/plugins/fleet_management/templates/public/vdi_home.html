@@ -1,0 +1,60 @@
+{% extends "public/vdi_base.html" %}
+{% import "partials/fleet_status_macros.html" as fs %}
+{% block vdi_title %}Select vehicle{% endblock %}
+{% block vdi_content %}
+<h1 class="h5 mb-3">Vehicle daily inspection</h1>
+<p class="text-muted small mb-4">Choose a vehicle to complete today&rsquo;s check. <span class="badge bg-danger vor-badge">VOR</span> (Vehicle off road) or <span class="badge bg-warning text-dark vor-badge">Maintenance</span> means do not use the vehicle on active service until fleet clears it.</p>
+<div class="row g-2">
+  {% for v in vehicles %}
+  <div class="col-12">
+    <a href="{{ url_for('fleet_vdi.vdi_vehicle', vehicle_id=v.id) }}" class="text-decoration-none text-dark">
+      <div class="card veh-card shadow-sm">
+        <div class="card-body d-flex align-items-center gap-3 py-3">
+          {% if v.id_photo_path %}
+          <img src="{{ url_for('static', filename='uploads/' + v.id_photo_path) }}" alt="" class="rounded" style="width:64px;height:64px;object-fit:cover">
+          {% else %}
+          <div class="bg-light rounded d-flex align-items-center justify-content-center" style="width:64px;height:64px"><i class="bi bi-truck-front fs-3 text-secondary"></i></div>
+          {% endif %}
+          <div class="flex-grow-1 min-w-0">
+            <div class="fw-semibold">{{ v.internal_code }}{% if v.registration %} <span class="text-muted small">{{ v.registration }}</span>{% endif %}</div>
+            <div class="small text-muted text-truncate">{{ v.make or '' }} {{ v.model or '' }}</div>
+            <div class="mt-1">{{ fs.crew_vehicle_badges(v) }}</div>
+          </div>
+          <i class="bi bi-chevron-right text-muted"></i>
+        </div>
+      </div>
+    </a>
+  </div>
+  {% else %}
+  <p class="text-muted">No vehicles in the fleet.</p>
+  {% endfor %}
+</div>
+
+{% if vehicles %}
+<div class="card shadow-sm mt-4">
+  <div class="card-header small fw-semibold">Report a vehicle issue</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('fleet_management.crew_report_issue') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-2">
+        <label class="form-label small">Vehicle</label>
+        <select name="vehicle_id" class="form-select form-select-sm" required>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}">{{ v.internal_code }}{% if v.registration %} — {{ v.registration }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label small">Title</label>
+        <input class="form-control form-control-sm" name="title" required placeholder="e.g. Engine warning light">
+      </div>
+      <div class="mb-2">
+        <label class="form-label small">Details</label>
+        <textarea class="form-control form-control-sm" name="description" rows="2" placeholder="What did you notice?"></textarea>
+      </div>
+      <button type="submit" class="btn btn-outline-danger btn-sm">Submit to fleet</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

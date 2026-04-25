@@ -2295,8 +2295,14 @@ class InventoryService:
             total_value = float((cur.fetchone() or {}).get("v", 0) or 0)
             cur.execute(
                 """
-                SELECT COUNT(*) AS n FROM inventory_batches
-                WHERE expiry_date IS NOT NULL AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+                SELECT COUNT(DISTINCT b.id) AS n
+                FROM inventory_batches b
+                INNER JOIN inventory_stock_levels s
+                  ON s.batch_id = b.id AND s.quantity_on_hand > 0
+                INNER JOIN inventory_locations l ON l.id = s.location_id
+                WHERE b.expiry_date IS NOT NULL
+                  AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+                  AND COALESCE(LOWER(l.type), '') <> 'training'
                 """
             )
             expiring_soon = (cur.fetchone() or {}).get("n", 0) or 0
@@ -2474,6 +2480,7 @@ class InventoryService:
                     WHERE b.expiry_date IS NOT NULL
                       AND b.expiry_date >= CURDATE()
                       AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+                      AND COALESCE(LOWER(l.type), '') <> 'training'
                     GROUP BY b.id, b.batch_number, b.lot_number, b.expiry_date,
                              i.id, i.name, i.sku, l.id, l.code, l.name
                     ORDER BY b.expiry_date ASC, l.name ASC
@@ -2501,15 +2508,19 @@ class InventoryService:
                 cur.execute(
                     """
                     SELECT b.id AS batch_id, b.batch_number, i.sku, i.name AS item_name,
-                           b.expiry_date, SUM(s.quantity_on_hand) AS qty
+                           b.expiry_date, l.id AS location_id, l.code AS location_code,
+                           l.name AS location_name, SUM(s.quantity_on_hand) AS qty
                     FROM inventory_batches b
                     INNER JOIN inventory_items i ON i.id = b.item_id
                     INNER JOIN inventory_stock_levels s
                       ON s.batch_id = b.id AND s.quantity_on_hand > 0
+                    INNER JOIN inventory_locations l ON l.id = s.location_id
                     WHERE b.expiry_date IS NOT NULL AND b.expiry_date < CURDATE()
-                    GROUP BY b.id, b.batch_number, i.sku, i.name, b.expiry_date
+                      AND COALESCE(LOWER(l.type), '') <> 'training'
+                    GROUP BY b.id, b.batch_number, i.sku, i.name, b.expiry_date,
+                             l.id, l.code, l.name
                     ORDER BY b.expiry_date DESC
-                    LIMIT 12
+                    LIMIT 24
                     """
                 )
                 er = cur.fetchall() or []
@@ -2721,8 +2732,16 @@ class InventoryService:
             )
             low = (cur.fetchone() or {}).get("n", 0) or 0
             cur.execute(
-                "SELECT COUNT(*) AS n FROM inventory_batches "
-                "WHERE expiry_date IS NOT NULL AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"
+                """
+                SELECT COUNT(DISTINCT b.id) AS n
+                FROM inventory_batches b
+                INNER JOIN inventory_stock_levels s
+                  ON s.batch_id = b.id AND s.quantity_on_hand > 0
+                INNER JOIN inventory_locations l ON l.id = s.location_id
+                WHERE b.expiry_date IS NOT NULL
+                  AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+                  AND COALESCE(LOWER(l.type), '') <> 'training'
+                """
             )
             expiring = (cur.fetchone() or {}).get("n", 0) or 0
             ins = by_type.get("in", 0) + by_type.get("return", 0) + by_type.get("repack", 0)
@@ -3101,6 +3120,106 @@ class InventoryService:
             reference_type="transfer",
         )
         return {"from": out_tx, "to": in_tx}
+
+    def get_training_pool_location_id(self) -> Optional[int]:
+        """Reserved location TRAINING-POOL (type training) for OOD stock kept for drills."""
+        conn = self._connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT id FROM inventory_locations WHERE code = %s LIMIT 1",
+                ("TRAINING-POOL",),
+            )
+            r = cur.fetchone()
+            return int(r[0]) if r else None
+        finally:
+            cur.close()
+
+    def transfer_batch_stock_to_training_pool(
+        self,
+        *,
+        batch_id: int,
+        from_location_id: int,
+        quantity: float,
+        performed_by_user_id: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Move on-hand dated stock into the training pool (patient-care expiry dashboards ignore it there)."""
+        pool_id = self.get_training_pool_location_id()
+        if not pool_id:
+            return {"ok": False, "error": "training_pool_missing"}
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SELECT item_id FROM inventory_batches WHERE id = %s", (int(batch_id),))
+            br = cur.fetchone()
+            if not br:
+                return {"ok": False, "error": "batch_not_found"}
+            item_id = int(br["item_id"])
+        finally:
+            cur.close()
+        st = self.get_stock_levels(
+            item_id=item_id, location_id=from_location_id, batch_id=int(batch_id)
+        )
+        qoh = float(st.get("quantity_on_hand") or 0)
+        try:
+            q = float(quantity)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "quantity_invalid"}
+        if q <= 0 or q > qoh + 1e-9:
+            return {"ok": False, "error": "quantity_invalid", "on_hand": qoh}
+        self.transfer_stock(
+            item_id=item_id,
+            from_location_id=int(from_location_id),
+            to_location_id=int(pool_id),
+            quantity=q,
+            batch_id=int(batch_id),
+            performed_by_user_id=performed_by_user_id,
+        )
+        return {"ok": True}
+
+    def dispose_batch_stock_ood(
+        self,
+        *,
+        batch_id: int,
+        from_location_id: int,
+        quantity: float,
+        performed_by_user_id: Optional[Any] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Remove on-hand stock for an out-of-date lot (patient use) with audit reference."""
+        conn = self._connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SELECT item_id FROM inventory_batches WHERE id = %s", (int(batch_id),))
+            br = cur.fetchone()
+            if not br:
+                return {"ok": False, "error": "batch_not_found"}
+            item_id = int(br["item_id"])
+        finally:
+            cur.close()
+        st = self.get_stock_levels(
+            item_id=item_id, location_id=int(from_location_id), batch_id=int(batch_id)
+        )
+        qoh = float(st.get("quantity_on_hand") or 0)
+        try:
+            q = float(quantity)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "quantity_invalid"}
+        if q <= 0 or q > qoh + 1e-9:
+            return {"ok": False, "error": "quantity_invalid", "on_hand": qoh}
+        meta = {"reason": "ood_disposal", "notes": (notes or "")[:500]}
+        self.record_transaction(
+            item_id=item_id,
+            location_id=int(from_location_id),
+            quantity=q,
+            transaction_type="out",
+            batch_id=int(batch_id),
+            performed_by_user_id=performed_by_user_id,
+            reference_type="ood_disposal",
+            reference_id=str(int(batch_id)),
+            metadata=meta,
+        )
+        return {"ok": True}
 
     def repack(
         self,

@@ -36,6 +36,51 @@ def pad_staff_roster(rows: list[dict[str, Any]], size: int = 16) -> list[dict[st
     return out
 
 
+def pad_staff_roster_for_edit(rows: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+    """Three empty slots for new plans; otherwise one slot per saved row (capped at 40)."""
+    n = len(rows)
+    size = max(3, min(40, n))
+    return pad_staff_roster(rows, size=size)
+
+
+def management_support_list_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalise ``management_support_json`` (command / gold–silver / coordination roles)."""
+    raw = plan.get("management_support_json")
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="replace")
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            v = json.loads(s)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def management_support_row_nonempty(r: dict[str, Any]) -> bool:
+    return any(str(r.get(k) or "").strip() for k in ("role", "name", "phone", "notes"))
+
+
+def pad_management_support_rows(
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any] | None]:
+    """Three empty slots for new plans; otherwise one slot per saved row (capped at 40)."""
+    n = len(rows)
+    size = max(3, min(40, n))
+    out: list[dict[str, Any] | None] = [None] * size
+    for i, r in enumerate(rows[:size]):
+        out[i] = r
+    return out
+
+
 def load_plan_pdf_labels(plan: dict[str, Any]) -> dict[str, Any]:
     """Resolve account, opportunity, and quote display strings for the cover sheet."""
     account_name = ""

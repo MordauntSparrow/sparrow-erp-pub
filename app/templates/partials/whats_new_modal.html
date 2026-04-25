@@ -1,0 +1,44 @@
+{# MDB modal — static backdrop; shown only on core dashboard (/). Close (X) and Got it both POST ack. #}
+<div class="modal fade" id="whatsNewModal" tabindex="-1" aria-labelledby="whatsNewModalTitle" aria-modal="true" role="dialog" data-mdb-backdrop="static" data-mdb-keyboard="false">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <form id="whatsNewAckForm" method="post" action="{{ url_for('routes.account_whats_new_ack') }}" class="d-none" aria-hidden="true">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      </form>
+      <div class="modal-header border-0 pb-0 align-items-start">
+        <div class="pe-4 flex-grow-1">
+          <p class="text-muted small mb-1">Welcome back{% if user_first is defined and user_first %}, {{ user_first }}{% endif %} — here&rsquo;s what&rsquo;s new this week.</p>
+          <h2 class="modal-title h4 mb-0" id="whatsNewModalTitle">{{ whats_new.title }}</h2>
+        </div>
+        <button type="submit" form="whatsNewAckForm" class="btn-close mt-1" aria-label="Dismiss and mark as read"></button>
+      </div>
+      <div class="modal-body pt-3 whats-new-modal-body">
+        {% if whats_new.summary %}
+        <p class="lead small text-body-secondary mb-4 border-bottom pb-3">{{ whats_new.summary }}</p>
+        {% endif %}
+        {% if whats_new.sections and whats_new.sections|length > 0 %}
+          {% for sec in whats_new.sections %}
+          <section class="mb-4{% if loop.first %} mt-0{% endif %}">
+            {% if sec.heading %}
+            <h3 class="h6 text-primary fw-semibold mb-2">{{ sec.heading }}</h3>
+            {% endif %}
+            {% for para in sec.paragraphs %}
+            <p class="small text-body mb-2 mb-md-3">{{ para }}</p>
+            {% endfor %}
+          </section>
+          {% endfor %}
+        {% elif whats_new.bullets %}
+        <ul class="mb-0 ps-3">
+          {% for line in whats_new.bullets %}
+          <li class="small mb-2">{{ line }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      <div class="modal-footer border-0 pt-0 flex-wrap gap-2">
+        <span class="text-muted small me-auto">Dismiss with &ldquo;Got it&rdquo; or the close control when you&rsquo;re finished reading.</span>
+        <button type="submit" form="whatsNewAckForm" class="btn btn-primary px-4">Got it</button>
+      </div>
+    </div>
+  </div>
+</div>

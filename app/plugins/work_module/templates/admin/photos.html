@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Photo gallery – Work{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="h4 mb-3">Photo gallery</h1>
+  <form method="get" class="row g-2 mb-3">
+    <div class="col-auto">
+      <label class="form-label small mb-0">From</label>
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from.isoformat() if date_from else '' }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">To</label>
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to.isoformat() if date_to else '' }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-0">Contractor</label>
+      <select name="contractor_id" class="form-select form-select-sm">
+        <option value="">All</option>
+        {% for c in contractors %}
+        <option value="{{ c.id }}" {{ 'selected' if contractor_id == c.id else '' }}>{{ c.name or c.email }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto" style="min-width:14rem;">
+      <label class="form-label small mb-0">Visit</label>
+      <input type="hidden" name="visit_id" id="workPhotosVisitHid" value="{{ visit_id or '' }}">
+      <input type="search" class="form-control form-control-sm mb-1" id="workPhotosVisitQ" autocomplete="off" placeholder="Search client, staff, visit #…" data-visits-search="{{ url_for('internal_work.admin_visits_search') }}">
+      <ul class="list-group list-group-flush small border rounded d-none position-absolute bg-white shadow-sm" id="workPhotosVisitUl" style="max-height:10rem;overflow:auto;z-index:20;min-width:16rem;"></ul>
+      <div class="small text-muted" id="workPhotosVisitPicked">{% if visit_filter_label %}{{ visit_filter_label|e }}{% else %}All visits{% endif %}</div>
+      <button type="button" class="btn btn-link btn-sm p-0 {% if not visit_id %}d-none{% endif %}" id="workPhotosVisitClear">Clear visit filter</button>
+    </div>
+    <div class="col-auto align-self-end">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+    </div>
+  </form>
+  <div class="row g-3">
+    {% for p in photos %}
+    <div class="col-6 col-md-4 col-lg-3">
+      <div class="card">
+        <a href="/static/{{ p.file_path }}" target="_blank" rel="noopener"><img src="/static/{{ p.file_path }}" class="card-img-top" alt="" style="object-fit: cover; height: 140px;"></a>
+        <div class="card-body py-2">
+          <p class="small mb-0">{{ p.contractor_name or '—' }} · {{ p.work_date.isoformat() if p.work_date else '' }}{% if p.visit_id %} · visit <code>{{ p.visit_id }}</code>{% endif %}</p>
+          <p class="small text-muted mb-0">{{ p.client_name or '—' }}{% if p.caption %}: {{ p.caption[:40] }}{% if p.caption|length > 40 %}…{% endif %}{% endif %}</p>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="col-12 text-muted">No photos match filters.</div>
+    {% endfor %}
+  </div>
+  <a href="{{ url_for('internal_work.admin_index') }}" class="btn btn-outline-secondary btn-sm mt-3">Back to Work</a>
+</div>
+<script>
+(function () {
+  var hid = document.getElementById("workPhotosVisitHid");
+  var qinp = document.getElementById("workPhotosVisitQ");
+  var ul = document.getElementById("workPhotosVisitUl");
+  var picked = document.getElementById("workPhotosVisitPicked");
+  var clr = document.getElementById("workPhotosVisitClear");
+  var wrap = qinp ? qinp.closest(".col-auto") : null;
+  if (wrap) wrap.style.position = "relative";
+  if (!hid || !qinp || !ul || !qinp.dataset.visitsSearch) return;
+  var t;
+  function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+  function setPicked(text, showClear) {
+    if (picked) picked.textContent = text;
+    if (clr) clr.classList.toggle("d-none", !showClear);
+  }
+  qinp.addEventListener("input", function () {
+    clearTimeout(t);
+    var q = (qinp.value || "").trim();
+    if (q.length < 2) { hide(); return; }
+    t = setTimeout(function () {
+      fetch(qinp.dataset.visitsSearch + "?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (rows) {
+          ul.innerHTML = "";
+          if (!rows || !rows.length) { hide(); return; }
+          rows.forEach(function (row) {
+            var li = document.createElement("li");
+            li.className = "list-group-item list-group-item-action py-1";
+            li.textContent = row.label;
+            li.addEventListener("click", function () {
+              hid.value = String(row.id);
+              setPicked(row.label, true);
+              qinp.value = "";
+              hide();
+            });
+            ul.appendChild(li);
+          });
+          ul.classList.remove("d-none");
+        })
+        .catch(function () { hide(); });
+    }, 250);
+  });
+  if (clr) {
+    clr.addEventListener("click", function (e) {
+      e.preventDefault();
+      hid.value = "";
+      setPicked("All visits", false);
+      qinp.value = "";
+      hide();
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (!ul.contains(e.target) && e.target !== qinp) hide();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,117 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Audit log — Sparrow{% endblock %}
+
+{% set rows = (audit_payload.audit_logs if audit_payload and audit_payload.audit_logs is defined else []) %}
+{% set counts = (audit_payload.category_counts if audit_payload and audit_payload.category_counts is defined else {}) %}
+{% set cat_display = {
+  'epcr_case_access': 'EPCR access',
+  'epcr_cases_api': 'EPCR API',
+  'cura_safeguarding_oversight': 'SG manager (UI)',
+  'cura_safeguarding_api': 'SG API / app',
+  'cura_mpi': 'Cura MPI',
+  'cura_mi_api': 'MI API',
+  'cura_api': 'Cura API',
+  'cura_ops_ui': 'Cura ops (UI)',
+  'other': 'Other',
+} %}
+
+{% block content %}
+<div class="mr-page-header mb-3">
+  <h1 class="h3 mb-1">Audit log</h1>
+  <p class="text-muted mb-0 small">Readable view of recent audit events (limit {{ audit_payload.limit if audit_payload else '—' }}). Use filters below to narrow quickly.</p>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label small mb-0" for="auditSearch">Search</label>
+        <input class="form-control form-control-sm" id="auditSearch" type="text" placeholder="User, action text, route, IP, case/patient…">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small mb-0" for="auditCategory">Category</label>
+        <select class="form-select form-select-sm" id="auditCategory">
+          <option value="all" selected>All ({{ rows|length }})</option>
+          <option value="epcr_case_access">EPCR case access ({{ counts.epcr_case_access|default(0) }})</option>
+          <option value="epcr_cases_api">EPCR cases API ({{ counts.epcr_cases_api|default(0) }})</option>
+          <option value="cura_safeguarding_oversight">Safeguarding manager — browser ({{ counts.cura_safeguarding_oversight|default(0) }})</option>
+          <option value="cura_safeguarding_api">Safeguarding — Cura / API ({{ counts.cura_safeguarding_api|default(0) }})</option>
+          <option value="cura_mpi">Cura MPI / match flags ({{ counts.cura_mpi|default(0) }})</option>
+          <option value="cura_mi_api">Minor injury (MI) API ({{ counts.cura_mi_api|default(0) }})</option>
+          <option value="cura_api">Cura ops API — events, attachments, … ({{ counts.cura_api|default(0) }})</option>
+          <option value="cura_ops_ui">Cura event manager &amp; settings (UI) ({{ counts.cura_ops_ui|default(0) }})</option>
+          <option value="other">Other ({{ counts.other|default(0) }})</option>
+        </select>
+      </div>
+      <div class="col-md-5 text-md-end">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('medical_records_internal.view_audit_log', format='json', limit=audit_payload.limit if audit_payload else 4000) }}" target="_blank" rel="noopener">Open JSON</a>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Back to Cura event manager</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive mr-table-wrap">
+  <table class="table table-sm table-hover align-middle mb-0" id="auditTable">
+    <thead class="table-light">
+      <tr>
+        <th scope="col" class="text-muted small text-nowrap">Time</th>
+        <th scope="col" class="text-muted small text-nowrap">Category</th>
+        <th scope="col" class="text-muted small">User</th>
+        <th scope="col" class="text-muted small text-nowrap">Role</th>
+        <th scope="col" class="text-muted small">Action</th>
+        <th scope="col" class="text-muted small text-nowrap">Case</th>
+        <th scope="col" class="text-muted small text-nowrap">Patient</th>
+        <th scope="col" class="text-muted small">Route</th>
+        <th scope="col" class="text-muted small text-nowrap">IP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr
+        data-cat="{{ r.category|default('other') }}"
+        data-q="{{ (r.timestamp|default('') ~ ' ' ~ r.category|default('') ~ ' ' ~ r.user|default('') ~ ' ' ~ r.principal_role|default('') ~ ' ' ~ r.action|default('') ~ ' ' ~ r.case_id|default('') ~ ' ' ~ r.patient_id|default('') ~ ' ' ~ r.route|default('') ~ ' ' ~ r.ip|default('') ~ ' ' ~ r.reason|default(''))|lower|e }}"
+      >
+        <td class="small text-muted text-nowrap">{{ r.timestamp }}</td>
+        <td class="small"><span class="badge bg-light text-dark border" title="{{ r.category|default('other') }}">{{ cat_display.get(r.category|default('other'), r.category|default('other')) }}</span></td>
+        <td class="small">{{ r.user or '—' }}</td>
+        <td class="small text-muted">{{ r.principal_role or '—' }}</td>
+        <td class="small text-break">{{ r.action }}</td>
+        <td class="small font-monospace">{{ r.case_id or '—' }}</td>
+        <td class="small font-monospace">{{ r.patient_id or '—' }}</td>
+        <td class="small text-muted text-break">{{ r.route or '—' }}</td>
+        <td class="small text-muted text-nowrap">{{ r.ip or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="text-muted py-4 text-center">No audit rows.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  (function() {
+    var searchEl = document.getElementById('auditSearch');
+    var catEl = document.getElementById('auditCategory');
+    var table = document.getElementById('auditTable');
+    if (!searchEl || !catEl || !table) return;
+
+    function applyFilter() {
+      var q = (searchEl.value || '').trim().toLowerCase();
+      var cat = (catEl.value || 'all');
+      var rows = table.querySelectorAll('tbody tr');
+      rows.forEach(function(tr) {
+        var trCat = tr.getAttribute('data-cat') || 'other';
+        var hay = tr.getAttribute('data-q') || '';
+        var okCat = (cat === 'all') || (trCat === cat);
+        var okQ = (!q) || (hay.indexOf(q) !== -1);
+        tr.classList.toggle('d-none', !(okCat && okQ));
+      });
+    }
+
+    searchEl.addEventListener('input', applyFilter);
+    catEl.addEventListener('change', applyFilter);
+  })();
+</script>
+{% endblock %}
+

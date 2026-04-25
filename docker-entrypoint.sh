@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-# Railway (and similar) set PORT; nginx must listen on that interface port.
+# Railway (and similar) set PORT; nginx listens here. run_website.py must use a different port (default 80).
 PORT="${PORT:-8080}"
 INSTALL_DEFAULT="/etc/nginx/sites-available/default"
 mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /var/lib/nginx/body /var/log/nginx

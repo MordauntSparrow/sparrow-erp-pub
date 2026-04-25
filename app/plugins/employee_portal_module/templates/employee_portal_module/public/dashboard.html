@@ -25,13 +25,18 @@
 
 {% set _glance = summary_context|default({}) %}
 {% set _sched = _glance.scheduling_summary|default({}) if _glance else {} %}
-{% set _has_attention = (_glance.pending_policies|default(0) > 0) or (_glance.pending_training|default(0) > 0) or (_glance.pending_hr_requests|default(0) > 0) or (_glance.pending_todo_count|default(0) > 0) or (_glance.unread_messages|default(0) > 0) or (scheduling_enabled|default(False) and (_sched.shifts_this_week|default(0) > 0 or _sched.pending_shift_tasks|default(0) > 0)) %}
+{# At a glance: respect portal module allow-list (same keys as module tiles). #}
+{% set _att_sched = (portal_show_scheduling_actions|default(true)) and (_sched) and ((_sched.shifts_this_week|default(0) > 0) or (_sched.pending_shift_tasks|default(0) > 0)) %}
+{% set _att_pol = (portal_show_compliance_actions|default(true)) and (_glance.pending_policies|default(0) > 0) %}
+{% set _att_tr = (portal_show_training_actions|default(true)) and (_glance.pending_training|default(0) > 0) %}
+{% set _att_hr = (portal_show_hr_actions|default(true)) and (_glance.pending_hr_requests|default(0) > 0) %}
+{% set _has_attention = _att_sched or _att_pol or _att_tr or _att_hr or (_glance.pending_todo_count|default(0) > 0) or (_glance.unread_messages|default(0) > 0) %}
 <section class="mb-4" role="region" aria-label="At a glance">
   <div class="ep-card p-3">
     <h3 class="h6 text-secondary text-uppercase mb-2">At a glance</h3>
     {% if _has_attention %}
     <ul class="list-unstyled mb-0 small">
-      {% if scheduling_enabled|default(False) and _sched %}
+      {% if portal_show_scheduling_actions|default(true) and _sched %}
       {% if _sched.shifts_this_week|default(0) > 0 %}
       <li class="mb-1"><i class="bi bi-calendar-week text-primary me-2" aria-hidden="true"></i><a href="{{ url_for('public_scheduling.public_index') }}">{{ _sched.shifts_this_week }} shift(s) this week</a>{% if _sched.shifts_today|default(0) > 0 %} ({{ _sched.shifts_today }} today){% endif %}</li>
       {% endif %}
@@ -39,13 +44,13 @@
       <li class="mb-1"><i class="bi bi-list-task text-secondary me-2" aria-hidden="true"></i><a href="{{ url_for('public_employee_portal.dashboard', todo_filter='pending') }}">{{ _sched.pending_shift_tasks }} shift task(s) to complete</a></li>
       {% endif %}
       {% endif %}
-      {% if _glance.pending_policies|default(0) > 0 %}
+      {% if portal_show_compliance_actions|default(true) and _glance.pending_policies|default(0) > 0 %}
       <li class="mb-1"><i class="bi bi-shield-check text-warning me-2" aria-hidden="true"></i><a href="{{ url_for('public_compliance.public_index') }}">{{ _glance.pending_policies }} policy/policies to sign</a></li>
       {% endif %}
-      {% if _glance.pending_training|default(0) > 0 %}
+      {% if portal_show_training_actions|default(true) and _glance.pending_training|default(0) > 0 %}
       <li class="mb-1"><i class="bi bi-mortarboard text-success me-2" aria-hidden="true"></i><a href="{{ url_for('public_training.public_index') }}">{{ _glance.pending_training }} training item(s) to complete</a></li>
       {% endif %}
-      {% if _glance.pending_hr_requests|default(0) > 0 %}
+      {% if portal_show_hr_actions|default(true) and _glance.pending_hr_requests|default(0) > 0 %}
       <li class="mb-1"><i class="bi bi-person-badge text-info me-2" aria-hidden="true"></i><a href="{{ url_for('public_hr.public_index') }}">{{ _glance.pending_hr_requests }} HR document request(s)</a></li>
       {% endif %}
       {% if _glance.pending_todo_count|default(0) > 0 %}
@@ -62,9 +67,9 @@
     <p class="mt-2 mb-0 small fst-italic">{{ ai_summary }}</p>
     {% endif %}
     <p class="mt-2 mb-0">
-      {% if ai_available|default(False) %}
+      {% if ai_available|default(False) and portal_show_assistant_tile|default(True) %}
       <a href="{{ url_for('public_employee_portal.assistant_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-chat-dots me-1"></i>Ask assistant</a>
-      {% else %}
+      {% elif not ai_available|default(False) %}
       <span class="btn btn-sm btn-outline-secondary disabled opacity-50" style="pointer-events: none;" tabindex="-1" role="button" aria-disabled="true" title="AI assistance is not set up or enabled yet."><i class="bi bi-chat-dots me-1"></i>Ask assistant</span>
       {% endif %}
     </p>
@@ -85,22 +90,26 @@
   </div>
 </section>
 
-{% set _has_quick_actions = (scheduling_enabled|default(False)) or (pending_policies|default(0) > 0) or (pending_hr_requests|default(0) > 0) or (pending_training|default(0) > 0) %}
+{% set _qa_sched = portal_show_scheduling_actions|default(true) %}
+{% set _qa_pol = portal_show_compliance_actions|default(true) and (pending_policies|default(0) > 0) %}
+{% set _qa_hr = portal_show_hr_actions|default(true) and (pending_hr_requests|default(0) > 0) %}
+{% set _qa_tr = portal_show_training_actions|default(true) and (pending_training|default(0) > 0) %}
+{% set _has_quick_actions = _qa_sched or _qa_pol or _qa_hr or _qa_tr %}
 {% if _has_quick_actions %}
 <section class="mb-4" aria-labelledby="quick-actions-heading">
   <h3 id="quick-actions-heading" class="h6 text-secondary text-uppercase mb-3">Quick actions</h3>
   <div class="d-flex flex-wrap gap-2">
-    {% if scheduling_enabled|default(False) %}
+    {% if _qa_sched %}
     <a href="{{ url_for('public_scheduling.request_time_off_page') }}" class="btn btn-outline-secondary btn-sm">Request time off</a>
     <a href="{{ url_for('public_scheduling.report_sickness_page') }}" class="btn btn-outline-warning btn-sm">Report sickness</a>
     {% endif %}
-    {% if pending_policies|default(0) > 0 %}
+    {% if _qa_pol %}
     <a href="{{ url_for('public_compliance.public_index') }}" class="btn btn-warning btn-sm">{{ pending_policies }} policy/policies to sign</a>
     {% endif %}
-    {% if pending_hr_requests|default(0) > 0 %}
+    {% if _qa_hr %}
     <a href="{{ url_for('public_hr.public_index') }}" class="btn btn-info btn-sm">{{ pending_hr_requests }} document request(s)</a>
     {% endif %}
-    {% if pending_training|default(0) > 0 %}
+    {% if _qa_tr %}
     <a href="{{ url_for('public_training.public_index') }}" class="btn btn-success btn-sm"><i class="bi bi-mortarboard me-1"></i>{{ pending_training }} training item(s) to complete</a>
     {% endif %}
   </div>
@@ -125,7 +134,7 @@
     </span>
     {% endif %}
     {% endfor %}
-    {% if equipment_portal_enabled|default(False) %}
+    {% if portal_show_equipment_tile|default(False) %}
     <a href="{{ url_for('public_employee_portal.my_equipment') }}" class="module-tile">
       <i class="bi bi-heart-pulse"></i>
       <span class="fw-medium">My equipment &amp; kit</span>
@@ -135,7 +144,7 @@
       <i class="bi bi-chevron-right ms-auto text-secondary"></i>
     </a>
     {% endif %}
-    {% if inventory_contractor_requests_portal_enabled|default(False) %}
+    {% if portal_show_inventory_tiles|default(False) %}
     <a href="{{ url_for('public_inventory.contractor_kit_request') }}" class="module-tile">
       <i class="bi bi-box-seam"></i>
       <span class="fw-medium">Request stock or equipment</span>
@@ -147,13 +156,13 @@
       <i class="bi bi-chevron-right ms-auto text-secondary"></i>
     </a>
     {% endif %}
-    {% if ai_available|default(False) %}
+    {% if ai_available|default(False) and portal_show_assistant_tile|default(True) %}
     <a href="{{ url_for('public_employee_portal.assistant_page') }}" class="module-tile">
       <i class="bi bi-chat-dots"></i>
       <span class="fw-medium">Portal assistant</span>
       <i class="bi bi-chevron-right ms-auto text-secondary"></i>
     </a>
-    {% else %}
+    {% elif not ai_available|default(False) %}
     <span class="module-tile module-tile--disabled" title="AI assistance is not set up or enabled yet." aria-disabled="true">
       <i class="bi bi-chat-dots"></i>
       <span class="fw-medium">Portal assistant</span>

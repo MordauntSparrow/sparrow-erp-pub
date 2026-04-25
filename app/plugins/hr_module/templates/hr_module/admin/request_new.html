@@ -10,6 +10,7 @@
     </ol>
   </nav>
   <h1 class="mb-3">New document request</h1>
+  <p class="small text-muted mb-3">When outgoing email (SMTP) is configured under Core Settings → Email, each selected employee receives an email with a link to this request on the employee portal (unless <code>HR_MODULE_EMAILS_DISABLED</code> is set).</p>
 
   <form method="post" action="{{ url_for('internal_hr.admin_request_new') }}" class="card card-body" style="max-width: 640px;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

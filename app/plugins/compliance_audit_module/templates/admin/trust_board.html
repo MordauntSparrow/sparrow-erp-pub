@@ -1,0 +1,36 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Trust board pack{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Governance &amp; assurance — trust board references</h1>
+<p class="text-muted small">Operational pointers for board packs. <strong>Not legal advice.</strong> Confirm with your governance lead and counsel.</p>
+
+<div class="card shadow-sm mb-3">
+  <div class="card-header">How this module supports accountability</div>
+  <div class="card-body small">
+    <ul class="mb-0">
+      <li><strong>Unified timeline</strong> — CAD, comms, triage, ePCR case rows, JSON signals, MI, training audit, identity log, admin audit, prior exports.</li>
+      <li><strong>Exports</strong> — CSV / JSON / PDF / ZIP evidence pack; manifest + SHA-256; PIN step-up for interactive downloads.</li>
+      <li><strong>Scheduled ZIPs</strong> — file-based retention with automatic purge (default ~72h on disk).</li>
+      <li><strong>Gap report</strong> — structural checks on <code>cases.data</code> (not clinical adequacy).</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+  <div class="card-header">Official CQC / IG links (external)</div>
+  <div class="card-body small">
+    <ul class="mb-0">
+      <li><a href="https://www.cqc.org.uk/guidance-providers/regulations-enforcement/regulation-17-good-governance" target="_blank" rel="noopener">CQC — Regulation 17: Good governance</a></li>
+      <li><a href="https://www.cqc.org.uk/guidance-providers/adult-social-care/digital-record-systems-adult-social-care-services/accessing-digital-records-site-visits" target="_blank" rel="noopener">CQC — Accessing digital records on site visits</a></li>
+      <li><a href="https://www.cqc.org.uk/guidance-providers/adult-social-care/digital-record-systems-adult-social-care-services/points-to-consider" target="_blank" rel="noopener">CQC — Digital records: points to consider</a></li>
+      <li><a href="https://www.cqc.org.uk/guidance-providers/adult-social-care/digital-record-systems-adult-social-care-services/assessing-and-inspecting" target="_blank" rel="noopener">CQC — Assessing and inspecting (digital records)</a></li>
+      <li><a href="https://ico.org.uk/for-organisations/" target="_blank" rel="noopener">ICO — For organisations (UK GDPR accountability)</a></li>
+      <li><a href="https://www.dsptoolkit.nhs.uk/" target="_blank" rel="noopener">NHS England — Data Security and Protection Toolkit</a> (official assessment; not completed in Sparrow)</li>
+    </ul>
+  </div>
+</div>
+
+<div class="alert alert-secondary small mb-0">
+  Inspection read-only access should use the <code>?mode=inspection</code> URL or the <code>compliance_audit_module.inspection</code> permission. Exports remain governance-controlled via <code>compliance_audit_module.export</code> and compliance PIN step-up.
+</div>
+{% endblock %}

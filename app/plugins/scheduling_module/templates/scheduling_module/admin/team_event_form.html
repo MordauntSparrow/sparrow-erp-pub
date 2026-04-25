@@ -1,5 +1,5 @@
 {% extends "scheduling_module/admin/base_admin.html" %}
-{% block title %}Team event (run sheet){% endblock %}
+{% block title %}Team event (rota + optional run sheet){% endblock %}
 {% block content %}
 <nav class="mb-2 small">
   <a href="{{ url_for('internal_scheduling.admin_index') }}">Scheduling</a>
@@ -8,11 +8,11 @@
   <span class="text-muted">/</span>
   <span>Team event</span>
 </nav>
-<h1 class="h4 mb-2">Team event → run sheet</h1>
+<h1 class="h4 mb-2">Team event (multi-person rota)</h1>
 <p class="text-muted small mb-3">
-  Creates <strong>one</strong> Time Billing run sheet for everyone (e.g. training day), with <strong>one schedule shift per person</strong>
-  on the same date and job type. After you publish, each person gets a timesheet line; they enter <strong>actual</strong> start/end on the
-  run sheet in the <strong>employee portal</strong>, which updates their timesheet.
+  Creates <strong>one schedule shift per person</strong> on the rota (same date, client, job type)—that is the <strong>planned</strong> job.
+  A linked Time Billing <strong>run sheet</strong> is optional tooling for <strong>actual</strong> clock times and rare ad-hoc work (e.g. urgent response not already on scheduling):
+  turn on <strong>Publish run sheet now</strong> only when you want timesheet rows created from the scheduled window and portal run-sheet entry; otherwise publish later from Time Billing or use normal timesheets from scheduled shifts.
 </p>
 
 <form method="post" action="{{ url_for('internal_scheduling.admin_team_event_create') }}" class="card card-body shadow-sm border-0">
@@ -84,15 +84,16 @@
     {% if industry_visible('medical') %}
     <div class="col-md-6">
       <label class="form-label">Cura operational event ID</label>
-      <input type="text" name="cura_operational_event_id" class="form-control" inputmode="numeric" pattern="[0-9]*" placeholder="Optional — links run sheet to Cura ops event" />
-      <div class="form-text">When set, ties this run sheet to Medical Records / Cura planning.</div>
+      <input type="text" name="cura_operational_event_id" class="form-control" inputmode="numeric" pattern="[0-9]*" placeholder="Optional — on the Time Billing run sheet header" />
+      <div class="form-text">Stored on the run sheet for Cura / staffing context; roster sync and planning prefer CRM plan links when present.</div>
     </div>
     {% endif %}
     <div class="col-md-6 d-flex flex-column justify-content-end">
       <div class="form-check mb-2">
-        <input class="form-check-input" type="checkbox" name="publish_runsheet" id="publish_runsheet" value="1" checked>
-        <label class="form-check-label" for="publish_runsheet">Publish run sheet now (creates timesheet rows from scheduled times)</label>
+        <input class="form-check-input" type="checkbox" name="publish_runsheet" id="publish_runsheet" value="1">
+        <label class="form-check-label" for="publish_runsheet">Publish run sheet now (Time Billing: timesheet lines from scheduled window + portal actual-time entry)</label>
       </div>
+      <div class="form-text mb-2">Leave unchecked if the rota is enough for now; open the draft run sheet in Time Billing when you need actual-time capture.</div>
       <label class="form-label small text-muted mb-0">Schedule shift visibility</label>
       <select name="shift_status" class="form-select form-select-sm">
         <option value="published" selected>Published (visible on team schedule)</option>

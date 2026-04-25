@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ module_name }} – Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-3">{{ module_name }}</h1>
+  <p class="text-muted">{{ module_description }}</p>
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Manage compliance</h5>
+      <p class="card-text small text-muted">Create and edit policies; staff view and sign from the <strong>Employee Portal</strong>. View who has acknowledged each policy.</p>
+      <div class="d-flex flex-wrap gap-2 mt-3">
+        <a href="{{ url_for('internal_compliance.admin_policies') }}" class="btn btn-primary btn-sm">Policies</a>
+        <a href="{{ url_for('internal_compliance.admin_acknowledgements') }}" class="btn btn-outline-primary btn-sm">Acknowledgements</a>
+        <a href="{{ url_for('routes.core_module_settings') }}" class="btn btn-outline-secondary btn-sm">Core settings</a>
+        <a href="{{ url_for('routes.plugins') }}" class="btn btn-outline-secondary btn-sm">Plugins</a>
+        <a href="{{ url_for('routes.dashboard') }}" class="btn btn-outline-secondary btn-sm">Dashboard</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

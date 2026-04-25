@@ -79,6 +79,13 @@
           {% elif hire_preview and not hire_preview.ok %}
           <div class="alert alert-secondary py-2 mb-2 small">{{ hire_preview.message }}</div>
           {% endif %}
+          {% if application.hire_employment_type == 'paye' %}
+          <p class="small text-muted mb-2">This vacancy is set to <strong>PAYE</strong> for the new contractor (Time Billing employment type and HR contract type on hire).</p>
+          {% elif application.hire_employment_type == 'self_employed' %}
+          <p class="small text-muted mb-2">This vacancy is set to <strong>self-employed</strong> for the new contractor.</p>
+          {% else %}
+          <p class="small text-muted mb-2">Vacancy employment default: <strong>self-employed</strong> (standard Time Billing default when the opening leaves employment blank).</p>
+          {% endif %}
           {% if rec_can_hire %}
           <form method="post" id="hire-contractor-form">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

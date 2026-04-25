@@ -6,13 +6,84 @@ Called after SQL migrations from ``install.install()`` / ``install.upgrade()``.
 
 Neutral baseline lives in ``db/007_seed_minimum.sql`` (Staff + Standard shift + two cards).
 This module adds pack rows for cleaning / medical / security / hospitality when those slugs are selected.
+
+**Opt-in (default off):** Packs do not run unless ``SPARROW_ENABLE_TIME_BILLING_INDUSTRY_SEEDS=1``
+(or ``SPARROW_FORCE_TIME_BILLING_INDUSTRY_SEEDS=1`` for a one-off re-apply). Fresh deploys therefore
+keep only the neutral SQL baseline (e.g. ``Standard shift`` from ``007_seed_minimum.sql``), not
+medical/cleaning/etc. job types.
+
+**One-shot per DB when enabled:** After a successful run, a sentinel row is stored in
+``tb_time_billing_migrations`` so ``upgrade()`` does not re-upsert packs on every deploy (which would
+resurrect deleted job types / roles via ``ON DUPLICATE KEY UPDATE``). Force removes the sentinel first.
 """
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from typing import List, Sequence, Tuple
 
 from app.organization_profile import load_tenant_industries_for_install, tenant_matches_industry
+
+# Synthetic ledger filename — not an on-disk migration; marks industry pack seed as done.
+_INDUSTRY_SEED_PACKS_LEDGER_KEY = "__time_billing_industry_seed_packs_applied__"
+
+
+def _force_time_billing_industry_seeds() -> bool:
+    v = (os.environ.get("SPARROW_FORCE_TIME_BILLING_INDUSTRY_SEEDS") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _enable_time_billing_industry_seeds() -> bool:
+    """Default off: industry packs (medical 'Care visit', etc.) are not applied on init/upgrade."""
+    v = (os.environ.get("SPARROW_ENABLE_TIME_BILLING_INDUSTRY_SEEDS") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _time_billing_industry_seeds_should_run() -> bool:
+    """Run packs when explicitly enabled, or when forcing a re-apply (support / dev)."""
+    return _enable_time_billing_industry_seeds() or _force_time_billing_industry_seeds()
+
+
+def _industry_seed_packs_already_completed(conn) -> bool:
+    if _force_time_billing_industry_seeds():
+        return False
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE %s", ("tb_time_billing_migrations",))
+        if not cur.fetchone():
+            return False
+        cur.execute(
+            "SELECT 1 FROM tb_time_billing_migrations WHERE filename = %s LIMIT 1",
+            (_INDUSTRY_SEED_PACKS_LEDGER_KEY,),
+        )
+        return bool(cur.fetchone())
+    finally:
+        cur.close()
+
+
+def _clear_industry_seed_marker(conn) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "DELETE FROM tb_time_billing_migrations WHERE filename = %s",
+            (_INDUSTRY_SEED_PACKS_LEDGER_KEY,),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _record_industry_seed_packs_completed(conn) -> None:
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT IGNORE INTO tb_time_billing_migrations (filename) VALUES (%s)",
+            (_INDUSTRY_SEED_PACKS_LEDGER_KEY,),
+        )
+        conn.commit()
+    finally:
+        cur.close()
+
 
 # (name, code)
 _RoleRow = Tuple[str, str]
@@ -82,7 +153,11 @@ def apply_time_billing_industry_seed_packs(conn) -> None:
     Upsert roles / job types; insert wage_rate_rows only when missing (INSERT IGNORE).
 
     Uses wage cards from neutral seed: ``Organisation default`` and ``Alternate card``.
+    Completes at most once per database when enabled (see module docstring).
     """
+    if not _time_billing_industry_seeds_should_run():
+        return
+
     industries: List[str] = load_tenant_industries_for_install()
 
     cur = conn.cursor()
@@ -95,6 +170,11 @@ def apply_time_billing_industry_seed_packs(conn) -> None:
             return
     finally:
         cur.close()
+
+    if _industry_seed_packs_already_completed(conn):
+        return
+    if _force_time_billing_industry_seeds():
+        _clear_industry_seed_marker(conn)
 
     packs: List[Tuple[str, Sequence[_RoleRow], Sequence[_JtRow]]] = []
     if tenant_matches_industry(industries, "cleaning"):
@@ -148,6 +228,7 @@ def apply_time_billing_industry_seed_packs(conn) -> None:
         premium_card_id = _card_id("Alternate card", "Premium Rate Card")
         if not default_card_id or not premium_card_id:
             conn.commit()
+            _record_industry_seed_packs_completed(conn)
             return
 
         for pack_name, _roles, job_types in packs:
@@ -175,6 +256,7 @@ def apply_time_billing_industry_seed_packs(conn) -> None:
                     )
 
         conn.commit()
+        _record_industry_seed_packs_completed(conn)
     except Exception:
         conn.rollback()
         raise

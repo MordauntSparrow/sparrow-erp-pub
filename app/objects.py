@@ -1179,6 +1179,37 @@ class User(UserMixin):
         return user_data
 
     @staticmethod
+    def get_user_for_web_login(login_key: str):
+        """
+        Staff ``/login`` form: match a single ``users`` row by case-insensitive **username** or **email**.
+
+        Used so HR-promoted portal staff (who are told to use their work email) can sign in without
+        remembering the generated ``users.username``. Rejects ambiguous matches (two rows).
+        """
+        raw = (login_key or "").strip()
+        if not raw:
+            return None
+        kl = raw.lower()
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT * FROM users
+                WHERE LOWER(TRIM(username)) = %s OR LOWER(TRIM(email)) = %s
+                LIMIT 2
+                """,
+                (kl, kl),
+            )
+            rows = cursor.fetchall() or []
+        finally:
+            cursor.close()
+            conn.close()
+        if len(rows) != 1:
+            return None
+        return rows[0]
+
+    @staticmethod
     def get_user_by_id(user_id):
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)

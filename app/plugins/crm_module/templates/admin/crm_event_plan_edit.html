@@ -1,66 +1,63 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Event plan{% endblock %}
-{% block crm_breadcrumb_current %}
-{% set _bc_title = plan.title or 'Plan' %}
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.event_plans_list') }}" class="text-decoration-none">Event plans</a></li>
-<li class="breadcrumb-item active" aria-current="page">{{ _bc_title[:48] }}{% if _bc_title|length > 48 %}…{% endif %}</li>
-{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}{{ (plan.title or 'Event plan') }} — Sparrow{% endblock %}
 {% block content %}
+{% set _bc_title = plan.title or 'Plan' %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+<li class="breadcrumb-item active" aria-current="page">{{ _bc_title[:48] }}{% if _bc_title|length > 48 %}…{% endif %}</li>
+  </ol>
+</nav>
 <div class="container-fluid px-0 pb-3">
+  {% include 'admin/partials/crm_pipeline_flow_bar.html' %}
   <div class="crm-page-toolbar mb-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
       <div>
         <p class="text-muted crm-upper-tight fw-semibold mb-1">Medical planning</p>
         <h1 class="h3 fw-semibold text-dark mb-0">{{ plan.title or 'Event plan' }}</h1>
       </div>
-      <a class="btn btn-outline-secondary rounded-pill px-3" href="{{ url_for('crm_module.event_plans_list') }}"><i class="bi bi-list-ul me-1"></i>All plans</a>
+      <a class="btn btn-outline-secondary rounded-pill px-3" href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}"><i class="bi bi-list-ul me-1"></i>All plans</a>
     </div>
     <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
-      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+      <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-calendar-event me-1"></i>Event manager</a>
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-receipt me-1"></i>CRM overview</a>
     </div>
   </div>
 
-  {% if plan.quote_id or plan.opportunity_id %}
-  <div class="alert alert-info border-0 py-2 small mb-3">
-    {% if plan.quote_id %}
-    <span class="me-3">Quote: <a href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">#{{ plan.quote_id }}</a>{% if plan_link_labels.quote_title %} — {{ plan_link_labels.quote_title }}{% endif %}</span>
-    {% endif %}
-    {% if plan.opportunity_id %}
-    <span>Opportunity: <a href="{{ url_for('crm_module.opportunity_edit', opp_id=plan.opportunity_id) }}">{% if plan_link_labels.opportunity_name %}{{ plan_link_labels.opportunity_name }}{% else %}#{{ plan.opportunity_id }}{% endif %}</a></span>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <div class="card crm-panel border-0 mb-3">
-    <div class="card-body py-3 small">
-      <p class="fw-semibold text-dark mb-1">Cura handoff</p>
-      <p class="mb-2 text-muted">Nothing is sent automatically. On the last step, click <strong>Send to Cura</strong> only when you intend to push this plan (e.g. after the client has agreed pricing if a quote is linked). Requires <code>SPARROW_CRM_EVENT_HANDOFF_MODE=live</code> and medical records integration for a real sync.</p>
-      <p class="mb-0 text-muted">
-        Mode: <code>{{ crm_handoff_mode or 'off' }}</code>
-        {% if plan.handoff_status %}
-        · Last: <span class="fw-medium text-dark">{{ plan.handoff_status }}</span>
-        {% if plan.handoff_external_ref %} · <code class="small">{{ plan.handoff_external_ref }}</code>{% endif %}
-        {% if plan.handoff_at %} · {{ plan.handoff_at }}{% endif %}
-        {% else %}
-        · Not sent yet.
-        {% endif %}
+  {% set cura_sync_done = plan.handoff_status in ('synced', 'synced_unchanged') %}
+  {% set cura_pref_on = (plan.cura_sync_enabled|default(0))|int == 1 %}
+  {% set _handoff_blocked = handoff_block_message is not none and (handoff_block_message|length > 0) %}
+  {% if not can_edit %}
+  <div class="card crm-panel border-0 mb-3 shadow-sm" id="crmCuraHandoffBanner">
+    <div class="card-body py-3 py-md-4">
+      <p class="fw-semibold text-dark mb-3 d-flex align-items-center gap-2">
+            <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:2.25rem;height:2.25rem;"><i class="bi bi-cloud-arrow-up" aria-hidden="true"></i></span>
+        Sync
       </p>
-      {% if cura_ops_event_url %}
-      <div class="mt-2">
-        <a class="btn btn-sm btn-primary rounded-pill" href="{{ cura_ops_event_url }}">Open in Cura</a>
-      </div>
-      {% endif %}
-    </div>
-  </div>
-
+      <section class="crm-ep-sync-seg rounded-3 border bg-light p-3 p-md-4 mb-4">
+        <h3 class="h6 text-uppercase text-muted mb-3">Cura operations</h3>
+        <p class="small text-muted mb-3">Allow push to Cura ops: <strong class="text-body">{% if cura_pref_on %}On{% else %}Off{% endif %}</strong>.</p>
+        <p class="text-muted small mb-0">
+          <span class="text-uppercase fw-semibold" style="font-size:0.65rem;letter-spacing:0.06em;">Last push</span>
+            {% if plan.handoff_status %}
+            · <span class="fw-medium text-dark">{{ plan.handoff_status }}</span>
+            {% if plan.handoff_external_ref %} · <code class="small">{{ plan.handoff_external_ref }}</code>{% endif %}
+            {% if plan.handoff_at %} · {{ plan.handoff_at }}{% endif %}
+            {% else %}
+          · <span class="fw-medium text-dark">Not pushed yet</span>
+            {% endif %}
+          </p>
+          {% if cura_ops_event_url %}
+        <a class="btn btn-outline-primary rounded-pill btn-sm" href="{{ cura_ops_event_url }}"><i class="bi bi-box-arrow-up-right me-1"></i> Open in Cura</a>
+          {% endif %}
+      </section>
   {% if handoff_log %}
-  <div class="card crm-panel border-0 mb-3">
-    <div class="card-body py-2">
-      <h2 class="h6 text-uppercase text-muted mb-2">Handoff log</h2>
+      <section class="crm-ep-sync-seg rounded-3 border bg-light p-3 p-md-4 mb-0" aria-labelledby="crmEpSyncLogHeadingRo">
+        <h3 class="h6 text-uppercase text-muted mb-3" id="crmEpSyncLogHeadingRo">Handoff log</h3>
       <ul class="list-unstyled small mb-0">
         {% for h in handoff_log %}
-        <li class="mb-1 pb-1 border-bottom">
+          <li class="mb-2 pb-2 border-bottom border-light">
           <span class="text-muted">{{ h.created_at }}</span>
           <span class="badge bg-light text-dark border">{{ h.status }}</span>
           {% if h.trigger_key %}<span class="text-muted">{{ h.trigger_key }}</span>{% endif %}
@@ -68,17 +65,84 @@
         </li>
         {% endfor %}
       </ul>
+      </section>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if scheduling_available and can_edit and not cura_pref_on %}
+  <div class="card border-0 shadow-sm mb-3" id="crmEpScheduleNonCura">
+    <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
+      <h2 class="h6 mb-0"><i class="bi bi-calendar-week me-1"></i> Scheduling (non-Cura)</h2>
+      {% if plan.schedule_shift_id %}
+      <span class="badge bg-secondary">Shift #{{ plan.schedule_shift_id }}</span>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">Create or update the <strong>schedule_shifts</strong> row for this plan (hospitality / cleaning / any job without Cura). Defaults use plan start/end when set. Assign crew in <strong>Scheduling → Shifts</strong>; roster flows back into the plan’s deployment staff list.</p>
+      <form method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_schedule_sync', plan_id=plan.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Client</label>
+          <select class="form-select form-select-sm" name="schedule_client_id" required>
+            <option value="">—</option>
+            {% for c in schedule_clients %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label small mb-0">Job type</label>
+          <select class="form-select form-select-sm" name="schedule_job_type_id" required>
+            <option value="">—</option>
+            {% for j in schedule_job_types %}
+            <option value="{{ j.id }}">{{ j.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Work date</label>
+          <input class="form-control form-control-sm" type="date" name="schedule_work_date" value="{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%Y-%m-%d') }}{% endif %}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Start</label>
+          <input class="form-control form-control-sm" type="time" name="schedule_start" value="{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%H:%M') }}{% endif %}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">End</label>
+          <input class="form-control form-control-sm" type="time" name="schedule_end" value="{% if plan.end_datetime %}{{ plan.end_datetime.strftime('%H:%M') }}{% endif %}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Break (min)</label>
+          <input class="form-control form-control-sm" type="number" name="schedule_break_mins" value="0" min="0">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Slots</label>
+          <input class="form-control form-control-sm" type="number" name="schedule_required_count" value="1" min="1">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Status</label>
+          <select class="form-select form-select-sm" name="schedule_status">
+            <option value="published" selected>Published</option>
+            <option value="draft">Draft</option>
+          </select>
+        </div>
+        <div class="col-md-12 mt-2">
+          <button type="submit" class="btn btn-primary btn-sm rounded-pill"><i class="bi bi-arrow-repeat me-1"></i> Save to scheduling</button>
+        </div>
+      </form>
     </div>
   </div>
   {% endif %}
 
   {% if pdf_history %}
   <div class="alert alert-light border small mb-3">
-    <strong>Recent PDFs</strong>
+    <strong>Recent downloads</strong>
     {% for row in pdf_history %}
     <div class="d-flex justify-content-between align-items-center py-1">
       <span>{{ row.pdf_generated_at }}</span>
-      <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.event_plan_pdf_download', plan_id=plan.id, f=row.file_path) }}">Download</a>
+      <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_pdf_download', plan_id=plan.id, f=row.file_path) }}">Download</a>
     </div>
     {% endfor %}
   </div>
@@ -87,6 +151,13 @@
   <style>
     .crm-event-plan-edit:not(.crm-ep-viewer) [data-ep-step] { display: none; }
     .crm-event-plan-edit:not(.crm-ep-viewer) [data-ep-step].crm-ep-active { display: block; }
+    .crm-ep-hosp-table-responsive { overflow: visible !important; }
+    #crmCuraHandoffBanner .crm-ep-sync-seg {
+      border-color: rgba(0, 0, 0, 0.08) !important;
+    }
+    #crmCuraHandoffBanner .crm-ep-sync-seg h3 {
+      letter-spacing: 0.04em;
+    }
   </style>
   <noscript>
     <style>
@@ -103,24 +174,26 @@
       <div class="card-body py-2">
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
           <span class="small text-muted text-uppercase me-1">Plan steps</span>
-          {% set labels = ['1 Details', '2 Location', '3 Checklist', '4 Hospitals & handover', '5 Resources', '6 Risk', '7 Sign-off', '8 Review', '9 PDF annex'] %}
-          {% for i in range(1, 10) %}
-          <button type="button" class="btn btn-sm rounded-pill crm-ep-go{% if display_step == i %} btn-primary{% else %} btn-outline-secondary{% endif %}" data-go="{{ i }}">{{ labels[i - 1] }}</button>
+          {% set labels = ['Sync', '1 Details', '2 Location', '3 Checklist', '4 Hospitals & handover', '5 Resources', '6 Risk', '7 Sign-off', '8 Review', '9 METHANE', '10 Annex', '11 Accommodation'] %}
+          {% for i in range(0, 12) %}
+          <button type="button" class="btn btn-sm rounded-pill crm-ep-go{% if display_step == i %} btn-primary{% else %} btn-outline-secondary{% endif %}" data-go="{{ i }}">{{ labels[i] }}</button>
           {% endfor %}
+          <span class="crm-ep-save-status ms-auto small text-muted align-self-center d-none d-sm-inline" aria-live="polite"></span>
         </div>
-        <div class="d-flex flex-wrap gap-2">
-          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpPrev" {% if display_step <= 1 %}disabled{% endif %}>Previous</button>
-          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill" id="crmEpNext" {% if display_step >= 9 %}disabled{% endif %}>Next</button>
         </div>
       </div>
-    </div>
-    {% endif %}
 
-    {% if can_edit %}
-    <div class="card border-0 shadow-sm mb-3">
-      <div class="card-body py-3">
-        <h2 class="h6 text-uppercase text-muted mb-2">CRM links</h2>
-        <p class="small text-muted mb-3">Choose a quote (preferred — carries the latest commercial detail) and/or an opportunity. Saving updates the plan links; use prefill to copy empty fields from CRM without overwriting text you already entered.</p>
+    <div data-ep-step="0" class="crm-ep-panel mb-1{% if display_step == 0 %} crm-ep-active{% endif %}">
+    <div class="card crm-panel border-0 shadow-sm mb-3" id="crmCuraHandoffBanner">
+      <div class="card-body py-3 py-md-4">
+        <h2 class="h6 text-uppercase text-muted mb-3 d-flex align-items-center gap-2">
+          <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:2.25rem;height:2.25rem;"><i class="bi bi-cloud-arrow-up" aria-hidden="true"></i></span>
+          Sync
+        </h2>
+
+        <section class="crm-ep-sync-seg rounded-3 border bg-light p-3 p-md-4 mb-4" aria-labelledby="crmEpSyncCrmHeading">
+          <h3 class="h6 text-uppercase text-muted mb-2" id="crmEpSyncCrmHeading">CRM links</h3>
+          <p class="small text-muted mb-3">Link a Sparrow <strong class="text-body">quote</strong> (and optionally adjust <strong class="text-body">opportunity</strong> when the quote does not set it) to pull commercial context into this plan. Leave both as <strong>None</strong> if not tied to CRM. <strong>Save plan</strong> updates the links; when a link <strong>changes</strong>, empty fields can be filled from CRM. Use prefill on save to merge into still-empty fields.</p>
         <div class="row g-2">
           <div class="col-md-6">
             <label class="form-label small mb-0">Quote</label>
@@ -147,7 +220,88 @@
             </div>
           </div>
         </div>
+        </section>
+
+        <section class="crm-ep-sync-seg rounded-3 border bg-light p-3 p-md-4 mb-4" aria-labelledby="crmEpSyncCuraHeading">
+          <h3 class="h6 text-uppercase text-muted mb-2" id="crmEpSyncCuraHeading">Cura operations</h3>
+          <p class="text-muted small mb-3">Push this plan to <strong class="text-body">Cura ops</strong> as an operational event (rostering / ops alongside medical records). CRM links in the block above do <strong class="text-body">not</strong> send anything to Cura. Turn the switch <strong class="text-body">on</strong> when this plan should be sent to Cura ops; leave it <strong class="text-body">off</strong> for work that never needs an ops event. Saving stores the switch. With it on, use <strong class="text-body">Push to Cura</strong> to create or update the ops event (nothing is sent while it is off).</p>
+          {% set _hm = (crm_handoff_mode or 'live')|lower %}
+          {% if _hm != 'live' %}
+          <p class="small text-warning mb-3">Handoff mode is <code>{{ _hm }}</code> — default is <code>live</code>. Remove or unset <code>SPARROW_CRM_EVENT_HANDOFF_MODE</code> for real Cura writes, or set <code>live</code> explicitly.</p>
+          {% endif %}
+
+          <div class="rounded-3 border bg-white p-3 mb-3">
+            <div class="small">
+              <div class="text-muted text-uppercase fw-semibold mb-1" style="font-size:0.65rem;letter-spacing:0.06em;">Preference</div>
+              <div class="fw-medium text-dark mb-0 pb-3 border-bottom">
+                {% if cura_pref_on %}<span class="text-success">On</span> — push to Cura ops allowed{% else %}<span class="text-secondary">Off</span> — no ops handoff{% endif %}
       </div>
+              <div class="text-muted text-uppercase fw-semibold mb-1 pt-3" style="font-size:0.65rem;letter-spacing:0.06em;">Last push</div>
+              <div class="fw-medium text-dark mb-0">
+                {% if plan.handoff_status %}
+                {{ plan.handoff_status }}
+                {% if plan.handoff_external_ref %}<span class="text-muted"> · </span><code class="small">{{ plan.handoff_external_ref }}</code>{% endif %}
+                {% if plan.handoff_at %}<span class="text-muted"> · </span>{{ plan.handoff_at }}{% endif %}
+                {% else %}
+                Not pushed yet
+                {% endif %}
+    </div>
+            </div>
+          </div>
+
+          <div class="form-check form-switch ps-0 d-flex flex-wrap align-items-center justify-content-between gap-3 border rounded-3 px-3 py-2 bg-white mb-3">
+            <div class="flex-grow-1" style="min-width:12rem;">
+              <label class="form-check-label fw-semibold mb-0 d-block" for="crmCuraSyncPref">Allow push to Cura ops</label>
+              <div class="small text-muted {% if cura_pref_on %}d-none{% endif %}" id="crmCuraSyncHelpOff">Off — no operational event is sent; turn on and <strong>Save plan</strong> when you need Cura ops updated.</div>
+              <div class="small text-success {% if not cura_pref_on %}d-none{% endif %}" id="crmCuraSyncHelpOn">On — use Push to create or refresh the linked Cura ops event.</div>
+            </div>
+            <input class="form-check-input ms-0 flex-shrink-0" type="checkbox" role="switch" id="crmCuraSyncPref" name="cura_sync_enabled" value="1" form="crmEpMainForm" style="width:2.75rem;height:1.35rem;" {% if cura_pref_on %}checked{% endif %}>
+          </div>
+
+          <div class="d-flex flex-wrap align-items-stretch gap-2">
+            {% if _handoff_blocked %}
+            <button type="button" class="btn btn-primary rounded-pill px-4" disabled aria-disabled="true"><i class="bi bi-lock me-1"></i> Push blocked</button>
+            {% if plan.quote_id and linked_quote and (linked_quote.status or '')|lower != 'accepted' %}
+            <form method="post" action="{{ url_for('crm_module.quote_accept_for_cura', quote_id=plan.quote_id) }}" class="d-inline">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="return_plan_id" value="{{ plan.id }}">
+              <button type="submit" class="btn btn-sm btn-success rounded-pill">Mark quote accepted — unlock push</button>
+            </form>
+            <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_edit', quote_id=plan.quote_id) }}">Open quote</a>
+            {% endif %}
+            {% else %}
+            <button type="submit" form="crmEpHandoffForm" class="btn btn-primary rounded-pill px-4 shadow-sm" id="crmCuraSyncTopBtn" {% if not cura_pref_on %}disabled aria-disabled="true"{% endif %}>
+              <i class="bi bi-cloud-arrow-up me-1"></i> Push to Cura
+            </button>
+            {% endif %}
+            {% if cura_ops_event_url %}
+            <a class="btn btn-outline-primary rounded-pill" href="{{ cura_ops_event_url }}"><i class="bi bi-box-arrow-up-right me-1"></i> Open in Cura</a>
+            {% endif %}
+          </div>
+          {% if _handoff_blocked %}
+          <p class="small text-warning mb-0 mt-2">{{ handoff_block_message }}</p>
+          {% else %}
+          <p class="small text-muted mb-0 mt-2">Save the plan after editing fields (and after changing the switch). Re-issue the plan document from the review step if Cura should get a new file revision.</p>
+          {% endif %}
+        </section>
+
+        {% if handoff_log %}
+        <section class="crm-ep-sync-seg rounded-3 border bg-light p-3 p-md-4 mb-0" aria-labelledby="crmEpSyncLogHeading">
+          <h3 class="h6 text-uppercase text-muted mb-3" id="crmEpSyncLogHeading">Handoff log</h3>
+          <ul class="list-unstyled small mb-0">
+            {% for h in handoff_log %}
+            <li class="mb-2 pb-2 border-bottom border-light">
+              <span class="text-muted">{{ h.created_at }}</span>
+              <span class="badge bg-light text-dark border">{{ h.status }}</span>
+              {% if h.trigger_key %}<span class="text-muted">{{ h.trigger_key }}</span>{% endif %}
+              {% if h.external_ref %}<code class="small">{{ h.external_ref }}</code>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endif %}
+      </div>
+    </div>
     </div>
     {% endif %}
 
@@ -173,20 +327,99 @@
             <input class="form-control" name="event_type" value="{{ plan.event_type or '' }}" {% if not can_edit %}readonly{% endif %}>
           </div>
           <div class="col-md-3">
-            <label class="form-label">Start</label>
-            <input class="form-control" type="datetime-local" name="start_datetime" value="{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+            <label class="form-label">Summary start <span class="text-muted small fw-normal">(overall)</span></label>
+            <input class="form-control bg-body-secondary" type="datetime-local" name="start_datetime" id="crmEpSummaryStart" value="{% if plan_summary_start %}{{ plan_summary_start.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" readonly tabindex="-1" title="Filled from the first row start in daily event timings below">
           </div>
           <div class="col-md-3">
-            <label class="form-label">End</label>
-            <input class="form-control" type="datetime-local" name="end_datetime" value="{% if plan.end_datetime %}{{ plan.end_datetime.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
+            <label class="form-label">Summary end <span class="text-muted small fw-normal">(overall)</span></label>
+            <input class="form-control bg-body-secondary" type="datetime-local" name="end_datetime" id="crmEpSummaryEnd" value="{% if plan_summary_end %}{{ plan_summary_end.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" readonly tabindex="-1" title="Filled from the last row end in daily event timings below">
           </div>
-          <div class="col-md-4">
+          <div class="col-12">
+            <p class="small text-muted mb-0">These mirror <strong>day&nbsp;1 start</strong> and the <strong>last day’s end</strong> in the table below (saved on the plan; cover/summary use <strong>calendar dates only</strong>).</p>
+          </div>
+          <div class="col-12 mt-2">
+            <label class="form-label">Daily event timings <span class="text-muted small fw-normal">(Day&nbsp;1, Day&nbsp;2 …)</span></label>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle" id="crmEpEventDaysTable">
+                <thead class="table-light">
+                  <tr>
+                    <th style="min-width:7rem">Day label</th>
+                    <th style="min-width:11rem">Start</th>
+                    <th style="min-width:11rem">End</th>
+                    {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                  </tr>
+                </thead>
+                <tbody id="crmEpEventDaysBody">
+                  {% for slot in event_day_rows %}
+                  <tr class="crm-ep-day-row">
+                    <td><input class="form-control form-control-sm" name="event_day_label" maxlength="64" placeholder="Day {{ loop.index }}" value="{% if slot %}{{ slot.label|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                    <td><input class="form-control form-control-sm" type="datetime-local" name="event_day_start" value="{% if slot %}{{ slot.start_input }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                    <td><input class="form-control form-control-sm" type="datetime-local" name="event_day_end" value="{% if slot %}{{ slot.end_input }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                    {% if can_edit %}
+                    <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-day-clear" title="Clear row">&times;</button></td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% if can_edit %}
+            <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpEventDayAddRow">Add day row</button>
+            </div>
+            <template id="crmEpEventDayRowTpl">
+              <tr class="crm-ep-day-row">
+                <td><input class="form-control form-control-sm" name="event_day_label" maxlength="64" placeholder="Day" value=""></td>
+                <td><input class="form-control form-control-sm" type="datetime-local" name="event_day_start" value=""></td>
+                <td><input class="form-control form-control-sm" type="datetime-local" name="event_day_end" value=""></td>
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-day-clear" title="Clear row">&times;</button></td>
+              </tr>
+            </template>
+            {% endif %}
+          </div>
+          <div class="col-md-4 mt-2">
             <label class="form-label">Expected attendance</label>
             <input class="form-control" name="expected_attendance" inputmode="numeric" value="{{ plan.expected_attendance or '' }}" {% if not can_edit %}readonly{% endif %}>
           </div>
           <div class="col-12 mt-2">
-            <label class="form-label">Attendance by day <span class="text-muted small fw-normal">(multi-day events — free text)</span></label>
-            <textarea class="form-control" name="attendance_by_day_text" rows="3" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Fri 5k — 4 000 · Sat 10k — 8 500">{{ plan.attendance_by_day_text or '' }}</textarea>
+            <label class="form-label">Attendance by day <span class="text-muted small fw-normal">(matches daily timings: day label and date follow the rows above; enter expected headcount per day)</span></label>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle" id="crmEpAttDayTable">
+                <thead class="table-light">
+                  <tr>
+                    <th style="min-width:7rem">Day label</th>
+                    <th style="min-width:11rem">Date</th>
+                    <th style="min-width:9rem">Expected attendance</th>
+                    {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                  </tr>
+                </thead>
+                <tbody id="crmEpAttDayBody">
+                  {% for slot in attendance_by_day_rows %}
+                  <tr class="crm-ep-att-row">
+                    <td><input class="form-control form-control-sm" name="att_day_label" maxlength="64" placeholder="e.g. Day 1" value="{% if slot %}{{ slot.label_val|e }}{% endif %}" {% if not can_edit %}readonly{% elif slot and slot.get('sync_row') %}readonly{% endif %} {% if slot and slot.get('sync_row') %}title="Taken from daily event timings"{% endif %}></td>
+                    <td><input class="form-control form-control-sm" type="date" name="att_day_date" value="{% if slot %}{{ slot.date_val|e }}{% endif %}" {% if not can_edit %}readonly{% elif slot and slot.get('sync_row') %}readonly{% endif %} {% if slot and slot.get('sync_row') %}title="Taken from start time in daily event timings"{% endif %}></td>
+                    <td><input class="form-control form-control-sm" name="att_day_amount" inputmode="numeric" placeholder="e.g. 4000" value="{% if slot %}{{ slot.amount_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                    {% if can_edit %}
+                    <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-att-clear" title="Clear row">&times;</button></td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% if can_edit %}
+            <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpAttDayAddRow">Add day</button>
+            </div>
+            <template id="crmEpAttDayRowTpl">
+              <tr class="crm-ep-att-row">
+                <td><input class="form-control form-control-sm" name="att_day_label" maxlength="64" placeholder="e.g. Day 1" value=""></td>
+                <td><input class="form-control form-control-sm" type="date" name="att_day_date" value=""></td>
+                <td><input class="form-control form-control-sm" name="att_day_amount" inputmode="numeric" placeholder="e.g. 4000" value=""></td>
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-att-clear" title="Clear row">&times;</button></td>
+              </tr>
+            </template>
+            {% endif %}
           </div>
         </div>
         <div class="mt-2">
@@ -198,26 +431,93 @@
           <textarea class="form-control" name="environment_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.environment_notes or '' }}</textarea>
         </div>
         <div class="mt-3 pt-3 border-top">
-          <label class="form-label">Purpose <span class="text-muted small fw-normal">(PDF — why you are on site; scope of cover)</span></label>
-          <textarea class="form-control" name="plan_purpose" rows="3" {% if not can_edit %}readonly{% endif %} placeholder="e.g. On site for first aid and medical emergencies; covering the full event footprint…">{{ plan.plan_purpose or '' }}</textarea>
+          <label class="form-label">Purpose <span class="text-muted small fw-normal">(why you are on site; scope of cover)</span></label>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            <div class="flex-grow-1" style="min-width:12rem;max-width:26rem;">
+              <label class="form-label small mb-0 text-muted" for="crmEpPurposeTplSelect">Insert template</label>
+              <select class="form-select form-select-sm" id="crmEpPurposeTplSelect">
+                <option value="">— Choose a saved template —</option>
+                {% for pt in purpose_templates or [] %}
+                <option value="{{ pt.id }}">{{ pt.title|e }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="crmEpPurposeTplInsert">Insert into purpose</button>
+          </div>
+          <div class="row g-2 align-items-end mb-2">
+            <div class="col-md-5 col-lg-4">
+              <label class="form-label small mb-0 text-muted" for="crmEpPurposeNewTitle">Save purpose as new template</label>
+              <input type="text" class="form-control form-control-sm" id="crmEpPurposeNewTitle" maxlength="255" placeholder="Template title (e.g. Tier 2 festival cover)" autocomplete="off">
+            </div>
+            <div class="col-md-7 col-lg-5 d-flex flex-wrap align-items-end gap-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpPurposeTplSave">Save template</button>
+              <span class="small text-muted" id="crmEpPurposeTplSaveMsg" role="status" aria-live="polite"></span>
+            </div>
+          </div>
+          <p class="small text-muted mb-2">Templates are shared across all event plans. <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_purpose_templates_admin') }}" target="_blank" rel="noopener noreferrer">Open template manager</a> to delete or review existing ones.</p>
+          <script type="application/json" id="crmEpPurposeTplJson">{{ (purpose_templates or []) | tojson }}</script>
+          <script type="application/json" id="crmEpPurposeTplSaveUrl">{{ event_plan_purpose_template_url|tojson }}</script>
+          {% endif %}
+          <textarea class="form-control" name="plan_purpose" id="crmEpPlanPurpose" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.plan_purpose or '' }}</textarea>
         </div>
         <div class="row g-2 mt-1">
-          <div class="col-md-6">
+          <div class="col-md-4">
             <label class="form-label">Event organiser(s)</label>
             <input class="form-control" name="event_organiser" value="{{ plan.event_organiser or '' }}" maxlength="255" {% if not can_edit %}readonly{% endif %}>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-4">
+            <label class="form-label">Organiser contact <span class="text-muted small fw-normal">(phone)</span></label>
+            <input class="form-control" type="tel" name="event_organiser_phone" value="{{ plan.event_organiser_phone or '' }}" maxlength="64" inputmode="tel" autocomplete="tel" placeholder="e.g. +44 7700 900000" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-4">
             <label class="form-label">Purple Guide tier / level</label>
             <input class="form-control" name="purple_guide_tier" value="{{ plan.purple_guide_tier or '' }}" maxlength="64" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Tier 3">
           </div>
         </div>
         <div class="mt-2">
           <label class="form-label">Event content / programme <span class="text-muted small fw-normal">(courses, obstacles, format)</span></label>
-          <textarea class="form-control" name="event_content_summary" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.event_content_summary or '' }}</textarea>
+          <textarea class="form-control" name="event_content_summary" rows="5" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Two mud run courses (7km &amp; 12km) including a variety of obstacles. Some obstacles consist of slides, bodies of water and rope related activities.&#10;&#10;e.g. Horsham's annual Christmas Launch Party fills the town with festive lights, music, and family-friendly entertainment. A joyful community celebration to kick off the Christmas season.">{{ plan.event_content_summary or '' }}</textarea>
         </div>
         <div class="mt-2">
-          <label class="form-label">Operational key timings <span class="text-muted small fw-normal">(leave base, on site, briefings, stand down…)</span></label>
-          <textarea class="form-control" name="operational_timings" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.operational_timings or '' }}</textarea>
+          <label class="form-label">Operational key timings <span class="text-muted small fw-normal">(date, time, then what happens — e.g. 26/04/2026 08:30 — Gates open)</span></label>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="crmEpOpTimTable">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:11rem">Date</th>
+                  <th style="min-width:7rem">Time</th>
+                  <th>Description</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpOpTimBody">
+                {% for slot in operational_timings_rows %}
+                <tr class="crm-ep-opt-row">
+                  <td><input class="form-control form-control-sm" type="date" name="op_tim_date" value="{% if slot %}{{ slot.date_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><input class="form-control form-control-sm" type="time" name="op_tim_time" value="{% if slot %}{{ slot.time_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><input class="form-control form-control-sm" name="op_tim_desc" maxlength="4000" placeholder="e.g. Gates open; leave base; briefing; stand down…" value="{% if slot %}{{ slot.desc_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-opt-clear" title="Clear row">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+        </div>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpOpTimAddRow">Add timing row</button>
+          </div>
+          <template id="crmEpOpTimRowTpl">
+            <tr class="crm-ep-opt-row">
+              <td><input class="form-control form-control-sm" type="date" name="op_tim_date" value=""></td>
+              <td><input class="form-control form-control-sm" type="time" name="op_tim_time" value=""></td>
+              <td><input class="form-control form-control-sm" name="op_tim_desc" maxlength="4000" placeholder="e.g. Gates open; leave base; briefing; stand down…" value=""></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-opt-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -246,7 +546,7 @@
           <textarea class="form-control" name="location_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.location_notes or '' }}</textarea>
         </div>
         <div class="mt-4 pt-3 border-top">
-          <label class="form-label">Event site map <span class="text-muted small fw-normal">(optional — appears in the PDF after site &amp; access)</span></label>
+          <label class="form-label">Event site map <span class="text-muted small fw-normal">(optional — after site &amp; access in the exported plan)</span></label>
           <p class="small text-muted mb-2">PNG, JPG, JPEG, WebP, or GIF. Use a clear plan showing medical posts, access routes, or venue layout.</p>
           {% if plan.event_map_path %}
           <div class="mb-2">
@@ -262,16 +562,88 @@
           </div>
           {% endif %}
           {% endif %}
-          <label class="form-label small text-muted mb-0">Map caption <span class="fw-normal">(optional, shown under the image in the PDF)</span></label>
+          <label class="form-label small text-muted mb-0">Map caption <span class="fw-normal">(optional, shown under the image when exported)</span></label>
           <input class="form-control form-control-sm" type="text" name="event_map_caption" maxlength="512" value="{{ plan.event_map_caption or '' }}" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Figure 1 — Arena layout, medical posts marked in red">
         </div>
         <div class="mt-4 pt-3 border-top">
-          <label class="form-label">Access &amp; egress <span class="text-muted small fw-normal">(PDF — access points table, vehicle movement; paste or type)</span></label>
-          <textarea class="form-control font-monospace small" name="access_egress_text" rows="6" {% if not can_edit %}readonly{% endif %} placeholder="e.g. Access Point 1 · Address · W3W: …">{{ plan.access_egress_text or '' }}</textarea>
+          <label class="form-label">Access &amp; egress <span class="text-muted small fw-normal">(access points, vehicle movement)</span></label>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="crmEpAeTable">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:9rem">Access point name</th>
+                  <th style="min-width:14rem">Address</th>
+                  <th style="min-width:10rem">What3Words</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpAeBody">
+                {% for slot in access_egress_rows %}
+                <tr class="crm-ep-ae-row">
+                  <td><input class="form-control form-control-sm" name="ae_name" maxlength="256" placeholder="e.g. Gate 1" value="{% if slot %}{{ slot.name_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><textarea class="form-control form-control-sm" name="ae_address" rows="2" maxlength="512" placeholder="Street, town…" {% if not can_edit %}readonly{% endif %}>{% if slot %}{{ slot.address_val|e }}{% endif %}</textarea></td>
+                  <td><input class="form-control form-control-sm" name="ae_w3w" maxlength="128" placeholder="e.g. ///filled.count.soap" value="{% if slot %}{{ slot.w3w_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-ae-clear" title="Clear row">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
         </div>
-        <div class="mt-2">
+          {% if can_edit %}
+          <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpAeAddRow">Add access row</button>
+          </div>
+          <template id="crmEpAeRowTpl">
+            <tr class="crm-ep-ae-row">
+              <td><input class="form-control form-control-sm" name="ae_name" maxlength="256" placeholder="e.g. Gate 1" value=""></td>
+              <td><textarea class="form-control form-control-sm" name="ae_address" rows="2" maxlength="512" placeholder="Street, town…"></textarea></td>
+              <td><input class="form-control form-control-sm" name="ae_w3w" maxlength="128" placeholder="e.g. ///filled.count.soap" value=""></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-ae-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
+        </div>
+        <div class="mt-4">
           <label class="form-label">Rendezvous points (RVPs)</label>
-          <textarea class="form-control font-monospace small" name="rendezvous_text" rows="5" {% if not can_edit %}readonly{% endif %} placeholder="RVP name · Address · W3W · notes for meeting external services…">{{ plan.rendezvous_text or '' }}</textarea>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="crmEpRvpTable">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:7rem">RVP name</th>
+                  <th style="min-width:12rem">Address</th>
+                  <th style="min-width:9rem">What3Words</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpRvpBody">
+                {% for slot in rendezvous_rows %}
+                <tr class="crm-ep-rvp-row">
+                  <td><input class="form-control form-control-sm" name="rvp_name" maxlength="256" placeholder="e.g. RVP 1" value="{% if slot %}{{ slot.name_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><textarea class="form-control form-control-sm" name="rvp_address" rows="2" maxlength="512" placeholder="Meeting point address…" {% if not can_edit %}readonly{% endif %}>{% if slot %}{{ slot.address_val|e }}{% endif %}</textarea></td>
+                  <td><input class="form-control form-control-sm" name="rvp_w3w" maxlength="128" placeholder="e.g. ///scouts.desks.charge" value="{% if slot %}{{ slot.w3w_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-rvp-clear" title="Clear row">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+        </div>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpRvpAddRow">Add RVP row</button>
+          </div>
+          <template id="crmEpRvpRowTpl">
+            <tr class="crm-ep-rvp-row">
+              <td><input class="form-control form-control-sm" name="rvp_name" maxlength="256" placeholder="e.g. RVP 1" value=""></td>
+              <td><textarea class="form-control form-control-sm" name="rvp_address" rows="2" maxlength="512" placeholder="Meeting point address…"></textarea></td>
+              <td><input class="form-control form-control-sm" name="rvp_w3w" maxlength="128" placeholder="e.g. ///scouts.desks.charge" value=""></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-rvp-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -311,48 +683,247 @@
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-2">Hospitals &amp; clinical routing</h2>
-        <p class="small text-muted mb-3">Use the <strong>site postcode</strong> from step 2 (or type an outcode). Suggestions rank nearby hospitals; add free-text lines for units not found.</p>
+        <p class="small text-muted mb-3">Add receiving hospitals and units in the table below. Use <strong>Add empty row</strong> for more hospitals. <strong>Type / facilities</strong> and <strong>Contacts</strong> can each have multiple lines (add lines with the buttons in those cells).</p>
+        <label class="form-label">Receiving hospitals &amp; units</label>
+        <div class="table-responsive mb-2 crm-ep-hosp-table-responsive">
+          <table class="table table-sm table-bordered align-middle" id="crmEpHospitalsTable">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width:11rem">Hospital name</th>
+                <th style="min-width:9rem">Type / facilities <span class="text-muted fw-normal small">(A&amp;E, MTC, PPCI…)</span></th>
+                <th style="min-width:10rem">Address</th>
+                <th colspan="2" style="min-width:18rem">Contacts <span class="text-muted fw-normal small">(label + number or email)</span></th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem" title="Clear row"> </th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="crmEpHospitalsBody">
+              {% for slot in hospital_rows %}
+              <tr class="crm-ep-hosp-row">
+                <td><input class="form-control form-control-sm" name="hosp_name" value="{% if slot %}{{ (slot.get('name','') or '')|e }}{% endif %}" maxlength="512" {% if not can_edit %}readonly{% endif %} placeholder="Hospital name"></td>
         {% if can_edit %}
-        <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
-          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill" id="crmEpHospitalSuggest">Add nearby hospitals</button>
-          <span class="small text-muted" id="crmEpHospitalSuggestMsg"></span>
+                <td class="crm-hosp-facilities-cell p-2 align-top">
+                  <div class="crm-hosp-facility-lines mb-1"></div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary crm-hosp-facility-add">Add facility line</button>
+                  <input type="hidden" name="hosp_facilities_json" value="{% if slot %}{{ (slot.get('facility_lines') or []) | tojson | forceescape }}{% else %}[]{% endif %}">
+                </td>
+                {% else %}
+                <td class="small align-top">
+                  {% if slot %}
+                    {% if slot.get('facility_lines') %}
+                      {% for fl in slot.facility_lines %}<div>{{ fl|e }}</div>{% endfor %}
+                    {% elif slot.get('facilities') %}<div>{{ slot.facilities|e }}</div>{% else %}—{% endif %}
+                  {% else %}—{% endif %}
+                </td>
+                {% endif %}
+                <td><input class="form-control form-control-sm" type="text" name="hosp_address" value="{% if slot %}{{ (slot.get('address','') or '')|e }}{% endif %}" maxlength="512" {% if not can_edit %}readonly{% endif %} placeholder="Postcode or full address"></td>
+                {% if can_edit %}
+                <td colspan="2" class="crm-hosp-contacts-cell p-2 align-top">
+                  <div class="crm-hosp-contact-lines mb-1"></div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary crm-hosp-contact-add">Add contact line</button>
+                  <input type="hidden" name="hosp_contacts_json" value="{% if slot %}{{ (slot.get('contact_lines') or []) | tojson | forceescape }}{% else %}[]{% endif %}">
+                </td>
+                {% else %}
+                <td colspan="2" class="small align-top">
+                  {% if slot %}
+                    {% if slot.get('contact_lines') %}
+                      {% for c in slot.contact_lines %}
+                      <div>{% if c.title %}<strong>{{ c.title|e }}</strong>{% if c.detail %} — {% endif %}{% endif %}{{ (c.detail or '')|e }}</div>
+                      {% endfor %}
+                    {% elif slot.get('contact') %}
+                      {{ slot.contact|e }}
+                    {% else %}—{% endif %}
+                  {% else %}—{% endif %}
+                </td>
+                {% endif %}
+                {% if can_edit %}
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-hosp-clear" title="Clear row">&times;</button></td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
+        {% if can_edit %}
+        <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="crmEpHospitalAddRow">Add empty row</button>
+        <template id="crmEpHospitalRowTpl">
+          <tr class="crm-ep-hosp-row">
+            <td><input class="form-control form-control-sm" name="hosp_name" value="" maxlength="512" placeholder="Hospital name"></td>
+            <td class="crm-hosp-facilities-cell p-2 align-top">
+              <div class="crm-hosp-facility-lines mb-1"></div>
+              <button type="button" class="btn btn-sm btn-outline-secondary crm-hosp-facility-add">Add facility line</button>
+              <input type="hidden" name="hosp_facilities_json" value="[]">
+            </td>
+            <td><input class="form-control form-control-sm" type="text" name="hosp_address" value="" maxlength="512" placeholder="Postcode or full address"></td>
+            <td colspan="2" class="crm-hosp-contacts-cell p-2 align-top">
+              <div class="crm-hosp-contact-lines mb-1"></div>
+              <button type="button" class="btn btn-sm btn-outline-secondary crm-hosp-contact-add">Add contact line</button>
+              <input type="hidden" name="hosp_contacts_json" value="[]">
+            </td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-hosp-clear" title="Clear row">&times;</button></td>
+          </tr>
+        </template>
         {% endif %}
-        <label class="form-label">Receiving hospitals &amp; units <span class="text-muted small fw-normal">(one per line)</span></label>
-        <textarea class="form-control mb-3" name="hospitals_list_lines" id="crmEpHospitalsLines" rows="4" placeholder="e.g. Royal County Hospital A&amp;E — DT1 2JY" {% if not can_edit %}readonly{% endif %}>{{ hospitals_list_lines }}</textarea>
-        <label class="form-label">Routes, access, transfer notes</label>
-        <textarea class="form-control mb-4" name="hospitals_notes" rows="3" placeholder="Helipad, ambulance access, preferred receiving unit…" {% if not can_edit %}readonly{% endif %}>{{ plan.hospitals_notes or '' }}</textarea>
 
-        <h3 class="h6 text-uppercase text-muted mb-2">Medical control</h3>
-        <label class="form-label small text-muted">Event medical control / comms <span class="fw-normal">(call sign, frequency, control desk, NHS numbers — free text)</span></label>
-        <textarea class="form-control mb-4" name="medical_control" rows="2" placeholder="e.g. Event Med Control 079… · NHS triage …" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.medical_control or '' }}</textarea>
+        {% set pap = (clinical_handover.pre_alert_policy or 'ashice') %}
+        <h3 class="h6 text-uppercase text-muted mb-2">Pre-Alert Policy</h3>
+        <p class="small text-muted mb-2">Structured handover prompt for receiving services. Pick <strong>ASHICE</strong>, <strong>ATMIST</strong>, or <strong>Custom</strong> (your own letter + description lines). Each block uses the same <strong>Letter</strong> then <strong>Description</strong> layout.</p>
+        {% if can_edit %}
+        <script type="application/json" id="crmEpPreAlertTemplatesJson">{{ (pre_alert_templates or []) | tojson }}</script>
+        <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+          <div class="flex-grow-1" style="min-width:14rem;max-width:26rem;">
+            <label class="form-label small mb-0 text-muted" for="crmEpPreAlertTplSelect">Insert saved template</label>
+            <select class="form-select form-select-sm" id="crmEpPreAlertTplSelect"{% if not pre_alert_templates %} disabled{% endif %}>
+              <option value="">— Choose —</option>
+              {% for t in pre_alert_templates %}
+              <option value="{{ t.id }}">{{ t.title|e }} ({{ t.policy|upper }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="crmEpPreAlertTplInsert"{% if not pre_alert_templates %} disabled{% endif %}>Insert into form</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpPreAlertTplSave">Save current as template</button>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_pre_alert_templates_admin') }}" target="_blank" rel="noopener noreferrer">Manage templates</a>
+          </div>
+        <div class="mb-3" role="radiogroup" aria-label="Pre-alert policy">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="pre_alert_policy" id="crmEpPapAshice" value="ashice" {% if pap == 'ashice' %}checked{% endif %}>
+            <label class="form-check-label" for="crmEpPapAshice">ASHICE</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="pre_alert_policy" id="crmEpPapAtmist" value="atmist" {% if pap == 'atmist' %}checked{% endif %}>
+            <label class="form-check-label" for="crmEpPapAtmist">ATMIST</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="pre_alert_policy" id="crmEpPapCustom" value="custom" {% if pap == 'custom' %}checked{% endif %}>
+            <label class="form-check-label" for="crmEpPapCustom">Custom</label>
+          </div>
+          </div>
+        {% else %}
+        <p class="small mb-3">Selected policy: <strong>{{ pap|upper }}</strong></p>
+        {% endif %}
 
-        <h3 class="h6 text-uppercase text-muted mb-2">ASHICE <span class="text-muted small fw-normal">(optional — pre-alert / handover)</span></h3>
-        <div class="row g-2">
-          <div class="col-md-6">
-            <label class="form-label small mb-0">A — Age</label>
-            <input class="form-control form-control-sm" name="ashice_age" value="{{ clinical_handover.ashice.age or '' }}" {% if not can_edit %}readonly{% endif %}>
+        <div class="crm-ep-pre-alert-panel mb-3{% if pap != 'ashice' %} d-none{% endif %}" data-pre-alert-panel="ashice">
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:6rem">Letter</th>
+                  <th>Description</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem" title="Clear description"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for key, letter_label in ashice_editor_rows %}
+                <tr class="crm-ep-pre-alert-struct-row">
+                  <td>
+                    {% if can_edit %}
+                    <input type="text" class="form-control form-control-sm bg-light" readonly tabindex="-1" value="{{ letter_label|e }}" aria-label="ASHICE item">
+                    {% else %}
+                    <span class="small fw-semibold text-muted">{{ letter_label }}</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if can_edit %}
+                      {% if key in ('history', 'injuries', 'current', 'expected') %}
+                      <textarea class="form-control form-control-sm" name="ashice_{{ key }}" rows="2" maxlength="4000" placeholder="">{{ clinical_handover.ashice.get(key, '') or '' }}</textarea>
+                      {% else %}
+                      <input class="form-control form-control-sm" type="text" name="ashice_{{ key }}" value="{{ clinical_handover.ashice.get(key, '') or '' }}" maxlength="2000" placeholder="">
+                      {% endif %}
+                    {% else %}
+                    {% set av = clinical_handover.ashice.get(key, '') or '' %}
+                    <span class="small" style="white-space:pre-wrap">{% if av %}{{ av|e }}{% else %}—{% endif %}</span>
+                    {% endif %}
+                  </td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-pre-alert-struct-clear" title="Clear description">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
-          <div class="col-md-6">
-            <label class="form-label small mb-0">S — Sex</label>
-            <input class="form-control form-control-sm" name="ashice_sex" value="{{ clinical_handover.ashice.sex or '' }}" {% if not can_edit %}readonly{% endif %}>
+        </div>
+
+        <div class="crm-ep-pre-alert-panel mb-3{% if pap != 'atmist' %} d-none{% endif %}" data-pre-alert-panel="atmist">
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:6rem">Letter</th>
+                  <th>Description</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem" title="Clear description"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for key, letter_label in atmist_editor_rows %}
+                <tr class="crm-ep-pre-alert-struct-row">
+                  <td>
+                    {% if can_edit %}
+                    <input type="text" class="form-control form-control-sm bg-light" readonly tabindex="-1" value="{{ letter_label|e }}" aria-label="ATMIST item">
+                    {% else %}
+                    <span class="small fw-semibold text-muted">{{ letter_label }}</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if can_edit %}
+                      {% if key == 'age' %}
+                      <input class="form-control form-control-sm" type="text" name="atmist_{{ key }}" value="{{ clinical_handover.atmist.get(key, '') or '' }}" maxlength="2000">
+                      {% else %}
+                      <textarea class="form-control form-control-sm" name="atmist_{{ key }}" rows="2" maxlength="4000">{{ clinical_handover.atmist.get(key, '') or '' }}</textarea>
+                      {% endif %}
+                    {% else %}
+                    {% set tv = clinical_handover.atmist.get(key, '') or '' %}
+                    <span class="small" style="white-space:pre-wrap">{% if tv %}{{ tv|e }}{% else %}—{% endif %}</span>
+                    {% endif %}
+                  </td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-pre-alert-struct-clear" title="Clear description">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
           </div>
-          <div class="col-12">
-            <label class="form-label small mb-0">H — History</label>
-            <textarea class="form-control form-control-sm" name="ashice_history" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.history or '' }}</textarea>
+        </div>
+
+        <div class="crm-ep-pre-alert-panel mb-3{% if pap != 'custom' %} d-none{% endif %}" data-pre-alert-panel="custom">
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:6rem">Letter</th>
+                  <th>Description</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem" title="Remove row"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpPreAlertCustomBody">
+                {% if can_edit %}
+                  {% for row in clinical_handover.custom_pre_alert_edit %}
+                  <tr class="crm-ep-pre-alert-custom-row">
+                    <td><input class="form-control form-control-sm" type="text" name="pre_alert_custom_letter" value="{{ row.letter }}" maxlength="16" placeholder="e.g. A"></td>
+                    <td><textarea class="form-control form-control-sm" name="pre_alert_custom_detail" rows="2" maxlength="2000" placeholder="e.g. Age — patient age and sex">{{ row.detail }}</textarea></td>
+                    <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-pre-alert-custom-clear" title="Clear row">&times;</button></td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  {% for row in clinical_handover.custom_pre_alert %}
+                  <tr><td class="small">{{ (row.letter or '')|e }}</td><td class="small" style="white-space:pre-wrap">{{ (row.detail or '')|e }}</td></tr>
+                  {% else %}
+                  <tr><td colspan="2" class="text-muted small">—</td></tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
           </div>
-          <div class="col-12">
-            <label class="form-label small mb-0">I — Injuries / findings</label>
-            <textarea class="form-control form-control-sm" name="ashice_injuries" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.injuries or '' }}</textarea>
-          </div>
-          <div class="col-12">
-            <label class="form-label small mb-0">C — Current condition</label>
-            <textarea class="form-control form-control-sm" name="ashice_current" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.current or '' }}</textarea>
-          </div>
-          <div class="col-12">
-            <label class="form-label small mb-0">E — Expected / ETA</label>
-            <textarea class="form-control form-control-sm" name="ashice_expected" rows="1" {% if not can_edit %}readonly{% endif %}>{{ clinical_handover.ashice.expected or '' }}</textarea>
-          </div>
+          {% if can_edit %}
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="crmEpPreAlertCustomAdd">Add row</button>
+          <template id="crmEpPreAlertCustomTpl">
+            <tr class="crm-ep-pre-alert-custom-row">
+              <td><input class="form-control form-control-sm" type="text" name="pre_alert_custom_letter" value="" maxlength="16" placeholder="e.g. A"></td>
+              <td><textarea class="form-control form-control-sm" name="pre_alert_custom_detail" rows="2" maxlength="2000" placeholder="e.g. Age — patient age and sex"></textarea></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-pre-alert-custom-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -362,74 +933,264 @@
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-3">Resources</h2>
-        <p class="small text-muted mb-2">Structured <strong>deployment roster</strong> (callsigns, posts) is included in the PDF; summary counts use the role / grade column.</p>
+        {% set sr_post_options = ['Ambulance', 'RRV', 'Motorcycle', 'Treatment Centre/Post', 'On Foot'] %}
+        {% macro crm_ep_sr_vehicle_select(selected_raw, fleet_vehicle_options, fleet_vehicle_option_ids) -%}
+        {%- set vv = ((selected_raw|string)|trim) if selected_raw is not none else '' -%}
+        <select class="form-select form-select-sm" name="sr_vehicle" aria-label="Assigned vehicle">
+          <option value=""{% if not vv %} selected{% endif %}>— None —</option>
+          <option value="onfoot"{% if vv|lower == 'onfoot' %} selected{% endif %}>On foot</option>
+          {%- if vv and vv not in fleet_vehicle_option_ids and vv|lower != 'onfoot' -%}
+          <option value="{{ vv|e }}" selected>Vehicle #{{ vv|e }} (not in current fleet list)</option>
+          {%- endif -%}
+          {% for fv in fleet_vehicle_options %}
+          <option value="{{ fv.id }}"{% if vv == (fv.id|string) %} selected{% endif %}>{{ fv.label|e }}</option>
+          {% endfor %}
+        </select>
+        {%- endmacro %}
+        <p class="small text-muted mb-2">Structured <strong>deployment roster</strong> (callsigns, posts) is included when the plan is issued; summary counts use the role / grade column.{% if fleet_vehicle_options %} <span class="text-muted"><strong>Vehicle</strong> is chosen from Fleet Management (plus <strong>On foot</strong>).</span>{% endif %}{% if can_edit %} <span class="text-muted">The <strong>User lookup</strong> column searches <strong>HR employees</strong> (Time Billing / HR) and <strong>Sparrow user accounts</strong> to fill name, role / grade, and phone where known; it is not saved on the plan or PDF.</span>{% endif %}</p>
         <div class="table-responsive mb-3">
-          <table class="table table-sm table-bordered align-middle">
+          <table class="table table-sm table-bordered align-middle" id="crmEpSrTable">
             <thead class="table-light">
               <tr>
                 <th style="width:8%">Callsign</th>
+                {% if can_edit %}<th style="width:11%">User lookup</th>{% endif %}
                 <th style="width:12%">Name</th>
                 <th style="width:14%">Role / grade</th>
-                <th style="width:15%">Post / assignment</th>
-                <th style="width:11%">Shift / times</th>
+                <th style="width:13%">Post / assignment <span class="text-muted fw-normal small">(type)</span></th>
+                <th style="width:14%">Vehicle</th>
+                <th style="width:10%">Shift / times</th>
                 <th style="width:10%">Phone</th>
                 <th>Notes</th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
               </tr>
             </thead>
-            <tbody>
+            <tbody id="crmEpSrBody">
               {% for slot in staff_roster_rows %}
-              <tr>
+              <tr class="crm-ep-sr-row">
                 <td><input class="form-control form-control-sm" name="sr_callsign" value="{% if slot %}{{ slot.get('callsign','') }}{% endif %}" maxlength="64" {% if not can_edit %}readonly{% endif %}></td>
+                {% if can_edit %}
+                <td class="position-relative">
+                    <input type="text" class="form-control form-control-sm crm-ep-plan-user-lookup" data-user-lookup-context="sr" autocomplete="off" placeholder="Search username…" aria-label="User lookup (not saved on plan)">
+                    <div class="crm-ep-user-lookup-dd d-none position-absolute bg-white border rounded shadow-sm mt-1 start-0 end-0" style="z-index:30;top:100%;max-height:12rem;overflow-y:auto;"></div>
+                </td>
+                {% endif %}
                 <td><input class="form-control form-control-sm" name="sr_name" value="{% if slot %}{{ slot.get('name','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
                 <td><input class="form-control form-control-sm" name="sr_role" value="{% if slot %}{{ slot.get('role_grade','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
-                <td><input class="form-control form-control-sm" name="sr_post" value="{% if slot %}{{ slot.get('post_assignment','') }}{% endif %}" maxlength="255" {% if not can_edit %}readonly{% endif %}></td>
+                <td>
+                  {% set pv = (slot.get('post_assignment','') if slot else '')|trim %}
+                  {% if can_edit %}
+                  <select class="form-select form-select-sm" name="sr_post" aria-label="Post or assignment type">
+                    <option value=""{% if not pv %} selected{% endif %}>— Select —</option>
+                    {% if pv and pv not in sr_post_options %}
+                    <option value="{{ pv }}" selected>{{ pv }}</option>
+                    {% endif %}
+                    {% for opt in sr_post_options %}
+                    <option value="{{ opt }}"{% if pv == opt %} selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                  </select>
+                  {% else %}
+                  <input type="text" class="form-control form-control-sm" value="{{ pv }}" readonly placeholder="—">
+                  {% endif %}
+                </td>
+                <td>
+                  {% if can_edit %}
+                  {{ crm_ep_sr_vehicle_select(slot.get('fleet_vehicle') if slot else None, fleet_vehicle_options, fleet_vehicle_option_ids) }}
+                  {% else %}
+                  <input type="text" class="form-control form-control-sm" value="{{ (slot.get('fleet_vehicle_display') if slot else '') or '—' }}" readonly tabindex="-1">
+                  {% endif %}
+                </td>
                 <td><input class="form-control form-control-sm" name="sr_shift" value="{% if slot %}{{ slot.get('shift','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
                 <td><input class="form-control form-control-sm" name="sr_phone" value="{% if slot %}{{ slot.get('phone','') }}{% endif %}" maxlength="32" {% if not can_edit %}readonly{% endif %}></td>
                 <td><input class="form-control form-control-sm" name="sr_notes" value="{% if slot %}{{ slot.get('notes','') }}{% endif %}" maxlength="512" {% if not can_edit %}readonly{% endif %}></td>
+                {% if can_edit %}
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-sr-clear" title="Clear row">&times;</button></td>
+                {% endif %}
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-        <div class="mb-2">
-          <label class="form-label">Medics / staffing summary <span class="text-muted small fw-normal">(optional narrative)</span></label>
-          <input class="form-control" name="resources_medics" value="{{ plan.resources_medics or '' }}" {% if not can_edit %}readonly{% endif %}>
+        {% if can_edit %}
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpSrAddRow">Add roster row</button>
         </div>
-        <div class="mb-2">
-          <label class="form-label">Vehicles / equipment</label>
-          <textarea class="form-control" name="resources_vehicles" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.resources_vehicles or '' }}</textarea>
+        <template id="crmEpSrRowTpl">
+          <tr class="crm-ep-sr-row">
+            <td><input class="form-control form-control-sm" name="sr_callsign" value="" maxlength="64"></td>
+            <td class="position-relative">
+                <input type="text" class="form-control form-control-sm crm-ep-plan-user-lookup" data-user-lookup-context="sr" autocomplete="off" placeholder="Search username…" aria-label="User lookup (not saved on plan)">
+                <div class="crm-ep-user-lookup-dd d-none position-absolute bg-white border rounded shadow-sm mt-1 start-0 end-0" style="z-index:30;top:100%;max-height:12rem;overflow-y:auto;"></div>
+            </td>
+            <td><input class="form-control form-control-sm" name="sr_name" value="" maxlength="128"></td>
+            <td><input class="form-control form-control-sm" name="sr_role" value="" maxlength="128"></td>
+            <td>
+              <select class="form-select form-select-sm" name="sr_post" aria-label="Post or assignment type">
+                <option value="" selected>— Select —</option>
+                {% for opt in sr_post_options %}
+                <option value="{{ opt }}">{{ opt }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>{{ crm_ep_sr_vehicle_select(None, fleet_vehicle_options, fleet_vehicle_option_ids) }}</td>
+            <td><input class="form-control form-control-sm" name="sr_shift" value="" maxlength="128"></td>
+            <td><input class="form-control form-control-sm" name="sr_phone" value="" maxlength="32"></td>
+            <td><input class="form-control form-control-sm" name="sr_notes" value="" maxlength="512"></td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-sr-clear" title="Clear row">&times;</button></td>
+          </tr>
+        </template>
+        {% endif %}
+        <p class="small text-muted mb-2"><strong>Management &amp; support roles</strong> — command, coordination, and other non-field posts (listed separately from the deployment roster; both are included when the plan is issued).{% if can_edit %} <span class="text-muted"><strong>User lookup</strong> fills name, phone when known, and <strong>role / function</strong> from HR job title / clinical grade when that field is still empty; it is not saved on the plan or PDF.</span>{% endif %}</p>
+        <div class="table-responsive mb-3">
+          <table class="table table-sm table-bordered align-middle" id="crmEpMsTable">
+            <thead class="table-light">
+              <tr>
+                <th style="width:22%">Role / function</th>
+                {% if can_edit %}<th style="width:11%">User lookup</th>{% endif %}
+                <th style="width:18%">Name</th>
+                <th style="width:12%">Phone</th>
+                <th>Notes</th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="crmEpMsBody">
+              {% for slot in management_support_rows %}
+              <tr class="crm-ep-ms-row">
+                <td><input class="form-control form-control-sm" name="ms_role" value="{% if slot %}{{ slot.get('role','') }}{% endif %}" maxlength="128" placeholder="e.g. Event Medical Director" {% if not can_edit %}readonly{% endif %}></td>
+                {% if can_edit %}
+                <td class="position-relative">
+                    <input type="text" class="form-control form-control-sm crm-ep-plan-user-lookup" data-user-lookup-context="ms" autocomplete="off" placeholder="Search username…" aria-label="User lookup (not saved on plan)">
+                    <div class="crm-ep-user-lookup-dd d-none position-absolute bg-white border rounded shadow-sm mt-1 start-0 end-0" style="z-index:30;top:100%;max-height:12rem;overflow-y:auto;"></div>
+                </td>
+                {% endif %}
+                <td><input class="form-control form-control-sm" name="ms_name" value="{% if slot %}{{ slot.get('name','') }}{% endif %}" maxlength="128" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="ms_phone" value="{% if slot %}{{ slot.get('phone','') }}{% endif %}" maxlength="32" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="ms_notes" value="{% if slot %}{{ slot.get('notes','') }}{% endif %}" maxlength="512" placeholder="e.g. Silver on-call; base contact" {% if not can_edit %}readonly{% endif %}></td>
+                {% if can_edit %}
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-ms-clear" title="Clear row">&times;</button></td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
-        <div class="mb-2">
-          <label class="form-label">Comms</label>
-          <textarea class="form-control" name="resources_comms" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.resources_comms or '' }}</textarea>
+        {% if can_edit %}
+        <div class="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpMsAddRow">Add management / support row</button>
         </div>
-        <div class="mb-2">
-          <label class="form-label">Escalation</label>
-          <textarea class="form-control" name="escalation_notes" rows="2" {% if not can_edit %}readonly{% endif %}>{{ plan.escalation_notes or '' }}</textarea>
-        </div>
+        <template id="crmEpMsRowTpl">
+          <tr class="crm-ep-ms-row">
+            <td><input class="form-control form-control-sm" name="ms_role" value="" maxlength="128" placeholder="e.g. Event Medical Director"></td>
+            <td class="position-relative">
+                <input type="text" class="form-control form-control-sm crm-ep-plan-user-lookup" data-user-lookup-context="ms" autocomplete="off" placeholder="Search username…" aria-label="User lookup (not saved on plan)">
+                <div class="crm-ep-user-lookup-dd d-none position-absolute bg-white border rounded shadow-sm mt-1 start-0 end-0" style="z-index:30;top:100%;max-height:12rem;overflow-y:auto;"></div>
+            </td>
+            <td><input class="form-control form-control-sm" name="ms_name" value="" maxlength="128"></td>
+            <td><input class="form-control form-control-sm" name="ms_phone" value="" maxlength="32"></td>
+            <td><input class="form-control form-control-sm" name="ms_notes" value="" maxlength="512" placeholder="e.g. Silver on-call; base contact"></td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-ms-clear" title="Clear row">&times;</button></td>
+          </tr>
+        </template>
+        {% endif %}
         <div class="mt-3 pt-3 border-top">
-          <label class="form-label">Staff transportation <span class="text-muted small fw-normal">(PDF)</span></label>
-          <textarea class="form-control small" name="staff_transport_text" rows="4" {% if not can_edit %}readonly{% endif %} placeholder="By day / vehicle / named staff…">{{ plan.staff_transport_text or '' }}</textarea>
+          <label class="form-label">Staff transportation <span class="text-muted small fw-normal">(by day, vehicle, named staff)</span></label>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="crmEpStTrTable">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:11rem">Date</th>
+                  <th style="min-width:12rem">Vehicle</th>
+                  <th>Staff</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpStTrBody">
+                {% for slot in staff_transport_rows %}
+                <tr class="crm-ep-sttr-row">
+                  <td><input class="form-control form-control-sm" type="date" name="st_tr_date" value="{% if slot %}{{ slot.date_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><input class="form-control form-control-sm" name="st_tr_vehicle" maxlength="512" placeholder="e.g. Sprinter — reg" value="{% if slot %}{{ slot.vehicle_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td><input class="form-control form-control-sm" name="st_tr_staff" maxlength="512" placeholder="e.g. Bloggs J, Smith A" value="{% if slot %}{{ slot.staff_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-sttr-clear" title="Clear row">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+        </div>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpStTrAddRow">Add transport row</button>
+        </div>
+          <template id="crmEpStTrRowTpl">
+            <tr class="crm-ep-sttr-row">
+              <td><input class="form-control form-control-sm" type="date" name="st_tr_date" value=""></td>
+              <td><input class="form-control form-control-sm" name="st_tr_vehicle" maxlength="512" placeholder="e.g. Sprinter — reg" value=""></td>
+              <td><input class="form-control form-control-sm" name="st_tr_staff" maxlength="512" placeholder="e.g. Bloggs J, Smith A" value=""></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-sttr-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
         </div>
         <div class="mt-2">
-          <label class="form-label">Command, control &amp; support <span class="text-muted small fw-normal">(PDF — triage officer, bronze/silver, etc.)</span></label>
-          <textarea class="form-control small" name="command_control_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.command_control_text or '' }}</textarea>
-        </div>
-        <div class="mt-2">
-          <label class="form-label">Uniform &amp; PPE <span class="text-muted small fw-normal">(PDF)</span></label>
-          <textarea class="form-control small" name="uniform_ppe_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.uniform_ppe_text or '' }}</textarea>
-        </div>
-        <div class="mt-2">
-          <label class="form-label">Equipment detail <span class="text-muted small fw-normal">(PDF — kit lists, beds, drugs bags, load lists)</span></label>
-          <textarea class="form-control font-monospace small" name="equipment_detail_text" rows="6" {% if not can_edit %}readonly{% endif %}>{{ plan.equipment_detail_text or '' }}</textarea>
+          <label class="form-label">Uniform &amp; PPE</label>
+          <p class="small text-muted mb-2"><strong>Helmets</strong> and <strong>Hi-Vis</strong> are prefilled when you first open this section. Choose <strong>Yes</strong> or <strong>No</strong> for each, add notes, and use <strong>Add row</strong> for anything else (e.g. safety footwear, radios, rescue kit).</p>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle" id="crmEpUpeTable">
+              <thead class="table-light">
+                <tr>
+                  <th style="min-width:12rem">Uniform / PPE type</th>
+                  <th style="min-width:7rem">Yes / No</th>
+                  <th>Notes</th>
+                  {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                </tr>
+              </thead>
+              <tbody id="crmEpUpeBody">
+                {% for slot in uniform_ppe_rows %}
+                <tr class="crm-ep-upe-row">
+                  <td><input class="form-control form-control-sm" name="upe_type" maxlength="256" placeholder="e.g. Two-way radio" value="{% if slot %}{{ slot.type_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  <td>
+                    <select class="form-select form-select-sm" name="upe_yes_no" {% if not can_edit %}disabled{% endif %}>
+                      <option value="">—</option>
+                      <option value="yes" {% if slot and slot.yes_no_val == 'yes' %}selected{% endif %}>Yes</option>
+                      <option value="no" {% if slot and slot.yes_no_val == 'no' %}selected{% endif %}>No</option>
+                    </select>
+                  </td>
+                  <td><input class="form-control form-control-sm" name="upe_notes" maxlength="512" placeholder="e.g. PAS-branded only" value="{% if slot %}{{ slot.notes_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                  {% if can_edit %}
+                  <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-upe-clear" title="Clear row">&times;</button></td>
+                  {% endif %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpUpeAddRow">Add PPE row</button>
+          </div>
+          <template id="crmEpUpeRowTpl">
+            <tr class="crm-ep-upe-row">
+              <td><input class="form-control form-control-sm" name="upe_type" maxlength="256" placeholder="e.g. Two-way radio" value=""></td>
+              <td>
+                <select class="form-select form-select-sm" name="upe_yes_no">
+                  <option value="">—</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </td>
+              <td><input class="form-control form-control-sm" name="upe_notes" maxlength="512" placeholder="e.g. PAS-branded only" value=""></td>
+              <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-upe-clear" title="Clear row">&times;</button></td>
+            </tr>
+          </template>
+          {% endif %}
         </div>
         <div class="mt-3 pt-3 border-top">
           <h3 class="h6 text-uppercase text-muted mb-2">Event kit manifest (inventory)</h3>
-          <p class="small text-muted mb-2">Serial assets linked here appear in a stable employee-portal URL for this plan (and in the PDF). Add by numeric asset ID or public asset code.</p>
+          <p class="small text-muted mb-2">Serial assets linked here appear in a stable employee-portal URL for this plan and when the plan is issued. Add by numeric asset ID or public asset code.</p>
           {% if kit_portal_url %}
           <p class="small mb-2"><a href="{{ kit_portal_url }}" target="_blank" rel="noopener">Open live kit list for staff</a> <span class="text-muted">(login required)</span></p>
           {% else %}
-          <p class="small text-warning mb-2">Portal URL unavailable (employee portal not registered) — PDFs will omit the live link until it is.</p>
+          <p class="small text-warning mb-2">Portal URL unavailable (employee portal not registered) — issued documents will omit the live link until it is.</p>
           {% endif %}
           {% if can_edit %}
           <div class="input-group input-group-sm mb-3" style="max-width:32rem">
@@ -474,9 +1235,9 @@
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-3">Risk assessment</h2>
-        <p class="small text-muted mb-2">Risk table (optional) — one row per topic; appears as a grid in the PDF (like SAG medical plans).</p>
+        <p class="small text-muted mb-2">Risk table (optional) — one row per topic.</p>
         <div class="table-responsive mb-3">
-          <table class="table table-sm table-bordered align-middle">
+          <table class="table table-sm table-bordered align-middle" id="crmEpRrTable">
             <thead class="table-light">
               <tr>
                 <th style="width:28%">Risk type / topic</th>
@@ -484,9 +1245,9 @@
                 <th>Comment</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="crmEpRrBody">
               {% for rslot in risk_register_rows %}
-              <tr>
+              <tr class="crm-ep-rr-row">
                 <td><input class="form-control form-control-sm" name="rr_type" value="{% if rslot %}{{ rslot.risk_type }}{% endif %}" maxlength="255" {% if not can_edit %}readonly{% endif %}></td>
                 <td><input class="form-control form-control-sm" name="rr_level" value="{% if rslot %}{{ rslot.risk_level }}{% endif %}" maxlength="64" {% if not can_edit %}readonly{% endif %} placeholder="Low / Mod…"></td>
                 <td><input class="form-control form-control-sm" name="rr_comment" value="{% if rslot %}{{ rslot.risk_comment }}{% endif %}" maxlength="1024" {% if not can_edit %}readonly{% endif %}></td>
@@ -495,6 +1256,18 @@
             </tbody>
           </table>
         </div>
+        {% if can_edit %}
+        <div class="d-flex flex-wrap gap-2 mb-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpRrAddRow">Add risk row</button>
+        </div>
+        <template id="crmEpRrRowTpl">
+          <tr class="crm-ep-rr-row">
+            <td><input class="form-control form-control-sm" name="rr_type" value="" maxlength="255"></td>
+            <td><input class="form-control form-control-sm" name="rr_level" value="" maxlength="64" placeholder="Low / Mod…"></td>
+            <td><input class="form-control form-control-sm" name="rr_comment" value="" maxlength="1024"></td>
+          </tr>
+        </template>
+        {% endif %}
         <label class="form-label">Narrative summary</label>
         <textarea class="form-control mb-2" name="risk_summary" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.risk_summary or '' }}</textarea>
         <label class="form-label">Optional score (1–10)</label>
@@ -506,13 +1279,13 @@
     <div data-ep-step="7" class="crm-ep-panel mb-1{% if display_step == 7 %} crm-ep-active{% endif %}">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 text-uppercase text-muted mb-3">Sign-off &amp; PDF control sheet</h2>
-        <p class="small text-muted mb-3">Document version is assigned automatically when you generate a PDF (first issue <strong>v1.0</strong>, then <strong>v1.1</strong>, <strong>v1.2</strong>, …). Release date, status, and distribution still appear on the cover.</p>
+        <h2 class="h6 text-uppercase text-muted mb-3">Sign-off &amp; document control</h2>
+        <p class="small text-muted mb-3">Document version is assigned automatically when you issue the plan from the review step (first issue <strong>v1.0</strong>, then <strong>v1.1</strong>, <strong>v1.2</strong>, …). Release date, status, and distribution still appear on the cover.</p>
         <div class="row g-2 mb-3">
           <div class="col-md-6">
             <label class="form-label small text-muted">Document version (read-only)</label>
             <p class="form-control form-control-sm bg-light mb-0 text-dark">
-              {% if plan_pdf_version_display %}<strong>v{{ plan_pdf_version_display }}</strong> <span class="text-muted small">— last PDF generation</span>{% else %}<span class="text-muted">No PDF issued yet — first will be v1.0</span>{% endif %}
+              {% if plan_pdf_version_display %}<strong>v{{ plan_pdf_version_display }}</strong> <span class="text-muted small">— last issue from review step</span>{% else %}<span class="text-muted">Not issued yet — first will be v1.0</span>{% endif %}
             </p>
           </div>
           <div class="col-md-3">
@@ -520,33 +1293,93 @@
             <input class="form-control form-control-sm" type="date" name="plan_document_release_date" value="{% if plan.plan_document_release_date %}{{ plan.plan_document_release_date.strftime('%Y-%m-%d') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Status <span class="text-muted fw-normal">(e.g. Pending SAG)</span></label>
-            <input class="form-control form-control-sm" name="plan_pdf_status" value="{{ plan.plan_pdf_status or '' }}" maxlength="128" {% if not can_edit %}readonly{% endif %}>
+            <label class="form-label small">Status</label>
+            <input class="form-control form-control-sm" name="plan_pdf_status" value="{{ plan.plan_pdf_status or '' }}" maxlength="128" placeholder="e.g. Pending SAG" {% if not can_edit %}readonly{% endif %}>
           </div>
           <div class="col-md-6">
             <label class="form-label small">Written by</label>
-            <input class="form-control form-control-sm" name="plan_written_by" value="{{ plan.plan_written_by or '' }}" maxlength="255" {% if not can_edit %}readonly{% endif %}>
+            <div class="input-group input-group-sm">
+              <input class="form-control" id="crmEpPlanWrittenBy" name="plan_written_by" value="{{ plan.plan_written_by or '' }}" maxlength="255" {% if not can_edit %}readonly{% endif %}>
+              {% if can_edit and current_user.is_authenticated %}
+              <button type="button" class="btn btn-outline-secondary text-nowrap" id="crmEpPlanWrittenByMe" title="Insert your name (from HR / staff profile when linked)" data-display-name="{{ (plan_written_by_me or current_user.username)|e }}" data-username-fallback="{{ current_user.username|e }}">Use me</button>
+              {% endif %}
+            </div>
           </div>
           <div class="col-12">
             <label class="form-label small">Distribution</label>
-            <textarea class="form-control form-control-sm" name="plan_distribution" rows="2" {% if not can_edit %}readonly{% endif %} placeholder="Attending staff, event organisers, SAG…">{{ plan.plan_distribution or '' }}</textarea>
+            <p class="small text-muted mb-2">One row per recipient or group (who gets the plan). Add or remove rows as needed.</p>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle" id="crmEpDistTable">
+                <thead class="table-light">
+                  <tr>
+                    <th>Recipient / group</th>
+                    {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+                  </tr>
+                </thead>
+                <tbody id="crmEpDistBody">
+                  {% for slot in plan_distribution_rows %}
+                  <tr class="crm-ep-dist-row">
+                    <td><input class="form-control form-control-sm" name="plan_dist_line" maxlength="512" placeholder="e.g. Event organiser, SAG, attending medics" value="{% if slot %}{{ slot.line_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                    {% if can_edit %}
+                    <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-dist-remove" title="Remove row">&times;</button></td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
           </div>
+            {% if can_edit %}
+            <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpDistAddRow">Add recipient row</button>
         </div>
+            <template id="crmEpDistRowTpl">
+              <tr class="crm-ep-dist-row">
+                <td><input class="form-control form-control-sm" name="plan_dist_line" maxlength="512" placeholder="e.g. Event organiser, SAG, attending medics" value=""></td>
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-dist-remove" title="Remove row">&times;</button></td>
+              </tr>
+            </template>
+            {% endif %}
+          </div>
+          </div>
         <h3 class="h6 text-uppercase text-muted mb-2">Clinical sign-off</h3>
-        <div class="row g-2">
-          <div class="col-md-4">
-            <label class="form-label">Name</label>
-            <input class="form-control" name="signoff_name" value="{{ plan.signoff_name or '' }}" {% if not can_edit %}readonly{% endif %}>
+        <p class="small text-muted mb-2">One row per signatory. Add or remove rows as needed.</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle" id="crmEpCsoTable">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width:11rem">Name</th>
+                <th style="min-width:11rem">Role</th>
+                <th style="min-width:12rem">Date / time</th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="crmEpCsoBody">
+              {% for slot in clinical_signoff_rows %}
+              <tr class="crm-ep-cso-row">
+                <td><input class="form-control form-control-sm" name="clinical_so_name" maxlength="255" placeholder="e.g. Dr A. Smith" value="{% if slot %}{{ slot.name_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="clinical_so_role" maxlength="255" placeholder="e.g. Event Medical Director" value="{% if slot %}{{ slot.role_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" type="datetime-local" name="clinical_so_at" value="{% if slot %}{{ slot.at_val }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                {% if can_edit %}
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-cso-remove" title="Remove row">&times;</button></td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
           </div>
-          <div class="col-md-4">
-            <label class="form-label">Role</label>
-            <input class="form-control" name="signoff_role" value="{{ plan.signoff_role or '' }}" {% if not can_edit %}readonly{% endif %}>
-          </div>
-          <div class="col-md-4">
-            <label class="form-label">Date/time</label>
-            <input class="form-control" type="datetime-local" name="signoff_at" value="{% if plan.signoff_at %}{{ plan.signoff_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}" {% if not can_edit %}readonly{% endif %}>
-          </div>
+        {% if can_edit %}
+        <div class="d-flex flex-wrap gap-2 mt-1 mb-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpCsoAddRow">Add sign-off row</button>
         </div>
+        <template id="crmEpCsoRowTpl">
+          <tr class="crm-ep-cso-row">
+            <td><input class="form-control form-control-sm" name="clinical_so_name" maxlength="255" placeholder="e.g. Dr A. Smith" value=""></td>
+            <td><input class="form-control form-control-sm" name="clinical_so_role" maxlength="255" placeholder="e.g. Event Medical Director" value=""></td>
+            <td><input class="form-control form-control-sm" type="datetime-local" name="clinical_so_at" value=""></td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-cso-remove" title="Remove row">&times;</button></td>
+          </tr>
+        </template>
+        {% endif %}
       </div>
     </div>
     </div>
@@ -554,8 +1387,64 @@
     <div data-ep-step="9" class="crm-ep-panel mb-1{% if display_step == 9 %} crm-ep-active{% endif %}">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">METHANE — for staff</h2>
+        <p class="small text-muted mb-3">Use this to <strong>reiterate METHANE</strong> (and related points) on the <strong>issued plan PDF</strong> so medics and support staff see the same prompts during briefings. This is <strong>event planning text only</strong> — it does <strong>not</strong> declare or record a live major incident in Sparrow or CAD. Leave fields blank if you do not need this page on the pack.</p>
+        <div class="row g-2 mb-2">
+          <div class="col-12">
+            <label class="form-label small mb-0">M — Major incident</label>
+            <input class="form-control form-control-sm" type="text" name="mi_major_incident_declared" value="{{ major_incident_detail.get('major_incident_declared', '') }}" maxlength="4000" placeholder="e.g. what to brief staff about escalation / standby / who declares on this event" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">E — Exact location</label>
+            <input class="form-control form-control-sm" type="text" name="mi_exact_location" value="{{ major_incident_detail.get('exact_location', '') }}" maxlength="4000" placeholder="e.g. how you fix location on this site (W3W · postcode · landmarks)" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">T — Type of incident</label>
+            <input class="form-control form-control-sm" type="text" name="mi_type_of_incident" value="{{ major_incident_detail.get('type_of_incident', '') }}" maxlength="4000" placeholder="e.g. scenarios staff should keep in mind for this event" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">H — Hazards</label>
+            <input class="form-control form-control-sm" type="text" name="mi_hazards" value="{{ major_incident_detail.get('hazards', '') }}" maxlength="4000" placeholder="e.g. site-specific hazards to mention in briefings" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">A — Access / routes</label>
+            <input class="form-control form-control-sm" type="text" name="mi_access_routes" value="{{ major_incident_detail.get('access_routes', '') }}" maxlength="4000" placeholder="e.g. RVPs · marshalling · cordons staff should know" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small mb-0">N — Number / severity of casualties</label>
+            <input class="form-control form-control-sm" type="text" name="mi_number_casualties" value="{{ major_incident_detail.get('number_casualties', '') }}" maxlength="4000" placeholder="e.g. triage / reporting lines you want reinforced" {% if not can_edit %}readonly{% endif %}>
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-0">E — Emergency services on scene / required</label>
+            <input class="form-control form-control-sm" type="text" name="mi_emergency_services" value="{{ major_incident_detail.get('emergency_services', '') }}" maxlength="4000" placeholder="e.g. who to involve on this event type; HART / SORT awareness" {% if not can_edit %}readonly{% endif %}>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">METHANE — narrative for staff</label>
+          <textarea class="form-control form-control-sm" name="mi_methane_notes" rows="3" maxlength="4000" placeholder="Short overall paragraph you want every medic to read on the plan" {% if not can_edit %}readonly{% endif %}>{{ major_incident_detail.get('methane_notes', '') }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">JESIP — briefing points</label>
+          <textarea class="form-control form-control-sm" name="mi_jesip_notes" rows="2" maxlength="4000" placeholder="e.g. joint working, shared picture, comms — as you want it stated on the plan" {% if not can_edit %}readonly{% endif %}>{{ major_incident_detail.get('jesip_notes', '') }}</textarea>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Cordons / command — briefing</label>
+          <textarea class="form-control form-control-sm" name="mi_cordons_command_notes" rows="2" maxlength="4000" placeholder="e.g. gold / silver / bronze or command structure you want on the printed plan" {% if not can_edit %}readonly{% endif %}>{{ major_incident_detail.get('cordons_command_notes', '') }}</textarea>
+        </div>
+        <div class="mb-0">
+          <label class="form-label small">Additional notes for staff</label>
+          <p class="small text-muted mb-1">Anything else you want on the PDF under this section (still planning / briefing text only).</p>
+          <textarea class="form-control form-control-sm" name="major_incident_text" rows="4" maxlength="65535" {% if not can_edit %}readonly{% endif %}>{{ plan.major_incident_text or '' }}</textarea>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <div data-ep-step="10" class="crm-ep-panel mb-1{% if display_step == 10 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
         <h2 class="h6 text-uppercase text-muted mb-3">Diagrams</h2>
-        <p class="small text-muted mb-3">Upload images for this plan only, or add from <a href="{{ url_for('crm_module.event_plan_diagram_templates_admin') }}" target="_blank" rel="noopener">shared templates</a> (template images can be replaced later for all plans that reference them).</p>
+        <p class="small text-muted mb-3">Upload images for this plan only, or add from <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_diagram_templates_admin') }}" target="_blank" rel="noopener">shared templates</a> (template images can be replaced later for all plans that reference them).</p>
         {% if can_edit and diagram_templates %}
         <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
           <div>
@@ -606,22 +1495,58 @@
         {% endif %}
 
         <h2 class="h6 text-uppercase text-muted mb-3">PDF annex — policies &amp; welfare</h2>
-        <p class="small text-muted mb-3">Optional long-form sections matching full event medical plans (H&amp;S, IPC, major incidents, welfare, etc.).</p>
-        <div class="mb-2">
+        <p class="small text-muted mb-3">Optional long-form sections matching full event medical plans (H&amp;S, IPC, welfare, etc.). The <strong>METHANE — for staff</strong> step is for briefing text on the issued PDF (not a live incident declaration). Use saved templates or a plain-text file import here, then edit for this event before issuing.</p>
+        <div class="mb-3">
           <label class="form-label small">Health &amp; safety at work</label>
-          <textarea class="form-control form-control-sm" name="health_safety_work_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.health_safety_work_text or '' }}</textarea>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            {% if policy_templates_hsw %}
+            <div class="flex-grow-1" style="min-width:12rem;max-width:24rem;">
+              <label class="form-label small mb-0 text-muted" for="crmEpHswTplSelect">Insert saved template</label>
+              <select class="form-select form-select-sm" id="crmEpHswTplSelect">
+                <option value="">— Choose —</option>
+                {% for pt in policy_templates_hsw %}
+                <option value="{{ pt.id }}">{{ pt.title|e }}</option>
+                {% endfor %}
+              </select>
         </div>
-        <div class="mb-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="crmEpHswTplInsert">Insert into H&amp;S</button>
+            {% endif %}
+            <input type="file" class="d-none" id="crmEpHswFileInput" accept=".txt,text/plain" aria-hidden="true">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpHswFileBtn">Import from file…</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_policy_templates_admin') }}#hsw" target="_blank" rel="noopener noreferrer">Manage H&amp;S templates</a>
+          </div>
+          <script type="application/json" id="crmEpHswTplJson">{{ policy_templates_hsw | tojson }}</script>
+          {% endif %}
+          <textarea class="form-control form-control-sm" id="crmEpHswText" name="health_safety_work_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.health_safety_work_text or '' }}</textarea>
+        </div>
+        <div class="mb-3">
           <label class="form-label small">Privacy, dignity &amp; IPC</label>
-          <textarea class="form-control form-control-sm" name="privacy_ipc_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.privacy_ipc_text or '' }}</textarea>
+          {% if can_edit %}
+          <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+            {% if policy_templates_privacy %}
+            <div class="flex-grow-1" style="min-width:12rem;max-width:24rem;">
+              <label class="form-label small mb-0 text-muted" for="crmEpPrivacyTplSelect">Insert saved template</label>
+              <select class="form-select form-select-sm" id="crmEpPrivacyTplSelect">
+                <option value="">— Choose —</option>
+                {% for pt in policy_templates_privacy %}
+                <option value="{{ pt.id }}">{{ pt.title|e }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="crmEpPrivacyTplInsert">Insert into privacy / IPC</button>
+            {% endif %}
+            <input type="file" class="d-none" id="crmEpPrivacyFileInput" accept=".txt,text/plain" aria-hidden="true">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpPrivacyFileBtn">Import from file…</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_policy_templates_admin') }}#privacy" target="_blank" rel="noopener noreferrer">Manage privacy templates</a>
+          </div>
+          <script type="application/json" id="crmEpPrivacyTplJson">{{ policy_templates_privacy | tojson }}</script>
+          {% endif %}
+          <textarea class="form-control form-control-sm" id="crmEpPrivacyText" name="privacy_ipc_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.privacy_ipc_text or '' }}</textarea>
         </div>
         <div class="mb-2">
           <label class="form-label small">Incident reporting</label>
           <textarea class="form-control form-control-sm" name="incident_reporting_text" rows="3" {% if not can_edit %}readonly{% endif %}>{{ plan.incident_reporting_text or '' }}</textarea>
-        </div>
-        <div class="mb-2">
-          <label class="form-label small">Major incidents <span class="text-muted fw-normal">(METHANE, JESIP, cordons…)</span></label>
-          <textarea class="form-control form-control-sm" name="major_incident_text" rows="4" {% if not can_edit %}readonly{% endif %}>{{ plan.major_incident_text or '' }}</textarea>
         </div>
         <div class="mb-2">
           <label class="form-label small">Welfare arrangements</label>
@@ -646,11 +1571,14 @@
     <div data-ep-step="8" class="crm-ep-panel mb-1{% if display_step == 8 %} crm-ep-active{% endif %}">
     <div class="card border-0 shadow-sm mb-3">
       <div class="card-body">
-        <h2 class="h6 text-uppercase text-muted mb-3">Review, PDF &amp; Cura</h2>
+        <h2 class="h6 text-uppercase text-muted mb-3">Review &amp; Cura</h2>
+        <p class="small text-primary border border-primary border-opacity-25 rounded-3 px-3 py-2 mb-3 bg-primary bg-opacity-05">
+          <i class="bi bi-info-circle me-1"></i> <strong>Sync</strong> (first plan step) has CRM links and <strong>Cura operations</strong> (switch + <strong>Push to Cura</strong>). <a href="#crmCuraHandoffBanner" class="text-decoration-none">Go to Sync</a> — turn the switch on, save, then push when the Cura <strong>ops</strong> event should be created or updated.
+        </p>
         <ol class="small text-muted mb-3 ps-3">
-          <li class="mb-1"><strong>Save plan</strong> (button below).</li>
-          <li class="mb-1"><strong>Generate PDF</strong> for the file pack.</li>
-          <li class="mb-0"><strong>Send to Cura</strong> — single explicit action; creates or updates the operational event for rostering.{% if plan.quote_id %} If this plan is linked to a quote, that quote must be <strong>Accepted</strong> first (Kanban “Won” is not enough).{% endif %}</li>
+          <li class="mb-1"><strong>Save plan</strong> — use <strong>Previous</strong> / <strong>Next</strong> at the bottom to move between sections, then <strong>Save plan</strong> when ready.</li>
+          <li class="mb-1"><strong>Issue plan document</strong> for the downloadable file pack.</li>
+          <li class="mb-0"><strong>Push to Cura</strong> — same as on the <strong>Sync</strong> step (requires <strong>Allow push to Cura ops</strong> on).{% if plan.quote_id %} Linked quote must be <strong>Accepted</strong> first (Kanban “Won” is not enough).{% endif %}</li>
         </ol>
         {% if can_edit %}
         {% if handoff_block_message %}
@@ -669,14 +1597,14 @@
           {% endif %}
         </div>
         {% elif plan.quote_id %}
-        <p class="small text-muted mb-3">Linked quote #{{ plan.quote_id }} is <span class="text-success fw-semibold">Accepted</span> — you may send to Cura after PDF if required.</p>
+        <p class="small text-muted mb-3">Linked quote #{{ plan.quote_id }} is <span class="text-success fw-semibold">Accepted</span> — you may send to Cura after issuing the plan document if required.</p>
         {% endif %}
         <div class="d-flex flex-wrap gap-2 align-items-center">
-          <button type="submit" form="crmEpPdfForm" class="btn btn-outline-dark rounded-pill">Generate PDF</button>
+          <button type="submit" form="crmEpPdfForm" class="btn btn-outline-dark rounded-pill">Issue plan document</button>
           {% if handoff_block_message %}
-          <button type="button" class="btn btn-primary rounded-pill" disabled aria-disabled="true">Send to Cura</button>
+          <button type="button" class="btn btn-primary rounded-pill" disabled aria-disabled="true">Push to Cura</button>
           {% else %}
-          <button type="submit" form="crmEpHandoffForm" class="btn btn-primary rounded-pill" id="crmEpHandoffSubmitBtn">Send to Cura</button>
+          <button type="submit" form="crmEpHandoffForm" class="btn btn-outline-primary rounded-pill" id="crmEpHandoffSubmitBtn" {% if not cura_pref_on %}disabled aria-disabled="true"{% endif %}><i class="bi bi-cloud-arrow-up me-1"></i> Push to Cura</button>
           {% endif %}
         </div>
         {% endif %}
@@ -684,53 +1612,150 @@
     </div>
     </div>
 
+    {% set acc_on = (plan.accommodation_enabled|default(0))|int == 1 %}
+    <div data-ep-step="11" class="crm-ep-panel mb-1{% if display_step == 11 %} crm-ep-active{% endif %}">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-uppercase text-muted mb-3">Accommodation</h2>
+        <p class="small text-muted mb-3">Optional: list overnight / staging addresses and allocate staff to hotel rooms. Turn on <strong>Include on plan PDF</strong> when this section should appear on the issued document (requires at least one venue or room row with content).</p>
+        <div class="form-check form-switch mb-3">
+          <input class="form-check-input" type="checkbox" name="accommodation_enabled" value="1" id="crmEpAccEnabled" {% if acc_on %}checked{% endif %} {% if not can_edit %}disabled{% endif %}>
+          <label class="form-check-label" for="crmEpAccEnabled">Include accommodation on plan PDF</label>
+        </div>
+        <h3 class="h6 text-muted mb-2">Accommodation addresses</h3>
+        <p class="small text-muted mb-2">Name and full address for each site (hotel, guest house, etc.).</p>
+        <div class="table-responsive mb-4">
+          <table class="table table-sm table-bordered align-middle" id="crmEpAccVenueTable">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width:12rem">Name</th>
+                <th>Address</th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="crmEpAccVenueBody">
+              {% for slot in accommodation_venue_rows %}
+              <tr class="crm-ep-acc-venue-row">
+                <td><input class="form-control form-control-sm" name="acc_venue_name" maxlength="255" placeholder="e.g. Premier Inn North" value="{% if slot %}{{ slot.name_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="acc_venue_address" maxlength="512" placeholder="Street, town, postcode…" value="{% if slot %}{{ slot.address_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
     {% if can_edit %}
-    <button type="submit" class="btn btn-primary rounded-pill mb-3">Save plan</button>
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-acc-venue-remove" title="Remove row">&times;</button></td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if can_edit %}
+        <button type="button" class="btn btn-sm btn-outline-secondary mb-4" id="crmEpAccVenueAdd">Add address row</button>
+        <template id="crmEpAccVenueRowTpl">
+          <tr class="crm-ep-acc-venue-row">
+            <td><input class="form-control form-control-sm" name="acc_venue_name" maxlength="255" placeholder="e.g. Premier Inn North" value=""></td>
+            <td><input class="form-control form-control-sm" name="acc_venue_address" maxlength="512" placeholder="Street, town, postcode…" value=""></td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-acc-venue-remove" title="Remove row">&times;</button></td>
+          </tr>
+        </template>
+        {% endif %}
+
+        <h3 class="h6 text-muted mb-2">Hotel room allocation</h3>
+        <p class="small text-muted mb-2"><strong>Staff</strong>: enter one name per line to assign several people to the same room.</p>
+        <div class="table-responsive mb-2">
+          <table class="table table-sm table-bordered align-middle" id="crmEpAccRoomTable">
+            <thead class="table-light">
+              <tr>
+                <th style="min-width:10rem">Hotel name</th>
+                <th style="width:7rem">Room no.</th>
+                <th style="min-width:14rem">Staff</th>
+                {% if can_edit %}<th class="text-center" style="width:2.5rem"></th>{% endif %}
+              </tr>
+            </thead>
+            <tbody id="crmEpAccRoomBody">
+              {% for slot in accommodation_room_rows %}
+              <tr class="crm-ep-acc-room-row">
+                <td><input class="form-control form-control-sm" name="acc_room_hotel" maxlength="255" placeholder="Hotel" value="{% if slot %}{{ slot.hotel_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                <td><input class="form-control form-control-sm" name="acc_room_no" maxlength="64" placeholder="e.g. 204" value="{% if slot %}{{ slot.room_val|e }}{% endif %}" {% if not can_edit %}readonly{% endif %}></td>
+                <td><textarea class="form-control form-control-sm" name="acc_room_staff" rows="2" maxlength="8000" placeholder="One staff member per line" {% if not can_edit %}readonly{% endif %}>{% if slot %}{{ slot.staff_text|e }}{% endif %}</textarea></td>
+                {% if can_edit %}
+                <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-acc-room-remove" title="Remove row">&times;</button></td>
+                {% endif %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if can_edit %}
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="crmEpAccRoomAdd">Add room row</button>
+        <template id="crmEpAccRoomRowTpl">
+          <tr class="crm-ep-acc-room-row">
+            <td><input class="form-control form-control-sm" name="acc_room_hotel" maxlength="255" placeholder="Hotel" value=""></td>
+            <td><input class="form-control form-control-sm" name="acc_room_no" maxlength="64" placeholder="e.g. 204" value=""></td>
+            <td><textarea class="form-control form-control-sm" name="acc_room_staff" rows="2" maxlength="8000" placeholder="One staff member per line"></textarea></td>
+            <td class="text-center p-0 align-middle"><button type="button" class="btn btn-sm btn-link text-danger py-0 crm-ep-acc-room-remove" title="Remove row">&times;</button></td>
+          </tr>
+        </template>
+        {% endif %}
+      </div>
+    </div>
+    </div>
+
+    {% if can_edit %}
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 pt-2 border-top border-light">
+      <button type="button" class="btn btn-primary rounded-pill px-4 shadow-sm text-uppercase fw-semibold" id="crmEpPrev" {% if display_step <= 0 %}disabled{% endif %}>Previous</button>
+      <button type="button" class="btn btn-primary rounded-pill px-4 shadow-sm text-uppercase fw-semibold" id="crmEpNext" {% if display_step >= 11 %}disabled{% endif %}>Next</button>
+      <span class="crm-ep-save-status flex-grow-1 small text-muted text-end pe-1 align-self-center" aria-live="polite"></span>
+      <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm text-uppercase fw-semibold">Save plan</button>
+    </div>
     {% endif %}
   </form>
   </div>
 
   {% if can_edit %}
-  <form id="crmEpEquipmentAddForm" method="post" action="{{ url_for('crm_module.event_plan_equipment_add', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+  <form id="crmEpPreAlertSaveTplForm" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_pre_alert_template_save') }}" class="d-none" aria-hidden="true">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_plan_id" value="{{ plan.id }}">
+    <input type="hidden" name="template_title" id="crmEpPreAlertSaveTplTitle" value="">
+    <input type="hidden" name="payload_json" id="crmEpPreAlertSaveTplPayload" value="">
+  </form>
+  <form id="crmEpEquipmentAddForm" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_equipment_add', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
   {% for erow in equipment_rows %}
-  <form id="crmEpEquipRm{{ erow.id }}" method="post" action="{{ url_for('crm_module.event_plan_equipment_remove', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+  <form id="crmEpEquipRm{{ erow.id }}" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_equipment_remove', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="equipment_asset_id" value="{{ erow.id }}">
   </form>
   {% endfor %}
-  <form id="crmEpDiagTplForm" method="post" action="{{ url_for('crm_module.event_plan_diagram_add_template', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
+  <form id="crmEpDiagTplForm" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_diagram_add_template', plan_id=plan.id) }}" class="d-none" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
-  <form id="crmEpDiagUpForm" method="post" action="{{ url_for('crm_module.event_plan_diagram_upload', plan_id=plan.id) }}" enctype="multipart/form-data" class="d-none" aria-hidden="true">
+  <form id="crmEpDiagUpForm" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_diagram_upload', plan_id=plan.id) }}" enctype="multipart/form-data" class="d-none" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
   {% for d in diagram_rows %}
-  <form id="crmEpDiagDel{{ d.id }}" method="post" action="{{ url_for('crm_module.event_plan_diagram_delete', plan_id=plan.id, dg_id=d.id) }}" class="d-none" aria-hidden="true">
+  <form id="crmEpDiagDel{{ d.id }}" method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_diagram_delete', plan_id=plan.id, dg_id=d.id) }}" class="d-none" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
   {% endfor %}
   {% endif %}
 
   {% if can_edit %}
-  <form method="post" action="{{ url_for('crm_module.event_plan_pdf', plan_id=plan.id) }}" id="crmEpPdfForm" class="visually-hidden" aria-hidden="true">
+  <form method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_pdf', plan_id=plan.id) }}" id="crmEpPdfForm" class="visually-hidden" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
-  <form method="post" action="{{ url_for('crm_module.event_plan_handoff', plan_id=plan.id) }}" id="crmEpHandoffForm" class="visually-hidden" aria-hidden="true">
+  <form method="post" action="{{ url_for('medical_records_internal.cura_event_planner.event_plan_handoff', plan_id=plan.id) }}" id="crmEpHandoffForm" class="visually-hidden" aria-hidden="true">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
   </form>
   {% endif %}
 
-  {% if can_edit and not handoff_block_message %}
+  {% if can_edit %}
   <script>
   (function () {
-    var hf = document.getElementById('crmEpHandoffForm');
-    if (!hf) return;
-    hf.addEventListener('submit', function (e) {
-      if (!window.confirm('Send this event plan to Cura now? Only confirm after the client has agreed pricing if a quote is linked to this plan.')) {
-        e.preventDefault();
-      }
+    var btn = document.getElementById('crmEpPlanWrittenByMe');
+    var inp = document.getElementById('crmEpPlanWrittenBy');
+    if (!btn || !inp) return;
+    btn.addEventListener('click', function () {
+      inp.value = btn.getAttribute('data-display-name') || btn.getAttribute('data-username-fallback') || '';
+      inp.focus();
     });
   })();
   </script>
@@ -739,6 +1764,203 @@
   {% if can_edit %}
   <script>
   (function () {
+    var hf = document.getElementById('crmEpHandoffForm');
+    if (!hf) return;
+    var alreadySynced = {{ cura_sync_done|tojson }};
+    hf.addEventListener('submit', function (e) {
+      var msg = alreadySynced
+        ? 'Push this plan to Cura again? Updates the operational event (e.g. staffing snapshot, plan fields, attached document if it changed).'
+        : 'Send this plan to Cura now? Creates the operational event for rostering. If a quote is linked, it must already be Accepted.';
+      if (!window.confirm(msg)) {
+        e.preventDefault();
+      }
+    });
+  })();
+  </script>
+  <script>
+  (function () {
+    var sw = document.getElementById('crmCuraSyncPref');
+    var blocked = {{ _handoff_blocked|tojson }};
+    var schedCard = document.getElementById('crmEpScheduleNonCura');
+    function syncPushUi() {
+      var on = !!(sw && sw.checked);
+      var top = document.getElementById('crmCuraSyncTopBtn');
+      var rev = document.getElementById('crmEpHandoffSubmitBtn');
+      var ho = document.getElementById('crmCuraSyncHelpOn');
+      var hf = document.getElementById('crmCuraSyncHelpOff');
+      if (ho && hf) {
+        ho.classList.toggle('d-none', !on);
+        hf.classList.toggle('d-none', on);
+      }
+      if (top) {
+        top.disabled = blocked || !on;
+        top.setAttribute('aria-disabled', top.disabled ? 'true' : 'false');
+      }
+      if (rev) {
+        rev.disabled = blocked || !on;
+        rev.setAttribute('aria-disabled', rev.disabled ? 'true' : 'false');
+      }
+      if (schedCard) {
+        schedCard.classList.toggle('d-none', on);
+      }
+    }
+    if (sw) {
+      sw.addEventListener('change', syncPushUi);
+      syncPushUi();
+    }
+  })();
+  </script>
+  {% endif %}
+
+  {% if can_edit %}
+  <script>
+  (function () {
+    var userSearchUrl = {{ event_plan_user_search_url|tojson }};
+
+    (function crmEpSaveStatus() {
+      var form = document.getElementById('crmEpMainForm');
+      var els = document.querySelectorAll('.crm-ep-save-status');
+      if (!form || !els.length) return;
+      var fromSave = new URLSearchParams(window.location.search).get('saved') === '1';
+      function stripSavedParam() {
+        var u = new URL(window.location.href);
+        if (u.searchParams.get('saved') !== '1') return;
+        u.searchParams.delete('saved');
+        var q = u.searchParams.toString();
+        window.history.replaceState({}, '', u.pathname + (q ? '?' + q : '') + u.hash);
+      }
+      function setSaved() {
+        els.forEach(function (el) {
+          el.textContent = 'Saved';
+          el.classList.remove('text-warning', 'text-muted');
+          el.classList.add('text-success');
+        });
+      }
+      function setUnsaved() {
+        els.forEach(function (el) {
+          el.textContent = 'Unsaved changes';
+          el.classList.remove('text-success', 'text-muted');
+          el.classList.add('text-warning');
+        });
+        stripSavedParam();
+      }
+      if (fromSave) setSaved();
+      form.addEventListener('input', setUnsaved);
+      form.addEventListener('change', setUnsaved);
+      var prevB = document.getElementById('crmEpPrev');
+      var nextB = document.getElementById('crmEpNext');
+      if (prevB) prevB.addEventListener('click', setUnsaved);
+      if (nextB) nextB.addEventListener('click', setUnsaved);
+      document.querySelectorAll('.crm-ep-go').forEach(function (btn) {
+        btn.addEventListener('click', setUnsaved);
+      });
+    })();
+
+    (function bindPlanUserLookups() {
+      function esc(s) {
+        return String(s || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+      function closeAllUserDd() {
+        document.querySelectorAll('.crm-ep-user-lookup-dd').forEach(function (dd) {
+          dd.classList.add('d-none');
+          dd.innerHTML = '';
+        });
+      }
+      function applyPick(tr, ctx, r, inp) {
+        var nameIn = tr.querySelector(ctx === 'sr' ? 'input[name="sr_name"]' : 'input[name="ms_name"]');
+        if (nameIn) nameIn.value = (r.display_name || r.username || '').trim();
+        var grade = (r.role_grade_hint || '').trim();
+        if (ctx === 'sr') {
+          var roleIn = tr.querySelector('input[name="sr_role"]');
+          if (roleIn && grade) {
+            roleIn.value = String(grade).slice(0, 128);
+          }
+          var phIn = tr.querySelector('input[name="sr_phone"]');
+          if (phIn && (r.phone || '').trim()) {
+            phIn.value = String(r.phone).trim().slice(0, 32);
+          }
+        } else {
+          var phIn2 = tr.querySelector('input[name="ms_phone"]');
+          if (phIn2 && (r.phone || '').trim()) {
+            phIn2.value = String(r.phone).trim().slice(0, 32);
+          }
+          var roleIn2 = tr.querySelector('input[name="ms_role"]');
+          if (roleIn2 && grade && !(roleIn2.value || '').trim()) {
+            roleIn2.value = String(grade).slice(0, 128);
+          }
+        }
+        inp.value = (r.username || '').trim();
+        closeAllUserDd();
+      }
+      function openDd(wrap, rows, tr, ctx, inp) {
+        var dd = wrap.querySelector('.crm-ep-user-lookup-dd');
+        if (!dd) return;
+        dd.innerHTML = '';
+        if (!rows || !rows.length) {
+          dd.innerHTML = '<div class="px-2 py-2 text-muted small">No matches.</div>';
+          dd.classList.remove('d-none');
+          return;
+        }
+        rows.forEach(function (r) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'd-block w-100 text-start btn btn-light btn-sm border-bottom rounded-0 py-2 px-2';
+          var hint = (r.role_grade_hint || '').trim();
+          var src = (r.source || '') === 'hr' ? 'HR' : 'Account';
+          b.innerHTML = '<span class="fw-medium text-body">' + esc(r.display_name || r.username) + '</span>' +
+            '<span class="small text-muted d-block">' + esc(src) + ' · @' + esc(r.username) + (hint ? ' · ' + esc(hint) : '') + '</span>';
+          b.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            applyPick(tr, ctx, r, inp);
+          });
+          dd.appendChild(b);
+        });
+        dd.classList.remove('d-none');
+      }
+      function wireBody(body) {
+        if (!body || !userSearchUrl) return;
+        var debMs = 350;
+        body.addEventListener('input', function (ev) {
+          var inp = ev.target;
+          if (!inp || !inp.classList || !inp.classList.contains('crm-ep-plan-user-lookup')) return;
+          var wrap = inp.closest('td');
+          if (!wrap || !wrap.querySelector('.crm-ep-user-lookup-dd')) return;
+          var tr = inp.closest('tr');
+          var ctx = inp.getAttribute('data-user-lookup-context') || 'sr';
+          if (inp._crmEpUserTimer) clearTimeout(inp._crmEpUserTimer);
+          var q = (inp.value || '').trim();
+          if (q.length < 2) {
+            var d0 = wrap.querySelector('.crm-ep-user-lookup-dd');
+            if (d0) { d0.classList.add('d-none'); d0.innerHTML = ''; }
+            return;
+          }
+          inp._crmEpUserTimer = setTimeout(function () {
+            fetch(userSearchUrl + '?q=' + encodeURIComponent(q))
+              .then(function (x) { return x.json(); })
+              .then(function (data) {
+                if (!document.body.contains(wrap)) return;
+                openDd(wrap, data.results || [], tr, ctx, inp);
+              })
+              .catch(function () {});
+          }, debMs);
+        });
+      }
+      wireBody(document.getElementById('crmEpSrBody'));
+      wireBody(document.getElementById('crmEpMsBody'));
+      document.addEventListener('mousedown', function (ev) {
+        if (ev.target.closest && ev.target.closest('.crm-ep-plan-user-lookup')) return;
+        if (ev.target.closest && ev.target.closest('.crm-ep-user-lookup-dd')) return;
+        closeAllUserDd();
+      });
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') closeAllUserDd();
+      });
+    })();
+
     var root = document.querySelector('.crm-event-plan-edit:not(.crm-ep-viewer)');
     if (!root) return;
     var stepInput = document.getElementById('crmEpWizardStep');
@@ -750,11 +1972,11 @@
 
     function currentStep() {
       var n = parseInt(stepInput.value, 10);
-      return isNaN(n) ? 1 : Math.max(1, Math.min(9, n));
+      return isNaN(n) ? 0 : Math.max(0, Math.min(11, n));
     }
 
     function showStep(s) {
-      var n = Math.max(1, Math.min(9, s));
+      var n = Math.max(0, Math.min(11, s));
       stepInput.value = String(n);
       panels.forEach(function (el) {
         var sn = parseInt(el.getAttribute('data-ep-step'), 10);
@@ -765,8 +1987,8 @@
         btn.classList.toggle('btn-primary', gn === n);
         btn.classList.toggle('btn-outline-secondary', gn !== n);
       });
-      if (prevBtn) prevBtn.disabled = n <= 1;
-      if (nextBtn) nextBtn.disabled = n >= 9;
+      if (prevBtn) prevBtn.disabled = n <= 0;
+      if (nextBtn) nextBtn.disabled = n >= 11;
     }
 
     navBtns.forEach(function (btn) {
@@ -779,37 +2001,947 @@
 
     showStep(currentStep());
 
-    var sugBtn = document.getElementById('crmEpHospitalSuggest');
-    var sugMsg = document.getElementById('crmEpHospitalSuggestMsg');
-    var pcEl = document.getElementById('crmEpPostcode');
-    var linesEl = document.getElementById('crmEpHospitalsLines');
-    var sugUrl = {{ hospital_suggest_url|tojson }};
-    if (sugBtn && linesEl && sugUrl) {
-      sugBtn.addEventListener('click', function () {
-        var q = pcEl && pcEl.value ? pcEl.value.trim() : '';
-        sugMsg.textContent = 'Loading…';
-        fetch(sugUrl + '?q=' + encodeURIComponent(q))
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data.message) {
-              sugMsg.textContent = data.message;
-            } else if (data.stub) {
-              sugMsg.textContent = 'Illustrative catalogue — enter a UK postcode for nearest hospitals.';
+    (function () {
+      var j = document.getElementById('crmEpPurposeTplJson');
+      var sel = document.getElementById('crmEpPurposeTplSelect');
+      var btn = document.getElementById('crmEpPurposeTplInsert');
+      var ta = document.getElementById('crmEpPlanPurpose');
+      var saveUrlEl = document.getElementById('crmEpPurposeTplSaveUrl');
+      var saveBtn = document.getElementById('crmEpPurposeTplSave');
+      var titleInp = document.getElementById('crmEpPurposeNewTitle');
+      var msgEl = document.getElementById('crmEpPurposeTplSaveMsg');
+      if (!j || !sel || !btn || !ta) return;
+      var tpls = [];
+      try {
+        tpls = JSON.parse(j.textContent || '[]');
+      } catch (e) {
+        return;
+      }
+      if (!Array.isArray(tpls)) tpls = [];
+      btn.addEventListener('click', function () {
+        var raw = sel.value;
+        var id = parseInt(raw, 10);
+        if (!id) return;
+        var body = '';
+        for (var i = 0; i < tpls.length; i++) {
+          if (tpls[i] && Number(tpls[i].id) === id) {
+            body = String(tpls[i].body || '');
+            break;
+          }
+        }
+        if (!body) return;
+        if ((ta.value || '').trim()) {
+          ta.value = ta.value.trim() + '\n\n' + body;
             } else {
-              sugMsg.textContent = 'Ranked by distance from your postcode.';
-            }
-            var rows = data.suggestions || [];
-            var lines = (linesEl.value || '').replace(/\s+$/, '');
-            var add = rows.map(function (s) {
-              var n = s.name || '';
-              var p = s.postcode || s.vicinity || '';
-              return p ? (n + ' — ' + p) : n;
-            }).filter(Boolean);
-            if (add.length) {
-              linesEl.value = lines + (lines ? '\n' : '') + add.join('\n');
-            }
+          ta.value = body;
+        }
+      });
+      if (saveBtn && saveUrlEl) {
+        var saveUrl = '';
+        try {
+          saveUrl = JSON.parse(saveUrlEl.textContent || '""');
+        } catch (e2) {
+          saveUrl = '';
+        }
+        if (!saveUrl) return;
+        saveBtn.addEventListener('click', function () {
+          if (msgEl) msgEl.textContent = '';
+          var body = (ta.value || '').trim();
+          if (!body) {
+            if (msgEl) msgEl.textContent = 'Write something in the Purpose box first, then save as a template.';
+            return;
+          }
+          var title = titleInp ? String(titleInp.value || '').trim() : '';
+          saveBtn.disabled = true;
+          fetch(saveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ title: title, body: body })
           })
-          .catch(function () { sugMsg.textContent = 'Request failed'; });
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (x) {
+              saveBtn.disabled = false;
+              if (!x.ok || !x.data || !x.data.ok) {
+                if (msgEl) msgEl.textContent = (x.data && x.data.error) ? String(x.data.error) : 'Could not save template.';
+                return;
+              }
+              var t = x.data.template;
+              if (!t || !t.id) {
+                if (msgEl) msgEl.textContent = 'Saved, but response was unexpected.';
+                return;
+              }
+              tpls.push({ id: t.id, title: t.title, body: t.body, sort_order: t.sort_order || 0 });
+              j.textContent = JSON.stringify(tpls);
+              var opt = document.createElement('option');
+              opt.value = String(t.id);
+              opt.textContent = String(t.title || 'Purpose template');
+              sel.appendChild(opt);
+              sel.value = String(t.id);
+              if (msgEl) msgEl.textContent = 'Template saved — it appears in the list for all plans.';
+              if (titleInp) titleInp.value = '';
+            })
+            .catch(function () {
+              saveBtn.disabled = false;
+              if (msgEl) msgEl.textContent = 'Network error — try again.';
+            });
+        });
+      }
+    })();
+
+    function crmAppendToTextarea(ta, chunk) {
+      if (!ta || chunk == null || chunk === '') return;
+      var c = String(chunk);
+      if ((ta.value || '').trim()) {
+        ta.value = ta.value.trim() + '\n\n' + c;
+      } else {
+        ta.value = c;
+      }
+    }
+
+    function crmBindPolicyTemplateInsert(jsonId, selectId, btnId, textareaId) {
+      var j = document.getElementById(jsonId);
+      var sel = document.getElementById(selectId);
+      var btn = document.getElementById(btnId);
+      var ta = document.getElementById(textareaId);
+      if (!j || !sel || !btn || !ta) return;
+      var tpls = [];
+      try {
+        tpls = JSON.parse(j.textContent || '[]');
+      } catch (e) {
+        return;
+      }
+      if (!Array.isArray(tpls) || !tpls.length) return;
+      btn.addEventListener('click', function () {
+        var id = parseInt(sel.value, 10);
+        if (!id) return;
+        var body = '';
+        for (var i = 0; i < tpls.length; i++) {
+          if (tpls[i] && Number(tpls[i].id) === id) {
+            body = String(tpls[i].body || '');
+            break;
+          }
+        }
+        if (!body) return;
+        crmAppendToTextarea(ta, body);
+      });
+    }
+
+    function crmBindTextFileImport(btnId, fileInputId, textareaId) {
+      var btn = document.getElementById(btnId);
+      var fin = document.getElementById(fileInputId);
+      var ta = document.getElementById(textareaId);
+      if (!btn || !fin || !ta) return;
+      btn.addEventListener('click', function () { fin.click(); });
+      fin.addEventListener('change', function () {
+        var f = fin.files && fin.files[0];
+        if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+          var text = String(reader.result || '').replace(/\r\n/g, '\n').trim();
+          if (text) crmAppendToTextarea(ta, text);
+          fin.value = '';
+        };
+        reader.onerror = function () { fin.value = ''; };
+        reader.readAsText(f, 'UTF-8');
+      });
+    }
+
+    crmBindPolicyTemplateInsert('crmEpHswTplJson', 'crmEpHswTplSelect', 'crmEpHswTplInsert', 'crmEpHswText');
+    crmBindPolicyTemplateInsert('crmEpPrivacyTplJson', 'crmEpPrivacyTplSelect', 'crmEpPrivacyTplInsert', 'crmEpPrivacyText');
+    crmBindTextFileImport('crmEpHswFileBtn', 'crmEpHswFileInput', 'crmEpHswText');
+    crmBindTextFileImport('crmEpPrivacyFileBtn', 'crmEpPrivacyFileInput', 'crmEpPrivacyText');
+
+    var hospBody = document.getElementById('crmEpHospitalsBody');
+    var hospTpl = document.getElementById('crmEpHospitalRowTpl');
+    var addRowBtn = document.getElementById('crmEpHospitalAddRow');
+
+    function readHospContactsArray(tr) {
+      var hid = tr.querySelector('input[name="hosp_contacts_json"]');
+      if (!hid || !(hid.value || '').trim()) return [];
+      try {
+        var v = JSON.parse(hid.value);
+        return Array.isArray(v) ? v : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function readHospFacilitiesArray(tr) {
+      var hid = tr.querySelector('input[name="hosp_facilities_json"]');
+      if (!hid || !(hid.value || '').trim()) return [];
+      try {
+        var v = JSON.parse(hid.value);
+        if (!Array.isArray(v)) return [];
+        return v.map(function (x) {
+          if (typeof x === 'string') return x;
+          if (x && typeof x === 'object') return String(x.line || x.text || '');
+          return '';
+        });
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function writeHospFacilitiesArray(tr, arr) {
+      var hid = tr.querySelector('input[name="hosp_facilities_json"]');
+      if (hid) hid.value = JSON.stringify(arr || []);
+    }
+
+    function flushHospFacilitiesFromDom(tr) {
+      var box = tr.querySelector('.crm-hosp-facility-lines');
+      var hid = tr.querySelector('input[name="hosp_facilities_json"]');
+      if (!box || !hid) return;
+      var out = [];
+      box.querySelectorAll('.crm-hosp-facility-row').forEach(function (row) {
+        var inp = row.querySelector('[data-hosp-fline]');
+        var s = (inp && inp.value) ? inp.value.trim() : '';
+        if (s) out.push(s);
+      });
+      hid.value = JSON.stringify(out);
+    }
+
+    function renderHospFacilityLines(tr) {
+      var box = tr.querySelector('.crm-hosp-facility-lines');
+      var hid = tr.querySelector('input[name="hosp_facilities_json"]');
+      if (!box || !hid) return;
+      var lines = [];
+      try {
+        lines = JSON.parse(hid.value || '[]');
+      } catch (e) {
+        lines = [];
+      }
+      if (!Array.isArray(lines)) lines = [];
+      lines = lines.map(function (x) {
+        if (typeof x === 'string') return x;
+        if (x && typeof x === 'object') return String(x.line || x.text || '');
+        return '';
+      });
+      box.innerHTML = '';
+      lines.forEach(function (line) {
+        var wrap = document.createElement('div');
+        wrap.className = 'crm-hosp-facility-row d-flex align-items-center gap-2 mb-1';
+        wrap.innerHTML = '<input class="form-control form-control-sm flex-grow-1" type="text" maxlength="255" placeholder="e.g. Emergency Department" data-hosp-fline style="min-width:0">' +
+          '<button type="button" class="btn btn-sm btn-link text-danger py-0 flex-shrink-0 crm-hosp-facility-remove" title="Remove line">&times;</button>';
+        wrap.querySelector('[data-hosp-fline]').value = line || '';
+        wrap.querySelector('.crm-hosp-facility-remove').addEventListener('click', function () {
+          if (box.querySelectorAll('.crm-hosp-facility-row').length <= 1) {
+            wrap.querySelector('[data-hosp-fline]').value = '';
+            flushHospFacilitiesFromDom(tr);
+            renderHospFacilityLines(tr);
+            return;
+          }
+          wrap.remove();
+          flushHospFacilitiesFromDom(tr);
+        });
+        wrap.querySelector('[data-hosp-fline]').addEventListener('input', function () { flushHospFacilitiesFromDom(tr); });
+        box.appendChild(wrap);
+      });
+    }
+
+    function writeHospContactsArray(tr, arr) {
+      var hid = tr.querySelector('input[name="hosp_contacts_json"]');
+      if (hid) hid.value = JSON.stringify(arr || []);
+    }
+
+    function flushHospContactsFromDom(tr) {
+      var box = tr.querySelector('.crm-hosp-contact-lines');
+      var hid = tr.querySelector('input[name="hosp_contacts_json"]');
+      if (!box || !hid) return;
+      var out = [];
+      box.querySelectorAll('.crm-hosp-contact-pair').forEach(function (row) {
+        var t = row.querySelector('[data-hosp-ctitle]');
+        var d = row.querySelector('[data-hosp-cdetail]');
+        var o = { title: (t && t.value) ? t.value.trim() : '', detail: (d && d.value) ? d.value.trim() : '' };
+        if (o.title || o.detail) out.push(o);
+      });
+      hid.value = JSON.stringify(out);
+    }
+
+    function renderHospContactLines(tr) {
+      var box = tr.querySelector('.crm-hosp-contact-lines');
+      var hid = tr.querySelector('input[name="hosp_contacts_json"]');
+      if (!box || !hid) return;
+      var lines = [];
+      try {
+        lines = JSON.parse(hid.value || '[]');
+      } catch (e) {
+        lines = [];
+      }
+      if (!Array.isArray(lines)) lines = [];
+      box.innerHTML = '';
+      lines.forEach(function (line) {
+        var wrap = document.createElement('div');
+        wrap.className = 'crm-hosp-contact-pair d-flex flex-nowrap align-items-center gap-2 mb-1';
+        var tVal = (line && line.title) ? line.title : '';
+        var dVal = (line && line.detail) ? line.detail : '';
+        wrap.innerHTML = '<input class="form-control form-control-sm flex-shrink-0" type="text" maxlength="128" placeholder="e.g. Switch" data-hosp-ctitle style="width:9rem;max-width:11rem">' +
+          '<input class="form-control form-control-sm flex-grow-1" type="text" maxlength="255" placeholder="Number, switch, email…" data-hosp-cdetail style="min-width:0">' +
+          '<button type="button" class="btn btn-sm btn-link text-danger py-0 flex-shrink-0 crm-hosp-contact-remove" title="Remove line">&times;</button>';
+        wrap.querySelector('[data-hosp-ctitle]').value = tVal;
+        wrap.querySelector('[data-hosp-cdetail]').value = dVal;
+        wrap.querySelector('.crm-hosp-contact-remove').addEventListener('click', function () {
+          if (box.querySelectorAll('.crm-hosp-contact-pair').length <= 1) {
+            wrap.querySelector('[data-hosp-ctitle]').value = '';
+            wrap.querySelector('[data-hosp-cdetail]').value = '';
+            flushHospContactsFromDom(tr);
+            renderHospContactLines(tr);
+            return;
+          }
+          wrap.remove();
+          flushHospContactsFromDom(tr);
+        });
+        wrap.querySelectorAll('input').forEach(function (inp) {
+          inp.addEventListener('input', function () { flushHospContactsFromDom(tr); });
+        });
+        box.appendChild(wrap);
+      });
+    }
+
+    function cloneHospRow() {
+      if (!hospTpl || !hospTpl.content) return null;
+      return document.importNode(hospTpl.content, true).querySelector('tr');
+    }
+
+    function fillHospRow(tr, name, facilityLines, address, contactLines) {
+      if (!tr) return;
+      var nm = tr.querySelector('input[name="hosp_name"]');
+      var ad = tr.querySelector('input[name="hosp_address"]');
+      if (nm) nm.value = name || '';
+      if (ad) ad.value = address || '';
+      if (facilityLines !== undefined) {
+        writeHospFacilitiesArray(tr, facilityLines || []);
+        renderHospFacilityLines(tr);
+      }
+      if (contactLines !== undefined) {
+        writeHospContactsArray(tr, contactLines || []);
+        renderHospContactLines(tr);
+      }
+    }
+
+    if (addRowBtn && hospBody) {
+      addRowBtn.addEventListener('click', function () {
+        var tr = cloneHospRow();
+        if (tr) {
+          hospBody.appendChild(tr);
+          renderHospFacilityLines(tr);
+          renderHospContactLines(tr);
+        }
+      });
+    }
+
+    if (hospBody) {
+      hospBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-hosp-clear')) {
+          var tr = t.closest('tr');
+          if (tr) fillHospRow(tr, '', [], '', []);
+          return;
+        }
+        var addF = t && t.closest && t.closest('.crm-hosp-facility-add');
+        if (addF) {
+          var trf = addF.closest('tr');
+          if (!trf) return;
+          var fa = readHospFacilitiesArray(trf);
+          fa.push('');
+          writeHospFacilitiesArray(trf, fa);
+          renderHospFacilityLines(trf);
+          return;
+        }
+        var addB = t && t.closest && t.closest('.crm-hosp-contact-add');
+        if (addB) {
+          var tr2 = addB.closest('tr');
+          if (!tr2) return;
+          var arr = readHospContactsArray(tr2);
+          arr.push({ title: '', detail: '' });
+          writeHospContactsArray(tr2, arr);
+          renderHospContactLines(tr2);
+        }
+      });
+      hospBody.querySelectorAll('tr.crm-ep-hosp-row').forEach(function (tr) {
+        renderHospFacilityLines(tr);
+        renderHospContactLines(tr);
+      });
+    }
+
+    (function () {
+      var radios = document.querySelectorAll('input[name="pre_alert_policy"]');
+      var panels = document.querySelectorAll('[data-pre-alert-panel]');
+      function syncPreAlertPanels() {
+        var v = 'ashice';
+        radios.forEach(function (r) {
+          if (r.checked) v = r.value;
+        });
+        panels.forEach(function (p) {
+          if (p.getAttribute('data-pre-alert-panel') === v) {
+            p.classList.remove('d-none');
+          } else {
+            p.classList.add('d-none');
+          }
+        });
+      }
+      if (radios.length) {
+        radios.forEach(function (r) {
+          r.addEventListener('change', syncPreAlertPanels);
+        });
+      }
+      var cBody = document.getElementById('crmEpPreAlertCustomBody');
+      var cTpl = document.getElementById('crmEpPreAlertCustomTpl');
+      var cAdd = document.getElementById('crmEpPreAlertCustomAdd');
+      function clonePreAlertCustomRow() {
+        if (!cTpl || !cTpl.content) return null;
+        return document.importNode(cTpl.content, true).querySelector('tr');
+      }
+      if (cAdd && cBody && cTpl) {
+        cAdd.addEventListener('click', function () {
+          var tr = clonePreAlertCustomRow();
+          if (tr) cBody.appendChild(tr);
+        });
+      }
+      if (cBody) {
+        cBody.addEventListener('click', function (ev) {
+          var t = ev.target;
+          if (t && t.classList && t.classList.contains('crm-ep-pre-alert-custom-clear')) {
+            var tr = t.closest('tr');
+            if (!tr || !cBody.contains(tr)) return;
+            if (cBody.querySelectorAll('tr.crm-ep-pre-alert-custom-row').length <= 1) {
+              tr.querySelectorAll('input, textarea').forEach(function (el) { el.value = ''; });
+              return;
+            }
+            tr.remove();
+          }
+        });
+      }
+      document.querySelectorAll('[data-pre-alert-panel]').forEach(function (panel) {
+        panel.addEventListener('click', function (ev) {
+          var t = ev.target;
+          if (t && t.classList && t.classList.contains('crm-ep-pre-alert-struct-clear')) {
+            var tr = t.closest('tr');
+            if (!tr) return;
+            var descCell = tr.children[1];
+            if (!descCell) return;
+            var inp = descCell.querySelector('input, textarea');
+            if (inp) inp.value = '';
+          }
+        });
+      });
+
+      function crmEpSyncPreAlertPanelsOnly() {
+        var v = 'ashice';
+        radios.forEach(function (r) {
+          if (r.checked) v = r.value;
+        });
+        panels.forEach(function (p) {
+          if (p.getAttribute('data-pre-alert-panel') === v) {
+            p.classList.remove('d-none');
+          } else {
+            p.classList.add('d-none');
+          }
+        });
+      }
+
+      function crmEpPreAlertCollectPayload() {
+        var v = 'ashice';
+        radios.forEach(function (r) {
+          if (r.checked) v = r.value;
+        });
+        var out = { policy: v };
+        if (v === 'ashice') {
+          out.ashice = {};
+          ['age', 'sex', 'history', 'injuries', 'current', 'expected'].forEach(function (k) {
+            var el = document.querySelector('[name="ashice_' + k + '"]');
+            out.ashice[k] = el ? String(el.value || '').trim() : '';
+          });
+        } else if (v === 'atmist') {
+          out.atmist = {};
+          ['age', 'time', 'mechanism', 'injuries', 'signs', 'treatment'].forEach(function (k) {
+            var el = document.querySelector('[name="atmist_' + k + '"]');
+            out.atmist[k] = el ? String(el.value || '').trim() : '';
+          });
+        } else {
+          out.custom_pre_alert = [];
+          if (cBody) {
+            cBody.querySelectorAll('tr.crm-ep-pre-alert-custom-row').forEach(function (tr) {
+              var L = tr.querySelector('input[name="pre_alert_custom_letter"]');
+              var D = tr.querySelector('textarea[name="pre_alert_custom_detail"]');
+              out.custom_pre_alert.push({
+                letter: L ? String(L.value || '').trim() : '',
+                detail: D ? String(D.value || '').trim() : ''
+              });
+            });
+          }
+        }
+        return out;
+      }
+
+      function crmEpPreAlertApplyTemplate(tpl) {
+        if (!tpl) return;
+        var pol = String(tpl.policy || 'ashice').toLowerCase();
+        var r = document.querySelector('input[name="pre_alert_policy"][value="' + pol + '"]');
+        if (r) {
+          r.checked = true;
+          crmEpSyncPreAlertPanelsOnly();
+        }
+        var p = tpl.payload_json || {};
+        if (pol === 'ashice') {
+          var ash = p.ashice && typeof p.ashice === 'object' ? p.ashice : p;
+          ['age', 'sex', 'history', 'injuries', 'current', 'expected'].forEach(function (k) {
+            var el = document.querySelector('[name="ashice_' + k + '"]');
+            if (el) el.value = (ash && ash[k]) ? String(ash[k]) : '';
+          });
+        } else if (pol === 'atmist') {
+          var atm = p.atmist && typeof p.atmist === 'object' ? p.atmist : p;
+          ['age', 'time', 'mechanism', 'injuries', 'signs', 'treatment'].forEach(function (k) {
+            var el = document.querySelector('[name="atmist_' + k + '"]');
+            if (el) el.value = (atm && atm[k]) ? String(atm[k]) : '';
+          });
+        } else if (pol === 'custom' && cBody && cTpl && cTpl.content) {
+          var lines = p.custom_pre_alert;
+          if (!Array.isArray(lines)) lines = [];
+          var minRows = Math.max(2, lines.length);
+          while (cBody.querySelectorAll('tr.crm-ep-pre-alert-custom-row').length < minRows) {
+            var nr = document.importNode(cTpl.content, true).querySelector('tr');
+            if (nr) cBody.appendChild(nr);
+          }
+          var rowEls = cBody.querySelectorAll('tr.crm-ep-pre-alert-custom-row');
+          for (var i = 0; i < rowEls.length; i++) {
+            var L = rowEls[i].querySelector('input[name="pre_alert_custom_letter"]');
+            var D = rowEls[i].querySelector('textarea[name="pre_alert_custom_detail"]');
+            if (lines[i]) {
+              if (L) L.value = lines[i].letter || '';
+              if (D) D.value = lines[i].detail || '';
+            } else {
+              if (L) L.value = '';
+              if (D) D.value = '';
+            }
+          }
+        }
+      }
+
+      var tplJsonEl = document.getElementById('crmEpPreAlertTemplatesJson');
+      var tplSelect = document.getElementById('crmEpPreAlertTplSelect');
+      var tplInsertBtn = document.getElementById('crmEpPreAlertTplInsert');
+      var tplSaveBtn = document.getElementById('crmEpPreAlertTplSave');
+      var tplSaveForm = document.getElementById('crmEpPreAlertSaveTplForm');
+      var tplTitleField = document.getElementById('crmEpPreAlertSaveTplTitle');
+      var tplPayloadField = document.getElementById('crmEpPreAlertSaveTplPayload');
+      var preAlertTpls = [];
+      try {
+        if (tplJsonEl && tplJsonEl.textContent) {
+          preAlertTpls = JSON.parse(tplJsonEl.textContent);
+          if (!Array.isArray(preAlertTpls)) preAlertTpls = [];
+        }
+      } catch (e2) {
+        preAlertTpls = [];
+      }
+      if (tplInsertBtn && tplSelect) {
+        tplInsertBtn.addEventListener('click', function () {
+          var id = String(tplSelect.value || '').trim();
+          if (!id) return;
+          var tpl = null;
+          preAlertTpls.forEach(function (x) {
+            if (x && String(x.id) === id) tpl = x;
+          });
+          if (!tpl) return;
+          crmEpPreAlertApplyTemplate(tpl);
+        });
+      }
+      if (tplSaveBtn && tplSaveForm && tplTitleField && tplPayloadField) {
+        tplSaveBtn.addEventListener('click', function () {
+          var payload = crmEpPreAlertCollectPayload();
+          var hasAny = false;
+          if (payload.policy === 'ashice' && payload.ashice) {
+            Object.keys(payload.ashice).forEach(function (k) {
+              if (payload.ashice[k]) hasAny = true;
+            });
+          } else if (payload.policy === 'atmist' && payload.atmist) {
+            Object.keys(payload.atmist).forEach(function (k) {
+              if (payload.atmist[k]) hasAny = true;
+            });
+          } else if (payload.custom_pre_alert) {
+            payload.custom_pre_alert.forEach(function (row) {
+              if ((row.letter || '').trim() || (row.detail || '').trim()) hasAny = true;
+            });
+          }
+          if (!hasAny) {
+            window.alert('Fill at least one pre-alert line before saving as a template.');
+            return;
+          }
+          var title = window.prompt('Short name for this template (e.g. Arena transfer — ASHICE)', '');
+          if (title === null) return;
+          title = String(title || '').trim();
+          if (!title) {
+            window.alert('Enter a title to save the template.');
+            return;
+          }
+          tplTitleField.value = title;
+          tplPayloadField.value = JSON.stringify(payload);
+          tplSaveForm.submit();
+        });
+      }
+    })();
+
+    var dayBody = document.getElementById('crmEpEventDaysBody');
+    var dayTpl = document.getElementById('crmEpEventDayRowTpl');
+    var dayAddBtn = document.getElementById('crmEpEventDayAddRow');
+    var sumStart = document.getElementById('crmEpSummaryStart');
+    var sumEnd = document.getElementById('crmEpSummaryEnd');
+    var attBody = document.getElementById('crmEpAttDayBody');
+    var attTpl = document.getElementById('crmEpAttDayRowTpl');
+    var attAddBtn = document.getElementById('crmEpAttDayAddRow');
+
+    function crmEpDateFromDatetimeLocal(v) {
+      v = (v || '').trim();
+      if (v.length >= 10 && v[4] === '-' && v[7] === '-') return v.slice(0, 10);
+      return '';
+    }
+    function syncSummaryFromEventDays() {
+      if (!dayBody || !sumStart || !sumEnd) return;
+      var trs = dayBody.querySelectorAll('tr.crm-ep-day-row');
+      if (!trs.length) {
+        sumStart.value = '';
+        sumEnd.value = '';
+        return;
+      }
+      var firstSt = trs[0].querySelector('input[name="event_day_start"]');
+      sumStart.value = (firstSt && (firstSt.value || '').trim()) ? firstSt.value.trim() : '';
+      var endVal = '';
+      var j, enIn;
+      for (j = trs.length - 1; j >= 0; j--) {
+        enIn = trs[j].querySelector('input[name="event_day_end"]');
+        if (enIn && (enIn.value || '').trim()) {
+          endVal = enIn.value.trim();
+          break;
+        }
+      }
+      sumEnd.value = endVal;
+    }
+    function syncAttendanceFromEventDays() {
+      if (!dayBody || !attBody) return;
+      var dayTrs = dayBody.querySelectorAll('tr.crm-ep-day-row');
+      var attTrs = attBody.querySelectorAll('tr.crm-ep-att-row');
+      var i, lblIn, stIn, li, di;
+      for (i = 0; i < attTrs.length; i++) {
+        li = attTrs[i].querySelector('input[name="att_day_label"]');
+        di = attTrs[i].querySelector('input[name="att_day_date"]');
+        if (!li || !di) continue;
+        if (i < dayTrs.length) {
+          lblIn = dayTrs[i].querySelector('input[name="event_day_label"]');
+          stIn = dayTrs[i].querySelector('input[name="event_day_start"]');
+          li.readOnly = true;
+          di.readOnly = true;
+          li.title = 'Taken from daily event timings';
+          di.title = 'Taken from start time in daily event timings';
+          if (lblIn) li.value = lblIn.value || '';
+          if (stIn) di.value = crmEpDateFromDatetimeLocal(stIn.value);
+        } else {
+          li.readOnly = false;
+          di.readOnly = false;
+          li.title = '';
+          di.title = '';
+        }
+      }
+    }
+
+    if (dayAddBtn && dayBody && dayTpl && dayTpl.content) {
+      dayAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(dayTpl.content, true).querySelector('tr');
+        if (tr) {
+          dayBody.appendChild(tr);
+          syncAttendanceFromEventDays();
+          syncSummaryFromEventDays();
+        }
+      });
+    }
+
+    if (dayBody) {
+      dayBody.addEventListener('input', function () {
+        syncAttendanceFromEventDays();
+        syncSummaryFromEventDays();
+      });
+      dayBody.addEventListener('change', function () {
+        syncAttendanceFromEventDays();
+        syncSummaryFromEventDays();
+      });
+      dayBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-day-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+          syncAttendanceFromEventDays();
+          syncSummaryFromEventDays();
+        }
+      });
+    }
+
+    if (attAddBtn && attBody && attTpl && attTpl.content) {
+      attAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(attTpl.content, true).querySelector('tr');
+        if (tr) {
+          attBody.appendChild(tr);
+          syncAttendanceFromEventDays();
+        }
+      });
+    }
+    if (attBody) {
+      attBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-att-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+          syncAttendanceFromEventDays();
+        }
+      });
+    }
+    syncAttendanceFromEventDays();
+    syncSummaryFromEventDays();
+
+    var opTimBody = document.getElementById('crmEpOpTimBody');
+    var opTimTpl = document.getElementById('crmEpOpTimRowTpl');
+    var opTimAddBtn = document.getElementById('crmEpOpTimAddRow');
+    if (opTimAddBtn && opTimBody && opTimTpl && opTimTpl.content) {
+      opTimAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(opTimTpl.content, true).querySelector('tr');
+        if (tr) opTimBody.appendChild(tr);
+      });
+    }
+    if (opTimBody) {
+      opTimBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-opt-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+        }
+      });
+    }
+
+    var aeBody = document.getElementById('crmEpAeBody');
+    var aeTpl = document.getElementById('crmEpAeRowTpl');
+    var aeAddBtn = document.getElementById('crmEpAeAddRow');
+    if (aeAddBtn && aeBody && aeTpl && aeTpl.content) {
+      aeAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(aeTpl.content, true).querySelector('tr');
+        if (tr) aeBody.appendChild(tr);
+      });
+    }
+    if (aeBody) {
+      aeBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-ae-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input, textarea').forEach(function (inp) { inp.value = ''; });
+        }
+      });
+    }
+
+    var rvpBody = document.getElementById('crmEpRvpBody');
+    var rvpTpl = document.getElementById('crmEpRvpRowTpl');
+    var rvpAddBtn = document.getElementById('crmEpRvpAddRow');
+    if (rvpAddBtn && rvpBody && rvpTpl && rvpTpl.content) {
+      rvpAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(rvpTpl.content, true).querySelector('tr');
+        if (tr) rvpBody.appendChild(tr);
+      });
+    }
+    if (rvpBody) {
+      rvpBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-rvp-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input, textarea').forEach(function (inp) { inp.value = ''; });
+        }
+      });
+    }
+
+    var srBody = document.getElementById('crmEpSrBody');
+    var srTpl = document.getElementById('crmEpSrRowTpl');
+    var srAddBtn = document.getElementById('crmEpSrAddRow');
+    if (srAddBtn && srBody && srTpl && srTpl.content) {
+      srAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(srTpl.content, true).querySelector('tr');
+        if (tr) srBody.appendChild(tr);
+      });
+    }
+    if (srBody) {
+      srBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-sr-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+          tr.querySelectorAll('select[name="sr_post"]').forEach(function (sel) { sel.selectedIndex = 0; });
+          tr.querySelectorAll('select[name="sr_vehicle"]').forEach(function (sel) { sel.selectedIndex = 0; });
+        }
+      });
+    }
+
+    var rrBody = document.getElementById('crmEpRrBody');
+    var rrTpl = document.getElementById('crmEpRrRowTpl');
+    var rrAddBtn = document.getElementById('crmEpRrAddRow');
+    if (rrAddBtn && rrBody && rrTpl && rrTpl.content) {
+      rrAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(rrTpl.content, true).querySelector('tr');
+        if (tr) rrBody.appendChild(tr);
+      });
+    }
+
+    var msBody = document.getElementById('crmEpMsBody');
+    var msTpl = document.getElementById('crmEpMsRowTpl');
+    var msAddBtn = document.getElementById('crmEpMsAddRow');
+    if (msAddBtn && msBody && msTpl && msTpl.content) {
+      msAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(msTpl.content, true).querySelector('tr');
+        if (tr) msBody.appendChild(tr);
+      });
+    }
+    if (msBody) {
+      msBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-ms-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+        }
+      });
+    }
+
+    var stTrBody = document.getElementById('crmEpStTrBody');
+    var stTrTpl = document.getElementById('crmEpStTrRowTpl');
+    var stTrAddBtn = document.getElementById('crmEpStTrAddRow');
+    if (stTrAddBtn && stTrBody && stTrTpl && stTrTpl.content) {
+      stTrAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(stTrTpl.content, true).querySelector('tr');
+        if (tr) stTrBody.appendChild(tr);
+      });
+    }
+    if (stTrBody) {
+      stTrBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-sttr-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+        }
+      });
+    }
+
+    var upeBody = document.getElementById('crmEpUpeBody');
+    var upeTpl = document.getElementById('crmEpUpeRowTpl');
+    var upeAddBtn = document.getElementById('crmEpUpeAddRow');
+    if (upeAddBtn && upeBody && upeTpl && upeTpl.content) {
+      upeAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(upeTpl.content, true).querySelector('tr');
+        if (tr) upeBody.appendChild(tr);
+      });
+    }
+    if (upeBody) {
+      upeBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-upe-clear')) {
+          var tr = t.closest('tr');
+          if (!tr) return;
+          tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+          var sel = tr.querySelector('select[name="upe_yes_no"]');
+          if (sel) sel.value = '';
+        }
+      });
+    }
+
+    var distBody = document.getElementById('crmEpDistBody');
+    var distTpl = document.getElementById('crmEpDistRowTpl');
+    var distAddBtn = document.getElementById('crmEpDistAddRow');
+    if (distAddBtn && distBody && distTpl && distTpl.content) {
+      distAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(distTpl.content, true).querySelector('tr');
+        if (tr) distBody.appendChild(tr);
+      });
+    }
+    if (distBody) {
+      distBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-dist-remove')) {
+          var tr = t.closest('tr');
+          if (!tr || !distBody.contains(tr)) return;
+          tr.remove();
+        }
+      });
+    }
+
+    var accVenueBody = document.getElementById('crmEpAccVenueBody');
+    var accVenueTpl = document.getElementById('crmEpAccVenueRowTpl');
+    var accVenueAdd = document.getElementById('crmEpAccVenueAdd');
+    if (accVenueAdd && accVenueBody && accVenueTpl && accVenueTpl.content) {
+      accVenueAdd.addEventListener('click', function () {
+        var tr = document.importNode(accVenueTpl.content, true).querySelector('tr');
+        if (tr) accVenueBody.appendChild(tr);
+      });
+    }
+    if (accVenueBody) {
+      accVenueBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-acc-venue-remove')) {
+          var tr = t.closest('tr');
+          if (!tr || !accVenueBody.contains(tr)) return;
+          var rows = accVenueBody.querySelectorAll('tr.crm-ep-acc-venue-row');
+          if (rows.length <= 1) {
+            tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+            return;
+          }
+          tr.remove();
+        }
+      });
+    }
+    var accRoomBody = document.getElementById('crmEpAccRoomBody');
+    var accRoomTpl = document.getElementById('crmEpAccRoomRowTpl');
+    var accRoomAdd = document.getElementById('crmEpAccRoomAdd');
+    if (accRoomAdd && accRoomBody && accRoomTpl && accRoomTpl.content) {
+      accRoomAdd.addEventListener('click', function () {
+        var tr = document.importNode(accRoomTpl.content, true).querySelector('tr');
+        if (tr) accRoomBody.appendChild(tr);
+      });
+    }
+    if (accRoomBody) {
+      accRoomBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-acc-room-remove')) {
+          var tr = t.closest('tr');
+          if (!tr || !accRoomBody.contains(tr)) return;
+          var rows = accRoomBody.querySelectorAll('tr.crm-ep-acc-room-row');
+          if (rows.length <= 1) {
+            tr.querySelectorAll('input,textarea').forEach(function (inp) { inp.value = ''; });
+            return;
+          }
+          tr.remove();
+        }
+      });
+    }
+
+    var csoBody = document.getElementById('crmEpCsoBody');
+    var csoTpl = document.getElementById('crmEpCsoRowTpl');
+    var csoAddBtn = document.getElementById('crmEpCsoAddRow');
+    if (csoAddBtn && csoBody && csoTpl && csoTpl.content) {
+      csoAddBtn.addEventListener('click', function () {
+        var tr = document.importNode(csoTpl.content, true).querySelector('tr');
+        if (tr) csoBody.appendChild(tr);
+      });
+    }
+    if (csoBody) {
+      csoBody.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.classList && t.classList.contains('crm-ep-cso-remove')) {
+          var tr = t.closest('tr');
+          if (!tr || !csoBody.contains(tr)) return;
+          var rows = csoBody.querySelectorAll('tr.crm-ep-cso-row');
+          if (rows.length <= 1) {
+            tr.querySelectorAll('input').forEach(function (inp) { inp.value = ''; });
+            return;
+          }
+          tr.remove();
+        }
       });
     }
   })();

@@ -2,31 +2,36 @@
 {% if industry_visible('medical') %}
 {% set t = theme|default('admin') %}
 {% if t == 'public' %}
-<div class="crm-pu-card p-4 mb-0 border border-2 border-light">
-  <h2 class="h6 fw-bold text-uppercase text-muted mb-3">Assessment before a binding quote</h2>
-  <p class="small mb-3">
-    Reputable medical event providers usually treat a <strong>medical needs assessment</strong> and an <strong>event medical plan</strong>
-    as part of proper governance before committing to cover. Initial figures from attendance and risk factors can be discussed early,
-    but a <strong>final, accurate quote</strong> normally depends on the full risk profile and specific requirements established through that process.
-  </p>
-  <h3 class="h6 fw-bold mb-2">Why the plan matters for pricing</h3>
-  <ul class="small ps-3 mb-3 crm-pu-guide">
-    <li><strong>Risk-led, not attendance-only:</strong> guidance such as the Purple Guide frames provision around risk; a smaller high-risk event can need more resource than a larger low-risk one.</li>
-    <li><strong>Defining scope:</strong> staffing (e.g. doctors, paramedics, first aiders), equipment, vehicles, and facilities are priced once required levels are agreed.</li>
-    <li><strong>Compliance:</strong> providers typically ensure planned cover matches registration and regulatory expectations (e.g. CQC in England where applicable) and local multi-agency expectations.</li>
-  </ul>
-  <h3 class="h6 fw-bold mb-2">Typical sequence</h3>
-  <ol class="small ps-3 mb-3">
-    <li class="mb-1"><strong>Before quote — discussion:</strong> event type, audience, history, and context (this enquiry captures high-level inputs).</li>
-    <li class="mb-1"><strong>Before quote — assessment:</strong> medical needs assessment to agree the required level of cover.</li>
-    <li class="mb-1"><strong>Quote:</strong> formal proposal based on that assessment.</li>
-    <li class="mb-1"><strong>After acceptance:</strong> detailed event medical plan finalised — often shared with the Safety Advisory Group (SAG) or equivalent.</li>
-  </ol>
-  <p class="small text-muted mb-0 border-top pt-3">
-    <strong>Takeaway:</strong> quoting without a proper needs assessment risks inadequate cover (organiser and public risk) or unnecessary cover (avoidable cost).
-    Numbers shown in this tool are <strong>indicative</strong> for early conversation — not a substitute for your own risk assessment or our clinical / operational sign-off.
-  </p>
-</div>
+<details class="crm-pu-card crm-pu-compliance mb-0 mt-0 border border-2 border-light border-opacity-50">
+  <summary class="d-flex align-items-center justify-content-between gap-2 px-4 py-3">
+    <span class="fw-semibold text-dark mb-0">Assessment before a binding quote <span class="fw-normal text-muted small">(MNA &amp; plan)</span></span>
+    <i class="bi bi-chevron-down crm-pu-chev text-primary flex-shrink-0" aria-hidden="true"></i>
+  </summary>
+  <div class="px-4 pb-4 pt-0 border-top border-light mt-0">
+    <p class="small mb-3 pt-3">
+      Reputable medical event providers usually treat a <strong>medical needs assessment</strong> and an <strong>event medical plan</strong>
+      as part of proper governance before committing to cover. Early numbers from this form can start a conversation;
+      a <strong>final quote</strong> follows the full risk profile and agreed scope.
+    </p>
+    <h3 class="h6 fw-bold mb-2">Why the plan matters for pricing</h3>
+    <ul class="small ps-3 mb-3 crm-pu-guide">
+      <li><strong>Risk-led, not attendance-only:</strong> guidance such as the Purple Guide frames provision around risk; a smaller high-risk event can need more resource than a larger low-risk one.</li>
+      <li><strong>Defining scope:</strong> staffing (e.g. doctors, paramedics, first aiders), equipment, vehicles, and facilities are priced once required levels are agreed.</li>
+      <li><strong>Compliance:</strong> providers typically match planned cover to registration and regulatory expectations (e.g. CQC in England where applicable) and local multi-agency expectations.</li>
+    </ul>
+    <h3 class="h6 fw-bold mb-2">Typical sequence</h3>
+    <ol class="small ps-3 mb-3">
+      <li class="mb-1"><strong>Discussion:</strong> event type, audience, history, and context (this enquiry captures high-level inputs).</li>
+      <li class="mb-1"><strong>Assessment:</strong> medical needs assessment to agree the required level of cover.</li>
+      <li class="mb-1"><strong>Quote:</strong> formal proposal based on that assessment.</li>
+      <li class="mb-1"><strong>After acceptance:</strong> detailed event medical plan, often shared with the Safety Advisory Group (SAG) or equivalent.</li>
+    </ol>
+    <p class="small text-muted mb-0 border-top pt-3">
+      <strong>Takeaway:</strong> quoting without a proper needs assessment risks weak cover or wasted cost.
+      Numbers here are <strong>indicative</strong> for early conversation, not a substitute for your own risk assessment or clinical sign-off.
+    </p>
+  </div>
+</details>
 {% else %}
 <div class="border rounded-3 p-3 mb-0" style="border-color: rgba(124, 58, 237, 0.35) !important; background: #faf8ff;">
   <h3 class="h6 text-uppercase fw-bold mb-2" style="color:#4c1d95;">Medical needs assessment &amp; event medical plan</h3>

@@ -32,6 +32,7 @@
           <td><span class="badge bg-secondary">{{ c.status or 'active' }}</span></td>
           <td>
             <a href="{{ url_for('internal_employee_portal.admin_contractor_portal', cid=c.id) }}" class="btn btn-sm btn-outline-primary">Portal view</a>
+            <a href="{{ url_for('internal_employee_portal.admin_module_access_contractor', cid=c.id) }}" class="btn btn-sm btn-outline-secondary">Portal modules</a>
           </td>
         </tr>
         {% endfor %}

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Case Access Result</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 1rem; }
+        .human-wrap { max-width: 56rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; vertical-align: top; padding: 0.35rem 0.5rem; font-size: 0.875rem; }
+        th { color: #555; font-weight: 600; width: 32%; max-width: 12rem; }
+        tr + tr th, tr + tr td { border-top: 1px solid #e5e5e5; }
+        ul { margin: 0; padding-left: 1.25rem; }
+        .text-muted { color: #6c757d; }
+    </style>
+</head>
+<body>
+    <h1>Case data</h1>
+    {% from 'clinical/cura_render_human.html' import render_human_value %}
+    <div class="human-wrap">{{ render_human_value(case_data) }}</div>
+    <p><a href="https://epcr.platinumambulance.co.uk/">Back to Case Access</a></p>
+</body>
+</html>

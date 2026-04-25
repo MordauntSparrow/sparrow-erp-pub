@@ -1,0 +1,715 @@
+{% extends "cad/ventus_admin_base.html" %}
+{% block content %}
+<div class="map-wrap">
+  <div id="map"></div>
+</div>
+<!-- Panels container: allows multiple open sidebar panels and popouts -->
+<div class="cad-panels" id="panelsContainer" aria-live="polite"></div>
+
+<!-- KPI/Stats Topbar -->
+<div id="kpiStatsPanel" style="position:fixed;top:10px;right:90px;z-index:2000;background:rgba(15,22,34,0.95);padding:7px 18px;border-radius:10px;box-shadow:0 4px 16px #0002;font-size:14px;display:flex;gap:20px;align-items:center;">
+  <span id="kpiActiveJobs"></span>
+  <span id="kpiUnitsAvail"></span>
+  <span id="kpiClearedToday"></span>
+  <span id="kpiAvgResp"></span>
+  <button onclick="toggleDarkMode()" id="darkModeBtn" style="margin-left:16px;background:var(--cad-panel-alt);color:var(--cad-text);border:none;padding:5px 12px;border-radius:6px;cursor:pointer;">🌙</button>
+</div>
+
+<!-- Toast notifications -->
+<div id="toast" style="position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#222b3a;color:#fff;padding:14px 28px;border-radius:8px;box-shadow:0 4px 16px #0003;z-index:5000;display:none;font-size:16px;"></div>
+<!-- Notification stack (bottom-right) -->
+<div id="notifications" class="notifications-container" aria-live="polite"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// --- Globals ---
+let map, jobsLayer, unitsLayer;
+let jobsData = [], unitsData = [];
+let openPanels = {};
+let currentMsgCallsign = null;
+let selectedJobs = new Set();
+let soundNewJob = new Audio('https://cdn.pixabay.com/audio/2022/07/26/audio_124bfa0c24.mp3');
+let soundUrgent = new Audio('https://cdn.pixabay.com/audio/2022/07/26/audio_124bfa0c24.mp3');
+let darkMode = false;
+// BroadcastChannel for syncing panels and popouts
+// Realtime channel: prefer Socket.IO, fall back to BroadcastChannel
+let socket = null;
+let bc = null;
+try{ if(typeof io !== 'undefined') socket = io(); }catch(e){ console.warn('Socket.IO client not available', e); socket = null; }
+try{ bc = new BroadcastChannel('ventus_cad'); }catch(e){ console.warn('BroadcastChannel not available', e); bc = null; }
+
+// Helper to emit panel_action via preferred channel
+function emitPanelAction(action, payload){
+  const msg = {type:'panel_action', action, payload};
+  try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message: msg}); else if(bc) bc.postMessage(msg); }catch(e){ console.warn('emitPanelAction failed', e); }
+}
+
+// Listen for panel_action requests coming from popouts/other clients
+function handleRemoteAction(msg){
+  const a = msg.action; const p = msg.payload || {};
+  if(a === 'assign_job' && p.cad && p.callsign){
+    fetch(`/plugin/ventus_response_module/job/${p.cad}/assign`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({callsign:p.callsign})})
+      .then(r=>r.json()).then(data=>{
+        showNotification('Assign result', data.message||data.error||'Done');
+        setTimeout(refreshMap, 400);
+        if(openPanels.jobs) loadJobsPanel();
+        try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:true, data}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:true, data}); }catch(e){}
+      }).catch(err=>{ showNotification('Assign failed', String(err)); try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:false, error:String(err)}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:false, error:String(err)}); }catch(e){} });
+  }
+  if(a === 'close_job' && p.cad){
+    fetch(`/plugin/ventus_response_module/job/${p.cad}/close`, {method:'POST'})
+      .then(r=>r.json()).then(data=>{
+        showNotification('Close result', data.message||data.error||'Done');
+        setTimeout(refreshMap, 400);
+        if(openPanels.jobs) loadJobsPanel();
+        try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:true, data}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:true, data}); }catch(e){}
+      }).catch(err=>{ showNotification('Close failed', String(err)); try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:false, error:String(err)}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:false, error:String(err)}); }catch(e){} });
+  }
+  if(a === 'send_msg' && p.callsign && p.text){
+    fetch(`/plugin/ventus_response_module/messages/${p.callsign}`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:p.text, from:'dispatcher'})})
+      .then(r=>r.json()).then(data=>{
+        showNotification('Message sent', `To ${p.callsign}`);
+        try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:true, data}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:true, data}); }catch(e){}
+      }).catch(err=>{ showNotification('Msg failed', String(err)); try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:false, error:String(err)}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:false, error:String(err)}); }catch(e){} });
+  }
+  if(a === 'change_unit_status' && p.callsign && p.status){
+    fetch(`/plugin/ventus_response_module/api/mdt/${p.callsign}/status`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:p.status, callSign: p.callsign})})
+      .then(r=>r.json()).then(data=>{
+        showNotification('Status updated', `${p.callsign}: ${p.status}`);
+        if(openPanels.units) loadUnitsPanel();
+        try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:true, data}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:true, data}); }catch(e){}
+      }).catch(err=>{ showNotification('Status failed', String(err)); try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'panel_action_result', action:a, success:false, error:String(err)}}); else if(bc) bc.postMessage({type:'panel_action_result', action:a, success:false, error:String(err)}); }catch(e){} });
+  }
+}
+
+// Wire listeners from Socket.IO and BroadcastChannel
+if(socket){
+  socket.on('panel_message', function(payload){
+    try{ if(payload && payload.message && payload.message.type === 'panel_action') handleRemoteAction(payload.message); }catch(e){}
+  });
+  socket.on('mdt_event', function(ev){
+    try{ if(ev && ev.type === 'jobs_updated') { setTimeout(refreshMap, 300); showNotification('Jobs updated', 'New job activity'); } }catch(e){}
+  });
+}
+if(bc){
+  bc.onmessage = function(ev){ try{ handleRemoteAction(ev.data || {}); }catch(e){} };
+}
+
+// --- DOM refs ---
+const btnJobs = document.getElementById('btnJobs');
+const btnUnits = document.getElementById('btnUnits');
+const btnMsgs = document.getElementById('btnMsgs');
+const cadMain = document.getElementById('cadMain');
+const panelsContainer = document.getElementById('panelsContainer');
+let drawerTitle = null;
+let drawerBody = null;
+const toast = document.getElementById('toast');
+const darkModeBtn = document.getElementById('darkModeBtn');
+
+// Helper to get or create a panel element by type
+function getOrCreatePanel(type, title) {
+  if (openPanels[type]) return openPanels[type];
+  const panel = document.createElement('div');
+  panel.className = 'cad-panel';
+  panel.dataset.type = type;
+  panel.innerHTML = `
+    <div class="cad-panel-header">
+      <div class="panel-title">${title}</div>
+      <div class="cad-panel-controls">
+        <button class="panel-popout" title="Pop out" onclick="popoutPanel('${type}')">⤢</button>
+        <button class="panel-popout" title="Close" onclick="closePanel('${type}')">✕</button>
+      </div>
+    </div>
+    <div class="cad-panel-body" data-panel-body></div>
+  `;
+  panelsContainer.prepend(panel);
+  openPanels[type] = panel;
+  return panel;
+}
+
+function closePanel(type) {
+  const p = openPanels[type];
+  if (!p) return;
+  p.remove();
+  delete openPanels[type];
+}
+
+function popoutPanel(type) {
+  // Open a dedicated panel route so the popout can be fully interactive and hydrate itself.
+  const url = `/plugin/ventus_response_module/panel/${encodeURIComponent(type)}`;
+  window.open(url, '_blank', 'width=980,height=760');
+}
+
+// --- Icons ---
+const jobIcon = L.icon({
+  iconUrl: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/icons/geo-alt-fill.svg',
+  iconSize: [22, 32], iconAnchor: [11, 32], popupAnchor: [0, -30]
+});
+const unitIcon = L.icon({
+  iconUrl: 'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/icons/truck-front-fill.svg',
+  iconSize: [22, 32], iconAnchor: [11, 32], popupAnchor: [0, -30]
+});
+
+// --- Map setup ---
+function initMap() {
+  // Default to somewhere central in the UK (e.g., Yorkshire)
+  let defaultLat = 53.9583, defaultLng = -1.0803, defaultZoom = 9;
+  map = L.map('map').setView([defaultLat, defaultLng], defaultZoom);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  jobsLayer = L.layerGroup().addTo(map);
+  unitsLayer = L.layerGroup().addTo(map);
+
+  // Try to center on controller's browser location
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      map.setView([pos.coords.latitude, pos.coords.longitude], 12);
+    }, function() {
+      // Permission denied or unavailable, stay at default
+    });
+  }
+
+  refreshMap();
+}
+
+let lastJobsCount = 0;
+function refreshMap() {
+  jobsLayer.clearLayers(); unitsLayer.clearLayers();
+  fetch('/plugin/ventus_response_module/jobs').then(r=>r.json()).then(jobs=>{
+    jobsData = jobs;
+    if (jobs.length > lastJobsCount) {
+      const newest = jobs[0] || {};
+      const title = 'New job received';
+      const body = `CAD #${newest.cad || '??'} — ${newest.reason_for_call || ''}`;
+      showToast(title);
+      showNotification(title, body);
+      try{ soundNewJob.play(); }catch(e){}
+    }
+    // broadcast update to any popouts / other tabs
+    if(bc) try{ bc.postMessage({type:'jobs_updated', data: jobs}); }catch(e){}
+    lastJobsCount = jobs.length;
+    jobs.forEach(job=>{
+      if(job.lat && job.lng) {
+        L.marker([job.lat, job.lng], {icon: jobIcon})
+          .addTo(jobsLayer)
+          .bindTooltip(`CAD #\${job.cad}`, {direction:"top"})
+          .on('click', ()=>loadJobDetail(job.cad));
+      }
+    });
+  });
+  fetch('/plugin/ventus_response_module/units').then(r=>r.json()).then(units=>{
+    unitsData = units;
+    units.forEach(unit=>{
+      if(unit.latitude && unit.longitude) {
+        L.marker([unit.latitude, unit.longitude], {icon: unitIcon})
+          .addTo(unitsLayer)
+          .bindTooltip(unit.callSign, {direction:"top"})
+          .on('click', ()=>zoomToUnit(unit.callSign));
+      }
+    });
+    if(bc) try{ bc.postMessage({type:'units_updated', data: units}); }catch(e){}
+  });
+}
+setInterval(refreshMap, 15000); // auto-refresh every 15s
+
+// --- KPI/Stats ---
+function refreshKPIs() {
+  fetch('/plugin/ventus_response_module/kpis').then(r=>r.json()).then(k=>{
+    document.getElementById('kpiActiveJobs').textContent = `Active Jobs: \${k.active_jobs}`;
+    document.getElementById('kpiUnitsAvail').textContent = `Units Available: \${k.units_available}`;
+    document.getElementById('kpiClearedToday').textContent = `Cleared Today: \${k.cleared_today}`;
+    document.getElementById('kpiAvgResp').textContent = `Avg Resp: \${k.avg_response_time}`;
+  });
+}
+setInterval(refreshKPIs, 20000);
+refreshKPIs();
+
+// --- Toasts ---
+function showToast(msg, duration=2500) {
+  toast.textContent = msg;
+  toast.style.display = 'block';
+  setTimeout(()=>{ toast.style.display = 'none'; }, duration);
+}
+
+// --- Notifications (stacked, closeable) ---
+const MAX_NOTIFICATIONS = 5;
+let notifications = [];
+function showNotification(title, body='', opts={autoClose: true, timeout:8000}){
+  try{
+    const container = document.getElementById('notifications');
+    const id = 'n'+Date.now()+Math.floor(Math.random()*1000);
+    const el = document.createElement('div'); el.className='notification'; el.id=id;
+    el.innerHTML = `<div class="notif-header"><div>${title}</div><button class="notif-close" aria-label="close">&times;</button></div><div class="notif-body">${body}</div>`;
+    container.prepend(el);
+    // wire close
+    el.querySelector('.notif-close').onclick = ()=>{ removeNotification(id); };
+    notifications.unshift(id);
+    // enforce limit
+    while(notifications.length>MAX_NOTIFICATIONS){ const old = notifications.pop(); const node=document.getElementById(old); if(node) node.remove(); }
+    if(opts.autoClose){ setTimeout(()=>{ removeNotification(id); }, opts.timeout||8000); }
+    return id;
+  }catch(e){ console.warn('notify err',e); }
+}
+function removeNotification(id){ const node=document.getElementById(id); if(node) node.remove(); notifications = notifications.filter(x=>x!==id); }
+
+// --- Dark/Light Mode ---
+function toggleDarkMode() {
+  darkMode = !darkMode;
+  document.body.style.background = darkMode ? '#f4f7fa' : 'var(--cad-bg)';
+  document.body.style.color = darkMode ? '#111' : 'var(--cad-text)';
+  darkModeBtn.textContent = darkMode ? '☀️' : '🌙';
+}
+
+// --- Panel switching ---
+function openPanel(type) {
+  // Toggle if already open
+  if (openPanels[type]) { closePanel(type); return; }
+  const titleMap = {jobs:'CAD Stack', units:'Units', msgs:'Messages', audit:'Audit Log'};
+  const title = titleMap[type] || type;
+  const panel = getOrCreatePanel(type, title);
+  // ensure layout shows right-hand column
+  cadMain.classList.add('drawer-open');
+  // set active header/button states
+  [btnJobs,btnUnits,btnMsgs].forEach(b=>b.classList.remove('active'));
+  if (type === 'jobs') btnJobs.classList.add('active');
+  if (type === 'units') btnUnits.classList.add('active');
+  if (type === 'msgs') btnMsgs.classList.add('active');
+  // set global drawer refs for existing code compatibility
+  drawerBody = panel.querySelector('[data-panel-body]');
+  drawerTitle = panel.querySelector('.panel-title');
+  // call loader for this panel
+  if (type === 'jobs') { loadJobsPanel(); }
+  if (type === 'units') { loadUnitsPanel(); }
+  if (type === 'msgs') { loadMsgPanel(); }
+  if (type === 'audit') { loadAuditPanel(); }
+  setTimeout(()=>map.invalidateSize(),200);
+}
+
+function closePanel(type) {
+  if (!type) return;
+  // clear active button state
+  [btnJobs,btnUnits,btnMsgs].forEach(b=>b.classList.remove('active'));
+  // remove panel element
+  const p = openPanels[type];
+  if (p) { p.remove(); delete openPanels[type]; }
+  // clear refs
+  drawerBody = null; drawerTitle = null;
+  // collapse the right column if no panels remain
+  if (Object.keys(openPanels).length === 0) cadMain.classList.remove('drawer-open');
+  setTimeout(()=>map.invalidateSize(),200);
+}
+btnJobs.onclick = ()=>openPanel('jobs');
+btnUnits.onclick = ()=>openPanel('units');
+btnMsgs.onclick = ()=>openPanel('msgs');
+
+// --- Jobs Panel ---
+function loadJobsPanel() {
+  drawerBody.innerHTML = `
+    <div style="padding:8px 0;">
+      <input id="jobFilter" type="text" placeholder="Filter by CAD, status, reason..." style="width:60%;padding:6px;border-radius:5px;">
+      <button onclick="bulkAssign()" style="margin-left:10px;">Bulk Assign</button>
+      <button onclick="bulkClose()" style="margin-left:6px;">Bulk Close</button>
+      <button onclick="openPanel('audit')" style="margin-left:6px;">Audit Log</button>
+    </div>
+    <ul id="jobsList" style="list-style:none;padding:0;margin:0;max-height:350px;overflow-y:auto;"></ul>
+  `;
+  fetch('/plugin/ventus_response_module/jobs')
+    .then(res => res.json())
+    .then(jobs => {
+      jobsData = jobs;
+      renderJobsList(jobs);
+      document.getElementById('jobFilter').oninput = function() {
+        const val = this.value.toLowerCase();
+        renderJobsList(jobs.filter(j=>
+          (""+j.cad).includes(val) ||
+          (j.status||'').toLowerCase().includes(val) ||
+          (j.reason_for_call||'').toLowerCase().includes(val)
+        ));
+      };
+    })
+    .catch(()=>{ drawerBody.innerHTML = '<div class="error">Failed to load jobs.</div>'; });
+}
+function renderJobsList(jobs) {
+  let html = '';
+  jobs.forEach(job => {
+    html += `
+      <li class="panel-list-item">
+        <input type="checkbox" onchange="toggleJobSelect(${job.cad},this)" ${selectedJobs.has(job.cad)?'checked':''} style="margin-right:7px;">
+        <span onclick="loadJobDetail(${job.cad})" style="cursor:pointer;">
+          <b>CAD #${job.cad}</b> <span class="status">${job.status}</span>
+          <div class="meta">${job.reason_for_call || 'No reason provided'}</div>
+        </span>
+      </li>
+    `;
+  });
+  document.getElementById('jobsList').innerHTML = html;
+}
+window.toggleJobSelect = function(cad, el) {
+  if (el.checked) selectedJobs.add(cad); else selectedJobs.delete(cad);
+};
+window.bulkAssign = function() {
+  const callsign = prompt('Assign selected jobs to which unit (callsign)?');
+  if (!callsign) return;
+  selectedJobs.forEach(cad => {
+    fetch(`/plugin/ventus_response_module/job/${cad}/assign`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({callsign})
+    })
+    .then(res=>res.json())
+    .then(data=>showToast(data.message || data.error));
+  });
+  setTimeout(loadJobsPanel, 1000);
+  refreshMap();
+};
+window.bulkClose = function() {
+  if (!confirm('Close all selected jobs?')) return;
+  selectedJobs.forEach(cad => {
+    fetch(`/plugin/ventus_response_module/job/${cad}/close`, {method: 'POST'})
+      .then(res=>res.json())
+      .then(data=>showToast(data.message || data.error));
+  });
+  setTimeout(loadJobsPanel, 1000);
+  refreshMap();
+};
+
+window.loadJobDetail = function(cad) {
+  drawerTitle.textContent = `Job #${cad}`;
+  drawerBody.innerHTML = '<div class="loading">Loading job details...</div>';
+  fetch(`/plugin/ventus_response_module/job/${cad}`)
+    .then(res => res.json())
+    .then(job => {
+      let triage = job.triage_data || {};
+      let lines = Object.entries(triage).map(([k,v]) =>
+        `<div><b>${k}:</b> ${typeof v === 'object' ? JSON.stringify(v) : v}</div>`).join('');
+      drawerBody.innerHTML = `
+        <div style="padding:16px;">
+          <div>Status: <b>${job.status}</b></div>
+          <hr style="border-color:#222;">
+          <div>${lines || '<i>No triage data</i>'}</div>
+          <hr style="border-color:#222;">
+          <button onclick="assignJob(${job.cad})" style="background:var(--cad-accent);color:#fff;padding:7px 14px;border:none;border-radius:6px;margin-right:8px;">Assign to Unit</button>
+          <button onclick="closeJob(${job.cad})" style="background:var(--cad-danger);color:#fff;padding:7px 14px;border:none;border-radius:6px;">Close Job</button>
+        </div>
+        <div id="jobTimeline"></div>
+        <div id="jobActionStatus"></div>
+      `;
+      loadIncidentTimeline(cad);
+    })
+    .catch(()=>{ drawerBody.innerHTML = '<div class="error">Failed to load job details.</div>'; });
+};
+function loadIncidentTimeline(cad) {
+  fetch(`/plugin/ventus_response_module/api/mdt/${cad}`)
+    .then(res=>res.json())
+    .then(data=>{
+      let triage = data.triage_data ? JSON.parse(data.triage_data) : {};
+      let timelineHtml = `<h4>Incident Timeline</h4><ul>`;
+      ['received','assigned','mobile','on_scene','leave_scene','at_hospital','cleared','stood_down'].forEach(status=>{
+        if (triage[status+'_time']) {
+          timelineHtml += `<li><b>${status.replace('_',' ').toUpperCase()}:</b> ${triage[status+'_time']}</li>`;
+        }
+      });
+      timelineHtml += `</ul>`;
+      document.getElementById('jobTimeline').innerHTML = timelineHtml;
+    });
+}
+window.assignJob = function(cad) {
+  let callsign = prompt('Assign to which unit (callsign)?');
+  if (!callsign) return;
+  fetch(`/plugin/ventus_response_module/job/${cad}/assign`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({callsign})
+  })
+  .then(res=>res.json())
+  .then(data=>{
+    showToast(data.message || data.error);
+    setTimeout(loadJobsPanel, 1000);
+    refreshMap();
+  });
+};
+window.closeJob = function(cad) {
+  if (!confirm('Close this job?')) return;
+  fetch(`/plugin/ventus_response_module/job/${cad}/close`, {method: 'POST'})
+    .then(res=>res.json())
+    .then(data=>{
+      showToast(data.message || data.error);
+      setTimeout(loadJobsPanel, 1000);
+      refreshMap();
+    });
+};
+
+// --- Units Panel ---
+function loadUnitsPanel() {
+  drawerBody.innerHTML = `
+    <div style="padding:8px 0;">
+      <input id="unitFilter" type="text" placeholder="Filter by callsign or status..." style="width:60%;padding:6px;border-radius:5px;">
+    </div>
+    <ul id="unitsList" style="list-style:none;padding:0;margin:0;max-height:350px;overflow-y:auto;"></ul>
+  `;
+  fetch('/plugin/ventus_response_module/units')
+    .then(res => res.json())
+    .then(units => {
+      unitsData = units;
+      renderUnitsList(units);
+      document.getElementById('unitFilter').oninput = function() {
+        const val = this.value.toLowerCase();
+        renderUnitsList(units.filter(u=>
+          (u.callSign||'').toLowerCase().includes(val) ||
+          (u.status||'').toLowerCase().includes(val)
+        ));
+      };
+    })
+    .catch(()=>{ drawerBody.innerHTML = '<div class="error">Failed to load units.</div>'; });
+}
+function renderUnitsList(units) {
+  let html = '';
+  units.forEach(unit => {
+    html += `
+      <li class="panel-list-item">
+        <span class="unit-badge">${unit.callSign}</span>
+        <span class="meta">${unit.status || 'unknown'}</span>
+        <div class="meta">Last seen: ${unit.latitude && unit.longitude ? `${unit.latitude.toFixed(5)}, ${unit.longitude.toFixed(5)}` : 'n/a'}
+          <button onclick="zoomToUnit('${unit.callSign}')" style="margin-left:8px;">Zoom</button>
+          <button onclick="quickMsg('${unit.callSign}')" style="margin-left:4px;">Msg</button>
+          <button onclick="changeUnitStatus('${unit.callSign}')" style="margin-left:4px;">Change Status</button>
+        </div>
+      </li>
+    `;
+  });
+  document.getElementById('unitsList').innerHTML = html;
+}
+window.zoomToUnit = function(callsign) {
+  let unit = unitsData.find(u=>u.callSign === callsign);
+  if (unit && unit.latitude && unit.longitude) {
+    map.setView([unit.latitude, unit.longitude], 13);
+  }
+};
+window.quickMsg = function(callsign) {
+  openPanel('msgs');
+  setTimeout(()=>{
+    document.getElementById('msgCallsign').value = callsign;
+    loadMsgThread();
+  }, 300);
+};
+window.changeUnitStatus = function(callsign) {
+  const status = prompt('Set new status for ' + callsign + ' (available, out_of_service, assigned, etc):');
+  if (!status) return;
+  fetch('/plugin/ventus_response_module/api/mdt/'+callsign+'/status', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({status, callSign: callsign})
+  })
+  .then(res=>res.json())
+  .then(data=>showToast(data.message || data.error));
+};
+
+// --- Messages Panel ---
+function loadMsgPanel() {
+  drawerBody.innerHTML = `
+    <div id="motdBlock"></div>
+    <hr style="border-color:#222;">
+    <button onclick="showBroadcastBox()" style="background:var(--cad-accent);color:#fff;padding:8px 14px;border:none;border-radius:6px;">Broadcast to All Units</button>
+    <button onclick="showUrgentAlertBox()" style="background:var(--cad-danger);color:#fff;padding:8px 14px;border:none;border-radius:6px;margin-left:8px;">Urgent Alert</button>
+    <hr style="border-color:#222;">
+    <label for="msgCallsign" style="font-size:14
+px;">Unit callsign:</label>
+    <input id="msgCallsign" type="text" style="width:120px;padding:6px;border-radius:4px;margin-left:8px;color:#222;">
+    <button onclick="loadMsgThread()" style="margin-left:10px;padding:6px 14px;border-radius:4px;background:var(--cad-accent);color:#fff;border:none;">View</button>
+    <div id="msgThread"></div>
+    <div id="broadcastBox" style="display:none;padding:18px;">
+      <form onsubmit="sendBroadcast(event)">
+        <input type="text" id="broadcastInput" placeholder="Broadcast message..." style="width:70%;padding:8px;border-radius:6px;">
+        <button type="submit" style="margin-left:10px;padding:8px 14px;border-radius:6px;background:var(--cad-accent);color:#fff;border:none;">Send to All Units</button>
+        <button type="button" onclick="hideBroadcastBox()" style="margin-left:10px;padding:8px 14px;border-radius:6px;background:var(--cad-danger);color:#fff;border:none;">Cancel</button>
+      </form>
+      <div id="broadcastStatus"></div>
+    </div>
+    <div id="urgentAlertBox" style="display:none;padding:18px;">
+      <form onsubmit="sendUrgentAlert(event)">
+        <input type="text" id="urgentAlertInput" placeholder="Urgent alert message..." style="width:70%;padding:8px;border-radius:6px;">
+        <button type="submit" style="margin-left:10px;padding:8px 14px;border-radius:6px;background:var(--cad-danger);color:#fff;border:none;">Send Urgent Alert</button>
+        <button type="button" onclick="hideUrgentAlertBox()" style="margin-left:10px;padding:8px 14px;border-radius:6px;background:var(--cad-muted);color:#fff;border:none;">Cancel</button>
+      </form>
+      <div id="urgentAlertStatus"></div>
+    </div>
+  `;
+  loadMotD();
+}
+function showBroadcastBox() {
+  document.getElementById('broadcastBox').style.display = 'block';
+}
+function hideBroadcastBox() {
+  document.getElementById('broadcastBox').style.display = 'none';
+  document.getElementById('broadcastStatus').textContent = '';
+}
+function sendBroadcast(e) {
+  e.preventDefault();
+  const msg = document.getElementById('broadcastInput').value.trim();
+  if (!msg) return;
+  fetch('/plugin/ventus_response_module/units')
+    .then(r=>r.json())
+    .then(units=>{
+      let sent = 0, failed = 0;
+      let promises = units.map(unit => 
+        fetch(`/plugin/ventus_response_module/messages/${unit.callSign}`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({text: msg, from: 'dispatcher'})
+        }).then(res=>res.ok ? sent++ : failed++)
+      );
+      Promise.all(promises).then(()=>{
+        document.getElementById('broadcastStatus').textContent = 
+          `Broadcast sent to ${sent} units${failed ? ', failed for '+failed : ''}.`;
+        showToast('Broadcast sent!');
+        showNotification('Broadcast sent', msg);
+        if(bc) try{ bc.postMessage({type:'broadcast', message: msg}); }catch(e){}
+      });
+    });
+  document.getElementById('broadcastInput').value = '';
+}
+function showUrgentAlertBox() {
+  document.getElementById('urgentAlertBox').style.display = 'block';
+}
+function hideUrgentAlertBox() {
+  document.getElementById('urgentAlertBox').style.display = 'none';
+  document.getElementById('urgentAlertStatus').textContent = '';
+}
+function sendUrgentAlert(e) {
+  e.preventDefault();
+  const msg = document.getElementById('urgentAlertInput').value.trim();
+  if (!msg) return;
+  fetch('/plugin/ventus_response_module/units')
+    .then(r=>r.json())
+    .then(units=>{
+      let sent = 0, failed = 0;
+      let promises = units.map(unit => 
+        fetch(`/plugin/ventus_response_module/messages/${unit.callSign}`, {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({text: "[URGENT] " + msg, from: 'dispatcher'})
+        }).then(res=>res.ok ? sent++ : failed++)
+      );
+      Promise.all(promises).then(()=>{
+        document.getElementById('urgentAlertStatus').textContent = 
+          `Urgent alert sent to ${sent} units${failed ? ', failed for '+failed : ''}.`;
+        showToast('Urgent alert sent!');
+        showNotification('Urgent alert sent', msg);
+        if(bc) try{ bc.postMessage({type:'urgent_alert', message: msg}); }catch(e){}
+        soundUrgent.play();
+      });
+    });
+  document.getElementById('urgentAlertInput').value = '';
+}
+// --- MotD ---
+function loadMotD() {
+  fetch('/plugin/ventus_response_module/motd')
+    .then(res => res.json())
+    .then(data => {
+      let motd = data.motd || '';
+      document.getElementById('motdBlock').innerHTML = `
+        <div style="margin-bottom:8px;">
+          <b>Message of the Day:</b> <span id="motdText">${motd}</span>
+          <button onclick="editMotD()" style="margin-left:8px;font-size:12px;">Edit</button>
+        </div>
+        <div id="motdEdit" style="display:none;">
+          <input id="motdInput" type="text" value="${motd}" style="width:60%;padding:6px;">
+          <button onclick="saveMotD()" style="margin-left:8px;">Save</button>
+          <button onclick="cancelMotDEdit()" style="margin-left:4px;">Cancel</button>
+          <span id="motdStatus"></span>
+        </div>
+      `;
+    });
+}
+function editMotD() {
+  document.getElementById('motdEdit').style.display = 'block';
+}
+function cancelMotDEdit() {
+  document.getElementById('motdEdit').style.display = 'none';
+}
+function saveMotD() {
+  const val = document.getElementById('motdInput').value.trim();
+  fetch('/plugin/ventus_response_module/motd', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({motd: val})
+  }).then(res => res.json())
+    .then(() => {
+      document.getElementById('motdText').textContent = val;
+      document.getElementById('motdStatus').textContent = 'Updated!';
+      setTimeout(()=>{ cancelMotDEdit(); }, 800);
+      showToast('Message of the Day updated!');
+    });
+}
+// --- Unit Messaging ---
+window.loadMsgThread = function() {
+  const callsign = document.getElementById('msgCallsign').value.trim();
+  if (!callsign) return;
+  currentMsgCallsign = callsign;
+  const msgThread = document.getElementById('msgThread');
+  msgThread.innerHTML = '<div class="loading">Loading messages...</div>';
+  fetch(`/plugin/ventus_response_module/messages/${callsign}`)
+    .then(res => res.json())
+    .then(msgs => {
+      let html = '<div style="padding:14px 0;max-height:220px;overflow-y:auto;">';
+      msgs.forEach(msg => {
+        html += `<div class="msg-bubble${msg.from === 'dispatcher' ? ' me' : ''}"><b>${msg.from}:</b> ${msg.text}</div>`;
+      });
+      html += '</div>';
+      html += `
+        <form onsubmit="sendMsg(event)" class="msg-input-row">
+          <input type="text" id="msgInput" placeholder="Type a message...">
+          <button type="submit">Send</button>
+        </form>
+      `;
+      msgThread.innerHTML = html;
+      msgThread.scrollTop = msgThread.scrollHeight;
+    })
+    .catch(()=>{ msgThread.innerHTML = '<div class="error">Failed to load messages.</div>'; });
+};
+
+window.sendMsg = function(e) {
+  e.preventDefault();
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !currentMsgCallsign) return;
+  fetch(`/plugin/ventus_response_module/messages/${currentMsgCallsign}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({text, from: 'dispatcher'})
+  })
+  .then(res => res.json())
+  .then(()=>{
+    input.value = '';
+    window.loadMsgThread();
+    showToast('Message sent!');
+    showNotification('Message sent', `To ${currentMsgCallsign}: ${text}`);
+    try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message:{type:'message_sent', callsign: currentMsgCallsign, text}}); else if(bc) bc.postMessage({type:'message_sent', callsign: currentMsgCallsign, text}); }catch(e){}
+  });
+};
+
+// --- Audit Log Panel (placeholder, needs backend endpoint) ---
+function loadAuditPanel() {
+  drawerBody.innerHTML = '<div class="loading">Loading audit log...</div>';
+  fetch('/plugin/ventus_response_module/audit') // Needs backend endpoint
+    .then(res=>res.json())
+    .then(logs => {
+      let html = '<ul style="list-style:none;padding:0;margin:0;';
+      logs.forEach(log => {
+        html += `<li style="padding:10px 0;border-bottom:1px solid #222;">
+          <b>${log.time}</b> &mdash; ${log.user}: ${log.action}
+        </li>`;
+      });
+      html += '</ul>';
+      drawerBody.innerHTML = html;
+    })
+    .catch(()=>{ drawerBody.innerHTML = '<div class="error">Failed to load audit log.</div>'; });
+}
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', function() {
+  initMap();
+  // Optionally, open Jobs panel by default:
+  // openPanel('jobs');
+});
+</script>
+{% endblock %}

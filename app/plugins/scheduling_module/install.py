@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS schedule_shifts (
   runsheet_id BIGINT DEFAULT NULL,
   runsheet_assignment_id BIGINT DEFAULT NULL,
   labour_cost DECIMAL(10,2) DEFAULT NULL,
+  shared_labour_hours DECIMAL(6,2) DEFAULT NULL COMMENT 'Fixed person-hours, duration shrinks as crew or required headcount grows',
   recurrence_id BIGINT DEFAULT NULL,
   required_count INT NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -514,6 +515,38 @@ def _ensure_required_count_and_assignments(conn):
         cur.close()
 
 
+def _ensure_shared_labour_hours_column(conn):
+    """Optional fixed person-hour budget for shared-crew visits (cleaning, etc.)."""
+    if not _table_exists(conn, "schedule_shifts"):
+        return
+    cur = conn.cursor()
+    try:
+        if not _column_exists(conn, "schedule_shifts", "shared_labour_hours"):
+            cur.execute(
+                "ALTER TABLE schedule_shifts ADD COLUMN shared_labour_hours DECIMAL(6,2) NULL "
+                "DEFAULT NULL COMMENT 'Person-hours, wall-clock duration = this divided by crew size' AFTER labour_cost"
+            )
+            conn.commit()
+    finally:
+        cur.close()
+
+
+def _ensure_portal_reminder_sent_at_column(conn):
+    """Web push dedupe: one 'starting soon' per shift after send."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+        if not cur.fetchone():
+            return
+        if not _column_exists(conn, "schedule_shifts", "portal_reminder_sent_at"):
+            cur.execute(
+                "ALTER TABLE schedule_shifts ADD COLUMN portal_reminder_sent_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at"
+            )
+            conn.commit()
+    finally:
+        cur.close()
+
+
 def _ensure_recurrence_id_column(conn):
     """Add recurrence_id to schedule_shifts for series/delete-in-series support."""
     if not _table_exists(conn, "schedule_shifts"):
@@ -605,6 +638,8 @@ def ensure_tables(conn):
     _ensure_open_shift_claims_columns(conn)
     _ensure_recurrence_id_column(conn)
     _ensure_required_count_and_assignments(conn)
+    _ensure_shared_labour_hours_column(conn)
+    _ensure_portal_reminder_sent_at_column(conn)
     # Ensure status ENUM includes 'cancelled' (existing DBs)
     try:
         cur = conn.cursor()

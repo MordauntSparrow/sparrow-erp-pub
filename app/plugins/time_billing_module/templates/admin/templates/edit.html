@@ -15,26 +15,40 @@
     <!-- Template Details -->
     <div class="card mb-3">
         <div class="card-body">
+            <p class="text-muted small mb-3">
+                <strong>Job type</strong> is what new timesheet lines use when this runsheet is published.
+                Default client/site pre-fill the runsheet; staff can still pick others if you allow it below.
+            </p>
             <div class="row g-2">
-                <div class="col-12 col-md-4">
-                    <label class="form-label">Name</label>
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Template name</label>
                     <input class="form-control form-control-sm" id="tpl_name">
                 </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Job Type ID</label>
-                    <input class="form-control form-control-sm" id="tpl_job_type_id">
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Internal code</label>
+                    <div class="form-control form-control-sm bg-light text-muted font-monospace small mb-0" id="tpl_code_ro" title="Generated when the template was created">—</div>
                 </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Client ID</label>
-                    <input class="form-control form-control-sm" id="tpl_client_id" placeholder="optional">
-                </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Site ID</label>
-                    <input class="form-control form-control-sm" id="tpl_site_id" placeholder="optional">
-                </div>
-                <div class="col-12 col-md-2">
+                <div class="col-12 col-md-3">
                     <label class="form-label">Version</label>
                     <input class="form-control form-control-sm" id="tpl_version" type="number" min="1" step="1">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Job type</label>
+                    <select class="form-select form-select-sm" id="tpl_job_type">
+                        <option value="">Loading…</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Default client</label>
+                    <select class="form-select form-select-sm" id="tpl_client">
+                        <option value="">— Not set —</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-3">
+                    <label class="form-label">Default site</label>
+                    <select class="form-select form-select-sm" id="tpl_site">
+                        <option value="">— Not set —</option>
+                    </select>
                 </div>
                 <div class="col-12">
                     <div class="form-check mt-1">
@@ -64,7 +78,8 @@
                         <tr>
                             <th>Label</th>
                             <th>Type</th>
-                            <th>Field name</th>
+                            <th>On timesheet</th>
+                            <th>Internal key</th>
                             <th>Required</th>
                             <th class="text-end">Actions</th>
                         </tr>
@@ -73,7 +88,8 @@
                 </table>
             </div>
             <p class="text-muted small mb-0 mt-2">
-                Use <strong>Field options</strong> below each row for choices, number limits, and timing / billing hints (no raw JSON required).
+                Staff see the <strong>label</strong>; the <strong>internal key</strong> is derived when you save and is used in exports and APIs.
+                Use <strong>Field options</strong> below each row for choices, number limits, and timing / billing hints.
                 Optional <em>Advanced JSON</em> merges extra keys for integrations.
             </p>
         </div>
@@ -92,6 +108,10 @@
         const templateFieldsUrl = () => TEMPLATE_API_BASE + '/' + tplId + '/fields';
         const fieldUpdateUrl = (fid) => TEMPLATE_API_BASE + '/' + tplId + '/fields/' + fid;
         const fieldDeleteUrl = (fid) => TEMPLATE_API_BASE + '/' + tplId + '/fields/' + fid;
+        const REF_JT = "{{ url_for('internal_time_billing.api_internal_refs_job_types') }}";
+        const REF_CL = "{{ url_for('internal_time_billing.api_admin_refs_clients') }}";
+        const REF_SI = "{{ url_for('internal_time_billing.api_admin_refs_sites') }}";
+        let tplRefsListenerBound = false;
         if (!tplId) {
             alert('Open this page from Templates with #edit-<id> in the URL.');
             return;
@@ -132,6 +152,19 @@
 
         function esc(s) {
             return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        }
+
+        function timesheetFieldHint(typ) {
+            if (typ === 'time' || typ === 'datetime') {
+                return 'Journey time: stored on the published timesheet line; use options below so payroll knows which segment it is.';
+            }
+            return 'Extra answers: kept with the runsheet / line (metadata), not a separate timesheet column.';
+        }
+
+        function updateMapHint(trMain) {
+            const typ = (trMain.querySelector('[data-field="type"]') || {}).value || 'text';
+            const el = trMain.querySelector('.js-map-hint');
+            if (el) el.textContent = timesheetFieldHint(typ);
         }
 
         function syncOptsVisibility(trMain, trOpts) {
@@ -253,7 +286,7 @@
             return Object.keys(o).length ? o : null;
         }
 
-        function collectRow(trMain, trOpts, origField) {
+        function collectRow(trMain, trOpts) {
             const get = f => {
                 const el = trMain.querySelector(`.js[data-field="${f}"]`);
                 if (!el) return null;
@@ -265,7 +298,6 @@
             return {
                 label: get('label'),
                 type: get('type'),
-                name: get('name') || (origField && origField.name) || '',
                 required: !!get('required'),
                 options_json,
                 validation_json,
@@ -279,7 +311,7 @@
             const billOpts = BILLING_MODES.map(p => `<option value="${p.key}">${esc(p.label)}</option>`).join('');
             const segOpts2 = SEGMENT_PRESETS.filter(p => p.key !== 'none').map(p => `<option value="${p.key}">${esc(p.label)}</option>`).join('');
             tr.innerHTML = `
-      <td colspan="5" class="p-3 small">
+      <td colspan="6" class="p-3 small">
         <div class="js-opt-choices mb-3" style="display:none;">
           <div class="fw-semibold mb-1">Choices (for select / multiselect)</div>
           <table class="table table-sm table-bordered mb-1">
@@ -363,14 +395,75 @@
             return tr;
         }
 
+        async function loadSitesForTpl(clientId, preselectSiteId) {
+            const si = $('#tpl_site');
+            si.innerHTML = '<option value="">— Not set —</option>';
+            try {
+                const u = new URL(REF_SI, window.location.origin);
+                if (clientId) u.searchParams.set('client_id', clientId);
+                const r = await fetch(u.pathname + u.search, { headers: { Accept: 'application/json' } });
+                if (!r.ok) return;
+                const d = await r.json();
+                (Array.isArray(d.items) ? d.items : []).forEach(x => {
+                    const o = document.createElement('option');
+                    o.value = x.id;
+                    o.textContent = x.name || ('Site #' + x.id);
+                    si.appendChild(o);
+                });
+                if (preselectSiteId != null && String(preselectSiteId) !== '')
+                    si.value = String(preselectSiteId);
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadRefsForEditor() {
+            const jt = $('#tpl_job_type');
+            const cl = $('#tpl_client');
+            jt.innerHTML = '<option value="">Select job type…</option>';
+            cl.innerHTML = '<option value="">— Not set —</option>';
+            try {
+                const [rj, rc] = await Promise.all([
+                    fetch(REF_JT, { headers: { Accept: 'application/json' } }),
+                    fetch(REF_CL, { headers: { Accept: 'application/json' } }),
+                ]);
+                const dj = rj.ok ? await rj.json() : { items: [] };
+                const dc = rc.ok ? await rc.json() : { items: [] };
+                (Array.isArray(dj.items) ? dj.items : []).forEach(x => {
+                    const o = document.createElement('option');
+                    o.value = x.id;
+                    o.textContent = x.name || ('Job #' + x.id);
+                    jt.appendChild(o);
+                });
+                (Array.isArray(dc.items) ? dc.items : []).forEach(x => {
+                    const o = document.createElement('option');
+                    o.value = x.id;
+                    o.textContent = x.name || ('Client #' + x.id);
+                    cl.appendChild(o);
+                });
+            } catch (e) {
+                console.error(e);
+                jt.innerHTML = '<option value="">Failed to load</option>';
+            }
+            if (!tplRefsListenerBound) {
+                tplRefsListenerBound = true;
+                $('#tpl_client').addEventListener('change', function () {
+                    loadSitesForTpl(this.value || '', null);
+                });
+            }
+        }
+
         async function loadHeader() {
+            await loadRefsForEditor();
             const r = await fetch(templateUrl());
             if (!r.ok) return alert('Failed to load template');
             const t = await r.json();
             $('#tpl_name').value = t.name || '';
-            $('#tpl_job_type_id').value = t.job_type_id || '';
-            $('#tpl_client_id').value = t.client_id != null ? t.client_id : (t.client_name || '');
-            $('#tpl_site_id').value = t.site_id != null ? t.site_id : (t.site_name || '');
+            const cro = $('#tpl_code_ro');
+            if (cro) cro.textContent = (t.code != null && String(t.code).trim() !== '') ? String(t.code) : '—';
+            $('#tpl_job_type').value = t.job_type_id != null ? String(t.job_type_id) : '';
+            $('#tpl_client').value = t.client_id != null ? String(t.client_id) : '';
+            await loadSitesForTpl($('#tpl_client').value || '', t.site_id);
+            if (t.site_id != null && $('#tpl_site').querySelector(`option[value="${t.site_id}"]`))
+                $('#tpl_site').value = String(t.site_id);
             $('#tpl_version').value = t.version || 1;
             const aft = t.allow_free_text_client_site;
             $('#tpl_allow_free_text').checked = aft === 1 || aft === true || aft === '1';
@@ -385,7 +478,7 @@
             body.innerHTML = '';
 
             if (!list.length) {
-                body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No fields yet.</td></tr>';
+                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No fields yet.</td></tr>';
                 return;
             }
 
@@ -401,7 +494,8 @@
                         .map(v => `<option value="${v}" ${f.type === v ? 'selected' : ''}>${v}</option>`).join('')}
           </select>
         </td>
-        <td><input class="form-control form-control-sm js" data-field="name" value="${esc(f.name)}"></td>
+        <td class="small text-muted js-map-hint" style="max-width:14rem;vertical-align:middle"></td>
+        <td style="vertical-align:middle"><code class="small text-muted js-key-ro">${esc(f.name)}</code></td>
         <td class="text-center">
           <input class="form-check-input js" data-field="required" type="checkbox" ${f.required ? 'checked' : ''}>
         </td>
@@ -415,18 +509,25 @@
                 body.appendChild(trMain);
                 body.appendChild(trOpts);
                 syncOptsVisibility(trMain, trOpts);
-                trMain.querySelector('[data-field="type"]').addEventListener('change', () => syncOptsVisibility(trMain, trOpts));
+                updateMapHint(trMain);
+                trMain.querySelector('[data-field="type"]').addEventListener('change', () => {
+                    syncOptsVisibility(trMain, trOpts);
+                    updateMapHint(trMain);
+                });
 
                 trMain.querySelector('.js-save').addEventListener('click', async () => {
                     try {
-                        const payload = collectRow(trMain, trOpts, f);
+                        const payload = collectRow(trMain, trOpts);
                         const r2 = await fetch(fieldUpdateUrl(f.id), {
                             method: 'PUT',
                             headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'PUT'),
                             body: JSON.stringify(payload)
                         });
                         if (!r2.ok) alert('Save failed');
-                        else alert('Saved');
+                        else {
+                            alert('Saved');
+                            loadFields();
+                        }
                     } catch (e) {
                         alert(e.message || String(e));
                     }
@@ -460,9 +561,9 @@
         });
 
         document.getElementById('btnSaveTpl').addEventListener('click', async () => {
-            const c = ($('#tpl_client_id').value || '').trim();
-            const s = ($('#tpl_site_id').value || '').trim();
-            const j = ($('#tpl_job_type_id').value || '').trim();
+            const c = ($('#tpl_client').value || '').trim();
+            const s = ($('#tpl_site').value || '').trim();
+            const j = ($('#tpl_job_type').value || '').trim();
             const payload = {
                 name: $('#tpl_name').value || '',
                 job_type_id: j ? parseInt(j, 10) : null,

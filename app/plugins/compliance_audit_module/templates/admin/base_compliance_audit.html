@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  {% set _site = session.get('site_settings') if session.get('site_settings') is mapping else {} %}
+  <title>{% block page_title %}Compliance audit{% endblock %} — {{ _site.get('company_name') or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% include 'partials/sparrow_csrf_head.html' %}
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <style>
+    body {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #121212 !important;
+        color: #ffffff !important;
+      {% elif config.theme_settings.theme == 'modern' %}
+        background-color: #f0f2f5 !important;
+        color: #212529 !important;
+      {% else %}
+        background-color: #f8f9fa !important;
+        color: #212529 !important;
+      {% endif %}
+    }
+    {% include 'partials/sparrow_admin_nav_styles.html' %}
+    * { box-sizing: border-box; }
+    .ca-main { padding: 1.5rem; max-width: 1600px; margin: 0 auto; }
+    .ca-main .card {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #1e1e1e !important; color: #fff !important; border: 1px solid #444 !important;
+      {% else %}
+        background-color: #fff !important; color: #212529 !important; border: 1px solid #dee2e6 !important;
+      {% endif %}
+    }
+    .ca-main .table { color: inherit; }
+    .ca-main .table-hover tbody tr:hover {
+      {% if config.theme_settings.theme == 'dark' %} background: rgba(255,255,255,0.06); {% else %} background: rgba(0,0,0,0.04); {% endif %}
+    }
+    .ca-main .form-control:not([type="checkbox"]):not([type="radio"]),
+    .ca-main .form-select {
+      {% if config.theme_settings.theme == 'dark' %}
+        background-color: #1f1f1f !important; color: #fff !important; border: 1px solid #444 !important;
+      {% else %}
+        background-color: #fff !important; color: #212529 !important; border: 1px solid #ced4da !important;
+      {% endif %}
+    }
+    .ca-main .btn-primary {
+      background-color: {% if config.theme_settings.theme == 'dark' %}#1e90ff{% else %}#0d6efd{% endif %} !important;
+      border-color: {% if config.theme_settings.theme == 'dark' %}#1e90ff{% else %}#0d6efd{% endif %} !important;
+    }
+    .badge-inspection { background: #6f42c1; }
+    .ca-subnav .dropdown-menu {
+      font-size: 0.9rem;
+      min-width: 14rem;
+    }
+    .ca-subnav .dropdown-header {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      color: #6c757d;
+    }
+    .ca-subnav .dropdown-item small {
+      display: block;
+      line-height: 1.2;
+      margin-top: 0.15rem;
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% include 'partials/sparrow_admin_top_nav.html' %}
+  {% set ca_ep_reports = (
+    'compliance_audit_internal.dspt_checklist',
+    'compliance_audit_internal.governance_evidence_packs',
+    'compliance_audit_internal.gap_report',
+    'compliance_audit_internal.trust_board_pack',
+    'compliance_audit_internal.export_log',
+    'compliance_audit_internal.scheduled_admin',
+  ) %}
+  {% set ca_ep_evidence = (
+    'compliance_audit_internal.ediscovery',
+    'compliance_audit_internal.siem_dashboard',
+  ) %}
+  <nav class="nav-module erp-module-subnav border-bottom py-2 px-3 ca-subnav">
+    <div class="container-fluid px-3">
+      <div class="d-flex flex-wrap align-items-center gap-1">
+        <a class="nav-link {% if request.endpoint == 'compliance_audit_internal.dashboard' %}active{% endif %}" href="{{ url_for('compliance_audit_internal.dashboard') }}"><i class="bi bi-shield-check me-1"></i>Overview</a>
+        <a class="nav-link {% if request.endpoint == 'compliance_audit_internal.timeline' %}active{% endif %}" href="{{ url_for('compliance_audit_internal.timeline') }}"><i class="bi bi-clock-history me-1"></i>Timeline</a>
+        {% if can_export|default(false) %}
+        <a class="nav-link {% if request.endpoint == 'compliance_audit_internal.export_wizard' %}active{% endif %}" href="{{ url_for('compliance_audit_internal.export_wizard') }}"><i class="bi bi-download me-1"></i>Export</a>
+        {% endif %}
+        <div class="dropdown">
+          <a class="nav-link dropdown-toggle {% if request.endpoint in ca_ep_reports %}active{% endif %}" href="#" id="caNavReports" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">Reports &amp; assurance</a>
+          <ul class="dropdown-menu" aria-labelledby="caNavReports">
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.dspt_checklist') }}">NHS data security (DSPT)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.governance_evidence_packs') }}">Governance assurance</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.gap_report') }}">Gap report</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.trust_board_pack') }}">Trust board pack</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.export_log') }}">Export log</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.scheduled_admin') }}">Scheduled exports</a></li>
+          </ul>
+        </div>
+        <div class="dropdown">
+          <a class="nav-link dropdown-toggle {% if request.endpoint in ca_ep_evidence %}active{% endif %}" href="#" id="caNavEvidence" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">Evidence &amp; technical</a>
+          <ul class="dropdown-menu" aria-labelledby="caNavEvidence">
+            <li><h6 class="dropdown-header">Legal / exhibit workflow</h6></li>
+            <li><a class="dropdown-item" href="{{ url_for('compliance_audit_internal.ediscovery') }}">eDiscovery matters</a></li>
+            <li><h6 class="dropdown-header">IT / integrations</h6></li>
+            <li>
+              <a class="dropdown-item" href="{{ url_for('compliance_audit_internal.siem_dashboard') }}">
+                Monitoring &amp; SIEM APIs
+                <small class="text-muted">Optional aggregates and JSON feeds for security tooling</small>
+              </a>
+            </li>
+          </ul>
+        </div>
+        {% if inspection_mode|default(false) %}
+        <span class="badge badge-inspection ms-2 align-self-center">Inspection</span>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+  <main class="ca-main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.js"></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

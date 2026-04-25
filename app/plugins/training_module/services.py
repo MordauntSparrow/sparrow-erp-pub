@@ -901,6 +901,25 @@ class TrainingService:
     # Courses / admin CRUD
     # ------------------------------------------------------------------
     @staticmethod
+    def list_comp_policies_for_course_select() -> List[Dict[str, Any]]:
+        """Optional Compliance policies for course linkage (no raw policy id typing)."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SHOW TABLES LIKE 'comp_policies'")
+            if not cur.fetchone():
+                return []
+            cur.execute(
+                "SELECT id, title FROM comp_policies ORDER BY title ASC LIMIT 500"
+            )
+            return cur.fetchall() or []
+        except Exception:
+            return []
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
     def list_courses(active_only: bool = False) -> List[Dict[str, Any]]:
         if not TrainingService._trn_tables_exist():
             return []

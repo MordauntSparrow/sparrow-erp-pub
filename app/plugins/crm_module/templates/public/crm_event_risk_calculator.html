@@ -1,167 +1,336 @@
 {% extends "public/crm_public_base.html" %}
 {% block crm_public_title %}{% if industry_visible('medical') %}Event medical risk guide &amp; enquiry{% else %}Event enquiry{% endif %}{% endblock %}
+{% block crm_public_head %}
+<style>
+  /* Wider canvas so the enquiry column is not dwarfed by the live panel column */
+  @media (min-width: 992px) {
+    body.crm-public .container.py-4 { max-width: min(100%, 1120px) !important; }
+  }
+</style>
+{% endblock %}
 {% block crm_public_body %}
 {% set fv = form_values or {} %}
-<div class="crm-pu-hero p-4 p-md-5 mb-4">
+<div class="crm-pu-hero p-4 p-md-5 mb-3">
   <p class="crm-pu-pill mb-2">For professional event organisers</p>
   {% if industry_visible('medical') %}
-  <h1 class="h2 fw-bold mb-3">Event medical risk guide &amp; enquiry</h1>
-  <p class="mb-0 opacity-90 lead">
-    This guide follows <strong>Purple Guide</strong>–style tiering and an indicative <strong>HSE-style planning score</strong> (not a licensed medical needs assessment).
-    It highlights <strong>CQC</strong> themes for patient-transport ambulances and why ambulances must not replace a proper medical post.
-    A formal <strong>medical needs assessment</strong> and <strong>event medical plan</strong> are still required before binding cover and pricing.
+  <h1 class="h2 fw-bold mb-3">Event medical enquiry</h1>
+  <p class="mb-2 opacity-90 lead">
+    Three short steps below. You will see a <strong>live planning score</strong> and <strong>indicative tier</strong> (Purple Guide style). This is not a medical needs assessment or a quote.
+  </p>
+  <p class="mb-0 small opacity-85">
+    Your council or SAG may still want a written plan before cover is agreed. Legal context (CQC, HSE themes) stays in the foldout under this page if you need it.
   </p>
   {% else %}
   <h1 class="h2 fw-bold mb-3">Event planning enquiry</h1>
   <p class="mb-0 opacity-90 lead">
-    Tell us about your event and contact details. We use risk factors (not attendance alone) for indicative resourcing hints.
-    A formal quote follows agreed scope and your organisation’s pricing rules.
+    Three short steps. We use your answers for indicative resourcing, not attendance alone. A formal quote follows agreed scope.
   </p>
   {% endif %}
 </div>
 
 {% if industry_visible('medical') %}
-<div class="crm-pu-card p-4 mb-4">
-  <h2 class="h5 fw-bold mb-3">Compliance context (UK — indicative)</h2>
-  <ul class="small ps-3 mb-3">
-    <li class="mb-2"><strong>CQC:</strong> Vehicles used to transport patients to hospital are regulated; providers offering ambulances for transfers should be appropriately registered where the law applies.</li>
-    <li class="mb-2"><strong>HSE / Purple Guide themes:</strong> Ambulances should not be used as the main treatment area — plan a dedicated first aid / medical post so vehicles stay available for emergencies and transfers.</li>
-    <li class="mb-0"><strong>Tiering:</strong> Tiers 1–5 summarise typical expectations from published event-medical tier guidance (duration, crowd, alcohol/drugs, activity risk, transfers). Your SAG or licensing authority may expect a written MNA.</li>
-  </ul>
-  <p class="small text-muted mb-0">Numbers below are a planning aid only — not clinical advice, not a substitute for your own risk assessment, insurer, or medical director sign-off.</p>
-</div>
+<details class="crm-pu-card crm-pu-compliance mb-4">
+  <summary class="d-flex align-items-center justify-content-between gap-2 px-4 py-3">
+    <span class="fw-semibold text-dark mb-0">UK compliance context <span class="fw-normal text-muted small">(CQC, HSE / Purple Guide themes, indicative)</span></span>
+    <i class="bi bi-chevron-down crm-pu-chev text-primary flex-shrink-0" aria-hidden="true"></i>
+  </summary>
+  <div class="px-4 pb-4 pt-0 border-top border-light mt-0">
+    <ul class="small ps-3 mb-3 pt-3">
+      <li class="mb-2"><strong>CQC:</strong> Vehicles used to transport patients to hospital are regulated; providers offering ambulances for transfers should be appropriately registered where the law applies.</li>
+      <li class="mb-2"><strong>HSE / Purple Guide themes:</strong> Ambulances are not the main treatment area. Plan a proper medical post so vehicles stay free for emergencies and transfers.</li>
+      <li class="mb-0"><strong>Tiering:</strong> Tiers 1–5 summarise typical expectations from published event-medical tier guidance (duration, crowd, alcohol/drugs, activity risk, transfers). Your SAG or licensing authority may expect a written MNA.</li>
+    </ul>
+    <p class="small text-muted mb-0">Numbers here are a planning aid only. They are not clinical advice and do not replace your risk assessment, insurer, or medical sign off.</p>
+  </div>
+</details>
 {% endif %}
 
-<div class="row g-4">
-  <div class="col-lg-5 order-lg-2">
-    <div class="crm-pu-card p-4 mb-4">
-      <h2 class="h5 fw-bold mb-3"><i class="bi bi-signpost-2 me-2 text-primary"></i>How this helps</h2>
-      <ul class="small crm-pu-guide ps-3 mb-0">
-        <li>Structures crowd size, duration, venue, activity risk, alcohol/drugs, and transfer expectations.</li>
-        <li>Produces a <strong>planning score</strong> mapped to an indicative <strong>conversion table</strong> (first responders, ambulances, clinical grades — industry-style).</li>
-        {% if industry_visible('medical') %}
-        <li>Surfaces <strong>tier 1–5</strong> narrative aligned with common Purple Guide tier descriptions.</li>
-        <li>Builds a pipeline card for our team; final fees follow formal MNA and plan.</li>
-        {% else %}
-        <li>Builds a pipeline card for our team for follow-up.</li>
-        {% endif %}
-      </ul>
+<div class="row g-4 align-items-start">
+  {# Mobile: live score first, then form, then explainer. Desktop: form left (wider), sticky live panel right (narrower). Long copy in collapsible details. #}
+  <div class="col-12 col-lg-4 order-1 order-lg-2">
+    <div class="crm-pu-live-sticky">
+      <div class="crm-pu-card p-4 border border-2 border-primary border-opacity-25 shadow-sm mb-3 mb-lg-0" id="liveRiskPanel">
+        <h3 class="h6 fw-bold text-uppercase text-muted mb-2"><i class="bi bi-speedometer2 me-1"></i>Live result</h3>
+        <p class="display-5 fw-bold mb-0 text-primary lh-1" id="purpleScoreVal">—</p>
+        <p class="small text-muted mt-2 mb-2">Planning score (0 to 100+). It moves with crowd size, duration, venue, programme risk, alcohol and drugs, transfers, and the optional details you open below.</p>
+        <p class="fw-semibold mb-1"><span id="riskTierBandLine" class="text-primary">Enter attendance to begin.</span></p>
+        <p class="small text-muted mb-2" id="tierLine">—</p>
+        <p class="small text-muted mb-2" id="riskBandHint">Add your expected numbers on step 2 to see tier and rough team size.</p>
+        <div id="conversionBandPanel" class="mt-3 pt-3 border-top border-primary border-opacity-25 d-none">
+          <h4 class="h6 fw-bold text-uppercase mb-2" style="color: var(--crm-pu-mid);">Indicative tier snapshot</h4>
+          <p class="small fw-semibold mb-1" id="conversionBandRange">—</p>
+          <p class="small text-muted mb-2" id="conversionBandBlurb"></p>
+          <div id="crmPuNumericMatrixWrap" class="d-none">
+            <p class="small fw-semibold mb-1">Typical headcount hint <span class="fw-normal text-muted">(not a quote)</span></p>
+            <div class="table-responsive border rounded mb-2 bg-white bg-opacity-10">
+              <table class="table table-sm table-borderless mb-0" id="crmPuNumericMatrix">
+                <thead>
+                  <tr class="border-bottom border-light">
+                    <th class="small text-muted ps-3 py-2">Role / resource</th>
+                    <th class="small text-muted text-end pe-3 py-2">Indicative #</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="small text-muted mb-2" id="crmPuMatrixFoot"></p>
+          </div>
+          <details class="small mb-0" id="crmPuTierNarrative">
+            <summary class="fw-semibold text-body mb-2" style="cursor:pointer;">What this tier usually covers <span class="fw-normal text-muted">(from the Guide)</span></summary>
+            <ul class="small mb-0 ps-0 list-unstyled text-muted" id="conversionBandList"></ul>
+          </details>
+        </div>
+      </div>
+      <div class="d-none d-lg-block mt-3">
+        <details class="crm-pu-card crm-pu-compliance mb-3 border border-2 border-light border-opacity-50">
+          <summary class="d-flex align-items-center justify-content-between gap-2 px-3 py-2">
+            <span class="fw-semibold text-dark mb-0 small">What you get <span class="fw-normal text-muted">(tier &amp; headcount)</span></span>
+            <i class="bi bi-chevron-down crm-pu-chev text-primary flex-shrink-0" aria-hidden="true"></i>
+          </summary>
+          <div class="px-3 pb-3 pt-0 border-top border-light mt-0">
+            <ul class="small crm-pu-guide ps-3 mb-0 pt-2">
+              <li>A tier (1 to 5) and rough team size that track <strong>both</strong> crowd size and risk, aligned with <cite>The Purple Guide</cite> (EIF).</li>
+              {% if industry_visible('medical') %}
+              <li>Enough to talk to a provider or council early. Binding cover still comes from your medical plan and SAG.</li>
+              {% else %}
+              <li>Enough for our team to call you back with next steps.</li>
+              {% endif %}
+            </ul>
+          </div>
+        </details>
+        {% with theme='public' %}
+        {% include 'partials/crm_medical_planning_process.html' %}
+        {% endwith %}
+      </div>
     </div>
+  </div>
+  <div class="col-12 col-lg-8 order-2 order-lg-1">
+    <div class="crm-pu-card p-4 p-md-4">
+      <h2 class="h5 fw-bold mb-2">Your enquiry</h2>
+      <p class="small text-muted mb-3">Use <strong>Next</strong> to move on. You can go back and change answers any time. The live panel updates whenever you leave a field.</p>
+      <form method="post" action="{{ url_for('crm_public.public_event_risk_calculator') }}" id="crmRiskForm"
+            data-initial-step="{% if fv.get('organisation_name') and fv.get('expected_attendees') %}3{% elif fv.get('organisation_name') %}2{% else %}1{% endif %}">
+        <noscript>
+          <style>#crmCalcStepper,#crmCalcNext1,#crmCalcBack2,#crmCalcNext2,#crmCalcBack3{display:none!important}.crm-calc-step-panel.d-none{display:block!important}</style>
+        </noscript>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3 small fw-semibold" id="crmCalcStepper" aria-label="Form steps">
+          <span class="badge rounded-pill bg-primary crm-step-pill px-3 py-2" data-step-indicator="1">1. Contact</span>
+          <span class="badge rounded-pill bg-secondary bg-opacity-50 text-dark crm-step-pill px-3 py-2" data-step-indicator="2">2. Crowd</span>
+          <span class="badge rounded-pill bg-secondary bg-opacity-50 text-dark crm-step-pill px-3 py-2" data-step-indicator="3">3. Risk &amp; send</span>
+        </div>
+        <div class="row g-3">
+          <div class="crm-calc-step-panel col-12" data-step="1">
+            <p class="small text-uppercase text-muted fw-bold mb-2">Step 1</p>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
+                <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255"
+                       value="{{ fv.get('organisation_name', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="contact_name">Your name <span class="text-danger">*</span></label>
+                <input class="form-control" id="contact_name" name="contact_name" required maxlength="255"
+                       value="{{ fv.get('contact_name', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+                <input class="form-control" type="email" id="email" name="email" required maxlength="255"
+                       value="{{ fv.get('email', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="phone">Phone</label>
+                <input class="form-control" id="phone" name="phone" maxlength="64" value="{{ fv.get('phone', '') }}">
+              </div>
+              <div class="col-12">
+                <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
+                <input class="form-control" id="event_name" name="event_name" required maxlength="255"
+                       value="{{ fv.get('event_name', '') }}">
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button type="button" class="btn btn-crm-pu rounded-pill px-4" id="crmCalcNext1">Next</button>
+            </div>
+          </div>
+          <div class="crm-calc-step-panel col-12 d-none" data-step="2">
+            <p class="small text-uppercase text-muted fw-bold mb-2">Step 2</p>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" for="expected_attendees">Expected peak attendance</label>
+                <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees"
+                       value="{{ fv.get('expected_attendees', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="duration_hours">Hours medics on site</label>
+                <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours"
+                       value="{{ fv.get('duration_hours', '6') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="venue_type">Venue</label>
+                <select class="form-select" id="venue_type" name="venue_type">
+                  {% set vt = fv.get('venue_type', 'indoor') %}
+                  <option value="indoor" {% if vt == 'indoor' %}selected{% endif %}>Indoor</option>
+                  <option value="outdoor" {% if vt == 'outdoor' %}selected{% endif %}>Outdoor</option>
+                  <option value="both" {% if vt == 'both' %}selected{% endif %}>Mixed indoor / outdoor</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="crowd_profile">Crowd profile</label>
+                <select class="form-select" id="crowd_profile" name="crowd_profile">
+                  {% set cp = fv.get('crowd_profile', 'mixed') %}
+                  <option value="family" {% if cp == 'family' %}selected{% endif %}>Family / daytime</option>
+                  <option value="mixed" {% if cp == 'mixed' %}selected{% endif %}>Mixed general public</option>
+                  <option value="young_adult" {% if cp == 'young_adult' %}selected{% endif %}>Young adult / evening-led</option>
+                </select>
+              </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button type="button" class="btn btn-outline-secondary rounded-pill px-3" id="crmCalcBack2">Back</button>
+              <button type="button" class="btn btn-crm-pu rounded-pill px-4" id="crmCalcNext2">Next</button>
+            </div>
+          </div>
+          <div class="crm-calc-step-panel col-12 d-none" data-step="3">
+            <p class="small text-uppercase text-muted fw-bold mb-2">Step 3</p>
+            <div class="row g-3 w-100 m-0">
+            {% include 'partials/crm_event_calculator_fields.html' %}
+            <div class="col-12">
+              <label class="form-label" for="message">Anything else?</label>
+              <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000">{{ fv.get('message', '') }}</textarea>
+            </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+              <button type="button" class="btn btn-outline-secondary rounded-pill px-3" id="crmCalcBack3">Back</button>
+              <button type="submit" class="btn btn-lg btn-crm-pu rounded-pill px-4"><i class="bi bi-send me-2"></i>Send enquiry</button>
+              <a class="btn btn-lg btn-outline-dark rounded-pill px-3 border-0 align-self-center" style="background:rgba(255,255,255,.15);color:#fff;" href="{{ url_for('crm_public.public_quoting_landing') }}">Start over</a>
+            </div>
+            <p class="small text-muted mt-3 mb-0">By sending, you agree we may contact you about this event. See our privacy notice for how we use data.</p>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="col-12 order-3 d-lg-none">
+    <details class="crm-pu-card crm-pu-compliance mb-3 border border-2 border-light border-opacity-50">
+      <summary class="d-flex align-items-center justify-content-between gap-2 px-4 py-3">
+        <span class="fw-semibold text-dark mb-0">What you get <span class="fw-normal text-muted small">(tier &amp; headcount)</span></span>
+        <i class="bi bi-chevron-down crm-pu-chev text-primary flex-shrink-0" aria-hidden="true"></i>
+      </summary>
+      <div class="px-4 pb-4 pt-0 border-top border-light mt-0">
+        <ul class="small crm-pu-guide ps-3 mb-0 pt-3">
+          <li>A tier (1 to 5) and rough team size that track <strong>both</strong> crowd size and risk, aligned with <cite>The Purple Guide</cite> (EIF).</li>
+          {% if industry_visible('medical') %}
+          <li>Enough to talk to a provider or council early. Binding cover still comes from your medical plan and SAG.</li>
+          {% else %}
+          <li>Enough for our team to call you back with next steps.</li>
+          {% endif %}
+        </ul>
+      </div>
+    </details>
     {% with theme='public' %}
     {% include 'partials/crm_medical_planning_process.html' %}
     {% endwith %}
-    <div class="crm-pu-card p-4 border border-2 border-light mb-3" id="liveRiskPanel">
-      <h3 class="h6 fw-bold text-uppercase text-muted mb-2">Live planning score</h3>
-      <p class="display-6 fw-bold mb-0 text-primary" id="purpleScoreVal">—</p>
-      <p class="small text-muted mt-1 mb-2">Indicative 0–100+ score (maps to conversion bands).</p>
-      <p class="fw-semibold mb-1">Band: <span id="riskBandLabel" class="text-primary">—</span></p>
-      <p class="small text-muted mb-2" id="tierLine">—</p>
-      <p class="small text-muted mb-0" id="riskBandHint">Enter attendance to see a live guide.</p>
-    </div>
-  </div>
-  <div class="col-lg-7 order-lg-1">
-    <div class="crm-pu-card p-4 p-md-4">
-      <h2 class="h5 fw-bold mb-3">Your event &amp; contact</h2>
-      <form method="post" action="{{ url_for('crm_public.public_event_risk_calculator') }}" id="crmRiskForm">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
-            <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255"
-                   value="{{ fv.get('organisation_name', '') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="contact_name">Your name <span class="text-danger">*</span></label>
-            <input class="form-control" id="contact_name" name="contact_name" required maxlength="255"
-                   value="{{ fv.get('contact_name', '') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
-            <input class="form-control" type="email" id="email" name="email" required maxlength="255"
-                   value="{{ fv.get('email', '') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="phone">Phone</label>
-            <input class="form-control" id="phone" name="phone" maxlength="64" value="{{ fv.get('phone', '') }}">
-          </div>
-          <div class="col-12">
-            <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
-            <input class="form-control" id="event_name" name="event_name" required maxlength="255"
-                   value="{{ fv.get('event_name', '') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="expected_attendees">Expected peak attendance</label>
-            <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees"
-                   value="{{ fv.get('expected_attendees', '') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="duration_hours">Hours on site (cover window)</label>
-            <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours"
-                   value="{{ fv.get('duration_hours', '6') }}">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="venue_type">Venue</label>
-            <select class="form-select" id="venue_type" name="venue_type">
-              {% set vt = fv.get('venue_type', 'indoor') %}
-              <option value="indoor" {% if vt == 'indoor' %}selected{% endif %}>Indoor</option>
-              <option value="outdoor" {% if vt == 'outdoor' %}selected{% endif %}>Outdoor</option>
-              <option value="both" {% if vt == 'both' %}selected{% endif %}>Mixed indoor / outdoor</option>
-            </select>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="crowd_profile">Crowd profile</label>
-            <select class="form-select" id="crowd_profile" name="crowd_profile">
-              {% set cp = fv.get('crowd_profile', 'mixed') %}
-              <option value="family" {% if cp == 'family' %}selected{% endif %}>Family / daytime</option>
-              <option value="mixed" {% if cp == 'mixed' %}selected{% endif %}>Mixed general public</option>
-              <option value="young_adult" {% if cp == 'young_adult' %}selected{% endif %}>Young adult / evening-led</option>
-            </select>
-          </div>
-          {% include 'partials/crm_event_calculator_fields.html' %}
-          <div class="col-12">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes"
-                     {% if fv.get('alcohol_served') %}checked{% endif %}>
-              <label class="form-check-label" for="alcohol_served">Alcohol served on site</label>
-            </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="late_finish" name="late_finish" value="yes"
-                     {% if fv.get('late_finish') %}checked{% endif %}>
-              <label class="form-check-label" for="late_finish">Programme runs past 23:00</label>
-            </div>
-          </div>
-          <div class="col-12">
-            <label class="form-label" for="message">Anything else we should know?</label>
-            <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000">{{ fv.get('message', '') }}</textarea>
-          </div>
-        </div>
-        <div class="d-flex flex-wrap gap-2 mt-4">
-          <button type="submit" class="btn btn-lg btn-crm-pu rounded-pill px-4"><i class="bi bi-send me-2"></i>Send enquiry</button>
-          <a class="btn btn-lg btn-outline-dark rounded-pill px-3 border-0" style="background:rgba(255,255,255,.15);color:#fff;" href="{{ url_for('crm_public.public_quoting_landing') }}">Refresh</a>
-        </div>
-        <p class="small text-muted mt-3 mb-0">By submitting, you agree we may contact you about this event. We process data per our privacy notice.</p>
-      </form>
-    </div>
   </div>
 </div>
 {% endblock %}
 {% block crm_public_scripts %}
 <script>
 (function () {
+  var TIER_RESOURCE_ROWS = {{ tier_resource_rows|tojson }};
+  var TMB = {{ tier_medic_base|tojson }};
+  var TVB = {{ tier_vehicle_base|tojson }};
+  var TIER_ROW_BY_NUM = {};
+  (TIER_RESOURCE_ROWS || []).forEach(function (row) {
+    if (row && row.tier) TIER_ROW_BY_NUM[row.tier] = row;
+  });
   var medicalSurface = {{ 'true' if industry_visible('medical') else 'false' }};
   var tierTitles = {
-    1: 'Tier 1 — smallest / simplest',
-    2: 'Tier 2 — local-licensing scale',
-    3: 'Tier 3 — larger / more presentations',
-    4: 'Tier 4 — complex / high attendance',
-    5: 'Tier 5 — mass gathering / highest risk'
+    1: 'Tier 1: smallest / simplest',
+    2: 'Tier 2: local licensing scale',
+    3: 'Tier 3: larger events, more presentations',
+    4: 'Tier 4: complex / high attendance',
+    5: 'Tier 5: mass gathering / highest risk'
   };
-  function tierFromSignals(ps, n, dspan, ar, dr, al, hr) {
-    if (n > 10000 || ps >= 72) return 5;
-    if (n > 5000 || ps >= 58) return 4;
-    if (n > 2000 || ps >= 44 || (dspan === 'multi_day' && (al === 'likely' || al === 'expected' || dr === 'likely' || dr === 'expected')) || hr === 'likely') return 3;
-    if (n > 500 || ps >= 28 || al === 'social' || al === 'likely' || al === 'expected' || ar === 'significant' || ar === 'high') return 2;
-    return 1;
+  function tierFromSignals(ps, n, dspan, ar, dr, al, hr, hdrv, disorder) {
+    var t;
+    if (n > 10000 || ps >= 72) t = 5;
+    else if (n > 5000 || ps >= 58) t = 4;
+    else if (n > 2000 || ps >= 44 || (dspan === 'multi_day' && (al === 'likely' || al === 'expected' || dr === 'likely' || dr === 'expected')) || hr === 'likely') t = 3;
+    else if (n > 500 || ps >= 28 || al === 'social' || al === 'likely' || al === 'expected' || ar === 'significant' || ar === 'high') t = 2;
+    else t = 1;
+    if (hdrv === 'over_30' && (hr === 'possible' || hr === 'likely') && n >= 800) t = Math.max(t, 3);
+    var dis = disorder || 'none';
+    if (dis === 'opposing_factions' && n >= 100) t = Math.max(t, 3);
+    else if (dis === 'high' && n >= 250) t = Math.max(t, 3);
+    else if (dis === 'medium' && n >= 800) t = Math.max(t, 2);
+    return Math.min(5, t);
+  }
+  function tbGet(map, tier) {
+    if (!map) return undefined;
+    var v = map[tier];
+    return v !== undefined && v !== null ? v : map[String(tier)];
+  }
+  function buildStaffingRolesClient(m, band, n) {
+    m = Math.max(0, parseInt(m, 10) || 0);
+    band = Math.max(1, Math.min(5, parseInt(band, 10) || 3));
+    n = Math.max(0, parseInt(n, 10) || 0);
+    if (m === 1) return { solo: 1, lead: 0, als: 0, emt: 0 };
+    if (m < 2) return { solo: 0, lead: 0, als: 0, emt: 0 };
+    var lead = (m >= 3 || band >= 4 || n >= 2500 || (band >= 3 && m >= 2)) ? 1 : 0;
+    var remaining = m - lead;
+    var alsShare = band >= 4 ? 0.45 : (band >= 3 ? 0.38 : 0.28);
+    var alsFloor = (band >= 3 && remaining >= 2) ? 1 : 0;
+    var alsN = Math.max(alsFloor, Math.round(remaining * alsShare));
+    alsN = Math.min(remaining, alsN);
+    var emtN = remaining - alsN;
+    return { solo: 0, lead: lead, als: alsN, emt: emtN };
+  }
+  function doctorCountClient(m, tier, n, band) {
+    if (m <= 1) return 0;
+    if (tier >= 5) return 1;
+    if (tier === 4 && (n >= 2000 || band >= 5)) return 1;
+    if (tier === 3 && n >= 5000) return 1;
+    return 0;
+  }
+  function fillNumericMatrix(r) {
+    var wrap = document.getElementById('crmPuNumericMatrixWrap');
+    var tb = document.querySelector('#crmPuNumericMatrix tbody');
+    var foot = document.getElementById('crmPuMatrixFoot');
+    if (!wrap || !tb) return;
+    tb.innerHTML = '';
+    var sm = r.suggested_medics;
+    var sv = r.suggested_vehicles;
+    var roles = buildStaffingRolesClient(sm, r.band, r.n);
+    var docs = doctorCountClient(sm, r.tier, r.n, r.band);
+    function addRow(cat, cnt, det) {
+      var tr = document.createElement('tr');
+      var td1 = document.createElement('td');
+      td1.className = 'small ps-3 py-1 align-top';
+      td1.textContent = cat;
+      var td2 = document.createElement('td');
+      td2.className = 'small text-end pe-3 py-1 fw-semibold align-top text-nowrap';
+      td2.textContent = String(cnt);
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      tb.appendChild(tr);
+      if (det) {
+        var tr2 = document.createElement('tr');
+        var td = document.createElement('td');
+        td.colSpan = 2;
+        td.className = 'small text-muted ps-3 pe-3 pb-2';
+        td.textContent = det;
+        tr2.appendChild(td);
+        tb.appendChild(tr2);
+      }
+    }
+    if (docs) addRow('Doctors (event physician / roving)', docs, 'Often on larger tiers; on-site vs on-call agreed in your MNA.');
+    if (roles.solo) addRow('Solo clinical cover', roles.solo, 'One paramedic or experienced EMT/technician. Confirm ALS vs EMT for your profile.');
+    var pt = roles.lead + roles.als;
+    if (pt) addRow('Paramedics / ALS (incl. clinical lead)', pt, 'Clinical lead: ' + roles.lead + '; further ALS/paramedic posts: ' + roles.als + '.');
+    if (roles.emt) addRow('EMTs / technicians / first responders', roles.emt, 'Patrols, walking wounded, support to ALS posts.');
+    addRow('Crewed ambulances (A&E transfer)', sv, 'So on-site care continues while vehicles are on a run.');
+    addRow('Ambulance crew roles (typical)', sv * 2, 'Often driver + clinician per vehicle; rotas may overlap with on-foot posts.');
+    wrap.classList.remove('d-none');
+    if (foot) foot.textContent = 'Final posts and vehicles are set in your medical needs assessment with your provider and SAG, not by this page alone.';
   }
   function purpleScore() {
     var n = parseInt(document.getElementById('expected_attendees').value, 10) || 0;
@@ -169,8 +338,7 @@
     hours = Math.max(1, Math.min(72, hours));
     var vt = document.getElementById('venue_type').value;
     var outdoor = vt === 'outdoor' || vt === 'both';
-    var alcoholChk = document.getElementById('alcohol_served').checked;
-    var late = document.getElementById('late_finish').checked;
+    var late = (document.getElementById('late_finish') || {}).checked;
     var cp = document.getElementById('crowd_profile').value;
     var ar = (document.getElementById('activity_risk') || {}).value || 'moderate';
     var dr = (document.getElementById('drug_risk') || {}).value || 'none';
@@ -181,9 +349,7 @@
       else if (hours <= 24) dspan = 'single_day';
       else dspan = 'multi_day';
     }
-    var alSel = (document.getElementById('alcohol_level') || {}).value || '';
-    var al = alSel;
-    if (!al) al = alcoholChk ? 'social' : 'none';
+    var al = (document.getElementById('alcohol_level') || {}).value || 'none';
     var hrSel = (document.getElementById('hospital_referrals') || {}).value || '';
     var hr = hrSel;
     if (!hr) {
@@ -191,6 +357,15 @@
       else if (n >= 2000) hr = 'possible';
       else hr = 'unlikely';
     }
+    var hdrvEl = document.getElementById('hospital_drive_band');
+    var hdrv = (hdrvEl && hdrvEl.value) ? hdrvEl.value : 'unknown';
+    if (!hdrv) hdrv = 'unknown';
+    var posture = (document.getElementById('audience_posture') || {}).value || 'unknown';
+    var disorder = (document.getElementById('disorder_risk') || {}).value || 'none';
+    var casualty = (document.getElementById('casualty_history') || {}).value || 'unknown';
+    var dwell = (document.getElementById('audience_dwell') || {}).value || 'unknown';
+    var season = (document.getElementById('season') || {}).value || 'unknown';
+    var defcare = (document.getElementById('definitive_care') || {}).value || 'unknown';
     var ps = 0;
     if (n >= 10000) ps += 34;
     else if (n >= 5000) ps += 28;
@@ -215,8 +390,58 @@
     if (cp === 'young_adult') ps += 7;
     if (hr === 'likely') ps += 16;
     else if (hr === 'possible') ps += 8;
+    if (hdrv === 'over_30') {
+      ps += 10;
+      if (hr === 'possible' || hr === 'likely') ps += 8;
+    } else if (hdrv === '15_30') {
+      ps += 6;
+      if (hr === 'likely') ps += 4;
+    }
+    if (posture === 'standing') ps += 8;
+    else if (posture === 'mixed') ps += 4;
+    if (disorder === 'opposing_factions') ps += 22;
+    else if (disorder === 'high') ps += 16;
+    else if (disorder === 'medium') ps += 10;
+    else if (disorder === 'low') ps += 3;
+    if (casualty === 'first_event') ps += 8;
+    else if (casualty === 'high_rate') ps += 12;
+    else if (casualty === 'medium_rate') ps += 5;
+    if (dwell === 'over_12h') {
+      if (hours < 11) ps += 12;
+      else if (hours < 20) ps += 5;
+    } else if (dwell === 'over_4h') {
+      if (hours < 8) ps += 6;
+      else if (hours < 12) ps += 3;
+    }
+    if (season === 'winter' && outdoor) ps += 8;
+    else if (season === 'winter') ps += 3;
+    else if (season === 'summer' && outdoor) ps += 6;
+    else if (season === 'summer') ps += 2;
+    if (defcare === 'small_ae') ps += 8;
+    var hzList = [];
+    document.querySelectorAll('input[name="additional_hazards"]:checked').forEach(function (el) {
+      if (el.value) hzList.push(el.value);
+    });
+    var hzPurple = { carnival: 4, parachute_display: 6, helicopters: 6, street_theatre: 3, motor_sport: 5 };
+    var hzSum = 0;
+    hzList.forEach(function (hx) {
+      var w = hzPurple[hx] || 0;
+      if (hx === 'motor_sport' && (ar === 'high' || ar === 'significant')) w = Math.min(w, 2);
+      hzSum += w;
+    });
+    hzSum = Math.min(hzSum, 16);
+    ps += hzSum;
+    var fcList = [];
+    document.querySelectorAll('input[name="on_site_facilities"]:checked').forEach(function (el) {
+      if (el.value) fcList.push(el.value);
+    });
+    var fcPurple = { suturing: 5, plastering: 4, xray: 9, psych_gp: 6, minor_surgery: 9 };
+    var fcSum = 0;
+    fcList.forEach(function (fx) { fcSum += fcPurple[fx] || 0; });
+    fcSum = Math.min(fcSum, 22);
+    ps += fcSum;
     ps = Math.max(0, Math.min(120, Math.round(ps)));
-    var tier = tierFromSignals(ps, n, dspan, ar, dr, al, hr);
+    var tier = tierFromSignals(ps, n, dspan, ar, dr, al, hr, hdrv, disorder);
     var s = 1;
     if (n >= 5000) s += 1.2;
     else if (n >= 1500) s += 0.7;
@@ -224,7 +449,7 @@
     if (hours >= 10) s += 0.5;
     else if (hours >= 6) s += 0.25;
     if (outdoor) s += 0.45;
-    if (alcoholChk) s += 0.55;
+    if (al !== 'none') s += 0.55;
     if (late) s += 0.4;
     if (cp === 'young_adult') s += 0.35;
     if (ar === 'high') s += 0.38;
@@ -237,42 +462,201 @@
     else if (dspan === 'few_hours') s -= 0.04;
     if (hr === 'likely') s += 0.28;
     else if (hr === 'possible') s += 0.12;
+    if (hdrv === 'over_30') s += 0.2;
+    else if (hdrv === '15_30') s += 0.1;
+    if (posture === 'standing') s += 0.12;
+    else if (posture === 'mixed') s += 0.06;
+    if (disorder === 'opposing_factions') s += 0.32;
+    else if (disorder === 'high') s += 0.22;
+    else if (disorder === 'medium') s += 0.12;
+    else if (disorder === 'low') s += 0.04;
+    if (casualty === 'first_event') s += 0.1;
+    else if (casualty === 'high_rate') s += 0.14;
+    else if (casualty === 'medium_rate') s += 0.06;
+    if (dwell === 'over_12h') {
+      if (hours < 11) s += 0.15;
+      else if (hours < 20) s += 0.06;
+    } else if (dwell === 'over_4h') {
+      if (hours < 8) s += 0.08;
+      else if (hours < 12) s += 0.04;
+    }
+    if (season === 'winter' && outdoor) s += 0.12;
+    else if (season === 'winter') s += 0.04;
+    else if (season === 'summer' && outdoor) s += 0.1;
+    else if (season === 'summer') s += 0.03;
+    if (defcare === 'small_ae') s += 0.1;
+    var hzInner = { carnival: 0.05, parachute_display: 0.07, helicopters: 0.07, street_theatre: 0.04, motor_sport: 0.06 };
+    var hzInnerSum = 0;
+    hzList.forEach(function (hx) {
+      var w = hzInner[hx] || 0;
+      if (hx === 'motor_sport' && (ar === 'high' || ar === 'significant')) w = Math.min(w, 0.03);
+      hzInnerSum += w;
+    });
+    s += Math.min(hzInnerSum, 0.22);
+    var fcInner = { suturing: 0.06, plastering: 0.05, xray: 0.11, psych_gp: 0.07, minor_surgery: 0.11 };
+    var fcInnerSum = 0;
+    fcList.forEach(function (fx) { fcInnerSum += fcInner[fx] || 0; });
+    s += Math.min(fcInnerSum, 0.28);
     s = Math.max(1, Math.min(5, s));
-    var band = Math.round(s);
-    var labels = {1:'Low',2:'Low–moderate',3:'Moderate',4:'Elevated',5:'High'};
-    var medics = Math.max(band >= 3 ? 2 : 1, Math.ceil(n / 2500) || 1, Math.ceil(band * 1.5));
-    return { purple: ps, band: band, label: labels[band] || 'Moderate', medics: medics, tier: tier };
+    var innerBand = Math.round(s);
+    var band = Math.min(5, Math.max(innerBand, tier));
+    var labels = {1:'Low',2:'Low / moderate',3:'Moderate',4:'Elevated',5:'High'};
+    var tierBase = tbGet(TMB, tier);
+    if (tierBase == null) tierBase = 4;
+    var crowdLift = n > 0 ? Math.ceil(n / 4000) : 0;
+    var suggested_medics = Math.max(tierBase, tierBase + crowdLift - 1, Math.ceil(band * 1.2));
+    suggested_medics = Math.min(suggested_medics, 56);
+    var tvb = tbGet(TVB, tier);
+    if (tvb == null) tvb = 1;
+    var suggested_vehicles = Math.max(tvb, Math.min(10, 1 + Math.ceil(n / 12000)));
+    return {
+      purple: ps,
+      band: band,
+      label: labels[band] || 'Moderate',
+      tier: tier,
+      n: n,
+      suggested_medics: suggested_medics,
+      suggested_vehicles: suggested_vehicles
+    };
+  }
+  function rowForTier(tier) {
+    var t = Math.max(1, Math.min(5, parseInt(tier, 10) || 1));
+    return TIER_ROW_BY_NUM[t] || null;
+  }
+  function liaisonLabel(v) {
+    if (v === 'VISIT' || v === 'visit') return 'Visit / liaison (where applicable)';
+    return String(v);
+  }
+  function fillConversionPanel(r) {
+    var panel = document.getElementById('conversionBandPanel');
+    var rangeEl = document.getElementById('conversionBandRange');
+    var listEl = document.getElementById('conversionBandList');
+    var blurb = document.getElementById('conversionBandBlurb');
+    if (!panel || !r) {
+      if (panel) panel.classList.add('d-none');
+      var mw = document.getElementById('crmPuNumericMatrixWrap');
+      if (mw) mw.classList.add('d-none');
+      return;
+    }
+    var cr = rowForTier(r.tier);
+    if (!cr) {
+      panel.classList.add('d-none');
+      return;
+    }
+    panel.classList.remove('d-none');
+    rangeEl.textContent = (cr.score_range || ('Tier ' + r.tier)) + ' · planning score ' + String(r.purple);
+    fillNumericMatrix(r);
+    if (blurb) {
+      blurb.textContent = medicalSurface
+        ? 'Rough headcount only. Your medical plan and SAG set real cover.'
+        : 'Rough headcount only. Your provider confirms scope and price.';
+    }
+    var items = [
+      ['On-site medical / first-response provision', cr.first_responder],
+      ['Ambulances (patient transfer)', String(cr.ambulances) + (cr.ambulance_crew && cr.ambulance_crew !== '—' ? ' · crew: ' + String(cr.ambulance_crew) : '')],
+      ['Doctors', cr.doctor],
+      ['Nurses / paramedics', cr.nurse],
+      ['NHS ambulance liaison', liaisonLabel(cr.nhs_ambulance_manager)],
+      ['Support / coordination', cr.support_unit]
+    ];
+    listEl.innerHTML = '';
+    items.forEach(function (pair) {
+      var li = document.createElement('li');
+      li.className = 'mb-3';
+      var lab = document.createElement('div');
+      lab.className = 'small fw-semibold text-body';
+      lab.textContent = pair[0];
+      var val = document.createElement('div');
+      val.className = 'small text-muted';
+      val.textContent = pair[1];
+      li.appendChild(lab);
+      li.appendChild(val);
+      listEl.appendChild(li);
+    });
   }
   function refresh() {
-    var el = document.getElementById('riskBandLabel');
+    var lineEl = document.getElementById('riskTierBandLine');
     var hint = document.getElementById('riskBandHint');
     var psEl = document.getElementById('purpleScoreVal');
     var tierEl = document.getElementById('tierLine');
     var n = parseInt(document.getElementById('expected_attendees').value, 10);
     if (!n && n !== 0) {
-      el.textContent = '—';
+      if (lineEl) lineEl.textContent = 'Add step 2 (crowd size) to see tier and score.';
       psEl.textContent = '—';
       tierEl.textContent = '—';
-      hint.textContent = 'Enter attendance to see a live guide.';
+      hint.textContent = 'The panel updates as you fill the form.';
+      fillConversionPanel(null);
       return;
     }
     var r = purpleScore();
     psEl.textContent = String(r.purple);
-    el.textContent = r.label;
+    if (lineEl) lineEl.textContent = 'Tier ' + r.tier + ' · ' + r.label;
     tierEl.textContent = tierTitles[r.tier] || ('Tier ' + r.tier);
     if (medicalSurface) {
-      hint.textContent = 'Indicative medic team size (pre-assessment only): ~' + r.medics + ' — subject to medical needs assessment before any binding quote.';
+      hint.textContent = 'About ' + r.suggested_medics + ' on foot clinical posts and ' + r.suggested_vehicles + ' crewed ambulances (rough guide). See table.';
     } else {
-      hint.textContent = 'Indicative on-site team size for planning only: ~' + r.medics + ' — subject to agreed scope before any binding quote.';
+      hint.textContent = 'About ' + r.suggested_medics + ' on foot posts and ' + r.suggested_vehicles + ' ambulances (rough guide).';
     }
+    fillConversionPanel(r);
   }
-  var ids = ['expected_attendees','duration_hours','venue_type','crowd_profile','alcohol_served','late_finish','activity_risk','duration_span','alcohol_level','drug_risk','hospital_referrals'];
+  var ids = ['expected_attendees','duration_hours','venue_type','crowd_profile','late_finish','activity_risk','duration_span','alcohol_level','drug_risk','hospital_referrals','hospital_drive_band','audience_posture','disorder_risk','casualty_history','audience_dwell','season','definitive_care'];
   ids.forEach(function (id) {
     var el = document.getElementById(id);
     if (el) el.addEventListener('change', refresh);
     if (el && el.type === 'checkbox') el.addEventListener('click', refresh);
   });
-  refresh();
+  document.querySelectorAll('input[name="additional_hazards"], input[name="on_site_facilities"]').forEach(function (el) {
+    el.addEventListener('change', refresh);
+  });
+
+  var calcStep = 1;
+  function setCalcStep(step) {
+    calcStep = Math.max(1, Math.min(3, parseInt(step, 10) || 1));
+    document.querySelectorAll('.crm-calc-step-panel').forEach(function (panel) {
+      var ps = parseInt(panel.getAttribute('data-step'), 10);
+      panel.classList.toggle('d-none', ps !== calcStep);
+    });
+    document.querySelectorAll('#crmCalcStepper .crm-step-pill').forEach(function (pill) {
+      var ind = parseInt(pill.getAttribute('data-step-indicator'), 10);
+      var on = ind === calcStep;
+      pill.classList.toggle('bg-primary', on);
+      pill.classList.toggle('text-white', on);
+      pill.classList.toggle('bg-secondary', !on);
+      pill.classList.toggle('bg-opacity-50', !on);
+      pill.classList.toggle('text-dark', !on);
+    });
+    refresh();
+  }
+  function validateStepPanel(step) {
+    var panel = document.querySelector('.crm-calc-step-panel[data-step="' + step + '"]');
+    if (!panel) return true;
+    var firstBad = null;
+    panel.querySelectorAll('input, select, textarea').forEach(function (field) {
+      if (field.willValidate && !field.checkValidity()) firstBad = firstBad || field;
+    });
+    if (firstBad) {
+      firstBad.focus();
+      firstBad.reportValidity();
+      return false;
+    }
+    return true;
+  }
+  var riskForm = document.getElementById('crmRiskForm');
+  if (riskForm) {
+    var initStep = parseInt(riskForm.getAttribute('data-initial-step') || '1', 10);
+    if (initStep >= 1 && initStep <= 3) calcStep = initStep;
+    var n1 = document.getElementById('crmCalcNext1');
+    var b2 = document.getElementById('crmCalcBack2');
+    var n2 = document.getElementById('crmCalcNext2');
+    var b3 = document.getElementById('crmCalcBack3');
+    if (n1) n1.addEventListener('click', function () { if (validateStepPanel(1)) setCalcStep(2); });
+    if (b2) b2.addEventListener('click', function () { setCalcStep(1); });
+    if (n2) n2.addEventListener('click', function () { setCalcStep(3); });
+    if (b3) b3.addEventListener('click', function () { setCalcStep(2); });
+    setCalcStep(calcStep);
+  } else {
+    refresh();
+  }
 })();
 </script>
 {% endblock %}

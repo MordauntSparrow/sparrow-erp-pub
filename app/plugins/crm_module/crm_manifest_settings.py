@@ -17,6 +17,7 @@ def get_crm_module_settings(app: Flask) -> dict[str, Any]:
     defaults: dict[str, Any] = {
         "event_plan_pdf_about_us": "",
         "event_plan_pdf_tagline": "",
+        "event_plan_pdf_logo_path": "",
     }
     path = core_manifest_path(app)
     if not os.path.isfile(path):

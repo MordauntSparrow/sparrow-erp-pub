@@ -21,15 +21,28 @@ typically ``/volume``. **Also accepted:** ``SPARROW_DATA_ROOT``, ``PERSISTENT_DA
 ``RAILWAY_DATA_ROOT``. On Railway, if none are set but ``/volume`` exists, it is used
 automatically (standard Railway mount).
 
-**Emergency / recovery:** Use **Website admin → Volume & templates** to push
-``templates/public_bundled`` (and plugin ``pages.json`` / ``manifest.json``) onto the volume, or
-download a ZIP of the live volume copy. Or set ``SPARROW_WEBSITE_VOLUME_SYNC_FROM_IMAGE=1`` for
-one deploy (then remove) so startup runs the same push before symlinks bind.
+**Emergency / recovery:** Use **Website admin → Volume & deploy** to push
+``templates/public_bundled`` and ``static_bundled`` onto the volume (existing ``site_data`` JSON is
+retained; static merge keeps ``uploads/``, manifest-linked assets, and any volume-only files not in the package). Or download a ZIP of the live volume copy. Or set
+``SPARROW_WEBSITE_VOLUME_SYNC_FROM_IMAGE=1`` for one deploy (then remove) so startup runs the same push before
+symlinks bind.
+
+**Reverse (rehydrate module from volume):** Admin **Pull volume → module** copies live
+``public_templates``, ``static``, and ``site_data`` from the volume into the package tree—preferring
+``templates/public_bundled`` / ``static_bundled`` when present (Docker rebuild / dev copy), else real
+``templates/public`` and ``static`` when they are not already symlinks to the volume. One-shot boot:
+``SPARROW_WEBSITE_PULL_FROM_VOLUME=1`` (remove after). Optional auto when the volume looks customised and
+``SPARROW_WEBSITE_DEMO=1`` or ``WEBSITE_DEMO=1`` (or ``SPARROW_WEBSITE_AUTO_REHYDRATE=1``) is set—see
+``maybe_pull_website_module_from_volume_on_boot``.
 
 **Bundled public HTML:** Git tracks only ``templates/public/``. The Docker image build copies it to
 ``templates/public_bundled/`` (ignored in Git) so the admin “push to volume” action still has real
 files after ``templates/public`` is symlinked to the volume. Edit public templates only under
 ``templates/public``.
+
+**Bundled website static:** The image also copies ``plugins/website_module/static`` to
+``static_bundled/`` so pushes can refresh volume ``plugins/website_module/static`` (used for media
+URLs) after that directory is symlinked to the volume.
 
 **Core ERP manifest** (company name, theme, branding paths in manifest, etc.): on POSIX with a
 persistent root, ``app/config/manifest.json`` is replaced with a symlink to
@@ -45,6 +58,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import zipfile
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -231,6 +245,206 @@ def _merge_tree_into(src_dir: str, dst_dir: str) -> None:
                 shutil.copy2(s, d)
 
 
+def _replace_directory_tree(src_dir: str, dst_dir: str) -> None:
+    """
+    Make ``dst_dir`` an exact copy of ``src_dir``: remove destination if present, then copytree.
+
+    ``src_dir`` must be a real directory (not a symlink). Symlinks inside ``src_dir`` are followed
+    so files are materialized on the destination (avoids Docker ``cp -a`` symlink artifacts blocking
+    updates). Used for volume push of ``public_templates`` and website ``static``.
+    """
+    src_dir = os.path.abspath(src_dir)
+    dst_dir = os.path.abspath(dst_dir)
+    if not os.path.isdir(src_dir) or os.path.islink(src_dir):
+        raise OSError(f"push source is not a real directory: {src_dir}")
+    if os.path.lexists(dst_dir):
+        if os.path.islink(dst_dir):
+            os.unlink(dst_dir)
+        elif os.path.isdir(dst_dir):
+            shutil.rmtree(dst_dir)
+        else:
+            os.remove(dst_dir)
+    parent = os.path.dirname(dst_dir)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    shutil.copytree(src_dir, dst_dir, symlinks=False)
+
+
+def _strip_version_from_seeded_site_manifest(path: str) -> None:
+    """First-time seed on volume: never persist bundled plugin ``version`` into tenant site_data."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or "version" not in data:
+            return
+        data = dict(data)
+        del data["version"]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+
+
+def _website_static_files_to_preserve_from_manifest(site_data_dir: str) -> List[str]:
+    """Relative paths under website ``static/`` referenced by saved settings (excludes uploads/)."""
+    rels: List[str] = []
+    p = os.path.join(os.path.abspath(site_data_dir), "manifest.json")
+    if not os.path.isfile(p):
+        return rels
+    try:
+        with open(p, encoding="utf-8") as f:
+            m = json.load(f)
+        if not isinstance(m, dict):
+            return rels
+        settings = m.get("settings")
+        if not isinstance(settings, dict):
+            return rels
+        for key in ("favicon_path", "default_og_image"):
+            v = settings.get(key)
+            if not v or not isinstance(v, str):
+                continue
+            rel = v.replace("\\", "/").strip().lstrip("/")
+            if not rel or ".." in rel or rel.startswith("uploads/"):
+                continue
+            rels.append(rel)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return rels
+
+
+def _relpaths_of_regular_files_under(root_dir: str) -> set[str]:
+    """POSIX-style ``relpath`` keys for every regular file under ``root_dir``."""
+    root_dir = os.path.abspath(root_dir)
+    out: set[str] = set()
+    if not os.path.isdir(root_dir) or os.path.islink(root_dir):
+        return out
+    for walk_root, _, files in os.walk(root_dir):
+        for fn in files:
+            p = os.path.join(walk_root, fn)
+            if os.path.isfile(p) and not os.path.islink(p):
+                rel = os.path.relpath(p, root_dir).replace("\\", "/")
+                out.add(rel)
+    return out
+
+
+def _stage_volume_only_static_files(static_dst: str, static_src: str, extra_root: str) -> None:
+    """
+    Stage regular files present on the volume static tree but absent from the push ``static_src``
+    (excluding ``uploads/``, which is staged wholesale). Restored after replace so tenant-only
+    assets are not deleted on update.
+    """
+    static_dst = os.path.abspath(static_dst)
+    static_src = os.path.abspath(static_src)
+    if not os.path.isdir(static_dst) or not os.path.isdir(static_src) or os.path.islink(static_src):
+        return
+    packaged = _relpaths_of_regular_files_under(static_src)
+    for walk_root, _, files in os.walk(static_dst):
+        for fn in files:
+            abs_p = os.path.join(walk_root, fn)
+            rel = os.path.relpath(abs_p, static_dst).replace("\\", "/")
+            if rel.startswith("uploads/"):
+                continue
+            if rel in packaged:
+                continue
+            if os.path.isfile(abs_p) and not os.path.islink(abs_p):
+                out = os.path.join(extra_root, rel)
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                shutil.copy2(abs_p, out)
+
+
+def _stage_website_static_user_preservation(
+    static_dst: str, site_data_dir: str, static_src: str
+) -> Optional[str]:
+    """
+    Copy tenant-owned static into a temp dir before a full static tree replace:
+
+    - whole ``uploads/`` tree
+    - manifest-linked root files (favicon / default OG)
+    - any other regular files on the volume not present in the new ``static_src`` package tree
+    """
+    static_dst = os.path.abspath(static_dst)
+    if not os.path.isdir(static_dst):
+        return None
+    tmp = tempfile.mkdtemp(prefix="sparrow_wm_static_")
+    try:
+        uploads = os.path.join(static_dst, "uploads")
+        if os.path.isdir(uploads):
+            shutil.copytree(uploads, os.path.join(tmp, "__uploads__"), symlinks=False)
+        files_dir = os.path.join(tmp, "__files__")
+        seen: set[str] = set()
+        for rel in _website_static_files_to_preserve_from_manifest(site_data_dir):
+            if rel in seen:
+                continue
+            seen.add(rel)
+            abs_src = os.path.join(static_dst, rel)
+            if os.path.isfile(abs_src) and not os.path.islink(abs_src):
+                dst_f = os.path.join(files_dir, rel)
+                os.makedirs(os.path.dirname(dst_f), exist_ok=True)
+                shutil.copy2(abs_src, dst_f)
+        fav = os.path.join(static_dst, "favicon.ico")
+        if os.path.isfile(fav) and not os.path.islink(fav) and "favicon.ico" not in seen:
+            dst_f = os.path.join(files_dir, "favicon.ico")
+            os.makedirs(os.path.dirname(dst_f), exist_ok=True)
+            shutil.copy2(fav, dst_f)
+        extra_root = os.path.join(tmp, "__extra__")
+        os.makedirs(extra_root, exist_ok=True)
+        _stage_volume_only_static_files(static_dst, static_src, extra_root)
+        return tmp
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return None
+
+
+def _restore_website_static_user_preservation(stage_dir: Optional[str], static_dst: str) -> None:
+    """Merge staged uploads, manifest files, and volume-only extras back after ``static`` replace."""
+    if not stage_dir or not os.path.isdir(stage_dir):
+        return
+    static_dst = os.path.abspath(static_dst)
+    try:
+        os.makedirs(static_dst, exist_ok=True)
+        uploads_bak = os.path.join(stage_dir, "__uploads__")
+        if os.path.isdir(uploads_bak):
+            dst_u = os.path.join(static_dst, "uploads")
+            shutil.copytree(uploads_bak, dst_u, dirs_exist_ok=True)
+        files_root = os.path.join(stage_dir, "__files__")
+        if os.path.isdir(files_root):
+            for root, _, names in os.walk(files_root):
+                for name in names:
+                    src_f = os.path.join(root, name)
+                    rel = os.path.relpath(src_f, files_root)
+                    dst_f = os.path.join(static_dst, rel)
+                    parent = os.path.dirname(dst_f)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    if os.path.isfile(src_f):
+                        shutil.copy2(src_f, dst_f)
+        extra_root = os.path.join(stage_dir, "__extra__")
+        if os.path.isdir(extra_root):
+            for root, _, names in os.walk(extra_root):
+                for name in names:
+                    src_f = os.path.join(root, name)
+                    rel = os.path.relpath(src_f, extra_root)
+                    dst_f = os.path.join(static_dst, rel)
+                    parent = os.path.dirname(dst_f)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    if os.path.isfile(src_f):
+                        shutil.copy2(src_f, dst_f)
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+
+
+def _replace_website_static_tree_preserving_user_content(
+    static_src: str, static_dst: str, site_data_dir: str
+) -> None:
+    """Full replace of website static from image, keeping uploads, manifest assets, and volume-only files."""
+    stage = _stage_website_static_user_preservation(static_dst, site_data_dir, static_src)
+    try:
+        _replace_directory_tree(static_src, static_dst)
+    finally:
+        _restore_website_static_user_preservation(stage, static_dst)
+
+
 def _merge_tree_overwrite(src_dir: str, dst_dir: str) -> None:
     """
     Copy all regular files under src_dir into dst_dir with the same relative paths,
@@ -285,14 +499,47 @@ def _resolve_website_public_push_source(module_dir: str, prefer_bundled: bool) -
     return None
 
 
+def _resolve_website_static_push_source(module_dir: str, prefer_bundled: bool) -> Optional[str]:
+    """
+    Directory of website static assets to push onto the volume: real dir only (not a symlink).
+
+    Prefer ``static_bundled`` when ``prefer_bundled`` (same pattern as ``public_bundled``).
+    """
+    wm = os.path.abspath(module_dir)
+    bundled = os.path.join(wm, "static_bundled")
+    stat = os.path.join(wm, "static")
+    candidates = (bundled, stat) if prefer_bundled else (stat, bundled)
+    for c in candidates:
+        if not os.path.isdir(c) or os.path.islink(c):
+            continue
+        try:
+            if not os.listdir(c):
+                continue
+        except OSError:
+            continue
+        return c
+    return None
+
+
 def push_website_volume_from_package(
     app_pkg_dir: str, *, prefer_bundled_public: bool
 ) -> Dict[str, Any]:
     """
-    Overwrite volume ``public_templates`` and ``site_data/{pages.json,manifest.json,local_service_pages.json}`` from the
-    plugin package on disk (image / bind mount).
+    Full replace on the volume:
 
-    Returns ``{"ok": bool, "message": str, "log": [str, ...]}``.
+    - ``public_templates`` from ``templates/public_bundled`` (or real ``templates/public`` when not
+      symlinked), not merge-in-place — removes orphans from removed/renamed package paths.
+    - ``plugins/website_module/static`` from ``static_bundled`` (or real ``static``): full replace,
+      then merges back ``uploads/``, manifest-linked root files, and **any other regular files that
+      existed on the volume but are not in the new package static tree** (tenant-only assets).
+    - ``site_data/{pages.json,manifest.json,local_service_pages.json}``: copied from the package only
+      when the destination file is missing (existing tenant JSON is never overwritten). New
+      ``manifest.json`` seeds have top-level ``version`` stripped so updates can still bump it from
+      the bundled manifest.
+
+    ``prefer_bundled_public`` applies to **both** public and static source resolution when True.
+
+    Returns ``ok``, ``message``, ``log``, ``public_ok``, ``static_ok``, ``json_ok`` (int count).
     """
     log: List[str] = []
     root = get_persistent_data_root()
@@ -301,32 +548,58 @@ def push_website_volume_from_package(
             "ok": False,
             "message": "No persistent volume is configured (set RAILWAY_VOLUME_MOUNT_PATH or similar).",
             "log": [],
+            "public_ok": False,
+            "static_ok": False,
+            "json_ok": 0,
         }
     app_pkg_dir = os.path.abspath(app_pkg_dir)
     dr = os.path.abspath(root)
     wm = _website_module_dir(app_pkg_dir)
     public_dst = os.path.join(dr, "plugins", "website_module", "public_templates")
+    static_dst = os.path.join(dr, "plugins", "website_module", "static")
     site_dst = os.path.join(dr, "plugins", "website_module", "site_data")
+    os.makedirs(os.path.join(dr, "plugins", "website_module"), exist_ok=True)
 
-    src = _resolve_website_public_push_source(wm, prefer_bundled_public)
+    prefer = prefer_bundled_public
+
+    public_src = _resolve_website_public_push_source(wm, prefer)
     public_ok = False
-    if src:
+    if public_src:
         try:
-            os.makedirs(public_dst, exist_ok=True)
-            _merge_tree_overwrite(src, public_dst)
+            _replace_directory_tree(public_src, public_dst)
             public_ok = True
-            log.append(f"Public HTML copied from {src} → volume public_templates.")
+            log.append(f"Public HTML replaced from {public_src} → volume public_templates.")
         except OSError as e:
-            log.append(f"Public HTML copy failed: {e}")
+            log.append(f"Public HTML replace failed: {e}")
     else:
         log.append(
             "Public HTML skipped (no templates/public_bundled or non-symlink templates/public with files)."
+        )
+
+    static_src = _resolve_website_static_push_source(wm, prefer)
+    static_ok = False
+    if static_src:
+        try:
+            _replace_website_static_tree_preserving_user_content(static_src, static_dst, site_dst)
+            static_ok = True
+            log.append(
+                f"Website static replaced from {static_src} → volume plugins/website_module/static "
+                "(uploads, manifest-linked files, and volume-only files not in the package retained)."
+            )
+        except OSError as e:
+            log.append(f"Website static replace failed: {e}")
+    else:
+        log.append(
+            "Website static skipped (no plugins/website_module/static_bundled or non-symlink static with files)."
         )
 
     json_ok = 0
     os.makedirs(site_dst, exist_ok=True)
     for fname in ("pages.json", "manifest.json", "local_service_pages.json"):
         dest = os.path.join(site_dst, fname)
+        if os.path.isfile(dest) and not os.path.islink(dest):
+            log.append(f"Skipped {fname} (already on volume; tenant data retained).")
+            continue
         srcf = os.path.join(wm, "site_data", fname)
         if not os.path.isfile(srcf) or os.path.islink(srcf):
             srcf = os.path.join(wm, fname)
@@ -334,13 +607,18 @@ def push_website_volume_from_package(
             try:
                 shutil.copy2(srcf, dest)
                 json_ok += 1
-                log.append(f"Copied {fname} to site_data on volume.")
+                log.append(f"Seeded {fname} to site_data on volume.")
+                if fname == "manifest.json":
+                    _strip_version_from_seeded_site_manifest(dest)
             except OSError as e:
                 log.append(f"Copy {fname} failed: {e}")
 
-    ok = public_ok or json_ok > 0
+    ok = bool(public_ok or static_ok or json_ok > 0)
     if not ok:
-        msg = "Nothing was copied. Add templates/public_bundled or plugin pages.json/manifest.json."
+        msg = (
+            "Nothing was copied. Add templates/public_bundled and static_bundled to the Docker image, "
+            "or ensure plugin pages.json/manifest.json exist."
+        )
     else:
         msg = " ".join(log)
     return {
@@ -348,16 +626,297 @@ def push_website_volume_from_package(
         "message": msg,
         "log": log,
         "public_ok": public_ok,
+        "static_ok": static_ok,
         "json_ok": json_ok,
     }
 
 
+def website_volume_pull_from_volume_requested() -> bool:
+    """One-shot boot / ops: ``SPARROW_WEBSITE_PULL_FROM_VOLUME=1`` forces volume → module rehydrate."""
+    v = (os.environ.get("SPARROW_WEBSITE_PULL_FROM_VOLUME") or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _website_volume_demo_or_auto_rehydrate_env() -> Tuple[bool, bool]:
+    """
+    Returns ``(demo_like, explicit_auto_rehydrate)``.
+
+    * ``demo_like`` — ``SPARROW_WEBSITE_DEMO`` or ``WEBSITE_DEMO`` truthy.
+    * ``explicit_auto_rehydrate`` — ``SPARROW_WEBSITE_AUTO_REHYDRATE`` truthy (still requires customised volume).
+    """
+    demo = (os.environ.get("SPARROW_WEBSITE_DEMO") or "").strip().lower() in ("1", "true", "yes", "on")
+    demo = demo or (os.environ.get("WEBSITE_DEMO") or "").strip().lower() in ("1", "true", "yes", "on")
+    auto = (os.environ.get("SPARROW_WEBSITE_AUTO_REHYDRATE") or "").strip().lower() in ("1", "true", "yes", "on")
+    return demo, auto
+
+
+def website_volume_data_root_looks_customized(data_root: str) -> bool:
+    """
+    Heuristic: volume has more than a trivial single-route stub, builder/data, large index, or social URLs.
+
+    Used to avoid auto rehydrate on empty demo volumes.
+    """
+    dr = os.path.abspath(data_root)
+    site = os.path.join(dr, "plugins", "website_module", "site_data")
+    pages_p = os.path.join(site, "pages.json")
+    if os.path.isfile(pages_p):
+        try:
+            with open(pages_p, encoding="utf-8") as f:
+                pl = json.load(f)
+            if isinstance(pl, list):
+                if len(pl) >= 2:
+                    return True
+                if len(pl) == 1 and isinstance(pl[0], dict):
+                    r = str(pl[0].get("route") or "").strip()
+                    if r and r != "/":
+                        return True
+                    t = str(pl[0].get("title") or "").strip().lower()
+                    if t and t not in ("home", "welcome"):
+                        return True
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
+    mf = os.path.join(site, "manifest.json")
+    if os.path.isfile(mf):
+        try:
+            with open(mf, encoding="utf-8") as f:
+                m = json.load(f)
+            settings = m.get("settings") if isinstance(m, dict) else None
+            if isinstance(settings, dict):
+                for key in (
+                    "facebook_url",
+                    "instagram_url",
+                    "linkedin_url",
+                    "twitter_url",
+                    "youtube_url",
+                    "tiktok_url",
+                ):
+                    u = (settings.get(key) or "").strip()
+                    if len(u) > 12 and ("http" in u or "www." in u):
+                        return True
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
+    data_dir = os.path.join(site, "data")
+    if os.path.isdir(data_dir):
+        try:
+            for _root, dirs, files in os.walk(data_dir):
+                if files:
+                    return True
+                if dirs:
+                    return True
+        except OSError:
+            pass
+
+    idx = os.path.join(dr, "plugins", "website_module", "public_templates", "index.html")
+    try:
+        if os.path.isfile(idx) and os.path.getsize(idx) > 12000:
+            return True
+    except OSError:
+        pass
+
+    return False
+
+
+def _website_volume_paths(data_root: str) -> Tuple[str, str, str]:
+    dr = os.path.abspath(data_root)
+    pub = os.path.join(dr, "plugins", "website_module", "public_templates")
+    stat = os.path.join(dr, "plugins", "website_module", "static")
+    site = os.path.join(dr, "plugins", "website_module", "site_data")
+    return pub, stat, site
+
+
+def _website_pull_dest_public(module_dir: str, vol_public: str) -> Tuple[Optional[str], str]:
+    """Writable package dir for public HTML merge (not the live volume path)."""
+    wm = os.path.abspath(module_dir)
+    bundled = os.path.join(wm, "templates", "public_bundled")
+    pub = os.path.join(wm, "templates", "public")
+    vol_public = os.path.abspath(vol_public)
+
+    if os.path.isdir(bundled) and not os.path.islink(bundled):
+        return bundled, "templates/public_bundled"
+
+    try:
+        if os.path.isdir(pub) and os.path.realpath(pub) == vol_public:
+            return None, "templates/public already points at volume"
+    except OSError:
+        pass
+
+    if os.path.isdir(pub) and not os.path.islink(pub):
+        return pub, "templates/public"
+
+    return None, "no writable public target (symlink only or missing)"
+
+
+def _website_pull_dest_static(module_dir: str, vol_static: str) -> Tuple[Optional[str], str]:
+    wm = os.path.abspath(module_dir)
+    bundled = os.path.join(wm, "static_bundled")
+    stat = os.path.join(wm, "static")
+    vol_static = os.path.abspath(vol_static)
+
+    if os.path.isdir(bundled) and not os.path.islink(bundled):
+        return bundled, "static_bundled"
+
+    try:
+        if os.path.isdir(stat) and os.path.realpath(stat) == vol_static:
+            return None, "static already points at volume"
+    except OSError:
+        pass
+
+    if os.path.isdir(stat) and not os.path.islink(stat):
+        return stat, "plugins/website_module/static"
+
+    return None, "no writable static target (symlink only or missing)"
+
+
+def _copy_site_data_tree_merge(src_dir: str, dst_dir: str) -> None:
+    """Copy ``site_data`` files from volume into package ``site_data`` (overwrite same names)."""
+    if not os.path.isdir(src_dir):
+        return
+    dst_dir = os.path.abspath(dst_dir)
+    os.makedirs(dst_dir, exist_ok=True)
+    for name in os.listdir(src_dir):
+        s = os.path.join(src_dir, name)
+        d = os.path.join(dst_dir, name)
+        if os.path.isdir(s) and not os.path.islink(s):
+            shutil.copytree(s, d, dirs_exist_ok=True)
+        elif os.path.isfile(s) and not os.path.islink(s):
+            shutil.copy2(s, d)
+
+
+def pull_website_module_from_volume(app_pkg_dir: str) -> Dict[str, Any]:
+    """
+    Copy live website assets **from the volume** into the **package** tree (reverse of push).
+
+    - ``public_templates`` → ``templates/public_bundled`` if that real dir exists, else non-symlink
+      ``templates/public``.
+    - Volume ``static`` → ``static_bundled`` if present, else non-symlink ``static``.
+    - ``site_data`` → ``plugins/website_module/site_data`` in the package (never the volume path).
+
+    Intended after a module/image replace so Git-tracked or bundled snapshot dirs match what is live
+    on the volume (social site recovery, local dev sync).
+    """
+    log: List[str] = []
+    root = get_persistent_data_root()
+    if not root:
+        return {
+            "ok": False,
+            "message": "No persistent volume is configured.",
+            "log": [],
+            "public_ok": False,
+            "static_ok": False,
+            "site_data_ok": False,
+        }
+    app_pkg_dir = os.path.abspath(app_pkg_dir)
+    wm = _website_module_dir(app_pkg_dir)
+    vol_public, vol_static, vol_site = _website_volume_paths(root)
+    pkg_site = os.path.join(wm, "site_data")
+
+    public_ok = False
+    static_ok = False
+    site_data_ok = False
+
+    if os.path.isdir(vol_public):
+        dest, note = _website_pull_dest_public(wm, vol_public)
+        if dest:
+            try:
+                _merge_tree_overwrite(vol_public, dest)
+                public_ok = True
+                log.append(f"Public HTML merged from volume → {note}.")
+            except OSError as e:
+                log.append(f"Public pull failed: {e}")
+        else:
+            log.append(f"Public pull skipped ({note}).")
+    else:
+        log.append("Volume public_templates missing; public pull skipped.")
+
+    if os.path.isdir(vol_static):
+        dest_s, note_s = _website_pull_dest_static(wm, vol_static)
+        if dest_s:
+            try:
+                _merge_tree_overwrite(vol_static, dest_s)
+                static_ok = True
+                log.append(f"Website static merged from volume → {note_s}.")
+            except OSError as e:
+                log.append(f"Static pull failed: {e}")
+        else:
+            log.append(f"Static pull skipped ({note_s}).")
+    else:
+        log.append("Volume website static missing; static pull skipped.")
+
+    if os.path.isdir(vol_site):
+        try:
+            if os.path.normcase(os.path.abspath(vol_site)) != os.path.normcase(os.path.abspath(pkg_site)):
+                _copy_site_data_tree_merge(vol_site, pkg_site)
+                site_data_ok = True
+                log.append("site_data merged from volume → plugins/website_module/site_data.")
+            else:
+                log.append("site_data pull skipped (package site_data is the volume path).")
+        except OSError as e:
+            log.append(f"site_data pull failed: {e}")
+    else:
+        log.append("Volume site_data missing; site_data pull skipped.")
+
+    ok = bool(public_ok or static_ok or site_data_ok)
+    msg = " ".join(log) if log else "Nothing pulled."
+    return {
+        "ok": ok,
+        "message": msg,
+        "log": log,
+        "public_ok": public_ok,
+        "static_ok": static_ok,
+        "site_data_ok": site_data_ok,
+    }
+
+
+def maybe_pull_website_module_from_volume_on_boot(app_pkg_dir: str) -> None:
+    """
+    Optionally rehydrate the package from the volume during ``bind_persistent_directories``.
+
+    Runs when:
+
+    * ``SPARROW_WEBSITE_PULL_FROM_VOLUME=1`` (one-shot; remove after deploy), or
+    * Volume passes :func:`website_volume_data_root_looks_customized` **and**
+      (``SPARROW_WEBSITE_DEMO`` / ``WEBSITE_DEMO`` **or** ``SPARROW_WEBSITE_AUTO_REHYDRATE``) is set.
+
+    Logs to stderr; never raises.
+    """
+    dr = get_persistent_data_root()
+    if not dr:
+        return
+    force = website_volume_pull_from_volume_requested()
+    demo, explicit_auto = _website_volume_demo_or_auto_rehydrate_env()
+    customized = website_volume_data_root_looks_customized(dr)
+    if not force and not ((demo or explicit_auto) and customized):
+        return
+    try:
+        result = pull_website_module_from_volume(app_pkg_dir)
+    except OSError as e:
+        print(f"[sparrow] website volume rehydrate failed: {e}", file=sys.stderr)
+        return
+    label = "SPARROW_WEBSITE_PULL_FROM_VOLUME" if force else "website auto-rehydrate"
+    for line in result.get("log") or []:
+        print(f"[sparrow] {label}: {line}", file=sys.stderr)
+    if not result.get("ok"):
+        print(
+            f"[sparrow] {label}: {result.get('message', 'failed')}",
+            file=sys.stderr,
+        )
+    if force:
+        print(
+            "[sparrow] Remove SPARROW_WEBSITE_PULL_FROM_VOLUME from the environment after this deploy.",
+            file=sys.stderr,
+        )
+
+
 def build_website_volume_backup_zip(app_pkg_dir: str) -> Tuple[Optional[bytes], str]:
     """
-    ZIP ``public_templates`` and ``site_data`` from the volume for download / Git backup.
+    ZIP ``public_templates``, ``plugins/website_module/static``, and ``site_data`` from the volume
+    for download / Git backup.
 
     Returns ``(zip_bytes, error_message)``; ``error_message`` empty on success.
     """
+    _ = app_pkg_dir
     root = get_persistent_data_root()
     if not root:
         return None, "No persistent volume is configured."
@@ -366,6 +925,10 @@ def build_website_volume_backup_zip(app_pkg_dir: str) -> Tuple[Optional[bytes], 
         (
             os.path.join(dr, "plugins", "website_module", "public_templates"),
             "public_templates",
+        ),
+        (
+            os.path.join(dr, "plugins", "website_module", "static"),
+            "plugins/website_module/static",
         ),
         (
             os.path.join(dr, "plugins", "website_module", "site_data"),
@@ -398,14 +961,14 @@ def sync_website_module_volume_from_image(app_pkg_dir: str, data_root: str) -> N
     """
     Startup hook: if ``SPARROW_WEBSITE_VOLUME_SYNC_FROM_IMAGE`` is set, push package files to volume.
 
-    Uses ``prefer_bundled_public=False`` first so a fresh container’s real ``templates/public``
-    wins; ``public_bundled`` is the fallback order inside ``push_website_volume_from_package``.
+    Uses ``prefer_bundled_public=True`` so Docker image snapshots (``public_bundled``,
+    ``static_bundled``) win — same policy as the admin **Push package → volume** action.
     """
     if not website_volume_sync_from_image_requested():
         return
     _ = data_root  # volume root is resolved inside push via get_persistent_data_root()
     result = push_website_volume_from_package(
-        app_pkg_dir, prefer_bundled_public=False
+        app_pkg_dir, prefer_bundled_public=True
     )
     for line in result.get("log") or []:
         print(f"[sparrow] SPARROW_WEBSITE_VOLUME_SYNC_FROM_IMAGE: {line}", file=sys.stderr)
@@ -492,16 +1055,22 @@ def bind_persistent_directories(app_pkg_dir: str) -> None:
     if not data_root:
         _warn_if_production_without_persistent_root()
         return
+
+    try:
+        sync_website_module_volume_from_image(app_pkg_dir, data_root)
+        maybe_pull_website_module_from_volume_on_boot(app_pkg_dir)
+    except OSError as e:
+        print(f"[sparrow] website volume sync/rehydrate failed: {e}", file=sys.stderr)
+
     if not _is_posix_like():
         print(
             "[sparrow] Persistent data root is set but symlinks are skipped on Windows; "
-            "use WSL or Docker for volume parity.",
+            "use WSL or Docker for volume parity. (Volume sync / rehydrate still ran if applicable.)",
             file=sys.stderr,
         )
         return
 
     try:
-        sync_website_module_volume_from_image(app_pkg_dir, data_root)
         _symlink_core_manifest_into_volume(app_pkg_dir, data_root)
         for link_path, target_path in _pairs_for_app(app_pkg_dir, data_root):
             if not os.path.isdir(os.path.dirname(link_path)):
@@ -649,5 +1218,6 @@ def migrate_website_module_site_data_once(module_dir: str) -> None:
     if not os.path.isfile(target_manifest) and os.path.isfile(legacy_manifest):
         try:
             shutil.copy2(legacy_manifest, target_manifest)
+            _strip_version_from_seeded_site_manifest(target_manifest)
         except OSError as e:
             print(f"[sparrow] website_module manifest migration copy failed: {e}", file=sys.stderr)

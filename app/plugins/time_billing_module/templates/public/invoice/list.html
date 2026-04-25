@@ -12,8 +12,14 @@
     <a href="{{ url_for('public_time_billing.public_billing_settings_page') }}" class="btn btn-outline-secondary btn-sm">Billing details</a>
   </div>
 </div>
-{% if employment_type == 'self_employed' and invoice_billing_frequency == 'monthly' %}
-<p class="text-muted small">Monthly billing: combine <strong>submitted or approved</strong> weeks that are not yet on an invoice using <strong>Create invoice</strong>. The invoice stays a <strong>draft</strong> until every selected week is approved; then it becomes sent (or staff approval can finalise it). If a week is rejected, linked invoices are voided automatically.</p>
+{% if employment_type == 'self_employed' and combined_invoice_billing %}
+<p class="text-muted small">
+  {% if (invoice_billing_frequency or '')|lower == 'biweekly' %}
+  Bi-weekly billing:
+  {% else %}
+  Monthly billing:
+  {% endif %}
+  combine <strong>submitted or approved</strong> weeks that are not yet on an invoice using <strong>Create invoice</strong>. The invoice stays <strong>current</strong> until every selected week is approved; then it becomes <strong>paid</strong> (or staff approval can finalise it). If a week is rejected, linked invoices are voided automatically.</p>
 {% else %}
 <p class="text-muted small">Linked to your timesheet weeks. Voided rows stay in history if a week was rejected and re-invoiced.</p>
 {% endif %}
@@ -35,8 +41,10 @@
       <tr>
         <td class="fw-semibold">{{ r.invoice_number }}</td>
         <td>
-          {% set nweeks = (r.invoice_week_count or 1)|int %}
-          {% set codes = (r.invoice_week_codes or r.timesheet_week_code or '') %}
+          {% set nlines = (r.line_week_distinct_count or 0)|int %}
+          {% set nj = (r.invoice_week_count or 0)|int %}
+          {% set nweeks = nlines if nlines > nj else (nj if nj > 0 else 1) %}
+          {% set codes = (r.line_week_codes if (nlines > nj and r.line_week_codes) else (r.invoice_week_codes or r.line_week_codes or r.timesheet_week_code or '')) %}
           {% if nweeks > 1 and codes %}
           <span class="fw-semibold">{{ codes }}</span>
           <span class="badge bg-secondary ms-1">{{ nweeks }} weeks</span>
@@ -48,16 +56,22 @@
         <td>{{ r.week_ending }}</td>
         <td class="text-end">£{{ '%.2f' % (r.total_amount or 0) }}</td>
         <td>
-          <span class="badge {% if r.status == 'sent' %}bg-primary{% elif r.status == 'draft' %}bg-secondary{% else %}bg-dark{% endif %}">{{ r.status }}</span>
+          <span class="badge {% if r.status == 'paid' %}bg-primary{% elif r.status == 'current' %}bg-secondary{% else %}bg-dark{% endif %}">{{ (r.status or '')|capitalize }}</span>
         </td>
         <td>
           <span class="badge {% if r.timesheet_status == 'approved' %}bg-success{% elif r.timesheet_status == 'rejected' %}bg-danger{% elif r.timesheet_status == 'invoiced' %}bg-success{% elif r.timesheet_status == 'submitted' %}bg-info text-dark{% else %}bg-secondary{% endif %}">{{ r.timesheet_status }}</span>
         </td>
         <td class="text-nowrap">
           {% if nweeks > 1 %}
-          <a class="btn btn-sm btn-outline-secondary me-1" href="{{ url_for('public_time_billing.public_week_page', week_id=r.timesheet_week_code) }}" title="Open anchor timesheet week">Timesheet</a>
+          <a class="btn btn-sm btn-outline-secondary me-1" href="{{ url_for('public_time_billing.public_invoice_detail_page', invoice_id=r.id) }}" title="Open invoice — use Timesheet weeks menu for each ISO week">Weeks</a>
           {% else %}
           <a class="btn btn-sm btn-outline-secondary me-1" href="{{ url_for('public_time_billing.public_week_page', week_id=r.timesheet_week_code) }}" title="Open this timesheet week">Timesheet</a>
+          {% endif %}
+          {% if (r.status or '')|lower == 'current' and (r.timesheet_status or '')|lower == 'approved' %}
+          <form method="post" action="{{ url_for('public_time_billing.public_week_invoice_finalize', week_id=r.timesheet_week_code) }}" class="d-inline me-1">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-warning" title="Mark invoice paid (week becomes invoiced)">Finalize</button>
+          </form>
           {% endif %}
           <a class="btn btn-sm btn-outline-primary" href="{{ url_for('public_time_billing.public_invoice_detail_page', invoice_id=r.id) }}">View</a>
         </td>
@@ -80,7 +94,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted">Select one or more <strong>submitted or approved</strong> weeks that are not yet linked to an invoice. If any week is still submitted, the invoice is saved as a <strong>draft</strong> until all of those weeks are approved.</p>
+        <p class="small text-muted">Select one or more <strong>submitted or approved</strong> weeks that are not yet linked to an invoice. If any week is still submitted, the invoice is saved as <strong>current</strong> until all of those weeks are approved.</p>
         <div class="mb-3">
           <label class="form-label" for="tbCombInvNum">Invoice number</label>
           <input type="text" class="form-control form-control-sm" id="tbCombInvNum" value="{{ suggested_next_invoice_number }}" autocomplete="off">

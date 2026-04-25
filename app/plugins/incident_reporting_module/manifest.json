@@ -1,0 +1,114 @@
+{
+  "system_name": "incident_reporting_module",
+  "name": "Safety & Incidents",
+  "description": "Safety and incident reporting: near misses, hazards, events, CAPA, workflows, analytics, and Cura safeguarding linkage for medical tenants.",
+  "version": "2.1.2",
+  "icon": "icon.png",
+  "dashboard_icon": "bi-shield-exclamation",
+  "dashboard_category": "Compliance & risk",
+  "enabled": true,
+  "access_permission": "incident_reporting_module.access",
+  "alternate_access_permissions": [
+    "incident_reporting_module.submit",
+    "incident_reporting_module.view_own",
+    "incident_reporting_module.view_site",
+    "incident_reporting_module.triage",
+    "incident_reporting_module.investigate",
+    "incident_reporting_module.close",
+    "incident_reporting_module.configure",
+    "incident_reporting_module.export_sensitive",
+    "incident_reporting_module.merge",
+    "incident_reporting_module.legal_hold",
+    "incident_reporting_module.portal_submit"
+  ],
+  "user_role_categories": [
+    {
+      "id": "org_accounts",
+      "label": "Organisation accounts",
+      "sort": 5,
+      "roles": []
+    },
+    {
+      "id": "managers",
+      "label": "Managers & supervisors",
+      "parent": "org_accounts",
+      "sort": 10,
+      "roles": ["admin", "clinical_lead", "staff"]
+    },
+    {
+      "id": "standard_users",
+      "label": "Standard users (crew, logistics, general)",
+      "parent": "org_accounts",
+      "sort": 20,
+      "roles": ["crew", "user", "logistics"]
+    },
+    {
+      "id": "platform",
+      "label": "Platform",
+      "sort": 90,
+      "roles": ["superuser"]
+    }
+  ],
+  "declared_permissions": [
+    {
+      "id": "incident_reporting_module.access",
+      "label": "Safety & Incidents — open module (command centre, lists, workspace)"
+    },
+    {
+      "id": "incident_reporting_module.submit",
+      "label": "Submit incidents (portal or admin on behalf of others)"
+    },
+    {
+      "id": "incident_reporting_module.view_own",
+      "label": "View own submissions only"
+    },
+    {
+      "id": "incident_reporting_module.view_site",
+      "label": "View incidents for own site / division (row-level enforcement later)"
+    },
+    {
+      "id": "incident_reporting_module.triage",
+      "label": "Triage queue — accept, route, initial classification"
+    },
+    {
+      "id": "incident_reporting_module.investigate",
+      "label": "Investigation and timeline / factor edits"
+    },
+    {
+      "id": "incident_reporting_module.close",
+      "label": "Close, verify, and archive incidents"
+    },
+    {
+      "id": "incident_reporting_module.configure",
+      "label": "Configure types, SLAs, routing, templates, picklists"
+    },
+    {
+      "id": "incident_reporting_module.export_sensitive",
+      "label": "Export sensitive narratives and executive packs"
+    },
+    {
+      "id": "incident_reporting_module.merge",
+      "label": "Merge / dedupe incidents"
+    },
+    {
+      "id": "incident_reporting_module.legal_hold",
+      "label": "Apply or release legal hold"
+    },
+    {
+      "id": "incident_reporting_module.portal_submit",
+      "label": "Employee portal — safety incident capture"
+    }
+  ],
+  "settings": {
+    "default_safeguarding_required_categories": {
+      "value": "safeguarding_concern,restraint",
+      "editable": true,
+      "tooltip": "Comma-separated incident category_slug values that default the safeguarding-required tick in the portal wizard (medical tenants only)."
+    }
+  },
+  "dependencies": ["employee_portal_module", "website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "IR1-style regulatory fields on incidents; HSE walkaround definitions with configurable intervals and completion tracking; CSV export extended. Settings → form visibility by Sparrow user role and optional manifest user_role_categories (parent/child); empty selection = all roles.",
+  "repository_token": ""
+}

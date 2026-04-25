@@ -2,13 +2,13 @@
   "system_name": "compliance_module",
   "name": "Compliance & Policies",
   "description": "Organisational policies (H&S, safeguarding, etc.), staff acknowledgement, and employee portal todos.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "icon": "icon.png",
   "settings": {},
   "enabled": true,
   "dependencies": ["employee_portal_module", "website_module"],
   "repository": "official",
   "download_url": "",
-  "changelog": "Staff audit bridge (detail_json) for policy CRUD, issue, unpublish, document types; contractor acknowledgements annotated.",
+  "changelog": "Public website mirror: opt-in per document for /policies (extends website shell); expose_on_website column.",
   "repository_token": ""
 }

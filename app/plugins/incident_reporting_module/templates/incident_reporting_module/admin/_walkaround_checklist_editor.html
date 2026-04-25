@@ -1,0 +1,42 @@
+{# Checklist editor: prefix (e.g. nwl_ or tw12_), rows list of {id,label,type,required}, tbody_id for JS add-row #}
+<div class="walkaround-cl-editor mb-3">
+  <label class="form-label small fw-semibold mb-2">Checklist</label>
+  <div class="table-responsive">
+    <table class="table table-sm table-bordered align-middle mb-2">
+      <thead class="table-light small">
+        <tr>
+          <th scope="col" style="min-width:14rem">Question / prompt</th>
+          <th scope="col" style="width:8.5rem">Response type</th>
+          <th scope="col" style="width:5rem" class="text-center">Required</th>
+          <th scope="col" style="width:2.75rem" class="text-center" aria-label="Remove"></th>
+        </tr>
+      </thead>
+      <tbody id="{{ tbody_id }}" class="walkaround-cl-tbody" data-next-index="{{ rows|length }}">
+        {% for it in rows %}
+        {% set i = loop.index0 %}
+        <tr class="walkaround-cl-row">
+          <td>
+            <input type="hidden" name="{{ prefix }}id_{{ i }}" value="{{ (it.id or '')|e }}">
+            <input type="text" class="form-control form-control-sm" name="{{ prefix }}label_{{ i }}" value="{{ (it.label or '')|e }}" maxlength="512" placeholder="e.g. Fire exits clear" autocomplete="off">
+          </td>
+          <td>
+            <select class="form-select form-select-sm" name="{{ prefix }}type_{{ i }}" aria-label="Response type for row {{ i + 1 }}">
+              <option value="bool" {% if (it.type or 'bool') == 'bool' %}selected{% endif %}>Yes / No</option>
+              <option value="text" {% if (it.type or '') == 'text' %}selected{% endif %}>Short text</option>
+            </select>
+          </td>
+          <td class="text-center align-middle">
+            <input class="form-check-input" type="checkbox" name="{{ prefix }}required_{{ i }}" value="1" id="{{ tbody_id }}_req_{{ i }}" {% if it.required %}checked{% endif %} aria-label="Required for row {{ i + 1 }}">
+          </td>
+          <td class="text-center align-middle">
+            <button type="button" class="btn btn-sm btn-outline-danger walkaround-cl-del py-0 px-2" title="Remove this row" aria-label="Remove checklist row">×</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <button type="button" class="btn btn-sm btn-outline-secondary" data-walkaround-cl-add data-target="{{ tbody_id }}" data-prefix="{{ prefix }}">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> Add checklist item
+  </button>
+</div>

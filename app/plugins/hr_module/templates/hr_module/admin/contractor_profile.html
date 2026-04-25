@@ -44,6 +44,14 @@
         {% if profile.manager_email and profile.manager_name %}<span class="text-muted small"> · {{ profile.manager_email }}</span>{% endif %}
         {% else %}—{% endif %}
       </p>
+      {% if profile.linked_core_user %}
+      <p class="mb-0 small">
+        <strong>Core ERP user</strong>
+        <code class="user-select-all">{{ profile.linked_core_user.username }}</code>
+        · role {{ profile.linked_core_user.role }}
+        {% if hr_can_edit_employees %}· <a href="{{ url_for('internal_hr.admin_contractor_edit_form', cid=profile.id) }}">Change on Edit profile</a>{% endif %}
+      </p>
+      {% endif %}
       {% if direct_reports %}
       <p class="mb-0 mt-2"><strong>Direct reports</strong></p>
       <ul class="small mb-0 mt-1">
@@ -54,6 +62,24 @@
       {% endif %}
     </div>
   </div>
+
+  {% if safety_incidents %}
+  <div class="card mb-4" id="safety-incidents-linked">
+    <div class="card-header"><strong>Safety &amp; incidents</strong></div>
+    <div class="card-body">
+      <ul class="list-unstyled mb-0 small">
+        {% for inc in safety_incidents %}
+        <li class="mb-2 pb-2 border-bottom">
+          <a href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=inc.id, tab='summary') }}" class="fw-semibold text-decoration-none">{{ (inc.title or 'Incident')|e }}</a>
+          {% if inc.reference_code %}<span class="text-muted font-monospace ms-1">{{ inc.reference_code|e }}</span>{% endif %}
+          <span class="badge bg-secondary ms-1">{{ safety_incident_status_labels.get(inc.status, inc.status) }}</span>
+          <div class="text-muted mt-1">{{ inc.updated_at or inc.created_at or '—' }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
 
   {% if ventus_plugin_available %}
   <div class="card mb-4" id="ventus-dispatch-register">

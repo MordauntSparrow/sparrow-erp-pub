@@ -8,9 +8,16 @@ import os
 import csv
 import io
 import re
-from app.objects import get_db_connection, EmailManager
+from app.objects import get_db_connection
 
 _LOG = logging.getLogger(__name__)
+
+# Display label for joins on job_types jt: archived types keep FKs but show (Legacy).
+_JT_DISP_NAME_EXPR = (
+    "(CASE WHEN COALESCE(jt.legacy, 0) = 1 THEN CONCAT(jt.name, ' (Legacy)') "
+    "ELSE jt.name END)"
+)
+_JT_DISP_NAME_SEL = _JT_DISP_NAME_EXPR + " AS job_type_name"
 
 
 def _tb_log_warning(message: str, *, exc_info: bool = False) -> None:
@@ -41,6 +48,18 @@ def _dec(v, q='0.01') -> Decimal:
     return Decimal(str(v if v is not None else 0)).quantize(Decimal(q), rounding=ROUND_HALF_UP)
 
 
+def _tb_slugify_key(label: str, *, prefix: str = "field") -> str:
+    """
+    Lowercase identifier for template codes and JSON field keys (letters, digits, underscore).
+    """
+    import re
+    import time as _time_mod
+
+    base = (label or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9_]+", "_", base).strip("_")[:80]
+    return slug if slug else f"{prefix}_{int(_time_mod.time())}"
+
+
 def _to_time(val: Any) -> time:
     """
     Convert a string or time object to a time object.
@@ -63,6 +82,53 @@ def _to_time(val: Any) -> time:
     raise ValueError(f"Invalid time value: {val}")
 
 
+def _optional_entry_time(val: Any) -> Optional[time]:
+    """Parse a timesheet entry time from UI payload or DB; None if absent or blank."""
+    if val is None or val == "":
+        return None
+    c = _coerce_entry_time_value(val)
+    if c is not None:
+        return c
+    if isinstance(val, str) and val.strip():
+        try:
+            s = val.strip()
+            return _to_time(s[:8] if len(s) >= 8 else s[:5])
+        except ValueError:
+            return None
+    return None
+
+
+def _require_schedule_time(val: Any) -> time:
+    """Scheduled times are required; accept MySQL TIME as time, timedelta, or HH:MM string."""
+    t = _coerce_entry_time_value(val)
+    if t is not None:
+        return t
+    if isinstance(val, str) and val.strip():
+        s = val.strip()
+        return _to_time(s[:8] if len(s) >= 8 else s[:5])
+    raise ValueError(f"Invalid scheduled time: {val!r}")
+
+
+def _coerce_entry_time_value(val: Any) -> Optional[time]:
+    """Normalize MySQL TIME / timedelta / datetime / string for entry hour math (driver-agnostic)."""
+    if val is None:
+        return None
+    if isinstance(val, time):
+        return val
+    if isinstance(val, timedelta):
+        secs = int(val.total_seconds()) % 86400
+        return time(secs // 3600, (secs % 3600) // 60, secs % 60)
+    if isinstance(val, datetime):
+        return val.time()
+    if isinstance(val, str) and val.strip():
+        s = val.strip()
+        try:
+            return _to_time(s[:8] if len(s) >= 8 else s[:5])
+        except ValueError:
+            return None
+    return None
+
+
 def _hours_between(t1: time, t2: time, break_mins: int = 0) -> float:
     """
     Calculate hours between two times, accounting for breaks and cross-midnight shifts.
@@ -81,6 +147,31 @@ def _hours_between(t1: time, t2: time, break_mins: int = 0) -> float:
     mins = (d1 - d0).total_seconds() / 60.0
     mins -= break_mins or 0
     return max(0.0, mins / 60.0)
+
+
+def _hours_between_safe(t1: Any, t2: Any, break_mins: int = 0) -> float:
+    """Like ``_hours_between`` but returns 0 when times are missing or invalid (admin patches, legacy rows).
+
+    Coerces MySQL ``TIME`` values (often ``timedelta`` from the driver) to ``time`` before computing.
+    """
+    ct1 = _coerce_entry_time_value(t1)
+    ct2 = _coerce_entry_time_value(t2)
+    if ct1 is None or ct2 is None:
+        return 0.0
+    try:
+        return float(_hours_between(ct1, ct2, break_mins))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _time_gt_safe(a: Any, b: Any) -> bool:
+    """True if ``a > b`` for time-like values; False if either side is missing or not comparable."""
+    if a is None or b is None:
+        return False
+    try:
+        return bool(a > b)
+    except TypeError:
+        return False
 
 
 def _now_utc_str() -> str:
@@ -227,7 +318,10 @@ class MinimalRateResolver:
         contractor_id: int, on_date: date
     ) -> List[Dict[str, Any]]:
         """
-        Job types shown on staff timesheets: aligned with ``resolve_rate`` eligibility.
+        Job types shown on staff timesheets: aligned with ``resolve_rate`` eligibility,
+        plus active job types that appear on the contractor's **rota** for the ISO week
+        ending ``on_date`` (same window as scheduler prefill), including assign-only
+        shifts when ``schedule_shift_assignments`` exists.
 
         If the contractor has ``wage_rate_override``, any active job type is allowed
         (same flat rate applies). Otherwise: union of job types that have an effective
@@ -323,12 +417,321 @@ class MinimalRateResolver:
             except Exception:
                 pass
 
+            # Rostership for this timesheet week: lets staff pick job types they were
+            # scheduled for even if wage card rows are incomplete (rates may be 0 until
+            # admin adds card rows; staff can use manual rate override where supported).
+            try:
+                cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+                if cur.fetchone():
+                    wk_start = on_date - timedelta(days=6)
+                    wk_end = on_date
+                    cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+                    has_asg = bool(cur.fetchone())
+                    if has_asg:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT jt.id, jt.name, jt.colour_hex
+                            FROM schedule_shifts ss
+                            INNER JOIN job_types jt ON jt.id = ss.job_type_id
+                            WHERE ss.work_date BETWEEN %s AND %s
+                              AND ss.job_type_id IS NOT NULL
+                              AND (ss.status IS NULL OR LOWER(COALESCE(ss.status, '')) <> 'cancelled')
+                              AND (
+                                ss.contractor_id = %s
+                                OR EXISTS (
+                                  SELECT 1 FROM schedule_shift_assignments sa
+                                  WHERE sa.shift_id = ss.id AND sa.contractor_id = %s
+                                )
+                              )
+                              AND jt.active IN (1, '1', 'active', TRUE)
+                            """,
+                            (wk_start, wk_end, int(contractor_id), int(contractor_id)),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT jt.id, jt.name, jt.colour_hex
+                            FROM schedule_shifts ss
+                            INNER JOIN job_types jt ON jt.id = ss.job_type_id
+                            WHERE ss.work_date BETWEEN %s AND %s
+                              AND ss.job_type_id IS NOT NULL
+                              AND (ss.status IS NULL OR LOWER(COALESCE(ss.status, '')) <> 'cancelled')
+                              AND ss.contractor_id = %s
+                              AND jt.active IN (1, '1', 'active', TRUE)
+                            """,
+                            (wk_start, wk_end, int(contractor_id)),
+                        )
+                    for row in cur.fetchall() or []:
+                        jid = row.get("id")
+                        if jid is not None:
+                            by_id[int(jid)] = row
+            except Exception:
+                pass
+
             out = list(by_id.values())
             out.sort(key=lambda r: ((r.get("name") or "").lower(), int(r.get("id") or 0)))
             return out
         finally:
             cur.close()
             conn.close()
+
+
+def _rr_parse_time_bands_json(raw: Any) -> List[Dict[str, Any]]:
+    """Parse ``time_bands_json`` from DB/API into a list of band dicts."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", errors="ignore")
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            v = json.loads(s)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+            if isinstance(v, dict):
+                return [v]
+        except Exception:
+            return []
+    return []
+
+
+def _rr_shift_bounds(work_date: date, t_start: time, t_end: time) -> Tuple[datetime, datetime]:
+    d0 = datetime.combine(work_date, t_start)
+    d1 = datetime.combine(work_date, t_end)
+    if d1 <= d0:
+        d1 += timedelta(days=1)
+    return d0, d1
+
+
+def _rr_gross_shift_minutes(work_date: date, t_start: time, t_end: time) -> float:
+    d0, d1 = _rr_shift_bounds(work_date, t_start, t_end)
+    return max(0.0, (d1 - d0).total_seconds() / 60.0)
+
+
+def _rr_band_bounds(work_date: date, ws: time, we: time) -> Tuple[datetime, datetime]:
+    if ws < we or ws == we:
+        return datetime.combine(work_date, ws), datetime.combine(work_date, we)
+    return datetime.combine(work_date, ws), datetime.combine(
+        work_date + timedelta(days=1), we
+    )
+
+
+def _rr_overlap_minutes(
+    work_date: date, t_start: time, t_end: time, win_start: time, win_end: time
+) -> float:
+    d0, d1 = _rr_shift_bounds(work_date, t_start, t_end)
+    bis, bie = _rr_band_bounds(work_date, win_start, win_end)
+    s = max(d0, bis)
+    e = min(d1, bie)
+    if e <= s:
+        return 0.0
+    return (e - s).total_seconds() / 60.0
+
+
+def _rr_band_weekday_ok(anchor_date: date, b: Dict[str, Any]) -> bool:
+    """True if ``band.weekdays`` allows this calendar day (empty = all days)."""
+    wds = b.get("weekdays")
+    if not isinstance(wds, list) or len(wds) == 0:
+        return True
+    try:
+        wdset = {int(x) for x in wds}
+    except (TypeError, ValueError):
+        return True
+    return anchor_date.weekday() in wdset
+
+
+def _rr_iter_shift_calendar_dates(ref: datetime, end: datetime) -> List[date]:
+    """Inclusive calendar dates touched by [ref, end) style span (end exclusive of last instant)."""
+    out: List[date] = []
+    d = ref.date()
+    end_d = end.date()
+    while d <= end_d:
+        out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _rr_band_hourly_rate(b: Dict[str, Any], R_day: Decimal) -> Decimal:
+    ab = b.get("absolute_rate")
+    if ab not in (None, ""):
+        try:
+            a = _dec(ab)
+            if a > 0:
+                return a.quantize(Decimal("0.01"))
+        except Exception:
+            pass
+    mult = _dec(b.get("multiplier") or 1)
+    br = (R_day * mult).quantize(Decimal("0.01"))
+    upl = _dec(b.get("uplift_per_hour") or b.get("bonus_per_hour") or 0)
+    return (br + upl).quantize(Decimal("0.01"))
+
+
+def _rr_segment_max_rate(mid: datetime, R_day: Decimal, bands: List[Dict[str, Any]]) -> Decimal:
+    """
+    Max hourly rate at segment midpoint: band window and weekday filter use the
+    segment's **calendar date** (so cross-midnight shifts can pick up Tue-only rules
+    on Tuesday morning, etc.).
+    """
+    anchor = mid.date()
+    rmax = R_day
+    for b in bands:
+        if not _rr_band_weekday_ok(anchor, b):
+            continue
+        ws = _coerce_entry_time_value(b.get("window_start"))
+        we = _coerce_entry_time_value(b.get("window_end"))
+        if ws is None or we is None:
+            continue
+        bis, bie = _rr_band_bounds(anchor, ws, we)
+        if not (bis <= mid < bie):
+            continue
+        br = _rr_band_hourly_rate(b, R_day)
+        if br > rmax:
+            rmax = br
+    return rmax
+
+
+def _rr_pay_time_bands(
+    work_date: date,
+    t_start: time,
+    t_end: time,
+    break_mins: int,
+    R_day: Decimal,
+    bands: List[Dict[str, Any]],
+) -> Tuple[Decimal, Dict[str, Any]]:
+    """
+    Pay from clock segments: each sub-interval uses max(R_day, matching band rates).
+    Break minutes are applied by scaling **hourly** gross pay down to net hours / gross hours.
+    Optional ``bonus_flat`` / ``flat_bonus_per_shift`` on a band: fixed £ added once per line
+    if the shift overlaps that band (not scaled by break). Band geometry for breakpoints
+    is unioned over each **calendar day** the shift touches, with weekday filter per day.
+    """
+    ref, end = _rr_shift_bounds(work_date, t_start, t_end)
+    gross_min = max(0.0, (end - ref).total_seconds() / 60.0)
+    gross_h = gross_min / 60.0
+    net_h = float(_hours_between(t_start, t_end, break_mins))
+    meta: Dict[str, Any] = {"gross_hours": gross_h, "net_hours": net_h}
+    if gross_h <= 0 or net_h <= 0:
+        return Decimal("0.00"), meta
+    pts_set: Set[datetime] = {ref, end}
+    for anchor_d in _rr_iter_shift_calendar_dates(ref, end):
+        for b in bands:
+            if not _rr_band_weekday_ok(anchor_d, b):
+                continue
+            ws = _coerce_entry_time_value(b.get("window_start"))
+            we = _coerce_entry_time_value(b.get("window_end"))
+            if ws is None or we is None:
+                continue
+            bis, bie = _rr_band_bounds(anchor_d, ws, we)
+            os = max(ref, bis)
+            oe = min(end, bie)
+            if os < oe:
+                pts_set.add(os)
+                pts_set.add(oe)
+    sl = sorted(pts_set)
+    gross_pay = Decimal("0.00")
+    seg_info: List[Dict[str, Any]] = []
+    for i in range(len(sl) - 1):
+        pa, pb = sl[i], sl[i + 1]
+        if pa >= pb:
+            continue
+        mid = pa + (pb - pa) / 2
+        seg_h = (pb - pa).total_seconds() / 3600.0
+        rate = _rr_segment_max_rate(mid, R_day, bands)
+        seg_pay = (_dec(seg_h) * rate).quantize(Decimal("0.01"))
+        gross_pay += seg_pay
+        seg_info.append({"hours": round(seg_h, 6), "rate": float(rate)})
+    scale = Decimal(str(net_h / gross_h)) if gross_h > 0 else Decimal(0)
+    pay = (gross_pay * scale).quantize(Decimal("0.01"))
+    # Hourly portion only; £/shift flats are added next (OT uses this via meta, not blended rate).
+    meta["time_band_hourly_pay"] = float(pay)
+
+    flat_lines: List[Dict[str, Any]] = []
+    flat_total = Decimal("0.00")
+    for b in bands:
+        raw_bf = b.get("bonus_flat")
+        if raw_bf in (None, ""):
+            raw_bf = b.get("flat_bonus_per_shift")
+        if raw_bf in (None, ""):
+            continue
+        try:
+            amt = _dec(raw_bf)
+        except Exception:
+            continue
+        if amt <= 0:
+            continue
+        ws = _coerce_entry_time_value(b.get("window_start"))
+        we = _coerce_entry_time_value(b.get("window_end"))
+        if ws is None or we is None:
+            continue
+        touched = False
+        for anchor_d in _rr_iter_shift_calendar_dates(ref, end):
+            if not _rr_band_weekday_ok(anchor_d, b):
+                continue
+            bis, bie = _rr_band_bounds(anchor_d, ws, we)
+            if max(ref, bis) < min(end, bie):
+                touched = True
+                break
+        if touched:
+            flat_total += amt
+            flat_lines.append(
+                {
+                    "amount": float(amt),
+                    "label": (b.get("label") or "")[:120],
+                }
+            )
+    pay = (pay + flat_total).quantize(Decimal("0.01"))
+    meta["time_band_segments"] = seg_info
+    if flat_lines:
+        meta["time_band_flat_bonuses"] = flat_lines
+    return pay, meta
+
+
+def _rr_pay_night_prorata(
+    work_date: date,
+    t_start: time,
+    t_end: time,
+    break_mins: int,
+    R_day: Decimal,
+    p: Dict[str, Any],
+) -> Tuple[Optional[Decimal], Dict[str, Any]]:
+    """Hours inside night window at night rate; outside at R_day; break via net/gross scale."""
+    ws = _coerce_entry_time_value(p.get("window_start"))
+    we = _coerce_entry_time_value(p.get("window_end"))
+    meta: Dict[str, Any] = {}
+    if ws is None or we is None:
+        return None, meta
+    pm = str(p.get("mode") or "").strip().upper()
+    if pm not in ("MULTIPLIER", "ABSOLUTE"):
+        return None, meta
+    G_min = _rr_gross_shift_minutes(work_date, t_start, t_end)
+    gross_h = G_min / 60.0
+    net_h = float(_hours_between(t_start, t_end, break_mins))
+    if gross_h <= 0 or net_h <= 0:
+        return Decimal("0.00"), meta
+    O_min = _rr_overlap_minutes(work_date, t_start, t_end, ws, we)
+    O_h = O_min / 60.0
+    out_h = max(0.0, gross_h - O_h)
+    if pm == "MULTIPLIER" and p.get("multiplier") is not None:
+        R_n = (R_day * _dec(p["multiplier"])).quantize(Decimal("0.01"))
+    elif pm == "ABSOLUTE" and p.get("absolute_rate") is not None:
+        R_n = _dec(p["absolute_rate"])
+    else:
+        return None, meta
+    pay_gross = (_dec(out_h) * R_day + _dec(O_h) * R_n).quantize(Decimal("0.01"))
+    scale = Decimal(str(net_h / gross_h))
+    pay = (pay_gross * scale).quantize(Decimal("0.01"))
+    meta["night_prorata"] = True
+    meta["hours_outside_window_net"] = round(out_h * net_h / gross_h, 4)
+    meta["hours_inside_window_net"] = round(O_h * net_h / gross_h, 4)
+    meta["R_day"] = float(R_day)
+    meta["R_night"] = float(R_n)
+    return pay, meta
 
 
 class RateResolver:
@@ -344,12 +747,18 @@ class RateResolver:
     Policies applied:
     - Weekend (WEEKEND)
     - Bank Holiday (BANK_HOLIDAY)
-    - Night (NIGHT)
-    - Overtime (OVERTIME_SHIFT)
+    - Night (NIGHT) — legacy max-of whole line, or PRORATA clock overlap
+    - Time bands (TIME_BANDS) — clock windows, max hourly rate per segment; optional
+      ``bonus_flat`` once per line when the shift overlaps the band; segment weekday/window
+      use each slice’s **calendar day** (cross-midnight shifts).
+    - Overtime (OVERTIME_SHIFT) — shift-line tiers on the time-band **hourly** total only;
+      ``bonus_flat`` amounts are added back after OT (daily/weekly OT reserved).
 
     Combination rule:
-    - Choose max-of(Base, Weekend, BH, Night)
-    - OT applies on top if applicable
+    - R_day = max(Base, Weekend, BH) for “day” rate in band / prorata math
+    - Legacy night (MULTIPLIER/ABSOLUTE, not PRORATA): whole line still uses
+      max(Base, Weekend, BH, Night).
+    - OT applies on effective hourly rate after the above (flat band bonuses are outside OT tiers).
     """
 
     @staticmethod
@@ -515,6 +924,13 @@ class RateResolver:
         return str(m).strip().upper() if m is not None else ""
 
     @staticmethod
+    def _policy_row_applies_wage(p: Optional[Dict[str, Any]]) -> bool:
+        if not p:
+            return False
+        s = str(p.get("applies_to") or "WAGE").strip().upper()
+        return s in ("WAGE", "BOTH")
+
+    @staticmethod
     def resolve_rate_and_pay(
         contractor_id: int,
         role_id: Optional[int],
@@ -534,6 +950,7 @@ class RateResolver:
             pay: Decimal
             policy_meta: Dict with applied policy details
         """
+        _ = weekly_hours_before  # reserved for weekly OT / caps
         base = RateResolver._base_rate(
             contractor_id, job_type_id, work_date, client_id)
         hrs = Decimal(
@@ -545,57 +962,124 @@ class RateResolver:
             "contractor_id": contractor_id
         }
 
-        # Candidate rates: base + policies
-        candidates = [("BASE", base)]
+        candidates_day: List[Tuple[str, Decimal]] = [("BASE", base)]
 
-        # Weekend policy
         if work_date.weekday() >= 5:
             pols = RateResolver._policies('WEEKEND', scope, work_date)
             if pols:
                 p = pols[0]
                 pm = RateResolver._policy_mode_upper(p)
                 if pm == "MULTIPLIER" and p.get('multiplier') is not None:
-                    candidates.append(
+                    candidates_day.append(
                         ("WEEKEND", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
                 elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
-                    candidates.append(("WEEKEND", _dec(p['absolute_rate'])))
+                    candidates_day.append(("WEEKEND", _dec(p['absolute_rate'])))
 
-        # Bank Holiday policy
         if RateResolver._is_bank_holiday(work_date):
             pols = RateResolver._policies('BANK_HOLIDAY', scope, work_date)
             if pols:
                 p = pols[0]
                 pm = RateResolver._policy_mode_upper(p)
                 if pm == "MULTIPLIER" and p.get('multiplier') is not None:
-                    candidates.append(
+                    candidates_day.append(
                         ("BANK_HOLIDAY", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
                 elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
-                    candidates.append(
+                    candidates_day.append(
                         ("BANK_HOLIDAY", _dec(p['absolute_rate'])))
 
-        # Night policy
-        pols = RateResolver._policies('NIGHT', scope, work_date)
+        R_day_name, R_day = max(candidates_day, key=lambda kv: kv[1])
+
+        pols_night = RateResolver._policies('NIGHT', scope, work_date)
         night_window = None
-        if pols:
-            p = pols[0]
-            ws, we = p.get('window_start'), p.get('window_end')
-            if ws and we:
-                night_window = (ws, we)
-            pm = RateResolver._policy_mode_upper(p)
-            if pm == "MULTIPLIER" and p.get('multiplier') is not None:
-                candidates.append(
-                    ("NIGHT", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
-            elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
-                candidates.append(("NIGHT", _dec(p['absolute_rate'])))
+        if pols_night:
+            pn0 = pols_night[0]
+            ws0, we0 = pn0.get('window_start'), pn0.get('window_end')
+            if ws0 and we0:
+                night_window = (ws0, we0)
 
-        # Choose max-of all candidate rates
-        chosen_name, chosen_rate = max(candidates, key=lambda kv: kv[1])
+        pay_pre_ot: Optional[Decimal] = None
+        chosen_name = R_day_name
+        extra_meta: Dict[str, Any] = {}
 
-        # Overtime (shift-based)
+        pols_tb = RateResolver._policies("TIME_BANDS", scope, work_date)
+        tb_pol = pols_tb[0] if pols_tb else None
+        bands: List[Dict[str, Any]] = []
+        if tb_pol and RateResolver._policy_row_applies_wage(tb_pol):
+            bands = _rr_parse_time_bands_json(tb_pol.get("time_bands_json"))
+        if (
+            bands
+            and tb_pol
+            and RateResolver._policy_mode_upper(tb_pol) != "OFF"
+        ):
+            pay_pre_ot, extra_meta = _rr_pay_time_bands(
+                work_date,
+                actual_start,
+                actual_end,
+                int(break_mins or 0),
+                R_day,
+                bands,
+            )
+            extra_meta["policy_id"] = int(tb_pol.get("id") or 0)
+            extra_meta["policy_name"] = str(tb_pol.get("name") or "")
+            chosen_name = "TIME_BANDS"
+        elif pols_night:
+            p = pols_night[0]
+            pmn = RateResolver._policy_mode_upper(p)
+            if pmn == "PRORATA" and RateResolver._policy_row_applies_wage(p):
+                pr_pay, pr_meta = _rr_pay_night_prorata(
+                    work_date,
+                    actual_start,
+                    actual_end,
+                    int(break_mins or 0),
+                    R_day,
+                    p,
+                )
+                if pr_pay is not None:
+                    pay_pre_ot = pr_pay
+                    extra_meta = pr_meta
+                    extra_meta["policy_id"] = int(p.get("id") or 0)
+                    chosen_name = "NIGHT_PRORATA"
+
+        time_band_flat_addon = Decimal("0")
+        if pay_pre_ot is not None and extra_meta.get("time_band_hourly_pay") is not None:
+            try:
+                time_band_flat_addon = (
+                    pay_pre_ot
+                    - Decimal(str(extra_meta["time_band_hourly_pay"]))
+                ).quantize(Decimal("0.01"))
+            except Exception:
+                time_band_flat_addon = Decimal("0")
+            if time_band_flat_addon < 0:
+                time_band_flat_addon = Decimal("0")
+
+        if pay_pre_ot is None:
+            candidates = list(candidates_day)
+            if pols_night:
+                p = pols_night[0]
+                pm = RateResolver._policy_mode_upper(p)
+                if pm == "MULTIPLIER" and p.get('multiplier') is not None:
+                    candidates.append(
+                        ("NIGHT", (base * _dec(p['multiplier'])).quantize(Decimal('0.01'))))
+                elif pm == "ABSOLUTE" and p.get('absolute_rate') is not None:
+                    candidates.append(("NIGHT", _dec(p['absolute_rate'])))
+            chosen_name, chosen_rate = max(candidates, key=lambda kv: kv[1])
+            pay_pre_ot = (hrs * chosen_rate).quantize(Decimal('0.01'))
+        else:
+            hourly_for_rate = pay_pre_ot
+            if extra_meta.get("time_band_hourly_pay") is not None:
+                try:
+                    hourly_for_rate = Decimal(str(extra_meta["time_band_hourly_pay"]))
+                except Exception:
+                    hourly_for_rate = pay_pre_ot
+            chosen_rate = (
+                (hourly_for_rate / hrs).quantize(Decimal("0.01")) if hrs > 0 else R_day
+            )
+
+        # Overtime (shift-based) uses effective line rate
         ot_applied = None
-        pols = RateResolver._policies('OVERTIME_SHIFT', scope, work_date)
-        if pols:
-            p = pols[0]
+        pols_ot = RateResolver._policies('OVERTIME_SHIFT', scope, work_date)
+        if pols_ot:
+            p = pols_ot[0]
             th = p.get('ot_threshold_hours')
             t1 = p.get('ot_tier1_mult')
             t2 = p.get('ot_tier2_mult')
@@ -603,30 +1087,56 @@ class RateResolver:
             if th and (t1 or t2):
                 base_hours = min(hrs, Decimal(str(th)))
                 ot_hours = max(Decimal('0'), hrs - Decimal(str(th)))
-                # OT stacks on top
                 if ot_hours > 0:
                     ot_mult = _dec(t2) if th2 and hrs > Decimal(
                         str(th2)) and t2 else _dec(t1 or 1)
                     ot_rate = (chosen_rate * ot_mult).quantize(Decimal('0.01'))
                     pay = (base_hours * chosen_rate + ot_hours *
                            ot_rate).quantize(Decimal('0.01'))
+                    if time_band_flat_addon > 0:
+                        pay = (pay + time_band_flat_addon).quantize(
+                            Decimal("0.01"))
                     ot_applied = {"threshold": float(th), "ot_hours": float(
                         ot_hours), "ot_multiplier": float(ot_mult)}
                 else:
-                    pay = (hrs * chosen_rate).quantize(Decimal('0.01'))
+                    pay = pay_pre_ot.quantize(Decimal('0.01'))
             else:
-                pay = (hrs * chosen_rate).quantize(Decimal('0.01'))
+                pay = pay_pre_ot.quantize(Decimal('0.01'))
         else:
-            pay = (hrs * chosen_rate).quantize(Decimal('0.01'))
+            pay = pay_pre_ot.quantize(Decimal('0.01'))
 
-        policy_meta = {
+        min_per_shift_meta: Optional[Dict[str, Any]] = None
+        pols_ms = RateResolver._policies(
+            "MINIMUM_HOURS_PER_SHIFT", scope, work_date)
+        ms_pol = pols_ms[0] if pols_ms else None
+        if ms_pol and RateResolver._policy_row_applies_wage(ms_pol):
+            try:
+                mh = _dec(ms_pol.get("minimum_hours") or 0)
+            except Exception:
+                mh = Decimal("0")
+            if mh > 0 and hrs > 0 and hrs < mh:
+                pay = (pay / hrs * mh).quantize(Decimal("0.01"))
+                min_per_shift_meta = {
+                    "type": "MINIMUM_HOURS_PER_SHIFT",
+                    "policy_id": int(ms_pol.get("id") or 0),
+                    "policy_name": str(ms_pol.get("name") or ""),
+                    "floor_hours": float(mh),
+                    "worked_hours": float(hrs),
+                }
+
+        policy_meta: Dict[str, Any] = {
             "base_rate": float(base),
+            "R_day": float(R_day),
+            "R_day_reason": R_day_name,
             "chosen_rate": float(chosen_rate),
             "chosen_reason": chosen_name,
             "hours": float(hrs),
             "night_window": str(night_window) if night_window else None,
-            "overtime": ot_applied
+            "overtime": ot_applied,
+            "minimum_per_shift": min_per_shift_meta,
         }
+        if extra_meta:
+            policy_meta["clock_split"] = extra_meta
 
         return chosen_rate, pay, policy_meta
 
@@ -837,19 +1347,478 @@ class TimesheetService:
         )
 
     @staticmethod
-    def _prefill_from_schedule_shifts(user_id: int, wk_pk: int, week_ending: date) -> None:
+    def contractor_has_schedule_shifts_in_week(
+        user_id: int, week_ending: date
+    ) -> bool:
+        """
+        True if ``schedule_shifts`` has at least one non-cancelled shift for this
+        contractor in the ISO week ending ``week_ending`` (primary or assignment).
+        """
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+            if not cur.fetchone():
+                return False
+            date_from = week_ending - timedelta(days=6)
+            date_to = week_ending
+            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            has_asg = bool(cur.fetchone())
+            if has_asg:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM schedule_shifts ss
+                    WHERE ss.work_date BETWEEN %s AND %s
+                      AND (ss.status IS NULL OR LOWER(ss.status) <> 'cancelled')
+                      AND (
+                        ss.contractor_id = %s
+                        OR EXISTS (
+                          SELECT 1 FROM schedule_shift_assignments sa
+                          WHERE sa.shift_id = ss.id AND sa.contractor_id = %s
+                        )
+                      )
+                    LIMIT 1
+                    """,
+                    (date_from, date_to, int(user_id), int(user_id)),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT 1 FROM schedule_shifts ss
+                    WHERE ss.work_date BETWEEN %s AND %s
+                      AND (ss.status IS NULL OR LOWER(ss.status) <> 'cancelled')
+                      AND ss.contractor_id = %s
+                    LIMIT 1
+                    """,
+                    (date_from, date_to, int(user_id)),
+                )
+            return bool(cur.fetchone())
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def sync_scheduler_shifts_into_week(user_id: int, week_id: str) -> dict:
+        """
+        Ensure the timesheet week exists and merge rota (``schedule_shifts``) into
+        ``tb_timesheet_entries`` for draft/rejected weeks when scheduler prefill is on.
+
+        Idempotent: safe after bulk issue, on page load, or from a background job.
+        """
+        wk = TimesheetService._ensure_week(user_id, week_id)
+        we = TimesheetService._coerce_week_ending_value(wk.get("week_ending"))
+        if not we:
+            we = TimesheetService.week_ending_date_from_week_id(week_id)
+        if TimesheetService._scheduler_week_prefill_enabled() and (
+            (wk.get("status") or "draft").lower() in ("draft", "rejected")
+        ):
+            try:
+                TimesheetService._prefill_from_schedule_shifts(
+                    user_id=user_id,
+                    wk_pk=int(wk["id"]),
+                    week_ending=we,
+                )
+            except Exception:
+                pass
+        return wk
+
+    @staticmethod
+    def notify_schedule_shift_changed(shift_id: int, *, deleted: bool = False) -> None:
+        """
+        Keep personal timesheets aligned with the scheduling rota.
+
+        Called when a shift is created, updated, assignments change, or deleted.
+        Respects ``scheduler_week_prefill_enabled`` for scheduler-mirror rows
+        (``source='scheduler'``, ``runsheet_id`` = schedule shift id).
+        """
+        try:
+            TimesheetService._notify_schedule_shift_changed_impl(
+                int(shift_id), deleted=bool(deleted)
+            )
+        except Exception:
+            _LOG.debug(
+                "notify_schedule_shift_changed failed shift_id=%s deleted=%s",
+                shift_id,
+                deleted,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _notify_schedule_shift_changed_impl(shift_id: int, *, deleted: bool) -> None:
+        if deleted:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    DELETE e FROM tb_timesheet_entries e
+                    INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                    WHERE e.source='scheduler' AND e.runsheet_id=%s AND e.edited_by IS NULL
+                      AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                    """,
+                    (int(shift_id),),
+                )
+                conn.commit()
+            finally:
+                cur.close()
+                conn.close()
+            return
+
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute("SHOW TABLES LIKE 'schedule_shifts'")
+            if not cur.fetchone():
+                return
+            cur.execute(
+                """
+                SELECT id, work_date, status, runsheet_id, runsheet_assignment_id,
+                       job_type_id, contractor_id, scheduled_start, scheduled_end
+                FROM schedule_shifts WHERE id=%s
+                """,
+                (int(shift_id),),
+            )
+            shift = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+
+        if not shift:
+            return
+
+        status = (str(shift.get("status") or "")).strip().lower()
+        if status == "cancelled":
+            conn = get_db_connection()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    DELETE e FROM tb_timesheet_entries e
+                    INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                    WHERE e.source='scheduler' AND e.runsheet_id=%s AND e.edited_by IS NULL
+                      AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                    """,
+                    (int(shift_id),),
+                )
+                conn.commit()
+            finally:
+                cur.close()
+                conn.close()
+            return
+
+        if shift.get("runsheet_id") and shift.get("runsheet_assignment_id"):
+            TimesheetService._push_schedule_shift_scheduled_to_runsheet_bundle(int(shift_id))
+            return
+
+        if not TimesheetService._scheduler_week_prefill_enabled():
+            return
+
+        assignees: List[int] = []
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            if cur.fetchone():
+                cur.execute(
+                    "SELECT contractor_id FROM schedule_shift_assignments WHERE shift_id=%s",
+                    (int(shift_id),),
+                )
+                assignees = [int(r[0]) for r in (cur.fetchall() or []) if r and r[0] is not None]
+            cid = shift.get("contractor_id")
+            if cid is not None:
+                ic = int(cid)
+                if ic not in assignees:
+                    assignees.append(ic)
+        finally:
+            cur.close()
+            conn.close()
+
+        wd = shift.get("work_date")
+        if wd is None:
+            return
+        if isinstance(wd, datetime):
+            wd_d = wd.date()
+        elif isinstance(wd, date):
+            wd_d = wd
+        else:
+            try:
+                wd_d = date.fromisoformat(str(wd)[:10])
+            except ValueError:
+                return
+
+        week_id_str = TimesheetService._week_id_for_date(wd_d)
+        week_ending = TimesheetService.week_ending_date_from_week_id(week_id_str)
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            if assignees:
+                placeholders = ",".join(["%s"] * len(assignees))
+                cur.execute(
+                    f"""
+                    DELETE e FROM tb_timesheet_entries e
+                    INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                    WHERE e.source='scheduler' AND e.runsheet_id=%s
+                      AND e.user_id NOT IN ({placeholders})
+                      AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                    """,
+                    (int(shift_id), *assignees),
+                )
+            else:
+                cur.execute(
+                    """
+                    DELETE e FROM tb_timesheet_entries e
+                    INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                    WHERE e.source='scheduler' AND e.runsheet_id=%s AND e.edited_by IS NULL
+                      AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                    """,
+                    (int(shift_id),),
+                )
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+        for uid in assignees:
+            try:
+                wk = TimesheetService._ensure_week(int(uid), week_id_str)
+                wst = (str(wk.get("status") or "draft")).strip().lower()
+                if wst not in ("draft", "rejected"):
+                    continue
+                TimesheetService._prefill_from_schedule_shifts(
+                    int(uid),
+                    int(wk["id"]),
+                    week_ending,
+                    force_shift_id=int(shift_id),
+                )
+            except Exception:
+                _LOG.debug(
+                    "prefill for assignee failed shift_id=%s user_id=%s",
+                    shift_id,
+                    uid,
+                    exc_info=True,
+                )
+
+        TimesheetService._sync_edited_scheduler_entries_from_shift(int(shift_id))
+
+    @staticmethod
+    def _sync_edited_scheduler_entries_from_shift(shift_id: int) -> None:
+        """Push new work_date / scheduled times from the rota into staff-edited scheduler mirror rows."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT e.id, e.user_id, e.week_id
+                FROM tb_timesheet_entries e
+                INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                WHERE e.source='scheduler' AND e.runsheet_id=%s AND e.edited_by IS NOT NULL
+                  AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                """,
+                (int(shift_id),),
+            )
+            touched = cur.fetchall() or []
+            if not touched:
+                return
+            cur.execute(
+                """
+                SELECT ss.work_date, ss.scheduled_start, ss.scheduled_end, ss.break_mins, ss.notes,
+                       ss.job_type_id, ss.client_id, ss.site_id,
+                       c.name AS client_name, s.name AS site_name
+                FROM schedule_shifts ss
+                LEFT JOIN clients c ON c.id = ss.client_id
+                LEFT JOIN sites s ON s.id = ss.site_id
+                WHERE ss.id=%s
+                """,
+                (int(shift_id),),
+            )
+            sh = cur.fetchone()
+            if not sh:
+                return
+            ecf = TimesheetService._tb_entry_column_flags(cur)
+            loc_set: List[str] = []
+            loc_vals: List[Any] = []
+            if ecf["client_name"]:
+                loc_set.append("e.client_name=%s")
+                loc_vals.append(sh.get("client_name"))
+            if ecf["site_name"]:
+                loc_set.append("e.site_name=%s")
+                loc_vals.append(sh.get("site_name"))
+            if ecf["client_id"]:
+                loc_set.append("e.client_id=%s")
+                loc_vals.append(sh.get("client_id"))
+            if ecf["site_id"]:
+                loc_set.append("e.site_id=%s")
+                loc_vals.append(sh.get("site_id"))
+            loc_sql = (",\n                    " + ",\n                    ".join(loc_set)) if loc_set else ""
+
+            cur.execute(
+                f"""
+                UPDATE tb_timesheet_entries e
+                INNER JOIN schedule_shifts ss ON ss.id = e.runsheet_id
+                INNER JOIN tb_timesheet_weeks w ON w.id = e.week_id
+                SET
+                    e.work_date = ss.work_date,
+                    e.scheduled_start = ss.scheduled_start,
+                    e.scheduled_end = ss.scheduled_end,
+                    e.break_mins = COALESCE(ss.break_mins, 0),
+                    e.notes = ss.notes,
+                    e.job_type_id = ss.job_type_id
+                    {loc_sql}
+                WHERE e.source='scheduler' AND e.runsheet_id=%s AND e.edited_by IS NOT NULL
+                  AND LOWER(COALESCE(w.status, 'draft')) IN ('draft', 'rejected')
+                """,
+                (*loc_vals, int(shift_id)),
+            )
+
+            seen: Set[Tuple[int, int]] = set()
+            for row in touched:
+                uid = int(row["user_id"])
+                wk_pk = int(row["week_id"])
+                key = (uid, wk_pk)
+                if key in seen:
+                    continue
+                seen.add(key)
+                TimesheetService._refresh_week_pay_and_daily_mins(cur, uid, wk_pk)
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def _push_schedule_shift_scheduled_to_runsheet_bundle(shift_id: int) -> None:
+        """When a shift is tied to a published run sheet, mirror scheduled/date changes into TB."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT id, contractor_id, work_date, scheduled_start, scheduled_end,
+                       notes, runsheet_id, runsheet_assignment_id
+                FROM schedule_shifts WHERE id=%s
+                """,
+                (int(shift_id),),
+            )
+            sh = cur.fetchone()
+            if not sh or not sh.get("runsheet_id") or not sh.get("runsheet_assignment_id"):
+                return
+            ra_id = int(sh["runsheet_assignment_id"])
+            rs_id = int(sh["runsheet_id"])
+            wd = sh.get("work_date")
+            if isinstance(wd, datetime):
+                wd = wd.date()
+            cur.execute(
+                """
+                UPDATE runsheet_assignments
+                SET scheduled_start=%s, scheduled_end=%s, notes=COALESCE(%s, notes)
+                WHERE id=%s
+                """,
+                (
+                    sh.get("scheduled_start"),
+                    sh.get("scheduled_end"),
+                    sh.get("notes"),
+                    ra_id,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE runsheets
+                SET work_date=%s, window_start=%s, window_end=%s
+                WHERE id=%s
+                """,
+                (
+                    wd,
+                    sh.get("scheduled_start"),
+                    sh.get("scheduled_end"),
+                    rs_id,
+                ),
+            )
+            uid = sh.get("contractor_id")
+            if uid is None:
+                cur.execute(
+                    "SELECT user_id FROM runsheet_assignments WHERE id=%s LIMIT 1",
+                    (ra_id,),
+                )
+                r2 = cur.fetchone()
+                uid = r2.get("user_id") if r2 else None
+            if uid is None or wd is None:
+                conn.commit()
+                return
+            iso_year, iso_week, _ = wd.isocalendar()
+            week_id_str = f"{iso_year}{iso_week:02d}"
+            cur.execute(
+                "SELECT id FROM tb_timesheet_weeks WHERE user_id=%s AND week_id=%s LIMIT 1",
+                (int(uid), week_id_str),
+            )
+            wk = cur.fetchone()
+            if not wk:
+                conn.commit()
+                return
+            week_pk = int(wk["id"])
+            cur.execute(
+                """
+                UPDATE tb_timesheet_entries
+                SET work_date=%s,
+                    scheduled_start=%s,
+                    scheduled_end=%s,
+                    notes=COALESCE(%s, notes)
+                WHERE week_id=%s AND user_id=%s AND source='runsheet' AND runsheet_id=%s
+                """,
+                (
+                    wd,
+                    sh.get("scheduled_start"),
+                    sh.get("scheduled_end"),
+                    sh.get("notes"),
+                    week_pk,
+                    int(uid),
+                    rs_id,
+                ),
+            )
+            TimesheetService.refresh_entries_actuals(
+                cur, conn, week_pk, int(uid), wd, rs_id
+            )
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            cur.close()
+            conn.close()
+
+        try:
+            TimesheetService.sync_schedule_shift_to_time_billing(int(shift_id))
+        except Exception:
+            _LOG.debug(
+                "sync_schedule_shift_to_time_billing after scheduled push failed shift_id=%s",
+                shift_id,
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _prefill_from_schedule_shifts(
+        user_id: int,
+        wk_pk: int,
+        week_ending: date,
+        force_shift_id: Optional[int] = None,
+    ) -> None:
         """
         Prefill `tb_timesheet_entries` for the contractor from `schedule_shifts`
         for the relevant ISO week.
 
         - Uses schedule `scheduled_start/end` as scheduled times.
-        - Uses `actual_start/end` when clock-in/out exists; otherwise defaults
-          actual to scheduled (so clocking is optional).
+        - Leaves `actual_start/end` NULL until real clock/portal actuals exist on
+          the shift, or the contractor enters actuals on the timesheet / via run sheet.
         - Stores the schedule shift id into `tb_timesheet_entries.runsheet_id`
           for `source='scheduler'` entries to keep mapping stable.
         - Respects staff deletions via `tb_scheduler_shift_removals`.
         - Does not overwrite entries that staff/admin already edited
           (`edited_by` is non-null).
+        - Includes shifts where the contractor is only on ``schedule_shift_assignments``
+          (multi-assignee / open slots), not only ``schedule_shifts.contractor_id``.
         """
         # Ensure schedule module is installed / tables exist.
         conn = get_db_connection()
@@ -867,6 +1836,9 @@ class TimesheetService:
                 "SHOW TABLES LIKE 'tb_scheduler_shift_removals'")
             removals_exists = bool(cur.fetchone())
 
+            cur.execute("SHOW TABLES LIKE 'schedule_shift_assignments'")
+            assignments_exists = bool(cur.fetchone())
+
             contractor = TimesheetService._get_contractor(user_id)
             if not contractor:
                 return
@@ -876,8 +1848,35 @@ class TimesheetService:
             # Pull shifts; only those not yet linked to a runsheet.
             # (If runsheet_id is set, the normal runsheet->timesheet path
             # should be used instead.)
+            if assignments_exists:
+                contractor_filter = (
+                    "(ss.contractor_id = %s OR EXISTS ("
+                    "SELECT 1 FROM schedule_shift_assignments sa "
+                    "WHERE sa.shift_id = ss.id AND sa.contractor_id = %s))"
+                )
+                if force_shift_id:
+                    runsheet_clause = "(ss.runsheet_id IS NULL OR ss.id = %s)"
+                    shift_sql_params = (
+                        user_id,
+                        user_id,
+                        date_from,
+                        date_to,
+                        int(force_shift_id),
+                    )
+                else:
+                    runsheet_clause = "ss.runsheet_id IS NULL"
+                    shift_sql_params = (user_id, user_id, date_from, date_to)
+            else:
+                contractor_filter = "ss.contractor_id = %s"
+                if force_shift_id:
+                    runsheet_clause = "(ss.runsheet_id IS NULL OR ss.id = %s)"
+                    shift_sql_params = (user_id, date_from, date_to, int(force_shift_id))
+                else:
+                    runsheet_clause = "ss.runsheet_id IS NULL"
+                    shift_sql_params = (user_id, date_from, date_to)
+
             cur.execute(
-                """
+                f"""
                 SELECT
                     ss.id,
                     ss.work_date,
@@ -895,13 +1894,13 @@ class TimesheetService:
                 FROM schedule_shifts ss
                 LEFT JOIN clients c ON c.id = ss.client_id
                 LEFT JOIN sites s   ON s.id = ss.site_id
-                WHERE ss.contractor_id = %s
+                WHERE {contractor_filter}
                   AND ss.work_date BETWEEN %s AND %s
                   AND (ss.status IS NULL OR LOWER(ss.status) <> 'cancelled')
-                  AND ss.runsheet_id IS NULL
+                  AND {runsheet_clause}
                 ORDER BY ss.work_date ASC, ss.scheduled_start ASC
                 """,
-                (user_id, date_from, date_to),
+                shift_sql_params,
             )
             shifts = cur.fetchall() or []
             if not shifts:
@@ -923,6 +1922,8 @@ class TimesheetService:
 
             for sh in shifts:
                 schedule_shift_id = int(sh["id"])
+                if sh.get("job_type_id") is None:
+                    continue
 
                 if removals_exists:
                     cur.execute(
@@ -937,17 +1938,13 @@ class TimesheetService:
                     if cur.fetchone():
                         continue
 
-                actual_start = sh.get("actual_start") or sh.get(
-                    "scheduled_start")
-                actual_end = sh.get("actual_end") or sh.get(
-                    "scheduled_end")
-
-                # If no clock data was recorded, we still prefill actuals
-                # with scheduled so the week is editable/submittable.
-                clock_missing = (
-                    sh.get("actual_start") is None or sh.get("actual_end") is None
-                )
-                auto_reason = "Clock not recorded; defaulted actual to scheduled" if clock_missing else None
+                ra_s = _coerce_entry_time_value(sh.get("actual_start"))
+                ra_e = _coerce_entry_time_value(sh.get("actual_end"))
+                if ra_s is not None and ra_e is not None:
+                    actual_start, actual_end = ra_s, ra_e
+                else:
+                    actual_start, actual_end = None, None
+                auto_reason = None
 
                 cur.execute(
                     f"""
@@ -990,6 +1987,10 @@ class TimesheetService:
                     "runsheet_id": schedule_shift_id,
                     "lock_job_client": 1,
                 }
+                if ecf["client_id"] and sh.get("client_id") is not None:
+                    payload["client_id"] = int(sh["client_id"])
+                if ecf["site_id"] and sh.get("site_id") is not None:
+                    payload["site_id"] = int(sh["site_id"])
 
                 computed = TimesheetService._compute_and_fill(
                     payload.copy(), contractor
@@ -1154,6 +2155,8 @@ class TimesheetService:
                     )
                     created += 1
 
+            TimesheetService._refresh_week_pay_and_daily_mins(cur, user_id, wk_pk)
+
             conn.commit()
         finally:
             cur.close()
@@ -1267,6 +2270,27 @@ class TimesheetService:
             conn.close()
 
     @staticmethod
+    def week_ending_date_from_week_id(week_id: str) -> date:
+        """Sunday (week end) for ISO week id ``YYYYWW`` (matches ``_ensure_week``)."""
+        y, wknum = int(week_id[:4]), int(week_id[4:])
+        return date.fromisocalendar(y, wknum, 7)
+
+    @staticmethod
+    def _coerce_week_ending_value(we: Any) -> Optional[date]:
+        if we is None:
+            return None
+        if isinstance(we, datetime):
+            return we.date()
+        if isinstance(we, date):
+            return we
+        if isinstance(we, str) and we.strip():
+            try:
+                return datetime.strptime(we[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
     def _validate_entry_payload(e: dict, allow_locked_fields=False) -> tuple:
         """
         Validate timesheet entry payload.
@@ -1278,8 +2302,7 @@ class TimesheetService:
         Returns:
             (is_valid: bool, error_message: Optional[str])
         """
-        required = ["job_type_id", "work_date", "scheduled_start",
-                    "scheduled_end", "actual_start", "actual_end"]
+        required = ["job_type_id", "work_date", "scheduled_start", "scheduled_end"]
         missing = [k for k in required if e.get(k) in (None, "")]
         if missing:
             return False, f"Missing fields: {', '.join(missing)}"
@@ -1290,10 +2313,14 @@ class TimesheetService:
             # Parse dates and times
             _ = datetime.strptime(
                 e["work_date"], "%Y-%m-%d").date() if isinstance(e["work_date"], str) else e["work_date"]
-            _ = _to_time(e["scheduled_start"])
-            _ = _to_time(e["scheduled_end"])
-            _ = _to_time(e["actual_start"])
-            _ = _to_time(e["actual_end"])
+            _ = _require_schedule_time(e["scheduled_start"])
+            _ = _require_schedule_time(e["scheduled_end"])
+            co_as = _optional_entry_time(e.get("actual_start"))
+            co_ae = _optional_entry_time(e.get("actual_end"))
+            has_as = co_as is not None
+            has_ae = co_ae is not None
+            if has_as != has_ae:
+                return False, "Enter both actual start and end, or leave both blank."
         except Exception as ex:
             return False, f"Invalid date/time or job_type_id: {ex}"
 
@@ -1332,25 +2359,14 @@ class TimesheetService:
         """
         work_date = entry["work_date"] if isinstance(
             entry["work_date"], date) else datetime.strptime(entry["work_date"], "%Y-%m-%d").date()
-        ss = _to_time(entry["scheduled_start"])
-        se = _to_time(entry["scheduled_end"])
-        as_ = _to_time(entry["actual_start"])
-        ae = _to_time(entry["actual_end"])
+        ss = _require_schedule_time(entry["scheduled_start"])
+        se = _require_schedule_time(entry["scheduled_end"])
+        as_ = _optional_entry_time(entry.get("actual_start"))
+        ae = _optional_entry_time(entry.get("actual_end"))
         break_mins = int(entry.get("break_mins") or 0)
 
         scheduled_hours = _hours_between(ss, se, 0)
-        actual_hours = _hours_between(as_, ae, break_mins)
-        labour_hours = actual_hours  # personal timesheets always 1 person
-
-        # Lateness and overrun in minutes
-        lateness = max(0, int((_hours_between(ss, as_, 0) * 60))
-                       ) if as_ > ss else 0
-        overrun = max(0, int((_hours_between(se, ae, 0) * 60))
-                      ) if ae > se else 0
-
         scheduled_total_mins = int(scheduled_hours * 60)
-        actual_total_mins = int(actual_hours * 60)
-        variance = actual_total_mins - scheduled_total_mins
 
         cid_for_rate: Optional[int] = None
         raw_cid = entry.get("client_id")
@@ -1360,43 +2376,75 @@ class TimesheetService:
             except (TypeError, ValueError):
                 cid_for_rate = None
 
-        hrs_dec = _dec(actual_hours, "0.0001")
         wage_f: float
         pay_f: float
         policy_applied_val: Optional[str]
         policy_source_val: str
 
-        try:
-            rate_dec, pay_dec, policy_meta = RateResolver.resolve_rate_and_pay(
-                contractor_id=int(contractor["id"]),
-                role_id=contractor.get("role_id"),
-                job_type_id=int(entry["job_type_id"]),
-                client_id=cid_for_rate,
-                work_date=work_date,
-                actual_start=as_,
-                actual_end=ae,
-                break_mins=break_mins,
-            )
-            wage_f = float(rate_dec)
-            pay_f = float(pay_dec)
-            policy_applied_val = json.dumps(policy_meta, default=str)
-            policy_source_val = str(policy_meta.get("chosen_reason") or "POLICY")
-        except Exception:
-            _tb_log_warning(
-                "time_billing: RateResolver failed; using MinimalRateResolver fallback.",
-                exc_info=True,
-            )
+        if as_ is None or ae is None:
+            actual_hours = 0.0
+            labour_hours = 0.0  # no worked time until actuals are recorded
+            lateness = 0
+            overrun = 0
+            actual_total_mins = 0
+            variance = actual_total_mins - scheduled_total_mins
+            hrs_dec = Decimal("0")
             base_rate = MinimalRateResolver.resolve_rate(
                 contractor_id=contractor["id"],
                 job_type_id=int(entry["job_type_id"]),
                 on_date=work_date,
                 client_id=cid_for_rate,
             )
-            pay_dec_fb = (hrs_dec * base_rate).quantize(Decimal("0.01"))
             wage_f = float(base_rate)
-            pay_f = float(pay_dec_fb)
+            pay_f = 0.0
             policy_applied_val = None
-            policy_source_val = "MINIMAL_FALLBACK"
+            policy_source_val = "NO_ACTUALS"
+        else:
+            actual_hours = _hours_between(as_, ae, break_mins)
+            labour_hours = actual_hours  # personal timesheets always 1 person
+
+            # Lateness and overrun in minutes
+            lateness = max(0, int((_hours_between(ss, as_, 0) * 60))
+                           ) if as_ > ss else 0
+            overrun = max(0, int((_hours_between(se, ae, 0) * 60))
+                          ) if ae > se else 0
+
+            actual_total_mins = int(actual_hours * 60)
+            variance = actual_total_mins - scheduled_total_mins
+
+            hrs_dec = _dec(actual_hours, "0.0001")
+
+            try:
+                rate_dec, pay_dec, policy_meta = RateResolver.resolve_rate_and_pay(
+                    contractor_id=int(contractor["id"]),
+                    role_id=contractor.get("role_id"),
+                    job_type_id=int(entry["job_type_id"]),
+                    client_id=cid_for_rate,
+                    work_date=work_date,
+                    actual_start=as_,
+                    actual_end=ae,
+                    break_mins=break_mins,
+                )
+                wage_f = float(rate_dec)
+                pay_f = float(pay_dec)
+                policy_applied_val = json.dumps(policy_meta, default=str)
+                policy_source_val = str(policy_meta.get("chosen_reason") or "POLICY")
+            except Exception:
+                _tb_log_warning(
+                    "time_billing: RateResolver failed; using MinimalRateResolver fallback.",
+                    exc_info=True,
+                )
+                base_rate = MinimalRateResolver.resolve_rate(
+                    contractor_id=contractor["id"],
+                    job_type_id=int(entry["job_type_id"]),
+                    on_date=work_date,
+                    client_id=cid_for_rate,
+                )
+                pay_dec_fb = (hrs_dec * base_rate).quantize(Decimal("0.01"))
+                wage_f = float(base_rate)
+                pay_f = float(pay_dec_fb)
+                policy_applied_val = None
+                policy_source_val = "MINIMAL_FALLBACK"
 
         entry.update({
             "scheduled_hours": float(_dec(scheduled_hours, "0.0001")),
@@ -1413,19 +2461,359 @@ class TimesheetService:
         return entry
 
     @staticmethod
+    def _merge_policy_daily_minimum(
+        existing_json: Any, meta: Dict[str, Any]
+    ) -> str:
+        try:
+            base = json.loads(existing_json) if existing_json else {}
+        except Exception:
+            base = {}
+        if not isinstance(base, dict):
+            base = {}
+        base["daily_minimum"] = meta
+        return json.dumps(base, default=str)
+
+    @staticmethod
+    def _entry_dict_for_compute_from_timesheet_row(
+        row: Dict[str, Any], ecf: Dict[str, bool], cur
+    ) -> Dict[str, Any]:
+        wd_raw = row.get("work_date")
+        if isinstance(wd_raw, datetime):
+            wd = wd_raw.date()
+        elif isinstance(wd_raw, date):
+            wd = wd_raw
+        elif isinstance(wd_raw, str) and wd_raw:
+            wd = datetime.strptime(str(wd_raw)[:10], "%Y-%m-%d").date()
+        else:
+            wd = date.today()
+
+        cn = row.get("client_name")
+        sn = row.get("site_name")
+        if not ecf.get("client_name") and not ecf.get("site_name"):
+            cn, sn = TimesheetService._client_site_display_names(
+                cur, row.get("client_id"), row.get("site_id")
+            )
+        elif (cn is None and sn is None) and (
+            ecf.get("client_id") or ecf.get("site_id")
+        ):
+            d2, d3 = TimesheetService._client_site_display_names(
+                cur, row.get("client_id"), row.get("site_id")
+            )
+            cn = cn or d2
+            sn = sn or d3
+
+        entry: Dict[str, Any] = {
+            "work_date": wd,
+            "scheduled_start": row.get("scheduled_start"),
+            "scheduled_end": row.get("scheduled_end"),
+            "actual_start": row.get("actual_start"),
+            "actual_end": row.get("actual_end"),
+            "break_mins": int(row.get("break_mins") or 0),
+            "job_type_id": int(row["job_type_id"]),
+            "client_name": cn,
+            "site_name": sn,
+            "source": row.get("source"),
+            "runsheet_id": row.get("runsheet_id"),
+            "lock_job_client": row.get("lock_job_client"),
+            "notes": row.get("notes"),
+        }
+        if ecf.get("client_id") and row.get("client_id") is not None:
+            entry["client_id"] = int(row["client_id"])
+        if ecf.get("site_id") and row.get("site_id") is not None:
+            entry["site_id"] = int(row["site_id"])
+        return entry
+
+    @staticmethod
+    def _distribute_daily_minimum_uplift(
+        cur,
+        group: List[Dict[str, Any]],
+        pol: Dict[str, Any],
+        basis: str,
+    ) -> None:
+        try:
+            mh = _dec(pol.get("minimum_hours") or 0)
+        except Exception:
+            mh = Decimal("0")
+        if mh <= 0 or not group:
+            return
+        sum_h = sum(float(_dec(r.get("actual_hours") or 0)) for r in group)
+        if sum_h <= 1e-9:
+            return
+        sum_h_dec = _dec(sum_h, "0.0001")
+        if sum_h_dec + Decimal("0.00001") >= mh:
+            return
+        sum_p_dec = sum((_dec(r.get("pay") or 0)) for r in group)
+        target = (sum_p_dec * (mh / sum_h_dec)).quantize(Decimal("0.01"))
+        uplift_dec = (target - sum_p_dec).quantize(Decimal("0.01"))
+        if uplift_dec <= Decimal("0.009"):
+            return
+        weights = [_dec(r.get("pay") or 0) for r in group]
+        wsum = sum(weights)
+        if wsum <= Decimal("0"):
+            weights = [Decimal("1")] * len(group)
+            wsum = Decimal(len(group))
+        acc = Decimal("0")
+        deltas: List[Tuple[int, Decimal]] = []
+        for i, r in enumerate(group):
+            if i < len(group) - 1:
+                wi = weights[i] / wsum
+                d = (uplift_dec * wi).quantize(Decimal("0.01"))
+                acc += d
+            else:
+                d = (uplift_dec - acc).quantize(Decimal("0.01"))
+            deltas.append((int(r["id"]), d))
+
+        meta_common = {
+            "basis": basis,
+            "policy_id": int(pol.get("id") or 0),
+            "policy_name": str(pol.get("name") or ""),
+            "minimum_hours": float(mh),
+            "sum_actual_hours": float(_dec(sum_h, "0.0001")),
+            "sum_pay_before": float(sum_p_dec.quantize(Decimal("0.01"))),
+        }
+        for (eid, delta), r in zip(deltas, group):
+            if delta <= Decimal("0"):
+                continue
+            old_pay = _dec(r.get("pay") or 0)
+            new_pay = (old_pay + delta).quantize(Decimal("0.01"))
+            dm = dict(meta_common)
+            dm["line_uplift"] = float(delta)
+            pa = TimesheetService._merge_policy_daily_minimum(
+                r.get("policy_applied"), dm
+            )
+            cur.execute(
+                "UPDATE tb_timesheet_entries SET pay=%s, policy_applied=%s WHERE id=%s",
+                (float(new_pay), pa, eid),
+            )
+
+    @staticmethod
+    def _apply_daily_minimum_pay(
+        cur,
+        user_id: int,
+        week_pk: int,
+        contractor: Dict[str, Any],
+    ) -> None:
+        contractor_id = int(contractor["id"])
+        role_id = contractor.get("role_id")
+        cur.execute(
+            """
+            SELECT id, work_date, client_id, job_type_id, actual_hours, pay, policy_applied,
+                   COALESCE(rate_overridden, 0) AS rate_overridden
+            FROM tb_timesheet_entries
+            WHERE user_id=%s AND week_id=%s
+            ORDER BY work_date ASC, id ASC
+            """,
+            (user_id, week_pk),
+        )
+        rows = cur.fetchall() or []
+        if not rows:
+            return
+
+        def _wd(r: Dict[str, Any]) -> date:
+            wd_raw = r.get("work_date")
+            if isinstance(wd_raw, datetime):
+                return wd_raw.date()
+            if isinstance(wd_raw, date):
+                return wd_raw
+            if isinstance(wd_raw, str) and wd_raw:
+                return datetime.strptime(str(wd_raw)[:10], "%Y-%m-%d").date()
+            return date.today()
+
+        active = [dict(x) for x in rows if int(x.get("rate_overridden") or 0) == 0]
+        if not active:
+            return
+
+        by_date: Dict[date, List[Dict[str, Any]]] = {}
+        for r in active:
+            wd = _wd(r)
+            by_date.setdefault(wd, []).append(r)
+
+        for wd, day_rows in by_date.items():
+            if not day_rows:
+                continue
+            probe_jt = int(day_rows[0]["job_type_id"])
+            scope_probe = {
+                "role_id": role_id,
+                "job_type_id": probe_jt,
+                "client_id": None,
+                "contractor_id": contractor_id,
+            }
+            pol_g = RateResolver._policies(
+                "MINIMUM_HOURS_DAILY_GLOBAL", scope_probe, wd
+            )
+            glob_ok = bool(
+                pol_g
+                and RateResolver._policy_row_applies_wage(pol_g[0])
+                and pol_g[0].get("minimum_hours")
+            )
+
+            cc_groups: Dict[int, List[Dict[str, Any]]] = {}
+            c_groups: Dict[int, List[Dict[str, Any]]] = {}
+            g_rows: List[Dict[str, Any]] = []
+
+            for r in day_rows:
+                cid = r.get("client_id")
+                jtid = int(r["job_type_id"])
+                if cid is not None:
+                    ic = int(cid)
+                    scope = {
+                        "role_id": role_id,
+                        "job_type_id": jtid,
+                        "client_id": ic,
+                        "contractor_id": contractor_id,
+                    }
+                    pcc = RateResolver._policies(
+                        "MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT", scope, wd
+                    )
+                    if (
+                        pcc
+                        and RateResolver._policy_row_applies_wage(pcc[0])
+                        and pcc[0].get("minimum_hours")
+                    ):
+                        cc_groups.setdefault(ic, []).append(r)
+                        continue
+                    pc = RateResolver._policies(
+                        "MINIMUM_HOURS_DAILY_CLIENT", scope, wd
+                    )
+                    if (
+                        pc
+                        and RateResolver._policy_row_applies_wage(pc[0])
+                        and pc[0].get("minimum_hours")
+                    ):
+                        c_groups.setdefault(ic, []).append(r)
+                        continue
+                if glob_ok:
+                    g_rows.append(r)
+
+            for ic, grp in cc_groups.items():
+                scope = {
+                    "role_id": role_id,
+                    "job_type_id": int(grp[0]["job_type_id"]),
+                    "client_id": ic,
+                    "contractor_id": contractor_id,
+                }
+                pols = RateResolver._policies(
+                    "MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT", scope, wd
+                )
+                if pols:
+                    TimesheetService._distribute_daily_minimum_uplift(
+                        cur, grp, pols[0], "CONTRACTOR_CLIENT"
+                    )
+            for ic, grp in c_groups.items():
+                scope = {
+                    "role_id": role_id,
+                    "job_type_id": int(grp[0]["job_type_id"]),
+                    "client_id": ic,
+                    "contractor_id": contractor_id,
+                }
+                pols = RateResolver._policies(
+                    "MINIMUM_HOURS_DAILY_CLIENT", scope, wd
+                )
+                if pols:
+                    TimesheetService._distribute_daily_minimum_uplift(
+                        cur, grp, pols[0], "CLIENT"
+                    )
+            if g_rows and pol_g:
+                TimesheetService._distribute_daily_minimum_uplift(
+                    cur, g_rows, pol_g[0], "GLOBAL"
+                )
+
+    @staticmethod
+    def _refresh_week_pay_and_daily_mins(cur, user_id: int, week_pk: int) -> None:
+        """
+        Recompute line pay from RateResolver (incl. per-shift minimum), then apply
+        daily minimum-hour rules across the week. Skips rows with rate_overridden=1
+        (e.g. runsheet flat day rate).
+        """
+        contractor = TimesheetService._get_contractor(user_id)
+        if not contractor:
+            return
+        ecf = TimesheetService._tb_entry_column_flags(cur)
+        cur.execute(
+            """
+            SELECT * FROM tb_timesheet_entries
+            WHERE user_id=%s AND week_id=%s
+            ORDER BY work_date ASC, id ASC
+            """,
+            (user_id, week_pk),
+        )
+        rows = cur.fetchall() or []
+        for row in rows:
+            if int(row.get("rate_overridden") or 0) == 1:
+                continue
+            entry = TimesheetService._entry_dict_for_compute_from_timesheet_row(
+                row, ecf, cur
+            )
+            TimesheetService._compute_and_fill(entry, contractor)
+            ro = int(row.get("rate_overridden") or 0)
+            if str(row.get("source") or "") == "runsheet" and row.get("runsheet_id"):
+                try:
+                    rs_hdr = RunsheetService.get_runsheet(int(row["runsheet_id"]))
+                    if rs_hdr:
+                        post = RunsheetService._apply_runsheet_shift_pay_to_computed(
+                            rs_hdr, dict(entry)
+                        )
+                        entry["wage_rate_used"] = post.get(
+                            "wage_rate_used", entry["wage_rate_used"]
+                        )
+                        entry["pay"] = post.get("pay", entry["pay"])
+                        entry["policy_source"] = post.get(
+                            "policy_source", entry.get("policy_source")
+                        )
+                        entry["policy_applied"] = post.get(
+                            "policy_applied", entry.get("policy_applied")
+                        )
+                        ro = int(post.get("rate_overridden") or 0)
+                except Exception:
+                    ro = int(row.get("rate_overridden") or 0)
+            cur.execute(
+                """
+                UPDATE tb_timesheet_entries SET
+                    scheduled_hours=%s, actual_hours=%s, labour_hours=%s,
+                    wage_rate_used=%s, pay=%s,
+                    lateness_mins=%s, overrun_mins=%s, variance_mins=%s,
+                    policy_applied=%s, policy_source=%s,
+                    rate_overridden=%s
+                WHERE id=%s
+                """,
+                (
+                    entry.get("scheduled_hours"),
+                    entry.get("actual_hours"),
+                    entry.get("labour_hours"),
+                    entry.get("wage_rate_used"),
+                    entry.get("pay"),
+                    entry.get("lateness_mins"),
+                    entry.get("overrun_mins"),
+                    entry.get("variance_mins"),
+                    entry.get("policy_applied"),
+                    entry.get("policy_source"),
+                    ro,
+                    int(row["id"]),
+                ),
+            )
+        TimesheetService._apply_daily_minimum_pay(
+            cur, user_id, week_pk, contractor
+        )
+        TimesheetService._refresh_week_totals(cur, user_id, week_pk)
+
+    @staticmethod
     def _job_type_name_and_colour(job_type_id: int) -> Tuple[Optional[str], Optional[str]]:
         """Return (name, colour_hex) for badges/UI; colour_hex may be None."""
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(
-                "SELECT name, colour_hex FROM job_types WHERE id=%s",
+                "SELECT name, colour_hex, COALESCE(legacy, 0) AS legacy "
+                "FROM job_types WHERE id=%s",
                 (int(job_type_id),),
             )
             r = cur.fetchone()
             if not r:
                 return None, None
-            return r.get("name"), r.get("colour_hex")
+            name = r.get("name")
+            if int(r.get("legacy") or 0) == 1 and name:
+                name = f"{name} (Legacy)"
+            return name, r.get("colour_hex")
         finally:
             cur.close()
             conn.close()
@@ -1462,19 +2850,7 @@ class TimesheetService:
 
         Resolves client/site labels for both legacy (free-text columns) and core schema (client_id/site_id only).
         """
-        wk = TimesheetService._ensure_week(user_id, week_id)
-
-        # Pre-fill weekly entries from scheduler shifts (optional clocking).
-        if TimesheetService._scheduler_week_prefill_enabled() and (wk.get("status") or "draft").lower() in ("draft", "rejected"):
-            try:
-                TimesheetService._prefill_from_schedule_shifts(
-                    user_id=user_id,
-                    wk_pk=wk["id"],
-                    week_ending=wk["week_ending"],
-                )
-            except Exception:
-                # Prefill is best-effort; don't break timesheet rendering.
-                pass
+        wk = TimesheetService.sync_scheduler_shifts_into_week(user_id, week_id)
 
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
@@ -1482,16 +2858,16 @@ class TimesheetService:
         try:
             ce, se, join_sql, has_cn, has_cid = TimesheetService._tb_timesheet_entry_location_parts(cur)
             star_suffix = ""
-            if has_cid:
+            if has_cid and not has_cn:
                 star_suffix = f", {ce} AS client_name, {se} AS site_name"
-            elif not has_cn:
+            elif not has_cid and not has_cn:
                 star_suffix = ", NULL AS client_name, NULL AS site_name"
 
             cur.execute(
                 f"""
                 SELECT
                     e.*,
-                    jt.name AS job_type_name,
+                    {_JT_DISP_NAME_SEL},
                     jt.colour_hex AS job_type_colour_hex
                     {star_suffix}
                 FROM tb_timesheet_entries e
@@ -1502,6 +2878,16 @@ class TimesheetService:
                 (wk["id"], user_id),
             )
             rows = cur.fetchall() or []
+
+            if has_cid:
+                for r in rows:
+                    dc, ds = TimesheetService._client_site_display_names(
+                        cur, r.get("client_id"), r.get("site_id")
+                    )
+                    if dc and not (str(r.get("client_name") or "").strip()):
+                        r["client_name"] = dc
+                    if ds and not (str(r.get("site_name") or "").strip()):
+                        r["site_name"] = ds
 
             # ---------------------------
             # Helpers for safe JSON
@@ -1628,27 +3014,32 @@ class TimesheetService:
                 pass
             status_lower = (wk.get("status") or "draft").lower()
             current_inv = invoice_info.get("current_invoice")
-            has_sent = current_inv and current_inv.get("status") == "sent"
-            has_draft = current_inv and current_inv.get("status") == "draft"
+            has_paid_invoice = current_inv and current_inv.get("status") == InvoiceService.INVOICE_STATUS_PAID
+            has_current_invoice = (
+                current_inv and current_inv.get("status") == InvoiceService.INVOICE_STATUS_CURRENT
+            )
+            combined_invoice_billing = InvoiceService.is_combined_invoice_billing(
+                invoice_billing_frequency
+            )
             can_show_invoice = (
                 status_lower in ("submitted", "approved")
                 and employment_type == "self_employed"
-                and str(invoice_billing_frequency).lower() != "monthly"
-                and not has_sent
-                and not has_draft
+                and not combined_invoice_billing
+                and not has_paid_invoice
+                and not has_current_invoice
             )
-            can_finalize_draft_invoice = (
+            can_finalize_current_invoice = (
                 status_lower == "approved"
                 and employment_type == "self_employed"
-                and has_draft
+                and has_current_invoice
             )
             prompt_resend = (
                 can_show_invoice
                 and invoice_info.get("has_voided_invoice")
             )
-            invoice_draft_pending = has_draft and status_lower == "submitted"
+            invoice_current_pending = has_current_invoice and status_lower == "submitted"
             blocking_portal_invoice = bool(
-                current_inv and current_inv.get("status") in ("draft", "sent")
+                current_inv and current_inv.get("status") in InvoiceService._INVOICE_PORTAL_ACTIVE
             )
             can_admin_mark_paid_closed = bool(
                 is_admin
@@ -1676,10 +3067,18 @@ class TimesheetService:
                 }
             elif employment_type == "self_employed":
                 if status_lower == "draft":
-                    if str(invoice_billing_frequency).lower() == "monthly":
+                    bf_norm = InvoiceService.normalize_invoice_billing_frequency(
+                        invoice_billing_frequency
+                    )
+                    if bf_norm == "monthly":
                         invoice_banner = {
                             "level": "info",
-                            "text": "Self-employed (monthly billing): submit this week when ready. When your pay period ends, open My invoices and use Create invoice to combine submitted or approved weeks (draft invoice until all selected weeks are approved).",
+                            "text": "Self-employed (monthly billing): submit this week when ready. When your pay period ends, open My invoices and use Create invoice to combine submitted or approved weeks (invoice stays current until all selected weeks are approved).",
+                        }
+                    elif bf_norm == "biweekly":
+                        invoice_banner = {
+                            "level": "info",
+                            "text": "Self-employed (bi-weekly billing): submit each week when ready. After each two-week pay period, open My invoices and use Create invoice to combine the submitted or approved weeks you want on that run (invoice stays current until every week on the invoice is approved).",
                         }
                     else:
                         invoice_banner = {
@@ -1691,15 +3090,15 @@ class TimesheetService:
                         "level": "warning",
                         "text": "This week was rejected — fix entries, resubmit, then create a new invoice if needed.",
                     }
-                elif status_lower in ("submitted", "approved") and uni_n == 0 and not has_sent and not has_draft:
+                elif status_lower in ("submitted", "approved") and uni_n == 0 and not has_paid_invoice and not has_current_invoice:
                     invoice_banner = {
                         "level": "info",
                         "text": "No uninvoiced shifts remain for this week. Use My invoices to view or download PDFs.",
                     }
-                elif status_lower == "approved" and employment_type == "self_employed" and has_draft:
+                elif status_lower == "approved" and employment_type == "self_employed" and has_current_invoice:
                     invoice_banner = {
                         "level": "success",
-                        "text": "Timesheet approved — you have a draft invoice for this week. Use Finalize invoice to mark it sent, or open My invoices.",
+                        "text": "Timesheet approved — you have a current invoice for this week. Use Finalize invoice to mark it paid, or open My invoices.",
                     }
                 elif status_lower == "invoiced" and employment_type == "self_employed":
                     if wk.get("payment_closed_at"):
@@ -1740,13 +3139,14 @@ class TimesheetService:
                 "is_admin": bool(is_admin),
                 "employment_type": employment_type,
                 "invoice_billing_frequency": invoice_billing_frequency,
+                "combined_invoice_billing": combined_invoice_billing,
                 "can_show_invoice_prompt": can_show_invoice,
                 "invoice_prompt_resend": prompt_resend,
-                "invoice_draft_pending": invoice_draft_pending,
+                "invoice_current_pending": invoice_current_pending,
                 "invoice_info": invoice_info,
                 "invoice_banner": invoice_banner,
                 "uninvoiced_entry_count": uni_n,
-                "can_finalize_draft_invoice": can_finalize_draft_invoice,
+                "can_finalize_current_invoice": can_finalize_current_invoice,
                 "can_admin_mark_paid_closed": can_admin_mark_paid_closed,
                 "can_admin_reopen_paid_closure": can_admin_reopen_paid_closure,
                 # UI policies
@@ -1811,6 +3211,17 @@ class TimesheetService:
 
         try:
             saved_entries = []
+            # Always refresh column flags when the client sends location text. A stale
+            # in-process TTL cache used to skip writing client_name/site_name while the
+            # response still echoed the typed values — so the UI looked saved until reload.
+            if (entries or []) and any(
+                str((x or {}).get("client_name") or "").strip()
+                or str((x or {}).get("site_name") or "").strip()
+                or str((x or {}).get("client_text") or "").strip()
+                or str((x or {}).get("site_text") or "").strip()
+                for x in entries
+            ):
+                TimesheetService.invalidate_tb_entry_column_flags_cache()
             ecf = TimesheetService._tb_entry_column_flags(cur)
             loc_sel: List[str] = []
             if ecf["client_name"]:
@@ -1832,6 +3243,34 @@ class TimesheetService:
                 return jt_meta_cache[jid]
 
             for e in entries or []:
+                # Back-compat: alternate field names from older/draft UIs.
+                if str((e or {}).get("client_name") or "").strip() == "" and str(
+                    (e or {}).get("client_text") or ""
+                ).strip():
+                    e["client_name"] = e.get("client_text")
+                if str((e or {}).get("site_name") or "").strip() == "" and str(
+                    (e or {}).get("site_text") or ""
+                ).strip():
+                    e["site_name"] = e.get("site_text")
+
+                entry_id_pre = e.get("id")
+                if entry_id_pre:
+                    cur.execute(
+                        """
+                        SELECT actual_start, actual_end
+                        FROM tb_timesheet_entries
+                        WHERE id=%s AND user_id=%s
+                        LIMIT 1
+                        """,
+                        (int(entry_id_pre), user_id),
+                    )
+                    ex_act = cur.fetchone()
+                    if ex_act:
+                        if "actual_start" not in e:
+                            e["actual_start"] = ex_act.get("actual_start")
+                        if "actual_end" not in e:
+                            e["actual_end"] = ex_act.get("actual_end")
+
                 # Validate payload
                 ok, err = TimesheetService._validate_entry_payload(e)
                 if not ok:
@@ -1889,13 +3328,22 @@ class TimesheetService:
                     # fields, so compute-and-fill still works.)
                     if existing["source"] in ("runsheet", "scheduler") and existing.get("lock_job_client"):
                         e["job_type_id"] = existing.get("job_type_id")
-                        if ecf["client_name"]:
+                        # Keep roster-assigned location when present; if the row has no
+                        # client/site yet, allow the contractor's typed values to persist.
+                        def _nonempty_str(v: Any) -> bool:
+                            return bool(str(v).strip()) if v is not None else False
+
+                        if ecf["client_name"] and _nonempty_str(
+                            existing.get("client_name")
+                        ):
                             e["client_name"] = existing.get("client_name")
-                        if ecf["site_name"]:
+                        if ecf["site_name"] and _nonempty_str(
+                            existing.get("site_name")
+                        ):
                             e["site_name"] = existing.get("site_name")
-                        if ecf["client_id"]:
+                        if ecf["client_id"] and existing.get("client_id") is not None:
                             e["client_id"] = existing.get("client_id")
-                        if ecf["site_id"]:
+                        if ecf["site_id"] and existing.get("site_id") is not None:
                             e["site_id"] = existing.get("site_id")
 
                     # Optional: scheduled time editing rules for scheduler-generated entries.
@@ -1905,14 +3353,14 @@ class TimesheetService:
 
                     # Detect if staff/admin actually changed anything that should be tracked.
                     # We track edits by setting edited_by/edit_reason (so admin can show "adjusted").
-                    incoming_actual_start = _to_time(e.get("actual_start"))
-                    incoming_actual_end = _to_time(e.get("actual_end"))
+                    incoming_actual_start = _optional_entry_time(e.get("actual_start"))
+                    incoming_actual_end = _optional_entry_time(e.get("actual_end"))
                     incoming_break_mins = int(e.get("break_mins") or 0)
                     incoming_travel = float(_dec(e.get("travel_parking") or 0))
                     incoming_notes = e.get("notes")
 
-                    existing_actual_start = existing.get("actual_start")
-                    existing_actual_end = existing.get("actual_end")
+                    existing_actual_start = _coerce_entry_time_value(existing.get("actual_start"))
+                    existing_actual_end = _coerce_entry_time_value(existing.get("actual_end"))
                     existing_break_mins = int(existing.get("break_mins") or 0)
                     existing_travel = float(_dec(existing.get("travel_parking") or 0))
                     existing_notes = existing.get("notes")
@@ -1957,8 +3405,13 @@ class TimesheetService:
                         and existing.get("lock_job_client")
                     )
                     if locked_loc:
-                        r_cid = existing.get("client_id") if existing else None
-                        r_sid = existing.get("site_id") if existing else None
+                        ecid = existing.get("client_id") if existing else None
+                        esid = existing.get("site_id") if existing else None
+                        rc_res, rs_res = TimesheetService._resolve_client_site_ids(
+                            cur, cn_raw, sn_raw
+                        )
+                        r_cid = ecid if ecid is not None else rc_res
+                        r_sid = esid if esid is not None else rs_res
                     else:
                         r_cid, r_sid = TimesheetService._resolve_client_site_ids(
                             cur, cn_raw, sn_raw
@@ -2013,10 +3466,10 @@ class TimesheetService:
                     "work_date": e["work_date"]
                     if isinstance(e["work_date"], date)
                     else datetime.strptime(e["work_date"], "%Y-%m-%d").date(),
-                    "scheduled_start": _to_time(e["scheduled_start"]),
-                    "scheduled_end": _to_time(e["scheduled_end"]),
-                    "actual_start": _to_time(e["actual_start"]),
-                    "actual_end": _to_time(e["actual_end"]),
+                    "scheduled_start": _require_schedule_time(e["scheduled_start"]),
+                    "scheduled_end": _require_schedule_time(e["scheduled_end"]),
+                    "actual_start": _optional_entry_time(e.get("actual_start")),
+                    "actual_end": _optional_entry_time(e.get("actual_end")),
                     "break_mins": int(e.get("break_mins") or 0),
                     "travel_parking": float(_dec(e.get("travel_parking") or 0)),
                     "notes": e.get("notes"),
@@ -2075,8 +3528,10 @@ class TimesheetService:
                     entry_id = cur.lastrowid
 
                 jn, jh = _jt_meta(params["job_type_id"])
-                disp_c: Optional[str] = cn_raw
-                disp_s: Optional[str] = sn_raw
+                # Only echo free-text location in the JSON response if those columns
+                # were included in the INSERT/UPDATE (avoids false "saved" UX).
+                disp_c: Optional[str] = cn_raw if ecf["client_name"] else None
+                disp_s: Optional[str] = sn_raw if ecf["site_name"] else None
                 if ecf["client_id"] and (
                     params.get("client_id") is not None or params.get("site_id") is not None
                 ):
@@ -2098,8 +3553,12 @@ class TimesheetService:
                         "job_type_colour_hex": jh,
                         "scheduled_start": str(params["scheduled_start"]),
                         "scheduled_end": str(params["scheduled_end"]),
-                        "actual_start": str(params["actual_start"]),
-                        "actual_end": str(params["actual_end"]),
+                        "actual_start": params["actual_start"].strftime("%H:%M:%S")
+                        if params["actual_start"]
+                        else None,
+                        "actual_end": params["actual_end"].strftime("%H:%M:%S")
+                        if params["actual_end"]
+                        else None,
                         "break_mins": params["break_mins"],
                         "travel_parking": params["travel_parking"],
                         "notes": params["notes"],
@@ -2109,29 +3568,31 @@ class TimesheetService:
                     }
                 )
 
-            # Update week totals snapshot
-            cur.execute(
-                """
-                UPDATE tb_timesheet_weeks w
-                LEFT JOIN (
-                    SELECT week_id,
-                        SUM(actual_hours)     AS th,
-                        SUM(pay)              AS tp,
-                        SUM(travel_parking)   AS tt,
-                        SUM(lateness_mins)    AS tl,
-                        SUM(overrun_mins)     AS tovr
-                    FROM tb_timesheet_entries
-                    WHERE user_id=%s AND week_id=%s
-                ) agg ON agg.week_id = w.id
-                SET w.total_hours         = COALESCE(agg.th, 0),
-                    w.total_pay           = COALESCE(agg.tp, 0),
-                    w.total_travel        = COALESCE(agg.tt, 0),
-                    w.total_lateness_mins = COALESCE(agg.tl, 0),
-                    w.total_overrun_mins  = COALESCE(agg.tovr, 0)
-                WHERE w.id=%s
-                """,
-                (user_id, wk["id"], wk["id"]),
-            )
+            TimesheetService._refresh_week_pay_and_daily_mins(cur, user_id, wk["id"])
+
+            if saved_entries:
+                ids = [int(se["id"]) for se in saved_entries if se.get("id")]
+                if ids:
+                    fmt = ",".join(["%s"] * len(ids))
+                    cur.execute(
+                        f"""
+                        SELECT id, pay, wage_rate_used, actual_hours
+                        FROM tb_timesheet_entries
+                        WHERE id IN ({fmt})
+                        """,
+                        tuple(ids),
+                    )
+                    freshen = {int(r["id"]): r for r in (cur.fetchall() or [])}
+                    for se in saved_entries:
+                        u = freshen.get(int(se["id"]))
+                        if u:
+                            se["pay"] = float(_dec(u.get("pay") or 0))
+                            se["wage_rate_used"] = float(
+                                _dec(u.get("wage_rate_used") or 0)
+                            )
+                            se["actual_hours"] = float(
+                                _dec(u.get("actual_hours") or 0, "0.0001")
+                            )
 
             conn.commit()
 
@@ -2173,26 +3634,68 @@ class TimesheetService:
             conn.close()
 
     @staticmethod
-    def submit_week(user_id: int, week_id: str) -> None:
+    def submit_week(user_id: int, week_id: str) -> Dict[str, Any]:
         """
         Mark a timesheet week as submitted.
 
-        Args:
-            user_id: ID of submitting user
-            week_id: ISO week string
+        Empty weeks (no entry rows) are allowed so contractors can show they did not work.
+
+        Blocks submit when any row has **scheduled** start/end but is missing **actual**
+        start or end (planned shift not yet completed in the timesheet).
+
+        Returns:
+            ``{"ok": True}`` or ``{"ok": False, "message": "..."}``.
         """
         wk = TimesheetService._ensure_week(user_id, week_id)
+        wst = (str(wk.get("status") or "draft")).strip().lower()
+        if wst not in ("draft", "rejected"):
+            return {
+                "ok": False,
+                "message": "Only draft or rejected weeks can be submitted.",
+            }
+
         conn = get_db_connection()
         cur = conn.cursor()
         try:
             cur.execute(
+                """
+                SELECT COUNT(*) FROM tb_timesheet_entries
+                WHERE user_id=%s AND week_id=%s
+                  AND scheduled_start IS NOT NULL
+                  AND scheduled_end IS NOT NULL
+                  AND (actual_start IS NULL OR actual_end IS NULL)
+                """,
+                (user_id, wk["id"]),
+            )
+            row = cur.fetchone()
+            n_bad = int(row[0]) if row and row[0] is not None else 0
+            if n_bad > 0:
+                return {
+                    "ok": False,
+                    "message": (
+                        "You have one or more rows with planned (scheduled) times but no worked "
+                        "(actual) times. Enter both actual start and end for each planned shift, "
+                        "or remove the row, before submitting. Empty weeks with no rows are fine."
+                    ),
+                }
+
+            cur.execute(
                 "UPDATE tb_timesheet_weeks SET status='submitted', submitted_at=%s, submitted_by=%s WHERE id=%s",
-                (_now_utc_str(), user_id, wk["id"])
+                (_now_utc_str(), user_id, wk["id"]),
             )
             conn.commit()
         finally:
             cur.close()
             conn.close()
+
+        try:
+            from app.plugins.time_billing_module import notifications as _tb_notifications
+
+            _tb_notifications.notify_admins_timesheet_submitted(user_id, week_id, wk)
+        except Exception as e:
+            _tb_log_warning(f"time_billing: timesheet submitted notify skipped: {e}")
+
+        return {"ok": True}
 
     # ---------- admin-only ----------
 
@@ -2252,8 +3755,18 @@ class TimesheetService:
                 merged["work_date"] = datetime.strptime(
                     merged["work_date"], "%Y-%m-%d").date()
             for tkey in ("scheduled_start", "scheduled_end", "actual_start", "actual_end"):
-                if tkey in merged and isinstance(merged[tkey], str):
-                    merged[tkey] = _to_time(merged[tkey])
+                v = merged.get(tkey)
+                if v is None or (isinstance(v, str) and not str(v).strip()):
+                    if tkey in ("actual_start", "actual_end"):
+                        merged[tkey] = None
+                    continue
+                co = _coerce_entry_time_value(v)
+                if co is not None:
+                    merged[tkey] = co
+                elif isinstance(v, str):
+                    merged[tkey] = _to_time(v)
+
+            bm = int(merged.get("break_mins") or 0)
 
             # Recompute fields unless admin explicitly sets wage_rate_used/pay
             recompute = True
@@ -2283,7 +3796,7 @@ class TimesheetService:
                 dsf = dsf or d3
 
             if recompute:
-                computed = TimesheetService._compute_and_fill({
+                _ce: Dict[str, Any] = {
                     "job_type_id": merged.get("job_type_id"),
                     "work_date": merged.get("work_date"),
                     "scheduled_start": merged.get("scheduled_start"),
@@ -2296,8 +3809,15 @@ class TimesheetService:
                     "source": merged.get("source"),
                     "runsheet_id": merged.get("runsheet_id"),
                     "lock_job_client": merged.get("lock_job_client"),
-                    "notes": merged.get("notes")
-                }, {"id": row["user_id"], "role_id": row.get("role_id")})
+                    "notes": merged.get("notes"),
+                }
+                if ecf["client_id"] and merged.get("client_id") is not None:
+                    _ce["client_id"] = int(merged["client_id"])
+                if ecf["site_id"] and merged.get("site_id") is not None:
+                    _ce["site_id"] = int(merged["site_id"])
+                computed = TimesheetService._compute_and_fill(
+                    _ce, {"id": row["user_id"], "role_id": row.get("role_id")}
+                )
 
                 wage_rate_used = computed["wage_rate_used"]
                 pay = computed["pay"]
@@ -2306,17 +3826,74 @@ class TimesheetService:
                 rate_overridden = 0
                 edit_reason = updates.get("edit_reason")
             else:
-                wage_rate_used = float(
-                    _dec(manual_rate if manual_rate is not None else row["wage_rate_used"]))
-                if manual_pay is None:
-                    pay = float(_dec(Decimal(str(wage_rate_used))
-                                * Decimal(str(row["actual_hours"] or 0))))
+                # Line hours from clock times (same basis as persisted actual_hours).
+                hrs = float(
+                    _dec(
+                        _hours_between_safe(
+                            merged.get("actual_start"),
+                            merged.get("actual_end"),
+                            bm,
+                        ),
+                        "0.0001",
+                    )
+                )
+                old_rate = float(_dec(row.get("wage_rate_used") or 0))
+                old_pay = float(_dec(row.get("pay") or 0))
+                mr = (
+                    float(_dec(manual_rate))
+                    if manual_rate is not None
+                    else old_rate
+                )
+                mp = (
+                    float(_dec(manual_pay))
+                    if manual_pay is not None
+                    else old_pay
+                )
+
+                def _money_close(a: float, b: float, eps: float = 0.009) -> bool:
+                    return abs(a - b) < eps
+
+                rate_changed = not _money_close(mr, old_rate)
+                pay_changed = not _money_close(mp, old_pay)
+
+                if hrs <= 0:
+                    wage_rate_used = mr
+                    pay = mp
+                elif rate_changed and not pay_changed:
+                    wage_rate_used = mr
+                    pay = float(_dec(Decimal(str(mr)) * Decimal(str(hrs))))
+                elif pay_changed and not rate_changed:
+                    pay = mp
+                    wage_rate_used = float(
+                        _dec(Decimal(str(mp)) / Decimal(str(hrs)))
+                    )
+                elif rate_changed and pay_changed:
+                    implied_pay = float(
+                        _dec(Decimal(str(mr)) * Decimal(str(hrs)))
+                    )
+                    if _money_close(mp, implied_pay, eps=0.02):
+                        wage_rate_used = mr
+                        pay = mp
+                    else:
+                        # Both changed but inconsistent: treat total pay as authoritative.
+                        pay = mp
+                        wage_rate_used = float(
+                            _dec(Decimal(str(mp)) / Decimal(str(hrs)))
+                        )
                 else:
-                    pay = float(_dec(manual_pay))
+                    wage_rate_used = mr
+                    pay = mp
+
                 policy_applied = row.get("policy_applied")
                 policy_source = row.get("policy_source")
                 rate_overridden = 1
                 edit_reason = (updates.get("edit_reason") or "").strip()
+
+            if edit_reason is not None and not isinstance(edit_reason, str):
+                edit_reason = str(edit_reason)
+            # DB column is VARCHAR(255); long onboarding notes must not break the save.
+            if isinstance(edit_reason, str) and len(edit_reason) > 255:
+                edit_reason = edit_reason[:252] + "..."
 
             # Build SQL update parameters
             params: Dict[str, Any] = {
@@ -2326,17 +3903,17 @@ class TimesheetService:
                 "scheduled_end": merged.get("scheduled_end"),
                 "actual_start": merged.get("actual_start"),
                 "actual_end": merged.get("actual_end"),
-                "break_mins": int(merged.get("break_mins") or 0),
+                "break_mins": bm,
                 "travel_parking": float(_dec(merged.get("travel_parking") or row.get("travel_parking") or 0)),
                 "notes": merged.get("notes"),
-                "scheduled_hours": float(_dec(_hours_between(merged.get("scheduled_start"), merged.get("scheduled_end"), 0), '0.0001')),
-                "actual_hours": float(_dec(_hours_between(merged.get("actual_start"), merged.get("actual_end"), int(merged.get("break_mins") or 0)), '0.0001')),
-                "labour_hours": float(_dec(_hours_between(merged.get("actual_start"), merged.get("actual_end"), int(merged.get("break_mins") or 0)), '0.0001')),
+                "scheduled_hours": float(_dec(_hours_between_safe(merged.get("scheduled_start"), merged.get("scheduled_end"), 0), '0.0001')),
+                "actual_hours": float(_dec(_hours_between_safe(merged.get("actual_start"), merged.get("actual_end"), bm), '0.0001')),
+                "labour_hours": float(_dec(_hours_between_safe(merged.get("actual_start"), merged.get("actual_end"), bm), '0.0001')),
                 "wage_rate_used": wage_rate_used,
                 "pay": pay,
-                "lateness_mins": max(0, int((_hours_between(merged.get("scheduled_start"), merged.get("actual_start"), 0) * 60))) if merged.get("actual_start") > merged.get("scheduled_start") else 0,
-                "overrun_mins": max(0, int((_hours_between(merged.get("scheduled_end"), merged.get("actual_end"), 0) * 60))) if merged.get("actual_end") > merged.get("scheduled_end") else 0,
-                "variance_mins": int((_hours_between(merged.get("actual_start"), merged.get("actual_end"), int(merged.get("break_mins") or 0)) - _hours_between(merged.get("scheduled_start"), merged.get("scheduled_end"), 0)) * 60),
+                "lateness_mins": max(0, int((_hours_between_safe(merged.get("scheduled_start"), merged.get("actual_start"), 0) * 60))) if _time_gt_safe(merged.get("actual_start"), merged.get("scheduled_start")) else 0,
+                "overrun_mins": max(0, int((_hours_between_safe(merged.get("scheduled_end"), merged.get("actual_end"), 0) * 60))) if _time_gt_safe(merged.get("actual_end"), merged.get("scheduled_end")) else 0,
+                "variance_mins": int((_hours_between_safe(merged.get("actual_start"), merged.get("actual_end"), bm) - _hours_between_safe(merged.get("scheduled_start"), merged.get("scheduled_end"), 0)) * 60),
                 "policy_applied": policy_applied,
                 "policy_source": policy_source,
                 "rate_overridden": rate_overridden,
@@ -2363,12 +3940,22 @@ class TimesheetService:
                 "SELECT week_id, user_id FROM tb_timesheet_entries WHERE id=%s", (entry_id,))
             key = cur.fetchone()
             if key:
-                TimesheetService._refresh_week_totals(
-                    cur, key["user_id"], key["week_id"])
+                TimesheetService._refresh_week_pay_and_daily_mins(
+                    cur, key["user_id"], key["week_id"]
+                )
 
             conn.commit()
             return {"ok": True}
-
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            _tb_log_warning(
+                f"TimesheetService.admin_patch_entry failed for entry {entry_id}: {e}",
+                exc_info=True,
+            )
+            return {"ok": False, "message": str(e)[:500]}
         finally:
             cur.close()
             conn.close()
@@ -2377,6 +3964,9 @@ class TimesheetService:
     def approve_week(admin_id: int, user_id: int, week_id: str) -> Tuple[bytes, dict]:
         """
         Approve a week for a contractor, generate PDF, and optionally email it.
+
+        Portal invoices in **current** status are **not** auto-finalised here: the week stays ``approved``
+        until the contractor uses **Finalize invoice** (or staff mark paid/closed for PAYE).
 
         Returns:
             PDF bytes and dict with status/filename
@@ -2400,110 +3990,26 @@ class TimesheetService:
             """, (datetime.utcnow(), admin_id, wk["id"]))
             conn.commit()
 
-            # Draft invoice (single- or multi-week): promote to sent and mark all linked weeks invoiced
-            week_marked_invoiced = False
-            cur.execute(
-                """
-                SELECT DISTINCT i.id FROM contractor_invoices i
-                WHERE i.contractor_id=%s AND i.status='draft'
-                  AND (
-                    i.timesheet_week_id=%s
-                    OR EXISTS (
-                      SELECT 1 FROM contractor_invoice_weeks c
-                      WHERE c.invoice_id=i.id AND c.timesheet_week_id=%s
-                    )
-                  )
-                ORDER BY i.id ASC
-                """,
-                (user_id, wk["id"], wk["id"]),
-            )
-            draft_rows = cur.fetchall() or []
-            promoted_any = False
-            if draft_rows:
-                now_inv = datetime.utcnow()
-                for dr in draft_rows:
-                    inv_id = dr.get("id")
-                    week_ids_to_close: List[int] = []
-                    try:
-                        cur.execute(
-                            "SELECT timesheet_week_id FROM contractor_invoice_weeks WHERE invoice_id=%s",
-                            (inv_id,),
-                        )
-                        for r in cur.fetchall() or []:
-                            week_ids_to_close.append(int(r["timesheet_week_id"]))
-                    except Exception:
-                        pass
-                    cur.execute(
-                        "SELECT timesheet_week_id FROM contractor_invoices WHERE id=%s",
-                        (inv_id,),
-                    )
-                    ar = cur.fetchone()
-                    if ar and ar.get("timesheet_week_id"):
-                        week_ids_to_close.append(int(ar["timesheet_week_id"]))
-                    week_ids_to_close = sorted(set(week_ids_to_close))
-                    if not week_ids_to_close:
-                        continue
-                    all_linked_approved = True
-                    for wid in week_ids_to_close:
-                        cur.execute(
-                            "SELECT status FROM tb_timesheet_weeks WHERE id=%s",
-                            (wid,),
-                        )
-                        rw = cur.fetchone()
-                        if not rw or str(rw.get("status") or "").lower() != "approved":
-                            all_linked_approved = False
-                            break
-                    if not all_linked_approved:
-                        continue
-                    cur.execute(
-                        """
-                        UPDATE contractor_invoices
-                        SET status='sent', sent_at=%s
-                        WHERE id=%s AND status='draft'
-                        """,
-                        (now_inv, inv_id),
-                    )
-                    if cur.rowcount == 0:
-                        continue
-                    for wid in week_ids_to_close:
-                        cur.execute(
-                            "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
-                            (wid,),
-                        )
-                    promoted_any = True
-                if promoted_any:
-                    conn.commit()
-                week_marked_invoiced = promoted_any
-
             # Generate PDF
             pdf_bytes, filename = ExportService.export_week_pdf(
                 user_id=user_id, week_id=week_id)
 
-            # Fetch contractor email
             cur.execute(
                 "SELECT email FROM tb_contractors WHERE id=%s", (user_id,))
             c = cur.fetchone() or {}
-            to_addr = [c.get("email")] if c.get("email") else []
-
-            if not to_addr:
-                return pdf_bytes, {"ok": True, "notice": "No recipient email on file; PDF not emailed."}
-
-            if week_marked_invoiced:
-                subject = f"Timesheet and invoice approved – Week Ending {wk['week_ending'].strftime('%d/%m/%Y')}"
-                body = f"Hi,\n\nYour timesheet and invoice for week ending {wk['week_ending'].strftime('%d/%m/%Y')} have been approved and marked for payment.\nPlease find the PDF attached for your records.\n\nRegards,\nAccounts"
-                html_body = f"<p>Your timesheet and invoice have been approved and marked for payment.</p><p>Please download your PDF from the portal.</p>"
-            else:
-                subject = f"Timesheet approved – Week Ending {wk['week_ending'].strftime('%d/%m/%Y')}"
-                body = f"Hi,\n\nYour timesheet for week ending {wk['week_ending'].strftime('%d/%m/%Y')} has been approved.\nPlease find the PDF attached for your records.\n\nRegards,\nAccounts"
-                html_body = f"<p>Your timesheet for week ending {wk['week_ending'].strftime('%d/%m/%Y')} has been approved.</p><p>Please download your PDF from the portal.</p>"
+            has_email = bool((c.get("email") or "").strip())
 
             try:
-                EmailManager().send_email(subject=subject, body=body,
-                                          recipients=to_addr, html_body=html_body)
-            except Exception as e:
-                _tb_log_warning(f"time_billing: approval email failed: {e}")
+                from app.plugins.time_billing_module import notifications as _tb_notifications
 
-            return pdf_bytes, {"ok": True, "filename": filename}
+                _tb_notifications.notify_contractor_timesheet_approved(user_id, wk)
+            except Exception as e:
+                _tb_log_warning(f"time_billing: approval notify skipped: {e}")
+
+            meta: Dict[str, Any] = {"ok": True, "filename": filename}
+            if not has_email:
+                meta["notice"] = "No recipient email on file; approval email not sent."
+            return pdf_bytes, meta
 
         finally:
             cur.close()
@@ -2513,7 +4019,7 @@ class TimesheetService:
     def reject_week(admin_id: int, user_id: int, week_id: str, reason: str) -> None:
         """
         Reject a contractor's week with a reason and optionally email them.
-        Voids any linked portal invoice (draft or sent) so lines are free to re-invoice after re-approval.
+        Voids any linked portal invoice (current or paid) so lines are free to re-invoice after re-approval.
 
         Args:
             reason: Mandatory rejection reason
@@ -2537,30 +4043,14 @@ class TimesheetService:
             """, (datetime.utcnow(), admin_id, reason.strip(), wk["id"]))
             conn.commit()
 
-            # Email user
-            cur.execute(
-                "SELECT email FROM tb_contractors WHERE id=%s", (user_id,))
-            c = cur.fetchone() or {}
-            to_addr = [c.get("email")] if c.get("email") else []
+            try:
+                from app.plugins.time_billing_module import notifications as _tb_notifications
 
-            if to_addr:
-                subject = f"Action required – Timesheet corrections for Week Ending {wk['week_ending'].strftime('%d/%m/%Y')}"
-                body = (
-                    f"Hi,\n\nWe couldn’t approve your timesheet (and any invoice submitted with it). "
-                    f"Please review and fix the following:\n\n- {reason.strip()}\n\n"
-                    "Then resubmit your timesheet and create a new invoice for the week. We will approve or reject both together.\n\nThanks."
+                _tb_notifications.notify_contractor_timesheet_rejected(
+                    user_id, wk, reason.strip()
                 )
-                html_body = (
-                    f"<p>We couldn’t approve your timesheet (and any invoice submitted with it).</p>"
-                    f"<p><strong>What to change:</strong> {reason.strip()}</p>"
-                    "<p>Please make the corrections, resubmit your timesheet, and create a new invoice for the week. We will approve or reject both together.</p>"
-                )
-
-                try:
-                    EmailManager().send_email(subject=subject, body=body,
-                                              recipients=to_addr, html_body=html_body)
-                except Exception as e:
-                    _tb_log_warning(f"time_billing: rejection email failed: {e}")
+            except Exception as e:
+                _tb_log_warning(f"time_billing: rejection notify skipped: {e}")
 
         finally:
             cur.close()
@@ -2630,58 +4120,7 @@ class TimesheetService:
         rows = cur.fetchall() or []
         if not rows:
             return
-        cur.execute(
-            "SELECT id, role_id FROM tb_contractors WHERE id=%s", (user_id,)
-        )
-        contractor_row = cur.fetchone()
-        contractor = contractor_row or {"id": user_id, "role_id": None}
-        for row in rows:
-            if row.get("actual_start") is None or row.get("actual_end") is None:
-                continue
-            cn = row.get("client_name")
-            sn = row.get("site_name")
-            if not ecf["client_name"] and not ecf["site_name"]:
-                cn, sn = TimesheetService._client_site_display_names(
-                    cur, row.get("client_id"), row.get("site_id")
-                )
-            elif cn is None and sn is None:
-                d2, d3 = TimesheetService._client_site_display_names(
-                    cur, row.get("client_id"), row.get("site_id")
-                )
-                cn = cn or d2
-                sn = sn or d3
-            entry = {
-                "work_date": row["work_date"],
-                "scheduled_start": row.get("scheduled_start"),
-                "scheduled_end": row.get("scheduled_end"),
-                "actual_start": row.get("actual_start"),
-                "actual_end": row.get("actual_end"),
-                "break_mins": row.get("break_mins") or 0,
-                "job_type_id": row["job_type_id"],
-                "client_name": cn,
-                "site_name": sn,
-                "source": row.get("source"),
-                "runsheet_id": row.get("runsheet_id"),
-                "lock_job_client": row.get("lock_job_client"),
-                "notes": row.get("notes"),
-            }
-            try:
-                computed = TimesheetService._compute_and_fill(entry, contractor)
-            except Exception:
-                continue
-            cur.execute("""
-                UPDATE tb_timesheet_entries
-                SET actual_hours=%s, labour_hours=%s, wage_rate_used=%s, pay=%s,
-                    scheduled_hours=%s, lateness_mins=%s, overrun_mins=%s, variance_mins=%s
-                WHERE id=%s
-            """, (
-                computed["actual_hours"], computed["labour_hours"],
-                computed["wage_rate_used"], computed["pay"],
-                computed["scheduled_hours"], computed["lateness_mins"],
-                computed["overrun_mins"], computed["variance_mins"],
-                row["id"],
-            ))
-        TimesheetService._refresh_week_totals(cur, user_id, week_pk)
+        TimesheetService._refresh_week_pay_and_daily_mins(cur, user_id, week_pk)
 
 
 # ---------- Contractor Invoice Service (self-employed) ----------
@@ -2693,6 +4132,11 @@ class TimesheetService:
 
 class InvoiceService:
     """Invoicing for self-employed contractors: create invoice from approved week; void on reject."""
+
+    INVOICE_STATUS_CURRENT = "current"
+    INVOICE_STATUS_PAID = "paid"
+    INVOICE_STATUS_VOID = "void"
+    _INVOICE_PORTAL_ACTIVE = frozenset({INVOICE_STATUS_CURRENT, INVOICE_STATUS_PAID})
 
     @staticmethod
     def get_contractor_employment_type(contractor_id: int) -> str:
@@ -2726,9 +4170,28 @@ class InvoiceService:
             cur.close()
             conn.close()
 
+    _INVOICE_BILLING_ALLOWED = frozenset({"weekly", "biweekly", "monthly"})
+
+    @staticmethod
+    def normalize_invoice_billing_frequency(raw: Optional[str]) -> str:
+        """Canonical invoice cadence: weekly, biweekly, or monthly (default weekly)."""
+        v = (raw or "weekly").strip().lower()
+        return v if v in InvoiceService._INVOICE_BILLING_ALLOWED else "weekly"
+
+    @staticmethod
+    def is_combined_invoice_billing(freq: Optional[str]) -> bool:
+        """
+        True when the contractor should combine weeks on **My invoices**
+        (bi-weekly or monthly), not create one invoice per timesheet week from the week page.
+        """
+        return InvoiceService.normalize_invoice_billing_frequency(freq) in (
+            "biweekly",
+            "monthly",
+        )
+
     @staticmethod
     def get_contractor_invoice_billing_frequency(contractor_id: int) -> str:
-        """Return 'weekly' or 'monthly' (default weekly)."""
+        """Return ``weekly``, ``biweekly``, or ``monthly`` (default weekly)."""
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
@@ -2744,7 +4207,7 @@ class InvoiceService:
                 return "weekly"
             row = cur.fetchone()
             v = (row.get("ibf") or "weekly") if row else "weekly"
-            return v if str(v).lower() in ("weekly", "monthly") else "weekly"
+            return InvoiceService.normalize_invoice_billing_frequency(str(v))
         finally:
             cur.close()
             conn.close()
@@ -2795,10 +4258,10 @@ class InvoiceService:
                 (timesheet_week_id, timesheet_week_id),
             )
             rows = cur.fetchall() or []
-            has_voided = any(r.get("status") == "void" for r in rows)
+            has_voided = any(r.get("status") == InvoiceService.INVOICE_STATUS_VOID for r in rows)
             current = None
             for r in rows:
-                if r.get("status") in ("draft", "sent"):
+                if r.get("status") in InvoiceService._INVOICE_PORTAL_ACTIVE:
                     current = r
                     break
             return {"has_voided_invoice": has_voided, "current_invoice": current}
@@ -2827,7 +4290,7 @@ class InvoiceService:
             ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
                 f"""
-                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, {_JT_DISP_NAME_SEL},
                        e.actual_hours, e.labour_hours, e.pay, e.travel_parking
                 FROM tb_timesheet_entries e
                 {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
@@ -2864,7 +4327,7 @@ class InvoiceService:
     ) -> Dict[str, Any]:
         """
         Accounts: close week as ``invoiced`` without a contractor_invoices row (PAYE payroll,
-        paid off-system, or legacy). Blocks portal invoicing the same as a sent invoice.
+        paid off-system, or legacy). Blocks portal invoicing the same as a paid invoice.
         """
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
@@ -2885,9 +4348,9 @@ class InvoiceService:
                 )
             info = InvoiceService.get_week_invoice_info(int(timesheet_week_pk))
             cur_inv = info.get("current_invoice")
-            if cur_inv and cur_inv.get("status") in ("draft", "sent"):
+            if cur_inv and cur_inv.get("status") in InvoiceService._INVOICE_PORTAL_ACTIVE:
                 raise ValueError(
-                    "This week already has a portal invoice (draft or sent). "
+                    "This week already has a portal invoice (current or paid). "
                     "Void it in Contractor invoices first if you need to change this."
                 )
             act = (str(actor).strip()[:64] if actor else "") or "admin"
@@ -2923,7 +4386,7 @@ class InvoiceService:
     ) -> Dict[str, Any]:
         """
         Undo admin-only payment closure: ``invoiced`` → ``approved`` when there is no
-        draft/sent portal invoice. Does not void contractor invoices.
+        current/paid portal invoice. Does not void contractor invoices.
         """
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
@@ -2939,7 +4402,7 @@ class InvoiceService:
                 raise ValueError("Only an invoiced week can be reopened this way.")
             info = InvoiceService.get_week_invoice_info(int(timesheet_week_pk))
             cur_inv = info.get("current_invoice")
-            if cur_inv and cur_inv.get("status") in ("draft", "sent"):
+            if cur_inv and cur_inv.get("status") in InvoiceService._INVOICE_PORTAL_ACTIVE:
                 raise ValueError(
                     "This week has a portal invoice. Void it from Contractor invoices instead of using reopen."
                 )
@@ -2973,7 +4436,7 @@ class InvoiceService:
         contractor_id: int,
         timesheet_week_id: int,
         invoice_number: str,
-        mark_sent: bool = True,
+        mark_paid: bool = True,
     ) -> dict:
         """
         Create invoice from uninvoiced entries for this week; link entries; set week status to invoiced.
@@ -3000,8 +4463,8 @@ class InvoiceService:
                     timesheet_week_id,
                     str(invoice_number).strip(),
                     total,
-                    "sent" if mark_sent else "draft",
-                    datetime.utcnow() if mark_sent else None,
+                    InvoiceService.INVOICE_STATUS_PAID if mark_paid else InvoiceService.INVOICE_STATUS_CURRENT,
+                    datetime.utcnow() if mark_paid else None,
                 ),
             )
             inv_id = cur.lastrowid
@@ -3020,7 +4483,7 @@ class InvoiceService:
                 f"UPDATE tb_timesheet_entries SET invoice_id=%s WHERE id IN ({placeholders})",
                 [inv_id] + entry_ids,
             )
-            if mark_sent:
+            if mark_paid:
                 cur.execute(
                     "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
                     (timesheet_week_id,),
@@ -3030,7 +4493,9 @@ class InvoiceService:
                 "id": inv_id,
                 "invoice_number": str(invoice_number).strip(),
                 "total_amount": round(total, 2),
-                "status": "sent" if mark_sent else "draft",
+                "status": (
+                    InvoiceService.INVOICE_STATUS_PAID if mark_paid else InvoiceService.INVOICE_STATUS_CURRENT
+                ),
             }
         finally:
             cur.close()
@@ -3080,13 +4545,13 @@ class InvoiceService:
         contractor_id: int,
         timesheet_week_pks: List[int],
         invoice_number: str,
-        mark_sent: bool = True,
+        mark_paid: bool = True,
     ) -> dict:
         """
         One invoice spanning multiple weeks; each entry becomes a line on the same invoice.
-        Weeks may be **submitted** or **approved**. Invoice is **draft** until every selected
+        Weeks may be **submitted** or **approved**. Invoice is **current** until every selected
         week is approved (matches per-week behaviour). Only when all are approved and
-        ``mark_sent`` is true do we set status **sent** and weeks **invoiced**.
+        ``mark_paid`` is true do we set status **paid** and weeks **invoiced**.
         """
         if not invoice_number or not str(invoice_number).strip():
             raise ValueError("Invoice number is required.")
@@ -3133,7 +4598,7 @@ class InvoiceService:
             all_weeks_approved = all(
                 str(w.get("status") or "").lower() == "approved" for w in weeks_ordered
             )
-            effective_sent = bool(mark_sent) and all_weeks_approved
+            effective_paid = bool(mark_paid) and all_weeks_approved
 
             cur.execute(
                 """
@@ -3146,8 +4611,8 @@ class InvoiceService:
                     anchor_week_id,
                     str(invoice_number).strip(),
                     total,
-                    "sent" if effective_sent else "draft",
-                    datetime.utcnow() if effective_sent else None,
+                    InvoiceService.INVOICE_STATUS_PAID if effective_paid else InvoiceService.INVOICE_STATUS_CURRENT,
+                    datetime.utcnow() if effective_paid else None,
                 ),
             )
             inv_id = cur.lastrowid
@@ -3167,7 +4632,7 @@ class InvoiceService:
                 f"UPDATE tb_timesheet_entries SET invoice_id=%s WHERE id IN ({placeholders})",
                 [inv_id] + entry_ids,
             )
-            if effective_sent:
+            if effective_paid:
                 for wk in weeks_ordered:
                     cur.execute(
                         "UPDATE tb_timesheet_weeks SET status='invoiced' WHERE id=%s",
@@ -3178,7 +4643,9 @@ class InvoiceService:
                 "id": inv_id,
                 "invoice_number": str(invoice_number).strip(),
                 "total_amount": round(total, 2),
-                "status": "sent" if effective_sent else "draft",
+                "status": (
+                    InvoiceService.INVOICE_STATUS_PAID if effective_paid else InvoiceService.INVOICE_STATUS_CURRENT
+                ),
                 "timesheet_week_ids": [int(w["id"]) for w in weeks_ordered],
             }
         finally:
@@ -3186,10 +4653,10 @@ class InvoiceService:
             conn.close()
 
     @staticmethod
-    def finalize_draft_invoice_for_week(contractor_id: int, timesheet_week_pk: int) -> Optional[Dict[str, Any]]:
+    def finalize_current_invoice_for_week(contractor_id: int, timesheet_week_pk: int) -> Optional[Dict[str, Any]]:
         """
-        Contractor self-service: timesheet must be **approved** and a **draft** invoice must exist
-        for this week (created while week was still submitted). Promotes draft → sent and week → invoiced.
+        Contractor self-service: timesheet must be **approved** and a **current** invoice must exist
+        for this week (created while week was still submitted). Promotes current → paid and week → invoiced.
         Fixes the case where approval did not run the admin finalize path or data was migrated.
         """
         conn = get_db_connection()
@@ -3211,7 +4678,7 @@ class InvoiceService:
             cur.execute(
                 """
                 SELECT id, invoice_number, total_amount FROM contractor_invoices i
-                WHERE i.contractor_id=%s AND i.status='draft'
+                WHERE i.contractor_id=%s AND i.status=%s
                   AND (
                     i.timesheet_week_id=%s
                     OR EXISTS (
@@ -3221,7 +4688,12 @@ class InvoiceService:
                   )
                 ORDER BY i.id DESC LIMIT 1
                 """,
-                (int(contractor_id), int(timesheet_week_pk), int(timesheet_week_pk)),
+                (
+                    int(contractor_id),
+                    InvoiceService.INVOICE_STATUS_CURRENT,
+                    int(timesheet_week_pk),
+                    int(timesheet_week_pk),
+                ),
             )
             inv = cur.fetchone()
             if not inv:
@@ -3254,16 +4726,21 @@ class InvoiceService:
                 rw = cur.fetchone()
                 if not rw or str(rw.get("status") or "").lower() != "approved":
                     raise ValueError(
-                        "Every timesheet week on this draft invoice must be approved before you can finalize. "
+                        "Every timesheet week on this invoice must be approved before you can finalize. "
                         "Wait until all linked weeks are approved, or ask staff to review any week still submitted."
                     )
             cur.execute(
                 """
                 UPDATE contractor_invoices
-                SET status='sent', sent_at=%s
-                WHERE id=%s AND status='draft'
+                SET status=%s, sent_at=%s
+                WHERE id=%s AND status=%s
                 """,
-                (datetime.utcnow(), inv_id),
+                (
+                    InvoiceService.INVOICE_STATUS_PAID,
+                    datetime.utcnow(),
+                    inv_id,
+                    InvoiceService.INVOICE_STATUS_CURRENT,
+                ),
             )
             if cur.rowcount == 0:
                 conn.rollback()
@@ -3279,11 +4756,16 @@ class InvoiceService:
                 "id": inv_id,
                 "invoice_number": inv.get("invoice_number"),
                 "total_amount": float(inv.get("total_amount") or 0),
-                "status": "sent",
+                "status": InvoiceService.INVOICE_STATUS_PAID,
             }
         finally:
             cur.close()
             conn.close()
+
+    @staticmethod
+    def finalize_draft_invoice_for_week(contractor_id: int, timesheet_week_pk: int) -> Optional[Dict[str, Any]]:
+        """Deprecated name; use :meth:`finalize_current_invoice_for_week`."""
+        return InvoiceService.finalize_current_invoice_for_week(contractor_id, timesheet_week_pk)
 
     @staticmethod
     def void_invoice_for_week(timesheet_week_id: int, reason: str) -> None:
@@ -3375,7 +4857,18 @@ class InvoiceService:
                        (SELECT GROUP_CONCAT(w2.week_id ORDER BY w2.week_ending SEPARATOR ', ')
                         FROM contractor_invoice_weeks ciw
                         JOIN tb_timesheet_weeks w2 ON w2.id = ciw.timesheet_week_id
-                        WHERE ciw.invoice_id = i.id) AS invoice_week_codes
+                        WHERE ciw.invoice_id = i.id) AS invoice_week_codes,
+                       (SELECT COUNT(DISTINCT e.week_id)
+                        FROM tb_timesheet_entries e
+                        WHERE e.invoice_id = i.id) AS line_week_distinct_count,
+                       (SELECT GROUP_CONCAT(sub.wk ORDER BY sub.we SEPARATOR ', ')
+                        FROM (
+                            SELECT DISTINCT tw2.week_id AS wk, tw2.week_ending AS we
+                            FROM tb_timesheet_entries e2
+                            JOIN tb_timesheet_weeks tw2 ON tw2.id = e2.week_id
+                            WHERE e2.invoice_id = i.id
+                        ) sub
+                       ) AS line_week_codes
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
                 WHERE i.contractor_id = %s
@@ -3443,7 +4936,7 @@ class InvoiceService:
             ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
                 f"""
-                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, {_JT_DISP_NAME_SEL},
                        e.actual_hours, e.pay, e.travel_parking,
                        tw.week_id AS timesheet_week_code
                 FROM tb_timesheet_entries e
@@ -3466,8 +4959,10 @@ class InvoiceService:
                         except (TypeError, ValueError):
                             r[k] = 0.0
             inv["lines"] = lines
-            inv["invoice_weeks"] = InvoiceService._list_invoice_weeks_meta(
-                cur, int(invoice_id)
+            inv["invoice_weeks"] = InvoiceService._merge_invoice_weeks_for_display(
+                cur,
+                int(invoice_id),
+                InvoiceService._list_invoice_weeks_meta(cur, int(invoice_id)),
             )
             inv["history"] = InvoiceService.list_invoice_history_for_week(int(inv["timesheet_week_id"]))
             return inv
@@ -3512,6 +5007,41 @@ class InvoiceService:
         return rows
 
     @staticmethod
+    def _invoice_weeks_meta_from_billed_lines(cur, invoice_id: int) -> List[Dict[str, Any]]:
+        """
+        Distinct timesheet weeks that actually have lines on this invoice (source of truth).
+
+        Used when ``contractor_invoice_weeks`` is missing rows (legacy / partial data) so the
+        portal and PDF still list every ISO week represented on the invoice.
+        """
+        cur.execute(
+            """
+            SELECT tw.id, tw.week_id AS week_code, tw.week_ending, tw.status
+            FROM tb_timesheet_entries e
+            JOIN tb_timesheet_weeks tw ON tw.id = e.week_id
+            WHERE e.invoice_id = %s
+            GROUP BY tw.id, tw.week_id, tw.week_ending, tw.status
+            ORDER BY tw.week_ending ASC, tw.id ASC
+            """,
+            (int(invoice_id),),
+        )
+        rows = cur.fetchall() or []
+        for r in rows:
+            we = r.get("week_ending")
+            if hasattr(we, "strftime"):
+                r["week_ending"] = we.strftime("%Y-%m-%d")
+        return rows
+
+    @staticmethod
+    def _merge_invoice_weeks_for_display(
+        cur, invoice_id: int, junction_weeks: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        line_weeks = InvoiceService._invoice_weeks_meta_from_billed_lines(cur, int(invoice_id))
+        if len(line_weeks) > len(junction_weeks):
+            return line_weeks
+        return junction_weeks
+
+    @staticmethod
     def get_invoice_detail_admin(invoice_id: int) -> Optional[Dict[str, Any]]:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
@@ -3538,7 +5068,7 @@ class InvoiceService:
             ce, se, join_sql, _, _ = TimesheetService._tb_timesheet_entry_location_parts(cur)
             cur.execute(
                 f"""
-                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, jt.name AS job_type_name,
+                SELECT e.id, e.work_date, {ce} AS client_name, {se} AS site_name, {_JT_DISP_NAME_SEL},
                        e.actual_hours, e.pay, e.travel_parking,
                        tw.week_id AS timesheet_week_code
                 FROM tb_timesheet_entries e
@@ -3555,8 +5085,10 @@ class InvoiceService:
                 if hasattr(wd, "strftime"):
                     r["work_date"] = wd.strftime("%Y-%m-%d")
             inv["lines"] = lines
-            inv["invoice_weeks"] = InvoiceService._list_invoice_weeks_meta(
-                cur, int(invoice_id)
+            inv["invoice_weeks"] = InvoiceService._merge_invoice_weeks_for_display(
+                cur,
+                int(invoice_id),
+                InvoiceService._list_invoice_weeks_meta(cur, int(invoice_id)),
             )
             inv["history"] = InvoiceService.list_invoice_history_for_week(int(inv["timesheet_week_id"]))
             return inv
@@ -3578,9 +5110,12 @@ class InvoiceService:
             if contractor_id:
                 where.append("i.contractor_id = %s")
                 params.append(int(contractor_id))
-            if status and str(status).lower() in ("draft", "sent", "void"):
+            st_f = str(status).lower() if status else ""
+            if st_f in ("draft", "sent"):
+                st_f = "current" if st_f == "draft" else "paid"
+            if st_f in ("current", "paid", "void"):
                 where.append("i.status = %s")
-                params.append(str(status).lower())
+                params.append(st_f)
             params.append(int(limit))
             cur.execute(
                 f"""
@@ -3989,6 +5524,7 @@ class InvoiceService:
         """
         Admin: totals by period (month, ISO timesheet week) and per-contractor YTD-style rollups.
         Amounts use timesheet week_ending for the calendar year filter. Excludes void invoices from sums.
+        Rollups use invoice status **paid** (finalised) vs **current** (not yet finalised).
         """
         y = int(year) if year is not None else datetime.utcnow().year
         today = date.today()
@@ -4000,55 +5536,55 @@ class InvoiceService:
                 SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status = 'sent' AND YEAR(w.week_ending) = %s
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
                 """,
-                (y,),
+                (InvoiceService.INVOICE_STATUS_PAID, y),
             )
-            ytd_sent = cur.fetchone() or {}
+            ytd_paid = cur.fetchone() or {}
 
             cur.execute(
                 """
                 SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status = 'draft' AND YEAR(w.week_ending) = %s
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
                 """,
-                (y,),
+                (InvoiceService.INVOICE_STATUS_CURRENT, y),
             )
-            ytd_draft = cur.fetchone() or {}
+            ytd_current = cur.fetchone() or {}
 
             cur.execute(
                 """
                 SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status = 'sent'
+                WHERE i.status = %s
                   AND YEAR(w.week_ending) = YEAR(%s) AND MONTH(w.week_ending) = MONTH(%s)
                 """,
-                (today, today),
+                (InvoiceService.INVOICE_STATUS_PAID, today, today),
             )
-            month_sent = cur.fetchone() or {}
+            month_paid = cur.fetchone() or {}
 
             cur.execute(
                 """
                 SELECT w.week_id AS iso_week, w.week_ending,
                        COUNT(i.id) AS inv_count,
-                       COALESCE(SUM(i.total_amount), 0) AS total_sent
+                       COALESCE(SUM(i.total_amount), 0) AS total_paid
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status = 'sent' AND YEAR(w.week_ending) = %s
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
                 GROUP BY w.week_id, w.week_ending
                 ORDER BY w.week_ending DESC
                 LIMIT 60
                 """,
-                (y,),
+                (InvoiceService.INVOICE_STATUS_PAID, y),
             )
             by_iso_week = cur.fetchall() or []
             for r in by_iso_week:
                 we = r.get("week_ending")
                 if hasattr(we, "strftime"):
                     r["week_ending"] = we.strftime("%Y-%m-%d")
-                for k in ("total_sent",):
+                for k in ("total_paid",):
                     if k in r and r[k] is not None:
                         r[k] = float(r[k])
 
@@ -4056,58 +5592,215 @@ class InvoiceService:
                 """
                 SELECT DATE_FORMAT(w.week_ending, '%%Y-%%m') AS ymonth,
                        COUNT(i.id) AS inv_count,
-                       COALESCE(SUM(i.total_amount), 0) AS total_sent
+                       COALESCE(SUM(i.total_amount), 0) AS total_paid
                 FROM contractor_invoices i
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status = 'sent' AND YEAR(w.week_ending) = %s
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
                 GROUP BY ymonth
                 ORDER BY ymonth DESC
                 """,
-                (y,),
+                (InvoiceService.INVOICE_STATUS_PAID, y),
             )
             by_month = cur.fetchall() or []
             for r in by_month:
-                if r.get("total_sent") is not None:
-                    r["total_sent"] = float(r["total_sent"])
+                if r.get("total_paid") is not None:
+                    r["total_paid"] = float(r["total_paid"])
 
             cur.execute(
                 """
                 SELECT i.contractor_id, c.name AS contractor_name, c.email AS contractor_email,
                        COUNT(i.id) AS invoice_count,
-                       COALESCE(SUM(CASE WHEN i.status = 'sent' THEN i.total_amount ELSE 0 END), 0) AS total_sent,
-                       COALESCE(SUM(CASE WHEN i.status = 'draft' THEN i.total_amount ELSE 0 END), 0) AS total_draft
+                       COALESCE(SUM(CASE WHEN i.status = %s THEN i.total_amount ELSE 0 END), 0) AS total_paid,
+                       COALESCE(SUM(CASE WHEN i.status = %s THEN i.total_amount ELSE 0 END), 0) AS total_current
                 FROM contractor_invoices i
                 JOIN tb_contractors c ON c.id = i.contractor_id
                 JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
-                WHERE i.status != 'void' AND YEAR(w.week_ending) = %s
+                WHERE i.status != %s AND YEAR(w.week_ending) = %s
                 GROUP BY i.contractor_id, c.name, c.email
-                ORDER BY total_sent DESC, contractor_name ASC
+                ORDER BY total_paid DESC, contractor_name ASC
                 """,
-                (y,),
+                (
+                    InvoiceService.INVOICE_STATUS_PAID,
+                    InvoiceService.INVOICE_STATUS_CURRENT,
+                    InvoiceService.INVOICE_STATUS_VOID,
+                    y,
+                ),
             )
             by_contractor = cur.fetchall() or []
             for r in by_contractor:
-                for k in ("total_sent", "total_draft"):
+                for k in ("total_paid", "total_current"):
                     if k in r and r[k] is not None:
                         r[k] = float(r[k])
 
             return {
                 "year": y,
-                "ytd_sent": {
-                    "count": int(ytd_sent.get("cnt") or 0),
-                    "total": float(ytd_sent.get("total") or 0),
+                "ytd_paid": {
+                    "count": int(ytd_paid.get("cnt") or 0),
+                    "total": float(ytd_paid.get("total") or 0),
                 },
-                "ytd_draft": {
-                    "count": int(ytd_draft.get("cnt") or 0),
-                    "total": float(ytd_draft.get("total") or 0),
+                "ytd_current": {
+                    "count": int(ytd_current.get("cnt") or 0),
+                    "total": float(ytd_current.get("total") or 0),
                 },
-                "current_month_sent": {
-                    "count": int(month_sent.get("cnt") or 0),
-                    "total": float(month_sent.get("total") or 0),
+                "current_month_paid": {
+                    "count": int(month_paid.get("cnt") or 0),
+                    "total": float(month_paid.get("total") or 0),
                 },
                 "by_iso_week": by_iso_week,
                 "by_month": by_month,
                 "by_contractor": by_contractor,
+            }
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def admin_dashboard_invoice_summary() -> Dict[str, Any]:
+        """
+        Compact metrics for the Time Billing admin dashboard. ``visible`` is False when there are
+        no self-employed contractors and no rows in ``contractor_invoices`` (invoice cards hidden).
+        """
+        out: Dict[str, Any] = {
+            "visible": False,
+            "self_employed_contractors": 0,
+            "total_invoices": 0,
+            "year": datetime.utcnow().year,
+            "ytd_paid": {"count": 0, "total": 0.0},
+            "ytd_current": {"count": 0, "total": 0.0},
+            "current_month_paid": {"count": 0, "total": 0.0},
+        }
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            try:
+                cur.execute("SELECT COUNT(*) AS c FROM contractor_invoices")
+            except Exception:
+                return out
+            inv_total = int((cur.fetchone() or {}).get("c") or 0)
+            out["total_invoices"] = inv_total
+            try:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM tb_contractors
+                    WHERE LOWER(COALESCE(employment_type, '')) = 'self_employed'
+                      AND LOWER(COALESCE(CAST(status AS CHAR), '')) IN ('active','1')
+                    """
+                )
+            except Exception:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM tb_contractors
+                    WHERE LOWER(COALESCE(employment_type, '')) = 'self_employed'
+                    """
+                )
+            se = int((cur.fetchone() or {}).get("c") or 0)
+            out["self_employed_contractors"] = se
+            if se == 0 and inv_total == 0:
+                return out
+            out["visible"] = True
+            y = int(out["year"])
+            today = date.today()
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
+                FROM contractor_invoices i
+                JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
+                """,
+                (InvoiceService.INVOICE_STATUS_PAID, y),
+            )
+            row = cur.fetchone() or {}
+            out["ytd_paid"] = {
+                "count": int(row.get("cnt") or 0),
+                "total": float(row.get("total") or 0),
+            }
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
+                FROM contractor_invoices i
+                JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
+                WHERE i.status = %s AND YEAR(w.week_ending) = %s
+                """,
+                (InvoiceService.INVOICE_STATUS_CURRENT, y),
+            )
+            row2 = cur.fetchone() or {}
+            out["ytd_current"] = {
+                "count": int(row2.get("cnt") or 0),
+                "total": float(row2.get("total") or 0),
+            }
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cnt, COALESCE(SUM(i.total_amount), 0) AS total
+                FROM contractor_invoices i
+                JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
+                WHERE i.status = %s
+                  AND YEAR(w.week_ending) = YEAR(%s) AND MONTH(w.week_ending) = MONTH(%s)
+                """,
+                (InvoiceService.INVOICE_STATUS_PAID, today, today),
+            )
+            row3 = cur.fetchone() or {}
+            out["current_month_paid"] = {
+                "count": int(row3.get("cnt") or 0),
+                "total": float(row3.get("total") or 0),
+            }
+            return out
+        except Exception:
+            return out
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def contractor_portal_invoice_kpis(contractor_id: int) -> Optional[Dict[str, Any]]:
+        """Dashboard figures for the contractor portal when self-employed; ``None`` for PAYE."""
+        if InvoiceService.get_contractor_employment_type(int(contractor_id)) != "self_employed":
+            return None
+        y = datetime.utcnow().year
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT
+                  COUNT(*) AS invoice_count,
+                  COALESCE(SUM(CASE WHEN i.status = %s AND YEAR(w.week_ending) = %s
+                    THEN i.total_amount ELSE 0 END), 0) AS ytd_paid,
+                  COALESCE(SUM(CASE WHEN i.status = %s AND YEAR(w.week_ending) = %s
+                    THEN 1 ELSE 0 END), 0) AS ytd_paid_n,
+                  COALESCE(SUM(CASE WHEN i.status = %s THEN 1 ELSE 0 END), 0) AS current_n,
+                  COALESCE(SUM(CASE WHEN i.status = %s THEN i.total_amount ELSE 0 END), 0) AS current_total
+                FROM contractor_invoices i
+                JOIN tb_timesheet_weeks w ON w.id = i.timesheet_week_id
+                WHERE i.contractor_id = %s AND i.status != %s
+                """,
+                (
+                    InvoiceService.INVOICE_STATUS_PAID,
+                    y,
+                    InvoiceService.INVOICE_STATUS_PAID,
+                    y,
+                    InvoiceService.INVOICE_STATUS_CURRENT,
+                    InvoiceService.INVOICE_STATUS_CURRENT,
+                    int(contractor_id),
+                    InvoiceService.INVOICE_STATUS_VOID,
+                ),
+            )
+            row = cur.fetchone() or {}
+            return {
+                "invoice_count": int(row.get("invoice_count") or 0),
+                "year": y,
+                "ytd_paid": float(row.get("ytd_paid") or 0),
+                "ytd_paid_n": int(row.get("ytd_paid_n") or 0),
+                "current_n": int(row.get("current_n") or 0),
+                "current_total": float(row.get("current_total") or 0),
+            }
+        except Exception:
+            return {
+                "invoice_count": 0,
+                "year": y,
+                "ytd_paid": 0.0,
+                "ytd_paid_n": 0,
+                "current_n": 0,
+                "current_total": 0.0,
             }
         finally:
             cur.close()
@@ -4315,7 +6008,7 @@ class RunsheetService:
                 r.site_id,
                 COALESCE(s.name, r.site_free_text) AS site_name,
                 r.job_type_id,
-                jt.name AS job_type_name,
+                {_JT_DISP_NAME_SEL},
                 jt.colour_hex AS job_type_colour_hex,
                 (SELECT COUNT(1)
                     FROM runsheet_assignments ra
@@ -4654,7 +6347,7 @@ class RunsheetService:
                     r.site_id,
                     COALESCE(s.name, r.site_free_text) AS site_name,
                     r.job_type_id,
-                    jt.name AS job_type_name,
+                    {_JT_DISP_NAME_SEL},
                     jt.colour_hex AS job_type_colour_hex,
                     req_role.name AS required_role_name,
                     shift_staff_r.name AS shift_staff_role_name,
@@ -4846,22 +6539,7 @@ class RunsheetService:
     @staticmethod
     def _coerce_db_time_to_py_time(val: Any) -> Optional[time]:
         """Normalize MySQL TIME / timedelta / string to datetime.time for hour math."""
-        if val is None:
-            return None
-        if isinstance(val, time):
-            return val
-        if isinstance(val, timedelta):
-            secs = int(val.total_seconds()) % 86400
-            return time(secs // 3600, (secs % 3600) // 60, secs % 60)
-        if isinstance(val, datetime):
-            return val.time()
-        if isinstance(val, str) and val.strip():
-            s = val.strip()
-            try:
-                return _to_time(s[:8] if len(s) >= 8 else s[:5])
-            except ValueError:
-                return None
-        return None
+        return _coerce_entry_time_value(val)
 
     @staticmethod
     def estimate_shift_hours_from_times(
@@ -5278,7 +6956,7 @@ class RunsheetService:
                     {cura_expr},
                     COALESCE(c.name, r.client_free_text) AS client_name,
                     COALESCE(s.name, r.site_free_text) AS site_name,
-                    jt.name AS job_type_name,
+                    {_JT_DISP_NAME_SEL},
                     jt.colour_hex AS job_type_colour_hex,
                     {win_start_expr},
                     {win_end_expr},
@@ -5575,6 +7253,121 @@ class RunsheetService:
         except Exception:
             return None
 
+    _CREW_SEGMENT_PAY_MODES = frozenset({"audit", "full_shift", "journey", "on_site"})
+
+    @staticmethod
+    def _normalize_crew_segment_pay_mode(val: Any) -> str:
+        s = str(val or "").strip().lower().replace("-", "_")
+        if s in ("", "audit_only", "none", "record_only"):
+            return "audit"
+        if s in ("journey_legs", "drive_legs"):
+            return "journey"
+        if s in ("at_client", "on_site_only", "client_only"):
+            return "on_site"
+        if s in ("full_shift", "shift_line", "inherit_line"):
+            return "full_shift"
+        return s if s in RunsheetService._CREW_SEGMENT_PAY_MODES else "audit"
+
+    @staticmethod
+    def _coerce_segment_time(val: Any) -> Optional[time]:
+        if val is None or val == "":
+            return None
+        if isinstance(val, time):
+            return val
+        if isinstance(val, datetime):
+            return val.time()
+        if isinstance(val, timedelta):
+            secs = int(val.total_seconds()) % 86400
+            h, r = divmod(secs, 3600)
+            m, s = divmod(r, 60)
+            return time(h, m, s)
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            return _to_time(s[:8] if len(s) >= 8 else s)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _serialize_time_value_for_json(val: Any) -> Optional[str]:
+        if val is None:
+            return None
+        if isinstance(val, time):
+            return val.strftime("%H:%M:%S")
+        if isinstance(val, timedelta):
+            secs = int(val.total_seconds()) % 86400
+            h, r = divmod(secs, 3600)
+            m, s = divmod(r, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return str(val)[:8] if val else None
+
+    @staticmethod
+    def _normalize_assignment_crew_role(val: Any) -> Optional[str]:
+        if val is None or val == "":
+            return None
+        s = str(val).strip()
+        return s[:64] if s else None
+
+    @staticmethod
+    def _replace_crew_segments(cur, runsheet_id: int, segments: Any) -> None:
+        """
+        Replace all journey/role segments for a runsheet. ``segments`` is a list of dicts
+        with contractor_id, role_code, optional times and pay_mode (audit|full_shift|journey|on_site).
+        """
+        if segments is None:
+            return
+        if not RunsheetService._tb_table_exists(cur, "tb_runsheet_crew_segments"):
+            return
+        cur.execute(
+            "DELETE FROM tb_runsheet_crew_segments WHERE runsheet_id=%s",
+            (runsheet_id,),
+        )
+        if not isinstance(segments, list):
+            return
+        for i, raw in enumerate(segments):
+            seg = raw if isinstance(raw, dict) else {}
+            uid = RunsheetService._optional_int(
+                seg.get("contractor_id") or seg.get("user_id")
+            )
+            if not uid:
+                continue
+            cur.execute("SELECT 1 FROM tb_contractors WHERE id=%s LIMIT 1", (uid,))
+            if not cur.fetchone():
+                continue
+            role_code = (seg.get("role_code") or seg.get("role") or "crew").strip()
+            if not role_code:
+                role_code = "crew"
+            role_code = role_code[:32]
+            role_label = (seg.get("role_label") or "").strip() or None
+            if role_label:
+                role_label = role_label[:120]
+            ts = RunsheetService._coerce_segment_time(seg.get("time_start"))
+            te = RunsheetService._coerce_segment_time(seg.get("time_end"))
+            pay_mode = RunsheetService._normalize_crew_segment_pay_mode(seg.get("pay_mode"))
+            notes = (seg.get("notes") or "").strip() or None
+            if notes:
+                notes = notes[:500]
+            cur.execute(
+                """
+                INSERT INTO tb_runsheet_crew_segments
+                (runsheet_id, contractor_id, role_code, role_label, time_start, time_end,
+                 pay_mode, notes, sort_order)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    runsheet_id,
+                    uid,
+                    role_code,
+                    role_label,
+                    ts,
+                    te,
+                    pay_mode,
+                    notes,
+                    int(seg.get("sort_order") if seg.get("sort_order") is not None else i),
+                ),
+            )
+
     @staticmethod
     def create_runsheet(
         data: Dict[str, Any], *, eligibility_context: Optional[Dict[str, Any]] = None
@@ -5727,15 +7520,18 @@ class RunsheetService:
                         allow_admin_override and ovr and not eligible and reason
                     )
                     fleet_vid = RunsheetService._optional_int(a.get("fleet_vehicle_id"))
+                    crew_role = RunsheetService._normalize_assignment_crew_role(
+                        a.get("crew_role")
+                    )
                     cur.execute(
                         """
                         INSERT INTO runsheet_assignments
                         (runsheet_id, user_id, scheduled_start, scheduled_end, actual_start, actual_end,
-                         break_mins, travel_parking, notes, payroll_included,
+                         break_mins, travel_parking, notes, crew_role, payroll_included,
                          role_eligibility_override, role_eligibility_override_reason,
                          role_eligibility_override_at, role_eligibility_override_staff_user_id,
                          fleet_vehicle_id)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         """,
                         (
                             rs_new_id,
@@ -5747,6 +7543,7 @@ class RunsheetService:
                             int(a.get("break_mins") or 0),
                             float(a.get("travel_parking") or 0),
                             a.get("notes"),
+                            crew_role,
                             payroll_included,
                             1 if ovr_active else 0,
                             reason if ovr_active else None,
@@ -5770,6 +7567,9 @@ class RunsheetService:
                             actor_staff_user_id=staff_actor_id,
                             actor_contractor_id=None,
                         )
+            RunsheetService._replace_crew_segments(
+                cur, rs_new_id, data.get("crew_segments")
+            )
             conn.commit()
             return rs_new_id
         except Exception as e:
@@ -5840,11 +7640,11 @@ class RunsheetService:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT r.*,
                        COALESCE(c.name, r.client_free_text) AS client_name,
                        COALESCE(s.name, r.site_free_text) AS site_name,
-                       jt.name AS job_type_name, jt.colour_hex AS job_type_colour_hex,
+                       {_JT_DISP_NAME_SEL}, jt.colour_hex AS job_type_colour_hex,
                        req_role.name AS required_role_name,
                        shift_staff_r.name AS shift_staff_role_name
                 FROM runsheets r
@@ -5869,6 +7669,30 @@ class RunsheetService:
             # Expose contractor_id for edit form (same as user_id)
             for a in rs["assignments"]:
                 a["contractor_id"] = a.get("user_id")
+            if RunsheetService._tb_table_exists(cur, "tb_runsheet_crew_segments"):
+                cur.execute(
+                    """
+                    SELECT s.id, s.runsheet_id, s.contractor_id, s.role_code, s.role_label,
+                           s.time_start, s.time_end, s.pay_mode, s.notes, s.sort_order,
+                           u.name AS user_name
+                    FROM tb_runsheet_crew_segments s
+                    JOIN tb_contractors u ON u.id = s.contractor_id
+                    WHERE s.runsheet_id=%s
+                    ORDER BY s.sort_order ASC, s.id ASC
+                    """,
+                    (rs_id,),
+                )
+                segs = cur.fetchall() or []
+                for s in segs:
+                    s["time_start"] = RunsheetService._serialize_time_value_for_json(
+                        s.get("time_start")
+                    )
+                    s["time_end"] = RunsheetService._serialize_time_value_for_json(
+                        s.get("time_end")
+                    )
+                rs["crew_segments"] = segs
+            else:
+                rs["crew_segments"] = []
             RunsheetService.attach_cura_context_to_runsheet_dict(cur, rs)
             return rs
         finally:
@@ -6029,15 +7853,18 @@ class RunsheetService:
                         allow_admin_override and ovr and not eligible and reason
                     )
                     fleet_vid = RunsheetService._optional_int(a.get("fleet_vehicle_id"))
+                    crew_role = RunsheetService._normalize_assignment_crew_role(
+                        a.get("crew_role")
+                    )
                     cur.execute(
                         """
                         INSERT INTO runsheet_assignments
                         (runsheet_id, user_id, scheduled_start, scheduled_end, actual_start, actual_end,
-                         break_mins, travel_parking, notes, payroll_included,
+                         break_mins, travel_parking, notes, crew_role, payroll_included,
                          role_eligibility_override, role_eligibility_override_reason,
                          role_eligibility_override_at, role_eligibility_override_staff_user_id,
                          fleet_vehicle_id)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """,
                         (
                             rs_id,
@@ -6049,6 +7876,7 @@ class RunsheetService:
                             int(a.get("break_mins") or 0),
                             float(a.get("travel_parking") or 0),
                             a.get("notes"),
+                            crew_role,
                             payroll_included,
                             1 if ovr_active else 0,
                             reason if ovr_active else None,
@@ -6101,6 +7929,10 @@ class RunsheetService:
                     assignments=assigns_check,
                     allow_admin_override=allow_admin_override,
                 )
+            if "crew_segments" in data:
+                RunsheetService._replace_crew_segments(
+                    cur, rs_id, data.get("crew_segments")
+                )
             conn.commit()
         except Exception as e:
             try:
@@ -6142,13 +7974,16 @@ class RunsheetService:
                  AND source='runsheet' AND runsheet_id=%s""",
             (user_id, week_pk, work_date, job_type_id, rs_id),
         )
-        TimesheetService._refresh_week_totals(cur, user_id, week_pk)
+        TimesheetService._refresh_week_pay_and_daily_mins(cur, user_id, week_pk)
 
     @staticmethod
     def _apply_runsheet_shift_pay_to_computed(
         rs: Dict[str, Any], computed: Dict[str, Any]
     ) -> Dict[str, Any]:
         """ROTA-PAY-001: optional hourly or flat day rate on the runsheet header."""
+        if str(computed.get("policy_source") or "") == "NO_ACTUALS":
+            computed.setdefault("rate_overridden", 0)
+            return computed
         model = RunsheetService._normalize_shift_pay_model(rs.get("shift_pay_model"))
         rate = rs.get("shift_pay_rate")
         if model == "inherit" or rate is None:
@@ -6215,6 +8050,7 @@ class RunsheetService:
         cur = conn.cursor(dictionary=True)
         created = 0
         updated = 0
+        weeks_touched: Set[Tuple[int, int]] = set()
         try:
             ecf = TimesheetService._tb_entry_column_flags(cur)
             for a in (rs.get("assignments") or []):
@@ -6237,8 +8073,12 @@ class RunsheetService:
                 scheduled_start = a.get(
                     "scheduled_start") or rs.get("window_start")
                 scheduled_end = a.get("scheduled_end") or rs.get("window_end")
-                actual_start = a.get("actual_start") or scheduled_start
-                actual_end = a.get("actual_end") or scheduled_end
+                ra_as = _coerce_entry_time_value(a.get("actual_start"))
+                ra_ae = _coerce_entry_time_value(a.get("actual_end"))
+                if ra_as is not None and ra_ae is not None:
+                    actual_start, actual_end = ra_as, ra_ae
+                else:
+                    actual_start, actual_end = None, None
                 break_mins = int(a.get("break_mins") or 0)
                 travel = float(a.get("travel_parking") or 0)
                 notes = a.get("notes")
@@ -6270,6 +8110,10 @@ class RunsheetService:
                     "runsheet_id": rs_id,
                     "lock_job_client": lock_job_client
                 }
+                if ecf["client_id"] and rs.get("client_id") is not None:
+                    payload["client_id"] = int(rs["client_id"])
+                if ecf["site_id"] and rs.get("site_id") is not None:
+                    payload["site_id"] = int(rs["site_id"])
 
                 contractor = TimesheetService._get_contractor(user_id)
                 computed = TimesheetService._compute_and_fill(
@@ -6351,13 +8195,24 @@ class RunsheetService:
                     cur.execute(sql, params)
                     created += 1
 
-                # Refresh totals per user/week
-                TimesheetService._refresh_week_totals(cur, user_id, wk["id"])
+                weeks_touched.add((user_id, wk["id"]))
+
+            for uid, wpk in weeks_touched:
+                TimesheetService._refresh_week_pay_and_daily_mins(cur, uid, wpk)
 
             # Mark runsheet as published
             cur.execute(
                 "UPDATE runsheets SET status='published' WHERE id=%s", (rs_id,))
             conn.commit()
+
+            try:
+                from app.plugins.time_billing_module import notifications as _tb_notifications
+
+                snap = dict(rs)
+                snap["status"] = "published"
+                _tb_notifications.notify_runsheet_published_to_crew(snap)
+            except Exception as e:
+                _tb_log_warning(f"time_billing: runsheet published notify skipped: {e}")
 
             return {"ok": True, "created": created, "updated": updated}
 
@@ -6372,10 +8227,10 @@ class RunsheetService:
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(
-                """
+                f"""
                 SELECT DISTINCT r.id, r.work_date, r.status, r.client_id, r.site_id, r.job_type_id,
                        r.template_id, r.lead_user_id, r.notes, r.required_role_id,
-                       COALESCE(c.name, r.client_free_text) AS client_name, jt.name AS job_type_name
+                       COALESCE(c.name, r.client_free_text) AS client_name, {_JT_DISP_NAME_SEL}
                 FROM runsheets r
                 LEFT JOIN clients c ON c.id = r.client_id
                 JOIN job_types jt ON jt.id = r.job_type_id
@@ -6999,12 +8854,17 @@ class TemplateService:
     # ---- Job Types CRUD ----
     @staticmethod
     def list_job_types() -> list[dict]:
-        """List all job types."""
+        """List all job types (legacy/archived last)."""
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(
-                "SELECT id, name, code, active, colour_hex FROM job_types ORDER BY name")
+                """
+                SELECT id, name, code, active, COALESCE(legacy, 0) AS legacy, colour_hex
+                FROM job_types
+                ORDER BY legacy ASC, active DESC, name ASC
+                """
+            )
             return cur.fetchall() or []
         finally:
             cur.close()
@@ -7033,14 +8893,26 @@ class TemplateService:
         """Update an existing job type."""
         if not data.get("id"):
             raise Exception("id required")
+        norm = dict(data)
+
+        def _truthy_active(v: Any) -> bool:
+            if v is True or v == 1:
+                return True
+            if isinstance(v, str) and v.strip().lower() in ("1", "true", "yes", "on"):
+                return True
+            return False
+
+        if "active" in norm and _truthy_active(norm.get("active")):
+            norm["legacy"] = 0
+
         fields, params = [], {}
-        for k in ("name", "code", "active", "colour_hex"):
-            if k in data:
+        for k in ("name", "code", "active", "colour_hex", "legacy"):
+            if k in norm:
                 fields.append(f"{k}=%({k})s")
-                params[k] = data[k]
+                params[k] = norm[k]
         if not fields:
             return
-        params["id"] = data["id"]
+        params["id"] = norm["id"]
 
         conn = get_db_connection()
         cur = conn.cursor()
@@ -7053,12 +8925,11 @@ class TemplateService:
             conn.close()
 
     @staticmethod
-    def delete_job_type(job_type_id: int) -> None:
+    def delete_job_type(job_type_id: int) -> dict:
         """
-        Delete a job type. Removes all wage and bill rate rows for this job type (DB CASCADE).
-        Contractor overrides, policies, and runsheet templates that reference it will have
-        job_type_id set to NULL (DB SET NULL). Fails if the job type is used in any
-        timesheet entries or runsheets (RESTRICT); use the returned error message to tell the user.
+        Hard-delete an unused job type (CASCADE wage/bill rows), or soft-archive
+        (active=0, legacy=1) when timesheet entries or runsheets still reference it
+        so historical rows keep a valid FK and UI shows the name as (Legacy).
         """
         conn = get_db_connection()
         cur = conn.cursor()
@@ -7076,17 +8947,21 @@ class TemplateService:
             row2 = cur.fetchone()
             runsheets_count = (row2[0] if row2 else 0) or 0
             if entries_count or runsheets_count:
-                parts = []
-                if entries_count:
-                    parts.append(f"{entries_count} timesheet entries")
-                if runsheets_count:
-                    parts.append(f"{runsheets_count} runsheets")
-                raise Exception(
-                    f"Cannot delete: this job type is used by {', '.join(parts)}. "
-                    "Reassign or remove those first."
+                cur.execute(
+                    "UPDATE job_types SET active=0, legacy=1 WHERE id=%s",
+                    (job_type_id,),
                 )
+                conn.commit()
+                return {
+                    "archived": True,
+                    "message": (
+                        "Job type archived: it no longer appears for new work, "
+                        "but existing timesheets and runsheets still show it labelled as (Legacy)."
+                    ),
+                }
             cur.execute("DELETE FROM job_types WHERE id=%s", (job_type_id,))
             conn.commit()
+            return {"archived": False, "deleted": True}
         finally:
             cur.close()
             conn.close()
@@ -7200,8 +9075,8 @@ class TemplateService:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute("""
-                SELECT wrr.id, wrr.job_type_id, jt.name AS job_type_name,
+            cur.execute(f"""
+                SELECT wrr.id, wrr.job_type_id, {_JT_DISP_NAME_SEL},
                        wrr.rate, wrr.effective_from, wrr.effective_to
                 FROM wage_rate_rows wrr
                 JOIN job_types jt ON jt.id=wrr.job_type_id
@@ -7398,8 +9273,8 @@ class TemplateService:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute("""
-                SELECT brr.id, brr.job_type_id, jt.name AS job_type_name,
+            cur.execute(f"""
+                SELECT brr.id, brr.job_type_id, {_JT_DISP_NAME_SEL},
                        brr.rate, brr.effective_from, brr.effective_to
                 FROM bill_rate_rows brr
                 JOIN job_types jt ON jt.id=brr.job_type_id
@@ -7536,9 +9411,14 @@ class TemplateService:
             "WEEKEND",
             "BANK_HOLIDAY",
             "NIGHT",
+            "TIME_BANDS",
             "OVERTIME_SHIFT",
             "OVERTIME_DAILY",
             "OVERTIME_WEEKLY",
+            "MINIMUM_HOURS_PER_SHIFT",
+            "MINIMUM_HOURS_DAILY_GLOBAL",
+            "MINIMUM_HOURS_DAILY_CLIENT",
+            "MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT",
         }
     )
     _CAL_POLICY_SCOPES = frozenset(
@@ -7550,7 +9430,7 @@ class TemplateService:
             "CONTRACTOR_CLIENT",
         }
     )
-    _CAL_POLICY_MODES = frozenset({"OFF", "MULTIPLIER", "ABSOLUTE"})
+    _CAL_POLICY_MODES = frozenset({"OFF", "MULTIPLIER", "ABSOLUTE", "PRORATA"})
 
     @staticmethod
     def _normalize_calendar_policy_type(val: Any) -> str:
@@ -7594,8 +9474,212 @@ class TemplateService:
         return datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
 
     @staticmethod
+    def _coerce_calendar_policy_effective_to(val: Any) -> Optional[date]:
+        if val in (None, ""):
+            return None
+        if isinstance(val, date):
+            return val
+        if isinstance(val, datetime):
+            return val.date()
+        return datetime.strptime(str(val)[:10], "%Y-%m-%d").date()
+
+    @staticmethod
+    def _serialize_policy_time(v: Any) -> Optional[str]:
+        """JSON-friendly TIME / timedelta for admin UI."""
+        if v is None:
+            return None
+        if isinstance(v, time):
+            return v.strftime("%H:%M:%S")
+        if isinstance(v, timedelta):
+            secs = int(v.total_seconds()) % 86400
+            h, r = divmod(secs, 3600)
+            m, s = divmod(r, 60)
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        s = str(v).strip()
+        return s or None
+
+    @staticmethod
+    def _normalize_applies_to(val: Any) -> str:
+        s = str(val or "WAGE").strip().upper()
+        return s if s in ("WAGE", "BILL", "BOTH") else "WAGE"
+
+    @staticmethod
+    def _normalize_stacking(val: Any) -> str:
+        s = str(val or "OT_ON_TOP").strip().upper()
+        return s if s in ("NONE", "OT_ON_TOP", "FULL") else "OT_ON_TOP"
+
+    @staticmethod
+    def _normalize_time_band_rows_for_json(val: Any) -> Optional[str]:
+        """
+        Build ``time_bands_json`` from structured ``time_band_rows`` (HTML forms / API arrays).
+
+        Each row: window_start, window_end (HH:MM), optional weekdays [0–6] (Mon=0),
+        optional multiplier, absolute_rate, uplift_per_hour / bonus_per_hour,
+        optional bonus_flat / flat_bonus_per_shift (£ once per line if shift overlaps band),
+        label.
+        """
+        if val is None:
+            return None
+        if isinstance(val, str):
+            s = val.strip()
+            if not s:
+                return None
+            try:
+                val = json.loads(s)
+            except Exception:
+                return None
+        if not isinstance(val, list):
+            return None
+        out: List[Dict[str, Any]] = []
+        for raw in val:
+            if not isinstance(raw, dict):
+                continue
+            ws = str(raw.get("window_start") or "").strip()
+            we = str(raw.get("window_end") or "").strip()
+            if not ws or not we:
+                continue
+            if len(ws) == 5 and ws[2:3] == ":":
+                ws = ws + ":00"
+            if len(we) == 5 and we[2:3] == ":":
+                we = we + ":00"
+            item: Dict[str, Any] = {"window_start": ws[:8], "window_end": we[:8]}
+            wds = raw.get("weekdays")
+            if isinstance(wds, list) and len(wds) > 0:
+                try:
+                    wl = sorted({int(x) for x in wds if 0 <= int(x) <= 6})
+                    if wl:
+                        item["weekdays"] = wl
+                except (TypeError, ValueError):
+                    pass
+            for key in ("multiplier", "absolute_rate", "uplift_per_hour"):
+                v = raw.get(key)
+                if v in (None, ""):
+                    continue
+                try:
+                    item[key] = float(_dec(v))
+                except Exception:
+                    pass
+            if "uplift_per_hour" not in item and raw.get("bonus_per_hour") not in (
+                None,
+                "",
+            ):
+                try:
+                    item["uplift_per_hour"] = float(_dec(raw.get("bonus_per_hour")))
+                except Exception:
+                    pass
+            for flat_key in ("bonus_flat", "flat_bonus_per_shift"):
+                v = raw.get(flat_key)
+                if v in (None, ""):
+                    continue
+                try:
+                    item["bonus_flat"] = float(_dec(v))
+                    break
+                except Exception:
+                    pass
+            lab = (raw.get("label") or "").strip()
+            if lab:
+                item["label"] = lab[:120]
+            out.append(item)
+        if not out:
+            return None
+        return json.dumps(out, separators=(",", ":"))
+
+    @staticmethod
+    def _policy_payload_to_row(data: dict) -> Dict[str, Any]:
+        """Normalise admin/API payload to ``calendar_policies`` column dict (includes ``id`` when updating)."""
+        d = dict(data or {})
+        name = (d.get("name") or "").strip()
+        if not name:
+            raise ValueError("name is required")
+        pol_type = TemplateService._normalize_calendar_policy_type(d.get("type"))
+        pol_cid = d.get("client_id")
+        if pol_cid is None and d.get("client_name") not in (None, ""):
+            try:
+                pol_cid = int(d["client_name"])
+            except (TypeError, ValueError):
+                pol_cid = None
+        rid = d.get("role_id")
+        if rid not in (None, ""):
+            try:
+                rid = int(rid)
+            except (TypeError, ValueError):
+                rid = None
+        jtid = d.get("job_type_id")
+        if jtid not in (None, ""):
+            try:
+                jtid = int(jtid)
+            except (TypeError, ValueError):
+                jtid = None
+        ctid = d.get("contractor_id")
+        if ctid not in (None, ""):
+            try:
+                ctid = int(ctid)
+            except (TypeError, ValueError):
+                ctid = None
+        eff_from = TemplateService._coerce_calendar_policy_effective_from(d.get("effective_from"))
+        eff_to = TemplateService._coerce_calendar_policy_effective_to(d.get("effective_to"))
+
+        def _fdec(key: str) -> Optional[Decimal]:
+            v = d.get(key)
+            if v in (None, ""):
+                return None
+            try:
+                return _dec(v)
+            except Exception:
+                return None
+
+        time_bands_json: Any = None
+        if pol_type == "TIME_BANDS":
+            if "time_band_rows" in d:
+                time_bands_json = TemplateService._normalize_time_band_rows_for_json(
+                    d.get("time_band_rows")
+                )
+            else:
+                tb_raw = d.get("time_bands_json")
+                if tb_raw is not None and tb_raw != "":
+                    if isinstance(tb_raw, (list, dict)):
+                        time_bands_json = json.dumps(
+                            tb_raw, separators=(",", ":")
+                        )
+                    else:
+                        s = str(tb_raw).strip()
+                        time_bands_json = s if s else None
+
+        row: Dict[str, Any] = {
+            "name": name,
+            "type": pol_type,
+            "scope": TemplateService._normalize_calendar_policy_scope(d.get("scope")),
+            "role_id": rid,
+            "job_type_id": jtid,
+            "client_id": pol_cid,
+            "contractor_id": ctid,
+            "mode": TemplateService._normalize_calendar_policy_mode(d.get("mode")),
+            "multiplier": _fdec("multiplier"),
+            "absolute_rate": _fdec("absolute_rate"),
+            "window_start": d.get("window_start") or None,
+            "window_end": d.get("window_end") or None,
+            "ot_threshold_hours": _fdec("ot_threshold_hours"),
+            "ot_tier2_threshold_hours": _fdec("ot_tier2_threshold_hours"),
+            "ot_tier1_mult": _fdec("ot_tier1_mult"),
+            "ot_tier2_mult": _fdec("ot_tier2_mult"),
+            "minimum_hours": _fdec("minimum_hours"),
+            "time_bands_json": time_bands_json,
+            "applies_to": TemplateService._normalize_applies_to(d.get("applies_to")),
+            "stacking": TemplateService._normalize_stacking(d.get("stacking")),
+            "effective_from": eff_from,
+            "effective_to": eff_to,
+            "active": int(d.get("active", 1) or 0),
+        }
+        if d.get("id") not in (None, ""):
+            try:
+                row["id"] = int(d["id"])
+            except (TypeError, ValueError):
+                pass
+        return row
+
+    @staticmethod
     def list_policies() -> list[dict]:
-        """List all calendar policies."""
+        """List all calendar policies (JSON-safe values for admin UI)."""
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
@@ -7603,64 +9687,208 @@ class TemplateService:
                 SELECT id, name, type, scope, role_id, job_type_id, client_id, contractor_id,
                        mode, multiplier, absolute_rate, window_start, window_end,
                        ot_threshold_hours, ot_tier2_threshold_hours, ot_tier1_mult, ot_tier2_mult,
+                       minimum_hours, time_bands_json,
                        applies_to, stacking, effective_from, effective_to, active
                 FROM calendar_policies
                 ORDER BY effective_from DESC, id DESC
             """)
-            return cur.fetchall() or []
+            rows = cur.fetchall() or []
+            for r in rows:
+                for dk in ("effective_from", "effective_to"):
+                    v = r.get(dk)
+                    if hasattr(v, "isoformat"):
+                        r[dk] = v.isoformat()[:10]
+                    elif v is None:
+                        r[dk] = None
+                for tk in ("window_start", "window_end"):
+                    r[tk] = TemplateService._serialize_policy_time(r.get(tk))
+                for nk in (
+                    "multiplier",
+                    "absolute_rate",
+                    "ot_threshold_hours",
+                    "ot_tier2_threshold_hours",
+                    "ot_tier1_mult",
+                    "ot_tier2_mult",
+                    "minimum_hours",
+                ):
+                    v = r.get(nk)
+                    if v is not None:
+                        r[nk] = float(v)
+                tbj = r.get("time_bands_json")
+                if isinstance(tbj, (bytes, bytearray)):
+                    tbj = tbj.decode("utf-8", errors="ignore")
+                if isinstance(tbj, str) and tbj.strip():
+                    try:
+                        r["time_bands_json"] = json.loads(tbj)
+                    except Exception:
+                        r["time_bands_json"] = tbj
+                elif isinstance(tbj, (list, dict)):
+                    r["time_bands_json"] = tbj
+                else:
+                    r["time_bands_json"] = None
+            return rows
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def save_calendar_policy(data: dict) -> int:
+        """
+        Insert or update a ``calendar_policies`` row (admin UI).
+
+        When ``id`` is present and exists, performs UPDATE; otherwise INSERT.
+        """
+        row = TemplateService._policy_payload_to_row(data)
+        pid = row.pop("id", None)
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            if pid:
+                cur.execute("SELECT id FROM calendar_policies WHERE id=%s", (int(pid),))
+                if not cur.fetchone():
+                    raise ValueError("Policy not found")
+                fields = [
+                    "name",
+                    "type",
+                    "scope",
+                    "role_id",
+                    "job_type_id",
+                    "client_id",
+                    "contractor_id",
+                    "mode",
+                    "multiplier",
+                    "absolute_rate",
+                    "window_start",
+                    "window_end",
+                    "ot_threshold_hours",
+                    "ot_tier2_threshold_hours",
+                    "ot_tier1_mult",
+                    "ot_tier2_mult",
+                    "minimum_hours",
+                    "time_bands_json",
+                    "applies_to",
+                    "stacking",
+                    "effective_from",
+                    "effective_to",
+                    "active",
+                ]
+                params = {k: row[k] for k in fields}
+                params["id"] = int(pid)
+                set_sql = ", ".join(f"{k}=%({k})s" for k in fields)
+                cur.execute(
+                    f"UPDATE calendar_policies SET {set_sql} WHERE id=%(id)s",
+                    params,
+                )
+                conn.commit()
+                return int(pid)
+            cur.execute(
+                """
+                INSERT INTO calendar_policies
+                (name, type, scope, role_id, job_type_id, client_id, contractor_id,
+                 mode, multiplier, absolute_rate, window_start, window_end,
+                 ot_threshold_hours, ot_tier2_threshold_hours, ot_tier1_mult, ot_tier2_mult,
+                 minimum_hours, time_bands_json,
+                 applies_to, stacking, effective_from, effective_to, active)
+                VALUES (%(name)s,%(type)s,%(scope)s,%(role_id)s,%(job_type_id)s,%(client_id)s,%(contractor_id)s,
+                 %(mode)s,%(multiplier)s,%(absolute_rate)s,%(window_start)s,%(window_end)s,
+                 %(ot_threshold_hours)s,%(ot_tier2_threshold_hours)s,%(ot_tier1_mult)s,%(ot_tier2_mult)s,
+                 %(minimum_hours)s,%(time_bands_json)s,
+                 %(applies_to)s,%(stacking)s,%(effective_from)s,%(effective_to)s,%(active)s)
+                """,
+                row,
+            )
+            conn.commit()
+            return int(cur.lastrowid)
         finally:
             cur.close()
             conn.close()
 
     @staticmethod
     def create_policy(data: dict) -> int:
-        """
-        Insert a ``calendar_policies`` row.
+        """Insert a ``calendar_policies`` row (legacy name; use ``save_calendar_policy``)."""
+        d = dict(data or {})
+        d.pop("id", None)
+        return TemplateService.save_calendar_policy(d)
 
-        Fills DB-safe defaults when the UI sends a minimal payload (e.g. name + scope only).
-        """
-        data = dict(data or {})
-        name = (data.get("name") or "").strip()
-        if not name:
-            raise Exception("name required")
-        data["name"] = name
-        data["type"] = TemplateService._normalize_calendar_policy_type(data.get("type"))
-        data["scope"] = TemplateService._normalize_calendar_policy_scope(data.get("scope"))
-        data["mode"] = TemplateService._normalize_calendar_policy_mode(data.get("mode"))
-        data["effective_from"] = TemplateService._coerce_calendar_policy_effective_from(
-            data.get("effective_from")
-        )
+    @staticmethod
+    def list_bank_holidays(limit: int = 500) -> List[dict]:
+        """Bank holiday rows for admin UI (date as YYYY-MM-DD string)."""
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT date, region, name, created_at
+                FROM bank_holidays
+                ORDER BY date DESC, region_norm ASC
+                LIMIT %s
+                """,
+                (max(1, min(int(limit), 2000)),),
+            )
+            rows = cur.fetchall() or []
+            for r in rows:
+                dv = r.get("date")
+                if hasattr(dv, "isoformat"):
+                    r["date"] = dv.isoformat()[:10]
+                ct = r.get("created_at")
+                if hasattr(ct, "isoformat"):
+                    r["created_at"] = ct.isoformat()
+            return rows
+        finally:
+            cur.close()
+            conn.close()
 
+    @staticmethod
+    def save_bank_holiday(data: dict) -> None:
+        """Insert or update a bank holiday row (composite PK date + region_norm)."""
+        d = dict(data or {})
+        raw = (d.get("date") or "").strip()
+        if not raw:
+            raise ValueError("date is required")
+        wd = datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
+        name = ((d.get("name") or "").strip() or "Bank holiday")[:255]
+        reg_raw = d.get("region")
+        if reg_raw is None or str(reg_raw).strip() == "":
+            region = None
+        else:
+            region = str(reg_raw).strip()[:100]
         conn = get_db_connection()
         cur = conn.cursor()
         try:
-            pol_cid = data.get("client_id")
-            if pol_cid is None:
-                pol_cid = data.get("client_name")
-            cur.execute("""
-                INSERT INTO calendar_policies
-                (name, type, scope, role_id, job_type_id, client_id, contractor_id,
-                 mode, multiplier, absolute_rate, window_start, window_end,
-                 ot_threshold_hours, ot_tier2_threshold_hours, ot_tier1_mult, ot_tier2_mult,
-                 applies_to, stacking, effective_from, effective_to, active)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """, (
-                data["name"], data["type"], data["scope"], data.get(
-                    "role_id"), data.get("job_type_id"),
-                pol_cid, data.get(
-                    "contractor_id"), data["mode"], data.get("multiplier"),
-                data.get("absolute_rate"), data.get(
-                    "window_start"), data.get("window_end"),
-                data.get("ot_threshold_hours"), data.get(
-                    "ot_tier2_threshold_hours"),
-                data.get("ot_tier1_mult"), data.get(
-                    "ot_tier2_mult"), data.get("applies_to", "WAGE"),
-                data.get("stacking", "OT_ON_TOP"), data["effective_from"], data.get(
-                    "effective_to"),
-                int(data.get("active", 1))
-            ))
+            cur.execute(
+                """
+                INSERT INTO bank_holidays (date, region, name)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE name = VALUES(name)
+                """,
+                (wd, region, name),
+            )
             conn.commit()
-            return cur.lastrowid
+        finally:
+            cur.close()
+            conn.close()
+
+    @staticmethod
+    def delete_bank_holiday(date_s: str, region: Optional[str] = None) -> bool:
+        """Remove one bank holiday row; ``region`` None or empty matches NULL region."""
+        raw = (date_s or "").strip()
+        if not raw:
+            raise ValueError("date is required")
+        wd = datetime.strptime(str(raw)[:10], "%Y-%m-%d").date()
+        reg_key = (region or "").strip()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                DELETE FROM bank_holidays
+                WHERE date=%s AND COALESCE(region, '')=%s
+                """,
+                (wd, reg_key),
+            )
+            n = cur.rowcount
+            conn.commit()
+            return bool(n)
         finally:
             cur.close()
             conn.close()
@@ -7672,10 +9900,10 @@ class TemplateService:
         conn = get_db_connection()
         cur = conn.cursor(dictionary=True)
         try:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT t.id, t.name, t.code, t.version, t.active,
                        t.allow_free_text_client_site,
-                       t.job_type_id, jt.name AS job_type_name,
+                       t.job_type_id, {_JT_DISP_NAME_SEL},
                        t.client_id, c.name AS client_label,
                        t.site_id, s.name AS site_label
                 FROM runsheet_templates t
@@ -7696,9 +9924,9 @@ class TemplateService:
         cur = conn.cursor(dictionary=True)
         try:
             cur.execute(
-                """
+                f"""
                 SELECT t.id, t.name, t.code, t.version, t.job_type_id,
-                       jt.name AS job_type_name,
+                       {_JT_DISP_NAME_SEL},
                        t.allow_free_text_client_site,
                        t.client_id, c.name AS client_label,
                        t.site_id, s.name AS site_label
@@ -7743,13 +9971,26 @@ class TemplateService:
         conn = get_db_connection()
         cur = conn.cursor()
         try:
+            base_code = _tb_slugify_key(str(data["name"]).strip(), prefix="tpl")
+            code = base_code
+            for attempt in range(500):
+                cur.execute(
+                    "SELECT id FROM runsheet_templates WHERE code=%s LIMIT 1", (code,))
+                if not cur.fetchone():
+                    break
+                tail = f"_{attempt + 2}"
+                max_base = max(0, 80 - len(tail))
+                code = (base_code[:max_base] + tail) if max_base else tail[-80:]
+            else:
+                code = _tb_slugify_key(f"tpl {data['name']}", prefix="tpl")
+
             cur.execute("""
                 INSERT INTO runsheet_templates
                 (name, code, job_type_id, client_id, site_id, active, version,
                  allow_free_text_client_site)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
-                data["name"], data.get("code"), jtid,
+                data["name"], code, jtid,
                 cid, sid,
                 int(data.get("active", 1)), int(data.get("version", 1)),
                 int(data.get("allow_free_text_client_site", 0) or 0),
@@ -7844,13 +10085,12 @@ class TemplateService:
     def add_template_field(tpl_id: int, field: dict) -> int:
         """Add a field to a runsheet template."""
         field = dict(field or {})
-        if not field.get("name"):
-            import re
-            base = (field.get("label") or "field").strip().lower()
-            slug = re.sub(r"[^a-z0-9_]+", "_", base).strip("_")[:80]
-            field["name"] = slug or f"field_{int(__import__('time').time())}"
-        if not field.get("label"):
-            field["label"] = field["name"].replace("_", " ").title()
+        lab = (field.get("label") or "").strip()
+        fallback = (field.get("name") or "").strip()
+        field["name"] = _tb_slugify_key(lab or fallback or "field", prefix="field")
+        if not lab:
+            field["label"] = (fallback.replace("_", " ").title() if fallback
+                              else field["name"].replace("_", " ").title())
         if not field.get("type"):
             field["type"] = "text"
         required = ["name", "label", "type"]
@@ -7890,6 +10130,14 @@ class TemplateService:
         conn = get_db_connection()
         cur = conn.cursor()
         try:
+            norm = dict(data or {})
+            if "label" in norm:
+                lab = str(norm.get("label") or "").strip()
+                if lab:
+                    norm["name"] = _tb_slugify_key(lab, prefix="field")
+            elif "name" in norm:
+                norm.pop("name", None)
+            data = norm
             fields, params = [], {"id": field_id, "template_id": tpl_id}
             for k in ("name", "label", "type", "required", "order_index",
                       "placeholder", "help_text", "options_json", "validation_json", "visible_if_json"):
@@ -8239,7 +10487,7 @@ class ExportService:
             cur.execute(
                 f"""
                 SELECT e.*,
-                    jt.name AS job_type_name
+                    {_JT_DISP_NAME_SEL}
                     {star_suffix}
                 FROM tb_timesheet_entries e
                 {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
@@ -8344,7 +10592,7 @@ class ExportService:
             cur.execute(
                 f"""
                 SELECT e.*,
-                    jt.name AS job_type_name
+                    {_JT_DISP_NAME_SEL}
                     {star_suffix}
                 FROM tb_timesheet_entries e
                 {join_sql}JOIN job_types jt ON jt.id = e.job_type_id
@@ -8436,7 +10684,7 @@ class ExportService:
             cur.execute(
                 f"""
                 SELECT e.*,
-                    jt.name AS job_type_name
+                    {_JT_DISP_NAME_SEL}
                     {star_suffix}
                 FROM tb_timesheet_entries e
                 {join_sql}JOIN job_types jt ON jt.id = e.job_type_id

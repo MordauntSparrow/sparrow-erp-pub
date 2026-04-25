@@ -1,0 +1,103 @@
+{% extends "work_module/base_public.html" %}
+{% block content %}
+<h1 class="h5 mb-2">{{ shift.client_name or '—' }}</h1>
+<div class="card card-module p-3 mb-3 bg-dark bg-opacity-25">
+  <h2 class="h6 text-muted mb-2">Client & site</h2>
+  <p class="mb-0 small">
+    {% if shift.site_name %}<strong>{{ shift.site_name }}</strong>{% endif %}
+    {% if shift.site_postcode %}{% if shift.site_name %} · {% endif %}{{ shift.site_postcode }}{% endif %}
+    {% if not shift.site_name and not shift.site_postcode %}<span class="text-muted">—</span>{% endif %}
+  </p>
+  <p class="mb-0 small text-secondary mt-1">Job: {{ shift.job_type_name or '—' }}</p>
+  <p class="mb-0 small text-secondary">Scheduled: {{ shift.scheduled_start.strftime('%H:%M') if shift.scheduled_start else '—' }} – {{ shift.scheduled_end.strftime('%H:%M') if shift.scheduled_end else '—' }}</p>
+  {% if visit_id %}<p class="mb-0 small text-info mt-2">Visit ref: <strong>#{{ visit_id }}</strong> (use for billing / queries)</p>{% endif %}
+</div>
+
+<div class="card card-module p-3 mb-4">
+  <h2 class="h6 mb-3">Record times & notes</h2>
+  <div class="d-flex flex-wrap gap-2 mb-2">
+    <button type="button" class="btn btn-success btn-sm" id="btnClockIn" title="Set arrival to now and save">Clock in now</button>
+    <button type="button" class="btn btn-warning btn-sm text-dark" id="btnClockOut" title="Set leaving to now and save">Clock out now</button>
+  </div>
+  <form id="recordForm">
+    <div class="row g-2 mb-2">
+      <div class="col-6">
+        <label class="form-label small">Arrival</label>
+        <input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" id="actual_start" name="actual_start"
+               value="{{ shift.actual_start.strftime('%H:%M') if shift.actual_start else '' }}">
+      </div>
+      <div class="col-6">
+        <label class="form-label small">Leaving</label>
+        <input type="time" class="form-control form-control-sm bg-dark text-light border-secondary" id="actual_end" name="actual_end"
+               value="{{ shift.actual_end.strftime('%H:%M') if shift.actual_end else '' }}">
+      </div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Notes</label>
+      <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="notes" name="notes" rows="2" placeholder="Optional notes">{{ shift.notes or '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+  </form>
+</div>
+
+<div class="card card-module p-3 mb-4">
+  <h2 class="h6 mb-3">Photos</h2>
+  <form id="photoForm" enctype="multipart/form-data">
+    <input type="file" class="form-control form-control-sm mb-2 bg-dark text-light border-secondary" name="photo" accept="image/*" capture="environment">
+    <input type="text" class="form-control form-control-sm mb-2 bg-dark text-light border-secondary" name="caption" placeholder="Caption (optional)">
+    <button type="submit" class="btn btn-outline-secondary btn-sm">Upload</button>
+  </form>
+  <div id="photoList" class="mt-3">
+    {% for p in photos %}
+    <div class="d-flex align-items-center gap-2 mb-2">
+      <img src="/static/{{ p.file_path }}" alt="" style="max-height: 60px; border-radius: 8px;">
+      <span class="small text-secondary">{{ p.caption or p.file_name or 'Photo' }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<a href="{{ url_for('public_work.index') }}" class="btn btn-outline-secondary btn-sm">Back to Work planner</a>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  const shiftId = {{ shift.id }};
+  function nowTime() {
+    const d = new Date();
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function saveTimes() {
+    const actual_start = document.getElementById('actual_start').value;
+    const actual_end = document.getElementById('actual_end').value;
+    const notes = document.getElementById('notes').value;
+    fetch('/work/api/stop/' + shiftId + '/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actual_start: actual_start || null, actual_end: actual_end || null, notes: notes || null })
+    }).then(r => r.json()).then(d => { if (d.ok) { /* saved */ } else alert(d.error || 'Error'); });
+  }
+  document.getElementById('btnClockIn').addEventListener('click', function() {
+    document.getElementById('actual_start').value = nowTime();
+    saveTimes();
+  });
+  document.getElementById('btnClockOut').addEventListener('click', function() {
+    document.getElementById('actual_end').value = nowTime();
+    saveTimes();
+  });
+  document.getElementById('recordForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    saveTimes();
+  });
+  document.getElementById('photoForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const fd = new FormData(this);
+    fetch('/work/api/stop/' + shiftId + '/photo', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) { document.getElementById('photoList').insertAdjacentHTML('beforeend',
+          '<div class="d-flex align-items-center gap-2 mb-2"><img src="' + (d.path || '') + '" alt="" style="max-height:60px;border-radius:8px;"></div>');
+          this.reset();
+        } else alert(d.error || 'Upload failed');
+      });
+  });
+</script>
+{% endblock %}

@@ -3,11 +3,15 @@
 {% block content %}
 <h1 class="h4 mb-3">Shift audit log</h1>
 <p class="text-muted small mb-3">Who created, updated, or cancelled shifts and when.</p>
-<form method="get" class="card card-body bg-light border mb-3">
+<form method="get" class="card card-body bg-light border mb-3" id="schedAuditFilt" style="max-width:36rem;">
   <div class="row g-2 align-items-end">
-    <div class="col-auto">
-      <label class="form-label small mb-0">Shift ID</label>
-      <input type="number" name="shift_id" class="form-control form-control-sm" value="{{ shift_id or '' }}" placeholder="Filter by shift">
+    <div class="col-12">
+      <label class="form-label small mb-0">Shift</label>
+      <input type="hidden" name="shift_id" id="schedAuditShiftHid" value="{{ shift_id or '' }}">
+      <input type="search" class="form-control form-control-sm mb-1" id="schedAuditShiftQ" autocomplete="off" placeholder="Search date, client, staff, or shift # (2+ chars)" data-shifts-search="{{ url_for('internal_scheduling.admin_shifts_search') }}">
+      <ul class="list-group list-group-flush small border rounded d-none mb-1" id="schedAuditShiftUl" style="max-height:10rem;overflow:auto;"></ul>
+      <div class="small text-muted" id="schedAuditShiftPicked">{% if shift_filter_label %}{{ shift_filter_label|e }}{% else %}All shifts{% endif %}</div>
+      <button type="button" class="btn btn-link btn-sm p-0 {% if not shift_id %}d-none{% endif %}" id="schedAuditShiftClear">Clear shift filter</button>
     </div>
     <div class="col-auto">
       <label class="form-label small mb-0">Limit</label>
@@ -55,4 +59,59 @@
     </tbody>
   </table>
 </div>
+<script>
+(function () {
+  var hid = document.getElementById("schedAuditShiftHid");
+  var qinp = document.getElementById("schedAuditShiftQ");
+  var ul = document.getElementById("schedAuditShiftUl");
+  var picked = document.getElementById("schedAuditShiftPicked");
+  var clr = document.getElementById("schedAuditShiftClear");
+  if (!hid || !qinp || !ul || !qinp.dataset.shiftsSearch) return;
+  var t;
+  function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+  function setPicked(text, showClear) {
+    if (picked) picked.textContent = text;
+    if (clr) clr.classList.toggle("d-none", !showClear);
+  }
+  qinp.addEventListener("input", function () {
+    clearTimeout(t);
+    var q = (qinp.value || "").trim();
+    if (q.length < 2) { hide(); return; }
+    t = setTimeout(function () {
+      fetch(qinp.dataset.shiftsSearch + "?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (rows) {
+          ul.innerHTML = "";
+          if (!rows || !rows.length) { hide(); return; }
+          rows.forEach(function (row) {
+            var li = document.createElement("li");
+            li.className = "list-group-item list-group-item-action py-1";
+            li.textContent = row.label;
+            li.addEventListener("click", function () {
+              hid.value = String(row.id);
+              setPicked(row.label, true);
+              qinp.value = "";
+              hide();
+            });
+            ul.appendChild(li);
+          });
+          ul.classList.remove("d-none");
+        })
+        .catch(function () { hide(); });
+    }, 250);
+  });
+  if (clr) {
+    clr.addEventListener("click", function (e) {
+      e.preventDefault();
+      hid.value = "";
+      setPicked("All shifts", false);
+      qinp.value = "";
+      hide();
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (!ul.contains(e.target) && e.target !== qinp) hide();
+  });
+})();
+</script>
 {% endblock %}

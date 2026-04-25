@@ -5,21 +5,191 @@
 <li class="breadcrumb-item"><a href="{{ url_for('crm_module.opportunities_list') }}" class="text-decoration-none">Opportunities</a></li>
 <li class="breadcrumb-item active" aria-current="page">Intake</li>
 {% endblock %}
+{% block extra_head %}
+<style>
+  .crm-intake-shell { min-height: calc(100vh - 120px); }
+  @media (min-width: 992px) {
+    .crm-intake-layout { display: flex; flex-direction: row; align-items: flex-start; gap: 1.5rem; }
+    .crm-intake-form-col { flex: 1 1 auto; min-width: 0; max-width: none; }
+    .crm-intake-sidebar {
+      flex: 0 0 min(100%, 28rem);
+      width: min(100%, 28rem);
+      position: sticky;
+      top: 0.75rem;
+      align-self: flex-start;
+      max-height: calc(100vh - 1.5rem);
+      overflow-y: auto;
+      z-index: 1010;
+      scrollbar-gutter: stable;
+    }
+    .crm-intake-sidebar::-webkit-scrollbar { width: 8px; }
+    .crm-intake-sidebar::-webkit-scrollbar-thumb {
+      background: rgba(79, 70, 229, 0.22);
+      border-radius: 99px;
+    }
+  }
+  .crm-intake-preview-card {
+    border-radius: var(--crm-radius, 14px);
+    border: 1px solid rgba(79, 70, 229, 0.12);
+    background: linear-gradient(180deg, #ffffff 0%, #fafbff 100%);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.07), 0 0 0 1px rgba(255,255,255,0.8) inset;
+    overflow: hidden;
+  }
+  .crm-intake-preview-card::before {
+    content: "";
+    display: block;
+    height: 3px;
+    background: linear-gradient(90deg, #4f46e5, #6366f1, #3b82f6);
+    opacity: 0.95;
+  }
+  .crm-intake-venue-panel {
+    border-radius: var(--crm-radius, 14px);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    background: linear-gradient(165deg, #fafbff 0%, #fff 45%, #f8fafc 100%);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .crm-intake-venue-panel .crm-intake-panel-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px dashed rgba(15, 23, 42, 0.08);
+  }
+  .crm-intake-venue-panel .crm-intake-panel-icon {
+    flex: 0 0 2.25rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.12), rgba(59, 130, 246, 0.1));
+    color: #4338ca;
+    font-size: 1.1rem;
+  }
+  .crm-intake-subfield {
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(15, 23, 42, 0.05);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .crm-intake-subfield:last-child { margin-bottom: 0; }
+  .crm-intake-subfield label.form-label { margin-bottom: 0.35rem; }
+  .crm-intake-select-premium.form-select,
+  .crm-intake-venue-panel .form-select {
+    border-radius: 10px;
+    border-color: rgba(15, 23, 42, 0.1);
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .crm-intake-select-premium.form-select:focus,
+  .crm-intake-venue-panel .form-select:focus {
+    border-color: rgba(79, 70, 229, 0.45);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+  }
+  .crm-intake-routing-chaser {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: #64748b;
+    padding: 0.75rem 0.85rem;
+    border-radius: 12px;
+    background: rgba(248, 250, 252, 0.95);
+    border: 1px dashed rgba(100, 116, 139, 0.25);
+  }
+  .crm-intake-routing-card {
+    background: linear-gradient(145deg, #f8fafc 0%, #fff 55%, #f1f5f9 100%);
+    border: 1px solid rgba(15, 23, 42, 0.07);
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+    animation: crmIntakeRoutingIn 0.35s ease-out both;
+  }
+  @keyframes crmIntakeRoutingIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .crm-intake-routing-card { animation: none; }
+  }
+  .crm-intake-routing-flow {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(15, 23, 42, 0.05);
+  }
+  .crm-intake-routing-flow .crm-intake-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6366f1;
+    flex-shrink: 0;
+  }
+  .crm-intake-routing-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+  @media (max-width: 380px) {
+    .crm-intake-routing-metrics { grid-template-columns: 1fr; }
+  }
+  .crm-intake-routing-metric {
+    text-align: center;
+    padding: 0.65rem 0.35rem;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.06);
+  }
+  .crm-intake-routing-metric .v {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+  .crm-intake-routing-metric .u {
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    color: #64748b;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .crm-intake-routing-metric .k {
+    font-size: 0.68rem;
+    color: #94a3b8;
+    margin-top: 0.2rem;
+    line-height: 1.3;
+  }
+  .crm-intake-save-row .btn {
+    border-radius: 10px;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .crm-account-dd { max-height: 14rem; overflow-y: auto; }
+  .crm-account-dd button { cursor: pointer; }
+</style>
+{% endblock %}
 {% block content %}
-<div class="container-fluid py-3" style="max-width: 920px;">
+{% set fv = form_values if form_values is defined else {} %}
+{% set _ih = event_intake_hidden if event_intake_hidden is defined else [] %}
+{% set _ix = intake_extra_prefill if intake_extra_prefill is defined else {} %}
+<div class="container-fluid py-3 crm-intake-shell px-2 px-lg-3">
   <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
       <p class="text-muted small text-uppercase fw-semibold mb-1">Pipeline</p>
       <h1 class="h4 mb-0"><i class="bi bi-telephone me-2 text-primary"></i>Call / desk intake</h1>
-      <p class="text-muted small mb-0 mt-1">Same fields as the public event guide — creates an account (if needed), contact, and opportunity. Use for early discussion;
-        {% if industry_visible('medical') %}
-        formal medical needs assessment and plan still precede binding quotes.
-        {% else %}
-        binding quotes follow agreed scope and your quote rules.
-        {% endif %}
+      <p class="text-muted small mb-0 mt-1">
+        Internal capture for <strong>quotes and resourcing</strong>: event inputs, guide tier/score, indicative headcount, wage-card hints, and venue location for mileage.
+        Creates or links a CRM account, contact, and opportunity — same risk engine as the public calculator, without organiser-facing wording.
       </p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
+      {% if can_edit %}
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.desk_intake_layout_settings') }}" title="Hide sections or add fields for desk intake forms"><i class="bi bi-sliders me-1"></i>Layout</a>
+      {% endif %}
+      <a class="btn btn-outline-primary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunity_intake_private_transfer') }}"><i class="bi bi-truck-front me-1"></i>Private transfer form</a>
       <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Board</a>
       <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_list') }}">List</a>
     </div>
@@ -28,104 +198,1201 @@
   {% if not can_edit %}
   <div class="alert alert-warning">You have read-only CRM access; intake is not available.</div>
   {% else %}
-  <div class="card border-0 shadow-sm">
-    <div class="card-body">
-      <div class="mb-4">
-        {% with theme='admin' %}
-        {% include 'partials/crm_medical_planning_process.html' %}
-        {% endwith %}
-      </div>
-      <form method="post">
-        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <div class="row g-3 mb-3 pb-3 border-bottom">
-          <div class="col-md-6">
-            <label class="form-label" for="account_id">Attach to account <span class="text-muted small">(optional — otherwise we create from organisation name)</span></label>
-            <select class="form-select" id="account_id" name="account_id">
-              <option value="">— New or match by organisation below —</option>
-              {% for a in accounts %}
-              <option value="{{ a.id }}">{{ a.name }}</option>
-              {% endfor %}
-            </select>
+  <div class="crm-intake-layout">
+    <div class="crm-intake-form-col">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          {% if 'desk_checklist' not in _ih %}
+          <div class="alert alert-light border small mb-4 py-2 mb-3">
+            <strong class="d-block mb-1">Quote desk checklist</strong>
+            <ul class="mb-0 ps-3 text-muted">
+              <li>Search or create the <strong>account</strong>; optional CRM history appears when you link one.</li>
+              <li>Capture <strong>event venue</strong> (postcode, what3words, or coordinates). Choose <strong>dispatch base</strong> when you have several departure points; with one base it applies automatically. Link a CRM account to reuse <strong>saved client venues</strong>.</li>
+              <li>Use the <strong>live panel</strong> (right on large screens) while you scroll — tier, counts, role mix, wage estimate.</li>
+              <li><strong>Distance</strong> in the live panel is straight-line plus a rough road factor — helpful on the phone, not a mileage claim or quote line.</li>
+              <li>Binding fees still follow your MNA / scope rules; this page is planning support only.</li>
+            </ul>
           </div>
-          <div class="col-md-6">
-            <label class="form-label" for="stage">Initial stage</label>
-            <select class="form-select" id="stage" name="stage">
-              {% for val, label in stages %}
-              <option value="{{ val }}" {% if val == 'prospecting' %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
+          {% endif %}
+          <form method="post" id="crmIntakeForm" autocomplete="off">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="account_id" id="account_id" value="{{ fv.get('account_id', '') }}">
 
-        <h2 class="h6 text-uppercase text-muted mb-3">Event &amp; contact</h2>
-        <div class="row g-3">
-          <div class="col-md-6">
-            <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
-            <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="contact_name">Caller / contact name <span class="text-danger">*</span></label>
-            <input class="form-control" id="contact_name" name="contact_name" required maxlength="255">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
-            <input class="form-control" type="email" id="email" name="email" required maxlength="255">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="phone">Phone</label>
-            <input class="form-control" id="phone" name="phone" maxlength="64">
-          </div>
-          <div class="col-12">
-            <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
-            <input class="form-control" id="event_name" name="event_name" required maxlength="255">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="expected_attendees">Expected peak attendance</label>
-            <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees" value="">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="duration_hours">Hours on site</label>
-            <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours" value="6">
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="venue_type">Venue</label>
-            <select class="form-select" id="venue_type" name="venue_type">
-              <option value="indoor" selected>Indoor</option>
-              <option value="outdoor">Outdoor</option>
-              <option value="both">Mixed indoor / outdoor</option>
-            </select>
-          </div>
-          <div class="col-md-6">
-            <label class="form-label" for="crowd_profile">Crowd profile</label>
-            <select class="form-select" id="crowd_profile" name="crowd_profile">
-              <option value="family">Family / daytime</option>
-              <option value="mixed" selected>Mixed general public</option>
-              <option value="young_adult">Young adult / evening-led</option>
-            </select>
-          </div>
-          {% include 'partials/crm_event_calculator_fields.html' %}
-          <div class="col-12">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="alcohol_served" name="alcohol_served" value="yes">
-              <label class="form-check-label" for="alcohol_served">Alcohol served on site</label>
+            <div class="row g-3 mb-3 pb-3 border-bottom">
+              <div class="col-md-6 position-relative">
+                <label class="form-label" for="account_search">CRM account <span class="text-muted small fw-normal">(search — or leave blank to create from organisation)</span></label>
+                <input type="text" class="form-control" id="account_search" placeholder="Type at least 2 letters…"
+                       aria-autocomplete="list" aria-controls="account_search_list" aria-expanded="false"
+                       value="">
+                <div id="account_search_list" class="list-group position-absolute w-100 shadow-sm crm-account-dd d-none mt-1" role="listbox" style="z-index: 1050;"></div>
+                <p class="small text-muted mb-0 mt-1" id="account_linked_hint"></p>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="stage">Initial stage</label>
+                <select class="form-select" id="stage" name="stage">
+                  {% for val, label in stages %}
+                  <option value="{{ val }}" {% if (fv.get('stage') or 'prospecting') == val %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
             </div>
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="late_finish" name="late_finish" value="yes">
-              <label class="form-check-label" for="late_finish">Programme runs past 23:00</label>
+
+            {% if 'account_history' not in _ih %}
+            <div id="account_history_panel" class="border rounded-3 p-3 mb-4 bg-light d-none">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                <span class="small fw-semibold text-uppercase text-muted">Recent opportunities on this account</span>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn_append_history">Append summary to notes</button>
+              </div>
+              <ul class="list-unstyled small mb-0" id="account_history_list"></ul>
             </div>
-          </div>
-          <div class="col-12">
-            <label class="form-label" for="message">Notes</label>
-            <textarea class="form-control" id="message" name="message" rows="3" maxlength="4000"></textarea>
-          </div>
+            {% endif %}
+
+            <h2 class="h6 text-uppercase text-muted mb-3">Event &amp; contact</h2>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label" for="organisation_name">Organisation <span class="text-danger">*</span></label>
+                <input class="form-control" id="organisation_name" name="organisation_name" required maxlength="255"
+                       value="{{ fv.get('organisation_name', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="contact_name">Caller / contact name <span class="text-danger">*</span></label>
+                <input class="form-control" id="contact_name" name="contact_name" required maxlength="255"
+                       value="{{ fv.get('contact_name', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="email">Email <span class="text-danger">*</span></label>
+                <input class="form-control" type="email" id="email" name="email" required maxlength="255"
+                       value="{{ fv.get('email', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="phone">Phone</label>
+                <input class="form-control" id="phone" name="phone" maxlength="64" value="{{ fv.get('phone', '') }}">
+              </div>
+              <div class="col-12">
+                <label class="form-label" for="event_name">Event name <span class="text-danger">*</span></label>
+                <input class="form-control" id="event_name" name="event_name" required maxlength="255"
+                       value="{{ fv.get('event_name', '') }}">
+              </div>
+
+              {% if 'venue_location' not in _ih %}
+              <div class="col-12 mt-2">
+                <div class="crm-intake-venue-panel p-3 p-md-4 mb-2">
+                  <div class="crm-intake-panel-head">
+                    <div class="crm-intake-panel-icon" aria-hidden="true"><i class="bi bi-geo-alt-fill"></i></div>
+                    <div>
+                      <h3 class="h6 text-uppercase text-muted mb-1 mb-md-0">Event site <span class="text-muted small fw-normal text-uppercase">— not departure</span></h3>
+                      <p class="small text-muted mb-0">Where cover is delivered (field, arena, postcode). Feeds the <strong>distance strip</strong> in the live panel once the site is pinned — not part of the risk score. w3w uses Ventus (<code>W3W_API_KEY</code>). Wheels-up points: <a href="{{ url_for('crm_module.dispatch_bases_settings') }}" class="text-decoration-none">Dispatch bases</a>.</p>
+                    </div>
+                  </div>
+              <input type="hidden" name="saved_venue_id" id="saved_venue_id_field" value="{{ fv.get('saved_venue_id') or '' }}">
+              <div class="w-100 d-none" id="dispatch_base_block">
+                <div class="crm-intake-subfield">
+                  <label class="form-label fw-semibold mb-1" for="dispatch_base_select"><i class="bi bi-truck text-primary me-1"></i>Wheels leave from</label>
+                  <p class="small text-muted mb-2 mb-md-2" id="dispatch_base_single_hint"></p>
+                  <select class="form-select crm-intake-select-premium d-none" id="dispatch_base_select" aria-label="Dispatch base"></select>
+                  <input type="hidden" name="dispatch_base_id" id="dispatch_base_id_field" value="{% if fv.get('dispatch_base_id') is not none %}{{ fv.get('dispatch_base_id') }}{% endif %}">
+                </div>
+              </div>
+              <div class="w-100 d-none" id="saved_venue_block">
+                <div class="crm-intake-subfield">
+                  <label class="form-label fw-semibold mb-1" for="saved_venue_select"><i class="bi bi-bookmarks text-primary me-1"></i>Saved for this client</label>
+                  <select class="form-select crm-intake-select-premium mb-1" id="saved_venue_select" aria-label="Pick a saved venue"></select>
+                  <p class="small text-muted mb-0">One tap fills the pin below — edit anytime.</p>
+                </div>
+              </div>
+              <div class="w-100 d-none mb-0 crm-intake-save-row" id="save_venue_to_account_row">
+                <div class="crm-intake-subfield d-flex flex-wrap align-items-end gap-2 gap-md-3">
+                  <div class="flex-grow-1" style="min-width: 12rem;">
+                    <label class="form-label small fw-semibold mb-1" for="save_venue_label">Remember this pin on the account</label>
+                    <input type="text" class="form-control form-control-sm rounded-3" id="save_venue_label" maxlength="255" placeholder="e.g. South car park · Main arena">
+                  </div>
+                  <button type="button" class="btn btn-sm btn-primary" id="btn_save_venue_to_account"><i class="bi bi-bookmark-plus me-1"></i>Save</button>
+                </div>
+                <div class="small mt-2 text-muted" id="save_venue_status" aria-live="polite"></div>
+              </div>
+              <div class="row g-3 mt-1">
+              <div class="col-12">
+                <label class="form-label" for="venue_address">Address line</label>
+                <input class="form-control" id="venue_address" name="venue_address" maxlength="512" placeholder="Venue name or street"
+                       value="{{ fv.get('venue_address') or '' }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="venue_postcode">Postcode</label>
+                <input class="form-control" id="venue_postcode" name="venue_postcode" maxlength="32" placeholder="e.g. SW1A 1AA"
+                       value="{{ fv.get('venue_postcode') or '' }}">
+              </div>
+              <div class="col-md-5">
+                <label class="form-label" for="venue_what3words">what3words</label>
+                <div class="input-group">
+                  <input class="form-control" id="venue_what3words" name="venue_what3words" maxlength="128" placeholder="e.g. filled.count.soap"
+                         value="{{ fv.get('venue_what3words') or '' }}">
+                  <button type="button" class="btn btn-primary px-3" id="venue_w3w_lookup"><i class="bi bi-pin-map me-1"></i>Pin</button>
+                </div>
+                <div class="small text-muted mt-1" id="venue_w3w_status"></div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Coordinates</label>
+                <div class="row g-1">
+                  <div class="col-6">
+                    <input class="form-control form-control-sm" id="venue_lat" name="venue_lat" inputmode="decimal" placeholder="Lat"
+                           value="{% if fv.get('venue_lat') is not none %}{{ fv.get('venue_lat') }}{% endif %}">
+                  </div>
+                  <div class="col-6">
+                    <input class="form-control form-control-sm" id="venue_lng" name="venue_lng" inputmode="decimal" placeholder="Lng"
+                           value="{% if fv.get('venue_lng') is not none %}{{ fv.get('venue_lng') }}{% endif %}">
+                  </div>
+                </div>
+              </div>
+              </div>
+                </div>
+              </div>
+              {% endif %}
+
+              {% if 'audience_scale' not in _ih %}
+              <div class="col-md-6">
+                <label class="form-label" for="expected_attendees">Expected peak attendance</label>
+                <input class="form-control" type="number" min="0" step="1" id="expected_attendees" name="expected_attendees"
+                       value="{{ fv.get('expected_attendees', '') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="duration_hours">Hours on site (cover window)</label>
+                <input class="form-control" type="number" min="1" max="72" step="0.5" id="duration_hours" name="duration_hours"
+                       value="{{ fv.get('duration_hours', '6') }}">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="venue_type">Venue</label>
+                <select class="form-select" id="venue_type" name="venue_type">
+                  {% set vt = fv.get('venue_type', 'indoor') %}
+                  <option value="indoor" {% if vt == 'indoor' %}selected{% endif %}>Indoor</option>
+                  <option value="outdoor" {% if vt == 'outdoor' %}selected{% endif %}>Outdoor</option>
+                  <option value="both" {% if vt == 'both' %}selected{% endif %}>Mixed indoor / outdoor</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="crowd_profile">Crowd profile</label>
+                <select class="form-select" id="crowd_profile" name="crowd_profile">
+                  {% set cp = fv.get('crowd_profile', 'mixed') %}
+                  <option value="family" {% if cp == 'family' %}selected{% endif %}>Family / daytime</option>
+                  <option value="mixed" {% if cp == 'mixed' %}selected{% endif %}>Mixed general public</option>
+                  <option value="young_adult" {% if cp == 'young_adult' %}selected{% endif %}>Young adult / evening-led</option>
+                </select>
+              </div>
+              {% endif %}
+              {% if 'risk_calculator' not in _ih %}
+              {% include 'partials/crm_event_calculator_fields.html' %}
+              {% endif %}
+              {% if 'internal_notes' not in _ih %}
+              <div class="col-12">
+                <label class="form-label" for="message">Internal notes</label>
+                <textarea class="form-control" id="message" name="message" rows="4" maxlength="4000" placeholder="Commercial terms, access, parking, SAG context…">{{ fv.get('message', '') }}</textarea>
+              </div>
+              {% endif %}
+              {% if event_intake_extra_fields %}
+              <div class="col-12 mt-2">
+                <h3 class="h6 text-uppercase text-muted mb-3">Additional capture</h3>
+                <p class="small text-muted mb-3">Configured under <strong>CRM → Quotes &amp; rules → Desk intake layout</strong>. Values are saved with the new opportunity and copied into its notes.</p>
+                <div class="row g-3">
+                  {% for ef in event_intake_extra_fields %}
+                  <div class="col-12{% if ef.type == 'text' %} col-md-6{% endif %}">
+                    <label class="form-label" for="intake_extra_{{ ef.key }}">{{ ef.label }}{% if ef.required %} <span class="text-danger">*</span>{% endif %}</label>
+                    {% if ef.type == 'textarea' %}
+                    <textarea class="form-control" id="intake_extra_{{ ef.key }}" name="intake_extra_{{ ef.key }}" rows="3" maxlength="8000" {% if ef.required %}required{% endif %}>{{ _ix.get(ef.key, '') }}</textarea>
+                    {% else %}
+                    <input class="form-control" type="text" id="intake_extra_{{ ef.key }}" name="intake_extra_{{ ef.key }}" maxlength="2000" value="{{ _ix.get(ef.key, '') }}" {% if ef.required %}required{% endif %}>
+                    {% endif %}
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
+            </div>
+            <div class="d-flex gap-2 mt-4">
+              <button type="submit" class="btn btn-primary rounded-pill">Create opportunity</button>
+              <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Cancel</a>
+            </div>
+          </form>
         </div>
-        <div class="d-flex gap-2 mt-4">
-          <button type="submit" class="btn btn-primary rounded-pill">Create opportunity</button>
-          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Cancel</a>
-        </div>
-      </form>
+      </div>
     </div>
+
+    <aside class="crm-intake-sidebar">
+      <div class="card border-0 crm-intake-preview-card h-100">
+        <div class="card-body pt-3 pb-4 px-3 px-md-4">
+          <h2 class="h6 text-uppercase text-muted fw-bold mb-2 d-flex align-items-center gap-2">
+            <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-primary bg-opacity-10 text-primary" style="width:2rem;height:2rem;"><i class="bi bi-speedometer2"></i></span>
+            Live desk panel
+          </h2>
+          <p class="small text-muted mb-3 mb-md-4">Tier, resourcing, wage bands, and <strong class="text-body">distance</strong> refresh as you type (server round-trip once attendance is set). <a href="{{ url_for('crm_module.guide_wage_job_map') }}" class="text-decoration-none">Wage mapping</a>.</p>
+          <div id="crmIntakePreviewIdle" class="small text-muted rounded-3 px-3 py-3 bg-white bg-opacity-60 border" style="border-color: rgba(15,23,42,0.06) !important;">Enter <strong class="text-body">expected attendance</strong> to unlock tier, headcount, wage hint, and the <strong class="text-body">distance strip</strong> once the event site is pinned.</div>
+          <div id="crmIntakePreviewBody" class="d-none">
+            <p class="mb-1"><span class="text-muted small">Planning score</span> <strong class="fs-5 text-primary" id="crmPrevScore">—</strong></p>
+            <p class="mb-1 small"><span class="text-muted">Tier / band</span> <strong id="crmPrevBand">—</strong></p>
+            <p class="mb-2 small" id="crmPrevTierLine">—</p>
+            <p class="small text-muted mb-2" id="crmPrevTierSum">—</p>
+            <div class="border-top pt-2 mt-2">
+              <p class="small fw-semibold mb-1">Tier — resource hints</p>
+              <ul class="small ps-3 mb-0 text-muted" id="crmPrevTierBullets"></ul>
+            </div>
+            <div class="border-top pt-2 mt-2">
+              <p class="small fw-semibold mb-1">Indicative headcount</p>
+              <p class="small mb-0 text-muted" id="crmPrevHeads">—</p>
+            </div>
+            <div class="border-top pt-2 mt-2">
+              <p class="small fw-semibold mb-1">Role mix (internal breakdown)</p>
+              <ul class="list-unstyled small mb-0" id="crmPrevMatrix"></ul>
+            </div>
+            <div class="border-top pt-2 mt-2">
+              <p class="small fw-semibold mb-1">Rough wage cost</p>
+              <div id="crmPrevCostNote" class="small text-warning mb-1 d-none"></div>
+              <ul class="list-unstyled small mb-1" id="crmPrevCostLines"></ul>
+              <p class="mb-0 fw-bold text-primary" id="crmPrevCostTotal"></p>
+              <p class="small text-muted mt-1 mb-0">{% if tb_wage_cards_url %}<a href="{{ tb_wage_cards_url }}">Wage cards</a> · {% endif %}Internal estimate only.</p>
+            </div>
+            <div id="crmPrevRoutingChaser" class="mt-3 d-none" role="status" aria-live="polite"></div>
+            <div id="crmPrevRouting" class="mt-2 d-none"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
   </div>
   {% endif %}
 </div>
+{% endblock %}
+{% block extra_scripts %}
+{% if can_edit %}
+<script>
+(function () {
+  var _intakeForm = document.getElementById('crmIntakeForm');
+  function intakeCsrfValue() {
+    var el = _intakeForm && _intakeForm.querySelector('input[name="_csrf_token"]');
+    if (el && el.value) return el.value;
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m && m.getAttribute('content') ? String(m.getAttribute('content')).trim() : '';
+  }
+  var previewUrl = {{ intake_preview_url|tojson }};
+  var accountsSearchUrl = {{ intake_accounts_search_url|tojson }};
+  var resolveW3wUrl = {{ intake_resolve_w3w_url|tojson }};
+  var accountSummaryUrl = {{ intake_account_summary_url|tojson }};
+  var dispatchBasesUrl = {{ intake_dispatch_bases_url|tojson }};
+  var savedVenuesUrl = {{ intake_saved_venues_url|tojson }};
+  var saveVenueUrl = {{ intake_save_venue_url|tojson }};
+  var oppEditSample = {{ url_for('crm_module.opportunity_edit', opp_id=999001)|tojson }};
+  function oppEditUrl(id) { return oppEditSample.replace('999001', String(id)); }
+  var TIER_ROWS = {{ tier_resource_rows|tojson }};
+  var TMB = {{ tier_medic_base|tojson }};
+  var TVB = {{ tier_vehicle_base|tojson }};
+  var TIER_ROW_BY_NUM = {};
+  (TIER_ROWS || []).forEach(function (row) { if (row && row.tier) TIER_ROW_BY_NUM[row.tier] = row; });
+  var tierTitles = {
+    1: 'Tier 1: smallest / simplest',
+    2: 'Tier 2: local licensing scale',
+    3: 'Tier 3: larger events, more presentations',
+    4: 'Tier 4: complex / high attendance',
+    5: 'Tier 5: mass gathering / highest risk'
+  };
+  function tierFromSignals(ps, n, dspan, ar, dr, al, hr, hdrv, disorder) {
+    var t;
+    if (n > 10000 || ps >= 72) t = 5;
+    else if (n > 5000 || ps >= 58) t = 4;
+    else if (n > 2000 || ps >= 44 || (dspan === 'multi_day' && (al === 'likely' || al === 'expected' || dr === 'likely' || dr === 'expected')) || hr === 'likely') t = 3;
+    else if (n > 500 || ps >= 28 || al === 'social' || al === 'likely' || al === 'expected' || ar === 'significant' || ar === 'high') t = 2;
+    else t = 1;
+    if (hdrv === 'over_30' && (hr === 'possible' || hr === 'likely') && n >= 800) t = Math.max(t, 3);
+    var dis = disorder || 'none';
+    if (dis === 'opposing_factions' && n >= 100) t = Math.max(t, 3);
+    else if (dis === 'high' && n >= 250) t = Math.max(t, 3);
+    else if (dis === 'medium' && n >= 800) t = Math.max(t, 2);
+    return Math.min(5, t);
+  }
+  function tbGet(map, tier) {
+    if (!map) return undefined;
+    var v = map[tier];
+    return v !== undefined && v !== null ? v : map[String(tier)];
+  }
+  function purpleScore() {
+    var n = parseInt(document.getElementById('expected_attendees').value, 10) || 0;
+    var hours = parseFloat(document.getElementById('duration_hours').value) || 6;
+    hours = Math.max(1, Math.min(72, hours));
+    var vt = document.getElementById('venue_type').value;
+    var outdoor = vt === 'outdoor' || vt === 'both';
+    var late = (document.getElementById('late_finish') || {}).checked;
+    var cp = document.getElementById('crowd_profile').value;
+    var ar = (document.getElementById('activity_risk') || {}).value || 'moderate';
+    var dr = (document.getElementById('drug_risk') || {}).value || 'none';
+    var dsel = (document.getElementById('duration_span') || {}).value || '';
+    var dspan = dsel;
+    if (!dspan) {
+      if (hours <= 5.5) dspan = 'few_hours';
+      else if (hours <= 24) dspan = 'single_day';
+      else dspan = 'multi_day';
+    }
+    var al = (document.getElementById('alcohol_level') || {}).value || 'none';
+    var hrSel = (document.getElementById('hospital_referrals') || {}).value || '';
+    var hr = hrSel;
+    if (!hr) {
+      if (n >= 5000) hr = 'likely';
+      else if (n >= 2000) hr = 'possible';
+      else hr = 'unlikely';
+    }
+    var hdrvEl = document.getElementById('hospital_drive_band');
+    var hdrv = (hdrvEl && hdrvEl.value) ? hdrvEl.value : 'unknown';
+    if (!hdrv) hdrv = 'unknown';
+    var posture = (document.getElementById('audience_posture') || {}).value || 'unknown';
+    var disorder = (document.getElementById('disorder_risk') || {}).value || 'none';
+    var casualty = (document.getElementById('casualty_history') || {}).value || 'unknown';
+    var dwell = (document.getElementById('audience_dwell') || {}).value || 'unknown';
+    var season = (document.getElementById('season') || {}).value || 'unknown';
+    var defcare = (document.getElementById('definitive_care') || {}).value || 'unknown';
+    var ps = 0;
+    if (n >= 10000) ps += 34;
+    else if (n >= 5000) ps += 28;
+    else if (n >= 2000) ps += 20;
+    else if (n >= 500) ps += 12;
+    else if (n > 0) ps += 4;
+    if (dspan === 'multi_day') ps += 22;
+    else if (dspan === 'few_hours') ps += 2;
+    else ps += 8;
+    if (hours > 24 && dspan !== 'multi_day') ps += 6;
+    if (ar === 'high') ps += 24;
+    else if (ar === 'significant') ps += 14;
+    else if (ar === 'moderate') ps += 6;
+    if (al === 'expected') ps += 18;
+    else if (al === 'likely') ps += 12;
+    else if (al === 'social') ps += 6;
+    if (dr === 'expected') ps += 18;
+    else if (dr === 'likely') ps += 12;
+    else if (dr === 'isolated') ps += 5;
+    if (outdoor) ps += 7;
+    if (late) ps += 9;
+    if (cp === 'young_adult') ps += 7;
+    if (hr === 'likely') ps += 16;
+    else if (hr === 'possible') ps += 8;
+    if (hdrv === 'over_30') {
+      ps += 10;
+      if (hr === 'possible' || hr === 'likely') ps += 8;
+    } else if (hdrv === '15_30') {
+      ps += 6;
+      if (hr === 'likely') ps += 4;
+    }
+    if (posture === 'standing') ps += 8;
+    else if (posture === 'mixed') ps += 4;
+    if (disorder === 'opposing_factions') ps += 22;
+    else if (disorder === 'high') ps += 16;
+    else if (disorder === 'medium') ps += 10;
+    else if (disorder === 'low') ps += 3;
+    if (casualty === 'first_event') ps += 8;
+    else if (casualty === 'high_rate') ps += 12;
+    else if (casualty === 'medium_rate') ps += 5;
+    if (dwell === 'over_12h') {
+      if (hours < 11) ps += 12;
+      else if (hours < 20) ps += 5;
+    } else if (dwell === 'over_4h') {
+      if (hours < 8) ps += 6;
+      else if (hours < 12) ps += 3;
+    }
+    if (season === 'winter' && outdoor) ps += 8;
+    else if (season === 'winter') ps += 3;
+    else if (season === 'summer' && outdoor) ps += 6;
+    else if (season === 'summer') ps += 2;
+    if (defcare === 'small_ae') ps += 8;
+    var hzList = [];
+    document.querySelectorAll('input[name="additional_hazards"]:checked').forEach(function (el) {
+      if (el.value) hzList.push(el.value);
+    });
+    var hzPurple = { carnival: 4, parachute_display: 6, helicopters: 6, street_theatre: 3, motor_sport: 5 };
+    var hzSum = 0;
+    hzList.forEach(function (hx) {
+      var w = hzPurple[hx] || 0;
+      if (hx === 'motor_sport' && (ar === 'high' || ar === 'significant')) w = Math.min(w, 2);
+      hzSum += w;
+    });
+    hzSum = Math.min(hzSum, 16);
+    ps += hzSum;
+    var fcList = [];
+    document.querySelectorAll('input[name="on_site_facilities"]:checked').forEach(function (el) {
+      if (el.value) fcList.push(el.value);
+    });
+    var fcPurple = { suturing: 5, plastering: 4, xray: 9, psych_gp: 6, minor_surgery: 9 };
+    var fcSum = 0;
+    fcList.forEach(function (fx) { fcSum += fcPurple[fx] || 0; });
+    fcSum = Math.min(fcSum, 22);
+    ps += fcSum;
+    ps = Math.max(0, Math.min(120, Math.round(ps)));
+    var tier = tierFromSignals(ps, n, dspan, ar, dr, al, hr, hdrv, disorder);
+    var s = 1;
+    if (n >= 5000) s += 1.2;
+    else if (n >= 1500) s += 0.7;
+    else if (n >= 500) s += 0.35;
+    if (hours >= 10) s += 0.5;
+    else if (hours >= 6) s += 0.25;
+    if (outdoor) s += 0.45;
+    if (al !== 'none') s += 0.55;
+    if (late) s += 0.4;
+    if (cp === 'young_adult') s += 0.35;
+    if (ar === 'high') s += 0.38;
+    else if (ar === 'significant') s += 0.24;
+    else if (ar === 'moderate') s += 0.12;
+    if (dr === 'expected') s += 0.38;
+    else if (dr === 'likely') s += 0.24;
+    else if (dr === 'isolated') s += 0.08;
+    if (dspan === 'multi_day') s += 0.34;
+    else if (dspan === 'few_hours') s -= 0.04;
+    if (hr === 'likely') s += 0.28;
+    else if (hr === 'possible') s += 0.12;
+    if (hdrv === 'over_30') s += 0.2;
+    else if (hdrv === '15_30') s += 0.1;
+    if (posture === 'standing') s += 0.12;
+    else if (posture === 'mixed') s += 0.06;
+    if (disorder === 'opposing_factions') s += 0.32;
+    else if (disorder === 'high') s += 0.22;
+    else if (disorder === 'medium') s += 0.12;
+    else if (disorder === 'low') s += 0.04;
+    if (casualty === 'first_event') s += 0.1;
+    else if (casualty === 'high_rate') s += 0.14;
+    else if (casualty === 'medium_rate') s += 0.06;
+    if (dwell === 'over_12h') {
+      if (hours < 11) s += 0.15;
+      else if (hours < 20) s += 0.06;
+    } else if (dwell === 'over_4h') {
+      if (hours < 8) s += 0.08;
+      else if (hours < 12) s += 0.04;
+    }
+    if (season === 'winter' && outdoor) s += 0.12;
+    else if (season === 'winter') s += 0.04;
+    else if (season === 'summer' && outdoor) s += 0.1;
+    else if (season === 'summer') s += 0.03;
+    if (defcare === 'small_ae') s += 0.1;
+    var hzInner = { carnival: 0.05, parachute_display: 0.07, helicopters: 0.07, street_theatre: 0.04, motor_sport: 0.06 };
+    var hzInnerSum = 0;
+    hzList.forEach(function (hx) {
+      var w = hzInner[hx] || 0;
+      if (hx === 'motor_sport' && (ar === 'high' || ar === 'significant')) w = Math.min(w, 0.03);
+      hzInnerSum += w;
+    });
+    s += Math.min(hzInnerSum, 0.22);
+    var fcInner = { suturing: 0.06, plastering: 0.05, xray: 0.11, psych_gp: 0.07, minor_surgery: 0.11 };
+    var fcInnerSum = 0;
+    fcList.forEach(function (fx) { fcInnerSum += fcInner[fx] || 0; });
+    s += Math.min(fcInnerSum, 0.28);
+    s = Math.max(1, Math.min(5, s));
+    var innerBand = Math.round(s);
+    var band = Math.min(5, Math.max(innerBand, tier));
+    var labels = {1:'Low',2:'Low / moderate',3:'Moderate',4:'Elevated',5:'High'};
+    var tierBase = tbGet(TMB, tier);
+    if (tierBase == null) tierBase = 4;
+    var crowdLift = n > 0 ? Math.ceil(n / 4000) : 0;
+    var suggested_medics = Math.max(tierBase, tierBase + crowdLift - 1, Math.ceil(band * 1.2));
+    suggested_medics = Math.min(suggested_medics, 56);
+    var tvb = tbGet(TVB, tier);
+    if (tvb == null) tvb = 1;
+    var suggested_vehicles = Math.max(tvb, Math.min(10, 1 + Math.ceil(n / 12000)));
+    return {
+      purple: ps,
+      band: band,
+      label: labels[band] || 'Moderate',
+      tier: tier,
+      n: n,
+      suggested_medics: suggested_medics,
+      suggested_vehicles: suggested_vehicles
+    };
+  }
+  function rowForTier(tier) {
+    var t = Math.max(1, Math.min(5, parseInt(tier, 10) || 1));
+    return TIER_ROW_BY_NUM[t] || null;
+  }
+  function tierBulletList(cr) {
+    if (!cr) return [];
+    return [
+      ['On-site / first response', cr.first_responder],
+      ['Ambulances', cr.ambulances + (cr.ambulance_crew && cr.ambulance_crew !== '—' ? ' (crew: ' + cr.ambulance_crew + ')' : '')],
+      ['Doctors', cr.doctor],
+      ['Nurses / paramedics', cr.nurse]
+    ];
+  }
+  function appendTierBullet(ul, label, value) {
+    var li = document.createElement('li');
+    li.className = 'mb-1';
+    var strong = document.createElement('strong');
+    strong.className = 'text-dark';
+    strong.textContent = label + ':';
+    li.appendChild(strong);
+    li.appendChild(document.createTextNode(' '));
+    var span = document.createElement('span');
+    span.textContent = String(value);
+    li.appendChild(span);
+    ul.appendChild(li);
+  }
+  var idleEl = document.getElementById('crmIntakePreviewIdle');
+  var bodyEl = document.getElementById('crmIntakePreviewBody');
+  var timer = null;
+  function renderServer(data) {
+    if (!data || !data.ok) return;
+    var pg = data.conversion_row || {};
+    document.getElementById('crmPrevScore').textContent = String(data.purple_score != null ? data.purple_score : '—');
+    document.getElementById('crmPrevBand').textContent =
+      (data.tier != null ? 'Tier ' + data.tier + ' · ' : '') + (data.band_label || '—');
+    document.getElementById('crmPrevTierLine').textContent = data.tier_title || ('Tier ' + data.tier);
+    document.getElementById('crmPrevTierSum').textContent = data.tier_summary || '';
+    var ul = document.getElementById('crmPrevTierBullets');
+    ul.innerHTML = '';
+    tierBulletList(pg).forEach(function (pair) {
+      if (!pair[1]) return;
+      appendTierBullet(ul, pair[0], pair[1]);
+    });
+    document.getElementById('crmPrevHeads').textContent =
+      '~' + (data.suggested_medics != null ? data.suggested_medics : '—') + ' on-foot clinical posts · ' +
+      (data.suggested_vehicles != null ? data.suggested_vehicles : '—') + ' vehicle(s) (guide)';
+    var mxEl = document.getElementById('crmPrevMatrix');
+    mxEl.innerHTML = '';
+    var mx = data.customer_resource_matrix;
+    if (mx && mx.rows && mx.rows.length) {
+      mx.rows.forEach(function (row) {
+        var li = document.createElement('li');
+        li.className = 'd-flex justify-content-between gap-2 border-bottom py-1';
+        var left = document.createElement('span');
+        left.className = 'text-muted';
+        left.textContent = row.category || '';
+        var right = document.createElement('span');
+        right.className = 'fw-semibold text-nowrap';
+        right.textContent = String(row.count != null ? row.count : '—');
+        li.appendChild(left);
+        li.appendChild(right);
+        mxEl.appendChild(li);
+      });
+    } else {
+      var empty = document.createElement('li');
+      empty.className = 'text-muted small';
+      empty.textContent = '—';
+      mxEl.appendChild(empty);
+    }
+    var cost = data.cost || {};
+    var noteEl = document.getElementById('crmPrevCostNote');
+    var linesEl = document.getElementById('crmPrevCostLines');
+    var totEl = document.getElementById('crmPrevCostTotal');
+    linesEl.innerHTML = '';
+    if (cost.tb_note) {
+      noteEl.textContent = cost.tb_note;
+      noteEl.classList.remove('d-none');
+    } else {
+      noteEl.classList.add('d-none');
+    }
+    (cost.lines || []).forEach(function (ln) {
+      var row = document.createElement('li');
+      row.className = 'd-flex justify-content-between gap-2 border-bottom py-1';
+      var left = document.createElement('span');
+      var l1 = document.createElement('span');
+      l1.className = 'fw-semibold';
+      l1.textContent = ln.label || '';
+      left.appendChild(l1);
+      left.appendChild(document.createElement('br'));
+      var l2 = document.createElement('span');
+      l2.className = 'text-muted small';
+      l2.textContent = ln.detail || '';
+      left.appendChild(l2);
+      var right = document.createElement('span');
+      right.className = 'text-nowrap fw-semibold';
+      right.textContent = '£' + (ln.amount_gbp != null ? Number(ln.amount_gbp).toFixed(2) : '—');
+      row.appendChild(left);
+      row.appendChild(right);
+      linesEl.appendChild(row);
+    });
+    if (cost.total_gbp != null) {
+      totEl.textContent = 'Estimated wage subtotal: £' + Number(cost.total_gbp).toFixed(2);
+      totEl.classList.remove('d-none');
+    } else {
+      totEl.textContent = '';
+      totEl.classList.add('d-none');
+    }
+    var rhEl = document.getElementById('crmPrevRouting');
+    var chEl = document.getElementById('crmPrevRoutingChaser');
+    function venueCoordsPresent() {
+      var la = (document.getElementById('venue_lat') || {}).value;
+      var ln = (document.getElementById('venue_lng') || {}).value;
+      return String(la || '').trim() !== '' && String(ln || '').trim() !== '';
+    }
+    function fillRoutingChaser(hasHint) {
+      if (!chEl) return;
+      chEl.innerHTML = '';
+      if (hasHint) {
+        chEl.className = 'mt-3 d-none';
+        return;
+      }
+      chEl.className = 'mt-3 crm-intake-routing-chaser';
+      var p = document.createElement('p');
+      p.className = 'mb-0';
+      if (!venueCoordsPresent()) {
+        p.appendChild(document.createTextNode('Pin the '));
+        var s1 = document.createElement('strong');
+        s1.className = 'text-body';
+        s1.textContent = 'event site';
+        p.appendChild(s1);
+        p.appendChild(document.createTextNode(' — use '));
+        var s2 = document.createElement('strong');
+        s2.className = 'text-body';
+        s2.textContent = 'Pin';
+        p.appendChild(s2);
+        p.appendChild(document.createTextNode(' on what3words or enter lat / long — then you’ll see distance & rough drive time from your base.'));
+      } else {
+        p.appendChild(document.createTextNode('Site is pinned. Add '));
+        var a = document.createElement('a');
+        a.href = {{ url_for('crm_module.dispatch_bases_settings')|tojson }};
+        a.className = 'fw-semibold text-decoration-none';
+        a.textContent = 'dispatch bases';
+        p.appendChild(a);
+        p.appendChild(document.createTextNode(' or an account '));
+        var s3 = document.createElement('strong');
+        s3.className = 'text-body';
+        s3.textContent = 'operating base';
+        p.appendChild(s3);
+        p.appendChild(document.createTextNode(' with coordinates to unlock the strip.'));
+      }
+      chEl.appendChild(p);
+    }
+    if (rhEl) {
+      rhEl.innerHTML = '';
+      rhEl.className = 'mt-2 d-none';
+      if (data.routing_hint) {
+        rhEl.classList.remove('d-none');
+        fillRoutingChaser(true);
+        var h = data.routing_hint;
+        var card = document.createElement('div');
+        card.className = 'crm-intake-routing-card rounded-3 p-3';
+        card.setAttribute('role', 'region');
+        card.setAttribute('aria-label', 'Indicative distance from base to event site');
+
+        var head = document.createElement('div');
+        head.className = 'd-flex align-items-center justify-content-between flex-wrap gap-2 mb-3';
+        var leftHead = document.createElement('div');
+        leftHead.className = 'd-flex align-items-center gap-2';
+        var ic = document.createElement('i');
+        ic.className = 'bi bi-signpost-split fs-5 text-primary';
+        ic.setAttribute('aria-hidden', 'true');
+        leftHead.appendChild(ic);
+        var ttl = document.createElement('span');
+        ttl.className = 'fw-semibold text-body';
+        ttl.textContent = 'Base → event site';
+        leftHead.appendChild(ttl);
+        head.appendChild(leftHead);
+        var badge = document.createElement('span');
+        badge.className = 'badge rounded-pill fw-semibold ' + (h.origin === 'dispatch' ? 'text-primary' : 'text-secondary');
+        badge.style.background = h.origin === 'dispatch' ? 'rgba(79,70,229,0.12)' : 'rgba(100,116,139,0.15)';
+        badge.textContent = h.origin === 'dispatch' ? 'Dispatch' : 'Account base';
+        head.appendChild(badge);
+        card.appendChild(head);
+
+        var flow = document.createElement('div');
+        flow.className = 'crm-intake-routing-flow text-body mb-3';
+        var baseName = document.createElement('span');
+        baseName.className = 'fw-semibold';
+        baseName.textContent = h.base_label || 'Base';
+        flow.appendChild(baseName);
+        if (h.base_postcode) {
+          flow.appendChild(document.createTextNode(' '));
+          var pcSpan = document.createElement('span');
+          pcSpan.className = 'text-muted font-monospace small';
+          pcSpan.textContent = String(h.base_postcode);
+          flow.appendChild(pcSpan);
+        }
+        var dot = document.createElement('span');
+        dot.className = 'crm-intake-dot mx-1';
+        dot.setAttribute('aria-hidden', 'true');
+        flow.appendChild(dot);
+        var arr = document.createElement('i');
+        arr.className = 'bi bi-arrow-right text-muted';
+        arr.setAttribute('aria-hidden', 'true');
+        flow.appendChild(arr);
+        flow.appendChild(document.createTextNode(' '));
+        var dest = document.createElement('span');
+        dest.className = 'text-muted';
+        dest.textContent = 'Event coordinates';
+        flow.appendChild(dest);
+        card.appendChild(flow);
+
+        var grid = document.createElement('div');
+        grid.className = 'crm-intake-routing-metrics mb-2';
+        function metric(label, sub, val) {
+          var d = document.createElement('div');
+          d.className = 'crm-intake-routing-metric';
+          var u = document.createElement('div');
+          u.className = 'u';
+          u.textContent = label;
+          d.appendChild(u);
+          var v = document.createElement('div');
+          v.className = 'v';
+          v.textContent = val;
+          d.appendChild(v);
+          var k = document.createElement('div');
+          k.className = 'k';
+          k.textContent = sub;
+          d.appendChild(k);
+          return d;
+        }
+        var rf = h.road_factor != null ? Number(h.road_factor).toFixed(2) : '1.22';
+        grid.appendChild(metric('As the crow flies', String(h.straight_line_km) + ' km', 'Great-circle'));
+        grid.appendChild(metric('Indicative road', String(h.approx_road_km) + ' km', '~' + rf + '× straight-line'));
+        var spd = Math.round(h.assumed_speed_kmh || 0);
+        grid.appendChild(metric('Rough drive time', '~' + String(h.approx_drive_minutes) + ' min', '~' + spd + ' km/h average'));
+        card.appendChild(grid);
+
+        var det = document.createElement('details');
+        det.className = 'small text-muted';
+        var sm = document.createElement('summary');
+        sm.className = 'fw-semibold text-secondary mb-0 user-select-none';
+        sm.style.cursor = 'pointer';
+        sm.textContent = 'Why this is indicative';
+        det.appendChild(sm);
+        var disc = document.createElement('p');
+        disc.className = 'mb-0 mt-2 lh-sm';
+        disc.textContent = h.disclaimer || 'Straight-line with a road factor and average speed — not binding mileage; confirm with your own routing.';
+        det.appendChild(disc);
+        card.appendChild(det);
+
+        rhEl.appendChild(card);
+      } else {
+        fillRoutingChaser(false);
+      }
+    }
+  }
+  function refreshLocal() {
+    var raw = (document.getElementById('expected_attendees').value || '').trim();
+    var nInt = parseInt(raw, 10);
+    if (raw === '' || Number.isNaN(nInt)) {
+      idleEl.classList.remove('d-none');
+      bodyEl.classList.add('d-none');
+      return;
+    }
+    var r = purpleScore();
+    idleEl.classList.add('d-none');
+    bodyEl.classList.remove('d-none');
+    document.getElementById('crmPrevScore').textContent = String(r.purple);
+    document.getElementById('crmPrevBand').textContent = 'Tier ' + r.tier + ' · ' + r.label;
+    document.getElementById('crmPrevTierLine').textContent = tierTitles[r.tier] || ('Tier ' + r.tier);
+    document.getElementById('crmPrevTierSum').textContent = '';
+    var cr = rowForTier(r.tier);
+    var ul = document.getElementById('crmPrevTierBullets');
+    ul.innerHTML = '';
+    tierBulletList(cr).forEach(function (pair) {
+      if (!pair[1]) return;
+      appendTierBullet(ul, pair[0], pair[1]);
+    });
+    document.getElementById('crmPrevHeads').textContent =
+      '~' + r.suggested_medics + ' on-foot clinical posts · ~' + r.suggested_vehicles + ' ambulance(s) (local hint — server refines)';
+  }
+  function fetchPreview() {
+    var form = document.getElementById('crmIntakeForm');
+    if (!form || !previewUrl) return;
+    var fd = new FormData(form);
+    fetch(previewUrl, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then(function (res) { return res.json(); })
+      .then(renderServer)
+      .catch(function () {});
+  }
+  function schedule() {
+    refreshLocal();
+    var raw = (document.getElementById('expected_attendees').value || '').trim();
+    var nInt = parseInt(raw, 10);
+    if (raw === '' || Number.isNaN(nInt)) {
+      if (timer) clearTimeout(timer);
+      return;
+    }
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(fetchPreview, 450);
+  }
+  var ids = ['expected_attendees','duration_hours','venue_type','crowd_profile','late_finish','activity_risk','duration_span','alcohol_level','drug_risk','hospital_referrals','hospital_drive_band','audience_posture','disorder_risk','casualty_history','audience_dwell','season','definitive_care','venue_lat','venue_lng'];
+  ids.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', schedule);
+      if (el.type === 'checkbox') el.addEventListener('click', schedule);
+    }
+  });
+  document.querySelectorAll('input[name="additional_hazards"], input[name="on_site_facilities"]').forEach(function (el) {
+    el.addEventListener('change', schedule);
+  });
+
+  /* Account search + history */
+  var accInput = document.getElementById('account_search');
+  var accList = document.getElementById('account_search_list');
+  var accHidden = document.getElementById('account_id');
+  var accHint = document.getElementById('account_linked_hint');
+  var histPanel = document.getElementById('account_history_panel');
+  var histList = document.getElementById('account_history_list');
+  var histAppendBtn = document.getElementById('btn_append_history');
+  var lastHistoryText = '';
+  var accTimer = null;
+  function hideAccDd() {
+    accList.classList.add('d-none');
+    accList.innerHTML = '';
+    accInput.setAttribute('aria-expanded', 'false');
+  }
+  function selectAccount(id, name) {
+    accHidden.value = String(id);
+    accInput.value = name;
+    accHint.textContent = 'Linked to CRM account #' + id + ' — new enquiries still use the organisation name you enter unless you clear the link.';
+    hideAccDd();
+    loadAccountHistory(id);
+    var orgEl = document.getElementById('organisation_name');
+    if (orgEl && !orgEl.value.trim()) orgEl.value = name;
+    loadSavedVenuesForAccount(id);
+    var svr = document.getElementById('save_venue_to_account_row');
+    if (svr) svr.classList.remove('d-none');
+  }
+  function clearAccountLink() {
+    accHidden.value = '';
+    accHint.textContent = '';
+    if (histPanel) histPanel.classList.add('d-none');
+    if (histList) histList.innerHTML = '';
+    lastHistoryText = '';
+    var svb = document.getElementById('saved_venue_block');
+    var svs = document.getElementById('saved_venue_select');
+    var svf = document.getElementById('saved_venue_id_field');
+    var svr = document.getElementById('save_venue_to_account_row');
+    if (svb) svb.classList.add('d-none');
+    if (svs) { svs.innerHTML = ''; }
+    if (svf) svf.value = '';
+    if (svr) svr.classList.add('d-none');
+  }
+  function loadAccountHistory(id) {
+    if (!accountSummaryUrl || !id || !histPanel || !histList) return;
+    fetch(accountSummaryUrl + '?account_id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        histList.innerHTML = '';
+        lastHistoryText = '';
+        if (!data || !data.ok || !data.opportunities || !data.opportunities.length) {
+          histPanel.classList.add('d-none');
+          return;
+        }
+        histPanel.classList.remove('d-none');
+        var lines = [];
+        data.opportunities.forEach(function (op) {
+          var li = document.createElement('li');
+          li.className = 'mb-2 border-bottom pb-2';
+          var a = document.createElement('a');
+          a.href = oppEditUrl(op.id);
+          a.textContent = op.name || ('Opportunity #' + op.id);
+          a.className = 'fw-semibold';
+          li.appendChild(a);
+          if (op.stage) {
+            li.appendChild(document.createTextNode(' · '));
+            li.appendChild(document.createTextNode(op.stage));
+          }
+          if (op.updated_at) {
+            var sm = document.createElement('div');
+            sm.className = 'text-muted small';
+            sm.textContent = op.updated_at;
+            li.appendChild(sm);
+          }
+          if (op.snippet) {
+            var sn = document.createElement('div');
+            sn.className = 'small';
+            sn.textContent = op.snippet;
+            li.appendChild(sn);
+          }
+          histList.appendChild(li);
+          lines.push('- ' + (op.name || '#' + op.id) + (op.snippet ? ' — ' + op.snippet : ''));
+        });
+        lastHistoryText = 'Prior CRM opportunities (same account):\n' + lines.join('\n');
+      })
+      .catch(function () { if (histPanel) histPanel.classList.add('d-none'); });
+  }
+  if (accInput && accList && accountsSearchUrl) {
+    accInput.addEventListener('input', function () {
+      if (accTimer) clearTimeout(accTimer);
+      var q = (accInput.value || '').trim();
+      if (accHidden.value && q !== accInput.dataset.linkedName) clearAccountLink();
+      if (q.length < 2) {
+        hideAccDd();
+        if (!q && accHidden.value) clearAccountLink();
+        return;
+      }
+      accTimer = setTimeout(function () {
+        fetch(accountsSearchUrl + '?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            accList.innerHTML = '';
+            if (!data || !data.accounts || !data.accounts.length) {
+              var b = document.createElement('button');
+              b.type = 'button';
+              b.className = 'list-group-item list-group-item-action list-group-item-light';
+              b.textContent = 'No match — will create account from organisation name';
+              b.addEventListener('click', function () {
+                clearAccountLink();
+                accInput.value = q;
+                hideAccDd();
+              });
+              accList.appendChild(b);
+              accList.classList.remove('d-none');
+              return;
+            }
+            data.accounts.forEach(function (row) {
+              var btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'list-group-item list-group-item-action';
+              btn.textContent = row.name + ' (#' + row.id + ')';
+              btn.addEventListener('click', function () {
+                accInput.dataset.linkedName = row.name;
+                selectAccount(row.id, row.name);
+              });
+              accList.appendChild(btn);
+            });
+            accList.classList.remove('d-none');
+            accInput.setAttribute('aria-expanded', 'true');
+          })
+          .catch(function () { hideAccDd(); });
+      }, 280);
+    });
+    document.addEventListener('click', function (ev) {
+      if (!accList.contains(ev.target) && ev.target !== accInput) hideAccDd();
+    });
+  }
+  if (histAppendBtn) {
+    histAppendBtn.addEventListener('click', function () {
+      if (!lastHistoryText) return;
+      var ta = document.getElementById('message');
+      if (!ta) return;
+      var cur = (ta.value || '').trim();
+      ta.value = (cur ? cur + '\n\n' : '') + lastHistoryText;
+    });
+  }
+  (function initAccountFromForm() {
+    var id = (accHidden && accHidden.value || '').trim();
+    if (!id || !accInput) return;
+    var prefillName = {{ (prefill_account_name or '')|tojson }};
+    if (prefillName) {
+      accInput.value = prefillName;
+      accInput.dataset.linkedName = prefillName;
+    }
+    if (accHint) accHint.textContent = 'Linked to CRM account #' + id;
+    loadAccountHistory(id);
+    loadSavedVenuesForAccount(id);
+    var svr = document.getElementById('save_venue_to_account_row');
+    if (svr) svr.classList.remove('d-none');
+  })();
+
+  function loadSavedVenuesForAccount(accountId) {
+    var block = document.getElementById('saved_venue_block');
+    var sel = document.getElementById('saved_venue_select');
+    var hid = document.getElementById('saved_venue_id_field');
+    if (!block || !sel || !hid || !savedVenuesUrl || !accountId) return;
+    fetch(savedVenuesUrl + '?account_id=' + encodeURIComponent(String(accountId)), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        sel.innerHTML = '';
+        var o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = '— Not from a saved template —';
+        sel.appendChild(o0);
+        var venues = (data && data.venues) ? data.venues : [];
+        if (!data || !data.ok || !venues.length) {
+          block.classList.add('d-none');
+          hid.value = '';
+          return;
+        }
+        venues.forEach(function (v) {
+          var o = document.createElement('option');
+          o.value = String(v.id);
+          o.textContent = v.label || ('Venue #' + v.id);
+          o.dataset.address = v.venue_address || '';
+          o.dataset.postcode = v.venue_postcode || '';
+          o.dataset.w3w = v.venue_what3words || '';
+          o.dataset.lat = v.venue_lat != null ? String(v.venue_lat) : '';
+          o.dataset.lng = v.venue_lng != null ? String(v.venue_lng) : '';
+          sel.appendChild(o);
+        });
+        block.classList.remove('d-none');
+        var preset = (hid.value || '').trim();
+        if (preset) {
+          sel.value = preset;
+        } else {
+          sel.value = '';
+        }
+      })
+      .catch(function () { block.classList.add('d-none'); });
+  }
+
+  (function bindSavedVenueSelect() {
+    var sel = document.getElementById('saved_venue_select');
+    var hid = document.getElementById('saved_venue_id_field');
+    if (!sel || !hid) return;
+    sel.addEventListener('change', function () {
+      var v = sel.value || '';
+      hid.value = v;
+      var opt = sel.options[sel.selectedIndex];
+      if (!v || !opt) return;
+      var a = document.getElementById('venue_address');
+      var p = document.getElementById('venue_postcode');
+      var w = document.getElementById('venue_what3words');
+      var la = document.getElementById('venue_lat');
+      var ln = document.getElementById('venue_lng');
+      if (a) a.value = opt.dataset.address || '';
+      if (p) p.value = opt.dataset.postcode || '';
+      if (w) w.value = opt.dataset.w3w || '';
+      if (la) la.value = opt.dataset.lat || '';
+      if (ln) ln.value = opt.dataset.lng || '';
+      schedule();
+    });
+  })();
+
+  (function initDispatchBases() {
+    var block = document.getElementById('dispatch_base_block');
+    var hid = document.getElementById('dispatch_base_id_field');
+    var sel = document.getElementById('dispatch_base_select');
+    var hint = document.getElementById('dispatch_base_single_hint');
+    if (!block || !hid || !dispatchBasesUrl) return;
+    fetch(dispatchBasesUrl, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var bases = (data && data.bases) ? data.bases : [];
+        if (!data || !data.ok || !bases.length) {
+          block.classList.add('d-none');
+          hid.value = '';
+          return;
+        }
+        block.classList.remove('d-none');
+        var preset = (hid.value || '').trim();
+        if (bases.length === 1) {
+          hid.value = String(bases[0].id);
+          if (sel) sel.classList.add('d-none');
+          if (hint) {
+            hint.classList.remove('d-none');
+            var pc = bases[0].postcode ? ' · ' + bases[0].postcode : '';
+            hint.textContent = 'Single departure on file — ' + (bases[0].label || 'Dispatch') +
+              (bases[0].postcode ? ' · ' + bases[0].postcode : '') +
+              '. Used automatically for distance hints.';
+          }
+          schedule();
+          return;
+        }
+        if (hint) hint.classList.add('d-none');
+        if (!sel) return;
+        sel.innerHTML = '';
+        var o0 = document.createElement('option');
+        o0.value = '';
+        o0.textContent = 'Choose where vehicles leave from…';
+        sel.appendChild(o0);
+        bases.forEach(function (b) {
+          var o = document.createElement('option');
+          o.value = String(b.id);
+          o.textContent = b.label + (b.postcode ? ' · ' + b.postcode : '');
+          sel.appendChild(o);
+        });
+        sel.classList.remove('d-none');
+        if (preset) {
+          sel.value = preset;
+          hid.value = preset;
+        } else {
+          sel.value = '';
+          hid.value = '';
+        }
+        sel.onchange = function () {
+          hid.value = sel.value || '';
+          schedule();
+        };
+        schedule();
+      })
+      .catch(function () {
+        block.classList.add('d-none');
+        hid.value = '';
+      });
+  })();
+
+  (function bindSaveVenueButton() {
+    var btn = document.getElementById('btn_save_venue_to_account');
+    var labelEl = document.getElementById('save_venue_label');
+    var statusEl = document.getElementById('save_venue_status');
+    var accEl = document.getElementById('account_id');
+    if (!btn || !saveVenueUrl) return;
+    btn.addEventListener('click', function () {
+      var aid = (accEl && accEl.value || '').trim();
+      var label = (labelEl && labelEl.value || '').trim();
+      if (!aid) {
+        if (statusEl) statusEl.textContent = 'Link a CRM account first.';
+        return;
+      }
+      if (!label) {
+        if (statusEl) statusEl.textContent = 'Enter a label for this venue.';
+        return;
+      }
+      var fd = new FormData();
+      var _ct = intakeCsrfValue();
+      if (!_ct) {
+        if (statusEl) statusEl.textContent = 'Security token missing — refresh the page and try again.';
+        return;
+      }
+      fd.append('_csrf_token', _ct);
+      fd.append('account_id', aid);
+      fd.append('label', label);
+      ['venue_address','venue_postcode','venue_what3words','venue_lat','venue_lng'].forEach(function (name) {
+        var el = document.querySelector('[name="' + name + '"]');
+        fd.append(name, el && el.value ? el.value : '');
+      });
+      btn.disabled = true;
+      if (statusEl) statusEl.textContent = 'Saving…';
+      fetch(saveVenueUrl, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (pack) {
+          var data = pack.j;
+          if (!pack.ok || !data.ok) {
+            if (statusEl) statusEl.textContent = (data && data.error) ? data.error : 'Save failed';
+            return;
+          }
+          if (labelEl) labelEl.value = '';
+          if (statusEl) statusEl.textContent = 'Saved.';
+          loadSavedVenuesForAccount(aid);
+          var hid = document.getElementById('saved_venue_id_field');
+          var sel = document.getElementById('saved_venue_select');
+          if (hid && data.id != null) {
+            hid.value = String(data.id);
+            if (sel) sel.value = String(data.id);
+          }
+        })
+        .catch(function () { if (statusEl) statusEl.textContent = 'Request failed'; })
+        .finally(function () { btn.disabled = false; });
+    });
+  })();
+
+  /* what3words */
+  var w3wBtn = document.getElementById('venue_w3w_lookup');
+  var w3wStatus = document.getElementById('venue_w3w_status');
+  if (w3wBtn && resolveW3wUrl) {
+    w3wBtn.addEventListener('click', function () {
+      var w = (document.getElementById('venue_what3words') || {}).value || '';
+      if (!w.trim()) {
+        if (w3wStatus) w3wStatus.textContent = 'Enter three words, then Pin.';
+        return;
+      }
+      var fd = new FormData();
+      var _ct2 = intakeCsrfValue();
+      if (!_ct2) {
+        if (w3wStatus) w3wStatus.textContent = 'Security token missing — refresh the page.';
+        return;
+      }
+      fd.append('_csrf_token', _ct2);
+      fd.append('words', w.trim());
+      if (w3wStatus) w3wStatus.textContent = 'Pinning…';
+      w3wBtn.disabled = true;
+      fetch(resolveW3wUrl, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (pack) {
+          var data = pack.j;
+          if (!pack.ok || !data.ok) {
+            if (w3wStatus) w3wStatus.textContent = (data && data.error) ? data.error : 'Lookup failed';
+            return;
+          }
+          document.getElementById('venue_lat').value = String(data.lat);
+          document.getElementById('venue_lng').value = String(data.lng);
+          if (data.normalized) document.getElementById('venue_what3words').value = data.normalized;
+          if (w3wStatus) w3wStatus.textContent = 'Pinned — lat / long filled. Distance strip updates with attendance.';
+          schedule();
+        })
+        .catch(function () { if (w3wStatus) w3wStatus.textContent = 'Request failed'; })
+        .finally(function () { w3wBtn.disabled = false; });
+    });
+  }
+
+  schedule();
+})();
+</script>
+{% endif %}
 {% endblock %}

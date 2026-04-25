@@ -4,12 +4,23 @@
 <div class="container-fluid mt-3 mt-md-4 px-3 px-lg-4 rec-admin">
   {% include 'recruitment_module/admin/_recruitment_ui.html' %}
   {% include 'recruitment_module/admin/_recruitment_nav.html' %}
-  <div class="d-flex justify-content-between align-items-center mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <div>
       <h1 class="h4 mb-0">Job roles</h1>
-      <p class="small text-muted mb-0">Recruitment-facing titles, linked to time billing for wages when people are hired.</p>
+      <p class="small text-muted mb-0">
+        Each row is a recruitment <strong>job family</strong> (used on vacancies). Link the Time Billing <strong>roles</strong> table for wages on hire.
+        Starter rows from install are samples only — use <strong>Sync from Time Billing</strong> to pull your real staff roles.
+      </p>
     </div>
-    <a class="btn btn-primary btn-sm rounded-3" href="{{ url_for('internal_recruitment.admin_role_new') }}">New role</a>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      {% if rec_can_manage_setup %}
+      <form method="post" action="{{ url_for('internal_recruitment.admin_roles_sync_from_time_billing') }}" class="m-0">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-secondary btn-sm rounded-3">Sync from Time Billing</button>
+      </form>
+      {% endif %}
+      <a class="btn btn-primary btn-sm rounded-3" href="{{ url_for('internal_recruitment.admin_role_new') }}">New role</a>
+    </div>
   </div>
   <div class="table-responsive border rounded bg-white">
     <table class="table table-hover mb-0 small">

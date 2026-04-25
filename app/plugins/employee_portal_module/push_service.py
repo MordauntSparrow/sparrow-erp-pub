@@ -8,14 +8,15 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from app.objects import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-# Allowed deep-link prefix for notification click targets
+# Allowed deep-link prefixes for notification click targets (same origin; PWA may open in browser).
 _PORTAL_PREFIX = "/employee-portal/"
+_SCHEDULING_PREFIX = "/scheduling/"
 
 
 def _vapid_config() -> Tuple[Optional[str], Optional[str], str]:
@@ -40,15 +41,16 @@ def get_vapid_public_key() -> Optional[str]:
 
 
 def normalize_portal_push_url(relative_url: Optional[str]) -> str:
-    """Restrict open-on-click URL to paths under /employee-portal/."""
+    """Restrict open-on-click URL to employee portal or public scheduling paths."""
     u = (relative_url or "").strip()
     if not u.startswith("/"):
         u = "/" + u
-    if not u.startswith(_PORTAL_PREFIX):
-        return _PORTAL_PREFIX
-    if len(u) > 512:
-        return _PORTAL_PREFIX
-    return u
+    for prefix in (_PORTAL_PREFIX, _SCHEDULING_PREFIX):
+        if u.startswith(prefix):
+            if len(u) > 512:
+                return prefix
+            return u
+    return _PORTAL_PREFIX
 
 
 def contractor_push_enabled(contractor_id: int) -> bool:
@@ -285,4 +287,63 @@ def schedule_push_for_new_portal_todos(rows: Sequence[Tuple[int, int, Optional[s
             body="You have a new task on your portal.",
             relative_url=rel,
             tag=f"ep-todo-{int(todo_id)}",
+        )
+
+
+_SHIFT_PUSH_COPY: Dict[str, Tuple[str, str]] = {
+    "assigned": (
+        "New shift assignment",
+        "You have been assigned a shift. Open the app for details.",
+    ),
+    "updated": (
+        "Shift updated",
+        "One of your shifts was changed. Open the app for details.",
+    ),
+    "cancelled": (
+        "Shift cancelled",
+        "A shift on your roster was cancelled or removed. Open the app for details.",
+    ),
+    "removed": (
+        "Removed from shift",
+        "You are no longer assigned to a shift. Open the app for details.",
+    ),
+    "starting_soon": (
+        "Shift starting soon",
+        "A shift is starting soon. Open the app for details.",
+    ),
+}
+
+
+def schedule_push_for_shift_contractors(
+    contractor_ids: Sequence[int],
+    kind: str,
+    shift_id: Optional[int] = None,
+) -> None:
+    """
+    Web push to contractors who registered a portal device (``ep_push_subscriptions``).
+    Payloads stay generic (no client/site names in the notification body).
+    """
+    pair = _SHIFT_PUSH_COPY.get((kind or "").strip().lower())
+    if not pair:
+        return
+    title, body = pair
+    rel = normalize_portal_push_url(
+        "/scheduling/my-schedule" if shift_id else "/scheduling/"
+    )
+    tag = f"ep-shift-{int(shift_id)}" if shift_id else "ep-shift"
+    seen: Set[int] = set()
+    for raw in contractor_ids:
+        try:
+            cid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if cid <= 0 or cid in seen:
+            continue
+        seen.add(cid)
+        schedule_push_for_contractor(
+            cid,
+            title=title,
+            body=body,
+            relative_url=rel,
+            tag=tag,
         )

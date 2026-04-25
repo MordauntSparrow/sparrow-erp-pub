@@ -163,7 +163,8 @@
             {% for e in data.entries %}
               <tr data-id="{{ e.id }}"
                   data-server-rate="{{ e.wage_rate_used or 0 }}"
-                  data-server-pay="{{ e.pay or 0 }}">
+                  data-server-pay="{{ e.pay or 0 }}"
+                  data-entry-hours="{{ (e.actual_hours or 0)|float }}">
                 <td>
                   {{ e.work_date.strftime('%d/%m/%Y') if e.work_date.__class__.__name__ == 'date' else e.work_date }}
                 </td>
@@ -230,9 +231,6 @@
                          data-field="wage_rate_used"
                          value="{{ '%.2f'|format(e.wage_rate_used or 0) }}"
                          title="Hourly rate for this line (admin uplift)">
-                  {% if e.rate_overridden %}
-                    <span class="badge bg-warning text-dark mt-1" title="Rate/pay set by admin override">Override</span>
-                  {% endif %}
                 </td>
                 <td class="text-end">
                   <input class="form-control form-control-sm js-pay-override text-end"
@@ -258,10 +256,22 @@
                     <input class="form-control form-control-sm js-edit"
                            data-field="notes"
                            value="{{ e.notes or '' }}">
-                    {% if e.edited_by %}
-                      <small class="text-warning mt-1" title="{{ (e.edit_reason or '')|e }}">
-                        Adjusted
+                    {% if e.edit_reason %}
+                      <small class="mt-1 text-break" style="max-width:18rem;"
+                             title="{{ (e.edit_reason or '')|e }}">
+                        {% if e.rate_overridden %}
+                          <span class="fw-semibold text-warning">Pay uplift —</span>
+                        {% elif e.edited_by %}
+                          <span class="fw-semibold text-warning">Office —</span>
+                        {% else %}
+                          <span class="fw-semibold text-muted">Note —</span>
+                        {% endif %}
+                        <span class="{% if e.rate_overridden or e.edited_by %}text-warning{% else %}text-muted{% endif %}">{{ e.edit_reason|e }}</span>
                       </small>
+                    {% elif e.edited_by %}
+                      <small class="text-warning mt-1">Adjusted by office</small>
+                    {% endif %}
+                    {% if e.edited_by %}
                       {% if e.actual_start and e.scheduled_start %}
                         <small class="text-warning mt-0" title="Start vs scheduled">
                           Start: {% if e.actual_start < e.scheduled_start %}early{% elif e.actual_start > e.scheduled_start %}late{% else %}on time{% endif %}
@@ -272,10 +282,6 @@
                           End: {% if e.actual_end < e.scheduled_end %}early{% elif e.actual_end > e.scheduled_end %}late{% else %}on time{% endif %}
                         </small>
                       {% endif %}
-                    {% elif e.edit_reason %}
-                      <small class="text-muted mt-1" title="{{ (e.edit_reason or '')|e }}">
-                        Auto-prefilled
-                      </small>
                     {% endif %}
                   </div>
                 </td>
@@ -458,12 +464,30 @@
     return { ok: true, ...data };
   }
 
+  function clearPayUpliftSync() {
+    if (!payUpliftPending) return;
+    if (payUpliftPending.rateInp) payUpliftPending.rateInp.oninput = null;
+    if (payUpliftPending.payInp) payUpliftPending.payInp.oninput = null;
+  }
+
   function openPayUpliftModal(tr, entryId) {
+    clearPayUpliftSync();
     const rateInp = tr.querySelector('.js-pay-override[data-field="wage_rate_used"]');
     const payInp = tr.querySelector('.js-pay-override[data-field="pay"]');
     if (!rateInp || !payInp) return;
+    const hours = parseFloat(tr.dataset.entryHours || "0");
     payUpliftPending = { tr, entryId, rateInp, payInp };
     if (payUpliftReason) payUpliftReason.value = "";
+    if (hours > 0) {
+      rateInp.oninput = () => {
+        const r = parseFloat(rateInp.value);
+        if (!Number.isNaN(r) && r >= 0) payInp.value = (r * hours).toFixed(2);
+      };
+      payInp.oninput = () => {
+        const p = parseFloat(payInp.value);
+        if (!Number.isNaN(p) && p >= 0) rateInp.value = (p / hours).toFixed(4);
+      };
+    }
     showModal(payUpliftModalEl);
     setTimeout(() => payUpliftReason && payUpliftReason.focus(), 300);
   }
@@ -488,11 +512,14 @@
       edit_reason: reason,
     });
     if (res.ok) {
+      clearPayUpliftSync();
       tr.dataset.serverRate = String(wage_rate_used);
       tr.dataset.serverPay = String(pay);
       hideModal(payUpliftModalEl);
       payUpliftPending = null;
       location.reload();
+    } else {
+      alert(res.message || "Failed to save rate/pay. Check the reason is at least 3 characters, then try again.");
     }
   }
 
@@ -569,6 +596,7 @@
     payUpliftCancel.addEventListener("click", () => {
       if (payUpliftPending) {
         const { tr, rateInp, payInp } = payUpliftPending;
+        clearPayUpliftSync();
         rateInp.value = parseFloat(tr.dataset.serverRate || 0).toFixed(2);
         payInp.value = parseFloat(tr.dataset.serverPay || 0).toFixed(2);
         payUpliftPending = null;

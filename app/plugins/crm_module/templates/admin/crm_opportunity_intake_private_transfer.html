@@ -1,0 +1,374 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Private transfer intake{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.opportunities_list') }}" class="text-decoration-none">Opportunities</a></li>
+<li class="breadcrumb-item active" aria-current="page">Private transfer</li>
+{% endblock %}
+{% block content %}
+{% set fv = form_values if form_values is defined else {} %}
+{% set _ph = pt_intake_hidden if pt_intake_hidden is defined else [] %}
+{% set _ix = intake_extra_prefill if intake_extra_prefill is defined else {} %}
+<div class="container-fluid py-3" style="max-width: 960px;">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+      <p class="text-muted small text-uppercase fw-semibold mb-1">Pipeline</p>
+      <h1 class="h4 mb-1"><i class="bi bi-truck-front me-2 text-primary"></i>Private transfer intake</h1>
+      <p class="text-muted small mb-0">
+        Multi-step capture for patient transport enquiries (no public maps). Creates a CRM opportunity you can open for scheduling and follow-up — use <strong>Scheduling</strong> on the opportunity to roster work without Cura.
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if can_edit %}
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.desk_intake_layout_settings') }}" title="Hide optional blocks or add fields"><i class="bi bi-sliders me-1"></i>Layout</a>
+      {% endif %}
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunity_intake') }}">Event intake</a>
+      <a class="btn btn-outline-secondary btn-sm rounded-pill" href="{{ url_for('crm_module.opportunities_board') }}">Board</a>
+    </div>
+  </div>
+
+  {% if not can_edit %}
+  <div class="alert alert-warning">You do not have permission to create pipeline records.</div>
+  {% else %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      {% if 'pt_progress_header' not in _ph %}
+      <div class="d-none d-sm-flex justify-content-between mb-2 small">
+        <span id="ptStage1" class="text-primary fw-bold">1. Patient</span>
+        <span id="ptStage2" class="text-muted">2. Journey</span>
+        <span id="ptStage3" class="text-muted">3. Clinical</span>
+        <span id="ptStage4" class="text-muted">4. Contact</span>
+      </div>
+      <div class="progress mb-3" style="height:6px;">
+        <div id="ptProgress" class="progress-bar bg-success" style="width:25%"></div>
+      </div>
+      {% endif %}
+
+      <form method="post" id="ptIntakeForm" novalidate>
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+        <div class="row g-3 mb-3 pb-3 border-bottom">
+          <div class="col-md-6">
+            <label class="form-label" for="account_id">CRM account</label>
+            <select class="form-select" id="account_id" name="account_id">
+              <option value="">— New account from payee / organisation —</option>
+              {% for a in intake_private_accounts %}
+              <option value="{{ a.id }}" {% if (fv.get('account_id') or '')|string == (a.id|string) %}selected{% endif %}>{{ a.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="stage">Initial stage</label>
+            <select class="form-select" id="stage" name="stage">
+              {% for val, label in stages %}
+              <option value="{{ val }}" {% if (fv.get('stage') or 'prospecting') == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="pt-step" data-step="0">
+          <h2 class="h6 text-uppercase text-muted mb-3">1. Patient</h2>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="patientfirst">First name <span class="text-danger">*</span></label>
+              <input class="form-control" id="patientfirst" name="patientfirst" required maxlength="128" value="{{ fv.get('patientfirst', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="patientlast">Surname <span class="text-danger">*</span></label>
+              <input class="form-control" id="patientlast" name="patientlast" required maxlength="128" value="{{ fv.get('patientlast', '') }}">
+            </div>
+            {% if 'pt_patient_extras' not in _ph %}
+            <div class="col-md-4">
+              <label class="form-label" for="dob">Date of birth</label>
+              <input type="date" class="form-control" id="dob" name="dob" value="{{ fv.get('dob', '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="patientweight">Weight (kg)</label>
+              <input type="number" class="form-control" id="patientweight" name="patientweight" min="1" max="400" value="{{ fv.get('patientweight', '') }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="additionalNeeds">Additional needs</label>
+              <textarea class="form-control" id="additionalNeeds" name="additionalNeeds" rows="2" placeholder="e.g. lighting, oxygen">{{ fv.get('additionalNeeds', '') }}</textarea>
+            </div>
+            {% endif %}
+          </div>
+          <div class="mt-3 d-flex justify-content-end">
+            <button type="button" class="btn btn-primary rounded-pill pt-next">Next</button>
+          </div>
+        </div>
+
+        <div class="pt-step d-none" data-step="1">
+          <h2 class="h6 text-uppercase text-muted mb-3">2. Journey &amp; addresses</h2>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="pickupdate">Pick-up date <span class="text-danger">*</span></label>
+              <input type="date" class="form-control" id="pickupdate" name="pickupdate" required value="{{ fv.get('pickupdate', '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="pickuptime">Pick-up time <span class="text-danger">*</span></label>
+              <input type="time" class="form-control" id="pickuptime" name="pickuptime" required value="{{ fv.get('pickuptime', '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="journeyType">Journey type <span class="text-danger">*</span></label>
+              <select class="form-select" id="journeyType" name="journeyType" required>
+                <option value="" {% if not fv.get('journeyType') %}selected{% endif %}>—</option>
+                <option value="oneway" {% if fv.get('journeyType') == 'oneway' %}selected{% endif %}>One-way</option>
+                <option value="return" {% if fv.get('journeyType') == 'return' %}selected{% endif %}>Return</option>
+                <option value="wait" {% if fv.get('journeyType') == 'wait' %}selected{% endif %}>Wait &amp; return</option>
+              </select>
+            </div>
+            {% if 'pt_return_leg' not in _ph %}
+            <div class="col-md-6">
+              <label class="form-label" for="returnDate">Return date</label>
+              <input type="date" class="form-control" id="returnDate" name="returnDate" value="{{ fv.get('returnDate', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="returnTime">Return time</label>
+              <input type="time" class="form-control" id="returnTime" name="returnTime" value="{{ fv.get('returnTime', '') }}">
+            </div>
+            {% endif %}
+            <div class="col-12"><hr class="my-1"></div>
+            <div class="col-md-6">
+              <label class="form-label" for="collectstreet1">Collect address line 1 <span class="text-danger">*</span></label>
+              <input class="form-control" id="collectstreet1" name="collectstreet1" required value="{{ fv.get('collectstreet1', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="collectstreet2">Line 2</label>
+              <input class="form-control" id="collectstreet2" name="collectstreet2" value="{{ fv.get('collectstreet2', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="collecttown">Town <span class="text-danger">*</span></label>
+              <input class="form-control" id="collecttown" name="collecttown" required value="{{ fv.get('collecttown', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="collectpostcode">Postcode <span class="text-danger">*</span></label>
+              <input class="form-control" id="collectpostcode" name="collectpostcode" required value="{{ fv.get('collectpostcode', '') }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="accessRequirementsCollection">Access (collection) <span class="text-danger">*</span></label>
+              <textarea class="form-control" id="accessRequirementsCollection" name="accessRequirementsCollection" rows="2" required>{{ fv.get('accessRequirementsCollection', '') }}</textarea>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="destinationstreet1">Destination line 1 <span class="text-danger">*</span></label>
+              <input class="form-control" id="destinationstreet1" name="destinationstreet1" required value="{{ fv.get('destinationstreet1', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="destinationstreet2">Line 2</label>
+              <input class="form-control" id="destinationstreet2" name="destinationstreet2" value="{{ fv.get('destinationstreet2', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="destinationtown">Town <span class="text-danger">*</span></label>
+              <input class="form-control" id="destinationtown" name="destinationtown" required value="{{ fv.get('destinationtown', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="destinationpostcode">Postcode <span class="text-danger">*</span></label>
+              <input class="form-control" id="destinationpostcode" name="destinationpostcode" required value="{{ fv.get('destinationpostcode', '') }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="accessRequirementsDestination">Access (destination) <span class="text-danger">*</span></label>
+              <textarea class="form-control" id="accessRequirementsDestination" name="accessRequirementsDestination" rows="2" required>{{ fv.get('accessRequirementsDestination', '') }}</textarea>
+            </div>
+          </div>
+          <div class="mt-3 d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary rounded-pill pt-prev">Back</button>
+            <button type="button" class="btn btn-primary rounded-pill pt-next">Next</button>
+          </div>
+        </div>
+
+        <div class="pt-step d-none" data-step="2">
+          <h2 class="h6 text-uppercase text-muted mb-3">3. Clinical &amp; vehicle</h2>
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="medicalHistory">Medical history &amp; conditions <span class="text-danger">*</span></label>
+              <textarea class="form-control" id="medicalHistory" name="medicalHistory" rows="4" required>{{ fv.get('medicalHistory', '') }}</textarea>
+            </div>
+            {% if 'pt_infectious_meds' not in _ph %}
+            <div class="col-12">
+              <label class="form-label">Infectious precautions (tick any)</label>
+              {% set inf = fv.get('infectious_sel') or [] %}
+              <div class="d-flex flex-wrap gap-3">
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="infectious[]" id="cb1" value="Covid-19" {% if 'Covid-19' in inf %}checked{% endif %}><label class="form-check-label" for="cb1">Covid-19</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="infectious[]" id="cb2" value="Norovirus" {% if 'Norovirus' in inf %}checked{% endif %}><label class="form-check-label" for="cb2">Norovirus</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="infectious[]" id="cb3" value="MRSA" {% if 'MRSA' in inf %}checked{% endif %}><label class="form-check-label" for="cb3">MRSA</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="infectious[]" id="cb4" value="C-difficile" {% if 'C-difficile' in inf %}checked{% endif %}><label class="form-check-label" for="cb4">C. difficile</label></div>
+              </div>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="currentMedications">Current medications</label>
+              <textarea class="form-control" id="currentMedications" name="currentMedications" rows="2">{{ fv.get('currentMedications', '') }}</textarea>
+            </div>
+            {% endif %}
+            <div class="col-12">
+              <label class="form-label">Mobility <span class="text-danger">*</span></label>
+              {% set mob = fv.get('serviceMobility', '') %}
+              <div class="form-check"><input class="form-check-input" type="radio" name="serviceMobility" id="mob1" value="Mobilises Independently" required {% if mob == 'Mobilises Independently' %}checked{% endif %}><label class="form-check-label" for="mob1">Mobilises independently</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="serviceMobility" id="mob2" value="Mobilises with Assistance" {% if mob == 'Mobilises with Assistance' %}checked{% endif %}><label class="form-check-label" for="mob2">With assistance</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="serviceMobility" id="mob2b" value="Mobilises with Difficulty" {% if mob == 'Mobilises with Difficulty' %}checked{% endif %}><label class="form-check-label" for="mob2b">With difficulty</label></div>
+              <div class="form-check"><input class="form-check-input" type="radio" name="serviceMobility" id="mob3" value="Unable to Mobilise" {% if mob == 'Unable to Mobilise' %}checked{% endif %}><label class="form-check-label" for="mob3">Unable to mobilise</label></div>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Crew / vehicle <span class="text-danger">*</span></label>
+              {% set cv = fv.get('crewVehicle', '') %}
+              <select class="form-select" name="crewVehicle" id="crewVehicle" required>
+                <option value="">—</option>
+                <option value="Ambulance Car (Single Crew – Driver)" {% if cv == 'Ambulance Car (Single Crew – Driver)' %}selected{% endif %}>Ambulance car</option>
+                <option value="Double Crew Non-Emergency Ambulance" {% if cv == 'Double Crew Non-Emergency Ambulance' %}selected{% endif %}>Double crew non-emergency</option>
+                <option value="Double Crew High-Dependency Ambulance" {% if cv == 'Double Crew High-Dependency Ambulance' %}selected{% endif %}>High-dependency ambulance</option>
+                <option value="Double Crew Emergency / Intensive Care Ambulance" {% if 'Emergency' in cv or 'Intensive Care' in cv %}selected{% endif %}>Emergency / ICU ambulance</option>
+                <option value="Unsure (Please Advise)" {% if cv == 'Unsure (Please Advise)' %}selected{% endif %}>Unsure</option>
+                <option value="Other" {% if cv == 'Other' or (cv and cv not in ['Ambulance Car (Single Crew – Driver)', 'Double Crew Non-Emergency Ambulance', 'Double Crew High-Dependency Ambulance', 'Double Crew Emergency / Intensive Care Ambulance', 'Unsure (Please Advise)']) %}selected{% endif %}>Other</option>
+              </select>
+            </div>
+            <div class="col-12" id="crewVehicleOtherWrap" {% if cv != 'Other' %}style="display:none"{% endif %}>
+              <label class="form-label" for="crewVehicle_other_text">Specify vehicle</label>
+              <input class="form-control" id="crewVehicle_other_text" name="crewVehicle_other_text" value="{{ fv.get('crewVehicle_other_text', '') }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label">Travel method <span class="text-danger">*</span></label>
+              {% set tm = fv.get('travelMethod', '') %}
+              <select class="form-select" name="travelMethod" id="travelMethod" required>
+                <option value="">—</option>
+                <option value="Car / Chair Seating" {% if tm == 'Car / Chair Seating' %}selected{% endif %}>Car / chair</option>
+                <option value="Travel on Ambulance Stretcher" {% if 'Stretcher' in tm %}selected{% endif %}>Stretcher</option>
+                <option value="Travel in Own Wheelchair (Manual &amp; Crash Tested)" {% if 'Wheelchair' in tm and 'Electric' not in tm %}selected{% endif %}>Own wheelchair (manual)</option>
+                <option value="Other" {% if tm == 'Other' %}selected{% endif %}>Other</option>
+              </select>
+            </div>
+            <div class="col-12" id="travelOtherWrap" {% if tm != 'Other' %}style="display:none"{% endif %}>
+              <label class="form-label" for="travel_other_text">Specify travel</label>
+              <input class="form-control" id="travel_other_text" name="travel_other_text" value="{{ fv.get('travel_other_text', '') }}">
+            </div>
+          </div>
+          <div class="mt-3 d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary rounded-pill pt-prev">Back</button>
+            <button type="button" class="btn btn-primary rounded-pill pt-next">Next</button>
+          </div>
+        </div>
+
+        <div class="pt-step d-none" data-step="3">
+          <h2 class="h6 text-uppercase text-muted mb-3">4. Applicant &amp; payee</h2>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label" for="applicantsname">Applicant name <span class="text-danger">*</span></label>
+              <input class="form-control" id="applicantsname" name="applicantsname" required value="{{ fv.get('applicantsname', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="applicantsphone">Applicant phone</label>
+              <input class="form-control" id="applicantsphone" name="applicantsphone" value="{{ fv.get('applicantsphone', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="applicantsmail">Applicant email <span class="text-danger">*</span></label>
+              <input type="email" class="form-control" id="applicantsmail" name="applicantsmail" required value="{{ fv.get('applicantsmail', '') }}">
+            </div>
+            {% if 'pt_payee_contact_extras' not in _ph %}
+            <div class="col-md-6">
+              <label class="form-label" for="payeecompany">Organisation (invoice)</label>
+              <input class="form-control" id="payeecompany" name="payeecompany" value="{{ fv.get('payeecompany', '') }}">
+            </div>
+            {% endif %}
+            <div class="col-md-6">
+              <label class="form-label" for="payeename">Payee name <span class="text-danger">*</span></label>
+              <input class="form-control" id="payeename" name="payeename" required value="{{ fv.get('payeename', '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="Payeemail">Payee email <span class="text-danger">*</span></label>
+              <input type="email" class="form-control" id="Payeemail" name="Payeemail" required value="{{ fv.get('Payeemail', '') }}">
+            </div>
+            {% if 'pt_payee_contact_extras' not in _ph %}
+            <div class="col-md-6">
+              <label class="form-label" for="Payeephone">Payee phone</label>
+              <input class="form-control" id="Payeephone" name="Payeephone" value="{{ fv.get('Payeephone', '') }}">
+            </div>
+            {% endif %}
+          </div>
+          {% if pt_intake_extra_fields %}
+          <div class="row g-3 mt-2 pt-3 border-top">
+            <div class="col-12">
+              <h3 class="h6 text-uppercase text-muted mb-2">Additional capture</h3>
+              <p class="small text-muted mb-3">From <strong>Desk intake layout</strong> — saved with the opportunity and copied into its notes.</p>
+            </div>
+            {% for ef in pt_intake_extra_fields %}
+            <div class="col-12{% if ef.type == 'text' %} col-md-6{% endif %}">
+              <label class="form-label" for="pt_ix_{{ ef.key }}">{{ ef.label }}{% if ef.required %} <span class="text-danger">*</span>{% endif %}</label>
+              {% if ef.type == 'textarea' %}
+              <textarea class="form-control" id="pt_ix_{{ ef.key }}" name="intake_extra_{{ ef.key }}" rows="3" maxlength="8000" {% if ef.required %}required{% endif %}>{{ _ix.get(ef.key, '') }}</textarea>
+              {% else %}
+              <input class="form-control" type="text" id="pt_ix_{{ ef.key }}" name="intake_extra_{{ ef.key }}" maxlength="2000" value="{{ _ix.get(ef.key, '') }}" {% if ef.required %}required{% endif %}>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <div class="mt-3 d-flex justify-content-between">
+            <button type="button" class="btn btn-outline-secondary rounded-pill pt-prev">Back</button>
+            <button type="submit" class="btn btn-success rounded-pill">Create opportunity</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(function () {
+  var form = document.getElementById('ptIntakeForm');
+  if (!form) return;
+  var steps = Array.prototype.slice.call(form.querySelectorAll('.pt-step'));
+  var cur = 0;
+  var bar = document.getElementById('ptProgress');
+  var labels = [1,2,3,4].map(function (i) { return document.getElementById('ptStage' + i); });
+
+  function paint() {
+    if (bar) bar.style.width = ((cur + 1) / steps.length * 100) + '%';
+    labels.forEach(function (el, idx) {
+      if (!el) return;
+      el.classList.toggle('text-primary', idx === cur);
+      el.classList.toggle('fw-bold', idx === cur);
+      el.classList.toggle('text-muted', idx !== cur);
+    });
+  }
+
+  function show(i) {
+    cur = Math.max(0, Math.min(steps.length - 1, i));
+    steps.forEach(function (el) {
+      var s = parseInt(el.getAttribute('data-step'), 10);
+      el.classList.toggle('d-none', s !== cur);
+    });
+    paint();
+  }
+
+  form.querySelectorAll('.pt-next').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var panel = steps[cur];
+      if (!panel) return;
+      var inputs = panel.querySelectorAll('input,select,textarea');
+      for (var j = 0; j < inputs.length; j++) {
+        if (!inputs[j].checkValidity()) {
+          inputs[j].reportValidity();
+          return;
+        }
+      }
+      show(cur + 1);
+    });
+  });
+  form.querySelectorAll('.pt-prev').forEach(function (btn) {
+    btn.addEventListener('click', function () { show(cur - 1); });
+  });
+
+  var cv = document.getElementById('crewVehicle');
+  var cvO = document.getElementById('crewVehicleOtherWrap');
+  if (cv && cvO) {
+    cv.addEventListener('change', function () { cvO.style.display = cv.value === 'Other' ? '' : 'none'; });
+  }
+  var tm = document.getElementById('travelMethod');
+  var tmO = document.getElementById('travelOtherWrap');
+  if (tm && tmO) {
+    tm.addEventListener('change', function () { tmO.style.display = tm.value === 'Other' ? '' : 'none'; });
+  }
+  show(0);
+})();
+</script>
+{% endblock %}

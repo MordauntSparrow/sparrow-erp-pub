@@ -13,6 +13,9 @@ except Exception as e:
 
 
 if __name__ == '__main__':
-    server = WebsiteServer(port=80)
+    # Flask listen port (default 80). MUST differ from Railway PORT / nginx listen — docker-entrypoint
+    # rewrites nginx to listen on $PORT (e.g. 8080). If WEBSITE_PORT equals PORT, bind fails: "address already in use".
+    _port = int((os.environ.get("WEBSITE_PORT") or "80").strip() or "80")
+    server = WebsiteServer(port=_port)
     print("Starting website server in debug mode (blocking)...")
     server.start(debug=True)

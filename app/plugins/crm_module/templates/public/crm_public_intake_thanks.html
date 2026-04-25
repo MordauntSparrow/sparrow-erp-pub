@@ -1,0 +1,13 @@
+{% extends "public/crm_public_base.html" %}
+{% block crm_public_title %}Thank you{% endblock %}
+{% block crm_public_body %}
+<div class="crm-pu-hero p-5 text-center">
+  <i class="bi bi-check-circle display-3 text-success mb-3 d-block"></i>
+  <h1 class="h3 fw-bold mb-3">Thank you</h1>
+  <p class="mb-4 opacity-90">
+    {% if form and form.title %}Your message for <strong>{{ form.title }}</strong> is saved.{% else %}We have received your enquiry.{% endif %}
+    We will follow up using the contact details you provided.
+  </p>
+  <p class="small text-white-50 mb-0">Reference: opportunity #{{ opportunity_id }}</p>
+</div>
+{% endblock %}

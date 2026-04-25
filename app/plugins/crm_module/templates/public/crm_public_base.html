@@ -48,6 +48,25 @@
     }
     .btn-crm-pu:hover { color: #fff; filter: brightness(1.08); }
     .crm-pu-guide li { margin-bottom: 0.35rem; }
+    .crm-pu-compliance > summary {
+      list-style: none;
+      cursor: pointer;
+      user-select: none;
+    }
+    .crm-pu-compliance > summary::-webkit-details-marker { display: none; }
+    .crm-pu-compliance > summary .crm-pu-chev {
+      transition: transform 0.2s ease;
+      display: inline-block;
+    }
+    .crm-pu-compliance[open] > summary .crm-pu-chev { transform: rotate(180deg); }
+    @media (min-width: 992px) {
+      .crm-pu-live-sticky {
+        position: sticky;
+        top: 1rem;
+        z-index: 2;
+        align-self: flex-start;
+      }
+    }
   </style>
   {% block crm_public_head %}{% endblock %}
 </head>

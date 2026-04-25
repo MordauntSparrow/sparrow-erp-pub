@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ventus CAD</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Bootstrap Icons only (NO layout framework) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+  <style>
+    :root {
+      --cad-bg: #0b0f14;
+      --cad-panel: #0f1622;
+      --cad-panel-alt: #141c2b;
+      --cad-border: #1e2633;
+      --cad-text: #e6e9ef;
+      --cad-muted: #9aa4b2;
+      --cad-accent: #3b82f6;
+      --cad-danger: #ef4444;
+      --cad-warning: #f59e0b;
+      --cad-success: #22c55e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      background: var(--cad-bg);
+      color: var(--cad-text);
+      overflow: hidden;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .cad-topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      background: var(--cad-panel);
+      border-bottom: 1px solid var(--cad-border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      z-index: 1000;
+    }
+
+    .cad-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .cad-brand img {
+      height: 32px;
+    }
+
+    .cad-topbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 14px;
+    }
+
+    .cad-topbar a {
+      color: var(--cad-text);
+      text-decoration: none;
+      opacity: 0.85;
+    }
+
+    .cad-topbar a:hover {
+      opacity: 1;
+    }
+
+    .cad-root {
+      position: fixed;
+      top: 56px;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .cad-rail {
+      width: 64px;
+      background: var(--cad-panel);
+      border-right: 1px solid var(--cad-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 0;
+      gap: 14px;
+      z-index: 200;
+    }
+
+    .cad-rail-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--cad-panel-alt);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      color: var(--cad-text);
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    .cad-rail-btn:hover {
+      background: #1c2740;
+      transform: translateY(-1px);
+    }
+
+    .cad-rail-btn.active {
+      background: var(--cad-accent);
+    }
+
+    .cad-main {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1fr 0;
+      transition:.25s ease;
+    }
+    .cad-main.drawer-open {
+      grid-template-columns: 1fr 420px;
+    }
+
+    .cad-canvas {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+
+    .map-wrap { position:relative; width: 100%; height: 100%; }
+    #map { position:absolute; inset:0; width: 100%; height: 100%; }
+
+    /* Multi-panel container (allows multiple sidebar panels) */
+    .cad-panels {
+      width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
+      background: linear-gradient(180deg, rgba(15,22,34,0.98), rgba(12,17,22,0.95));
+      border-left: 1px solid var(--cad-border);
+      overflow-y: auto;
+    }
+
+    .cad-panel {
+      background: var(--cad-panel);
+      border: 1px solid var(--cad-border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 120px;
+      max-height: 420px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+    }
+
+    .cad-panel-header {
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+      background: var(--cad-panel-alt);
+      border-bottom: 1px solid var(--cad-border);
+    }
+
+    .cad-panel-controls { display:flex; gap:8px; align-items:center; }
+    .cad-panel-body { padding: 10px; overflow:auto; }
+
+    .panel-popout { background:transparent;border:none;color:var(--cad-text);cursor:pointer;padding:6px;border-radius:6px }
+    .panel-popout:hover { background:rgba(255,255,255,0.03); }
+    /* Notification popups (stacked bottom-right) */
+    .notifications-container {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      width: 320px;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 10px;
+      z-index: 7000;
+      pointer-events: none;
+    }
+    .notification {
+      pointer-events: auto;
+      background: linear-gradient(180deg, #11151b, #0f1622);
+      border: 1px solid rgba(255,255,255,0.04);
+      color: var(--cad-text);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+      font-size: 13px;
+      overflow: hidden;
+    }
+    .notification .notif-header { display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700;margin-bottom:6px }
+    .notification .notif-close { background:transparent;border:none;color:var(--cad-muted);cursor:pointer;border-radius:6px;padding:4px }
+    .notification .notif-close:hover { color:var(--cad-text) }
+  </style>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+</head>
+<body>
+  <div class="cad-topbar">
+    <div class="cad-brand">
+      <img src="/static/uploads/logo-whitebg.png">
+    </div>
+    <div class="cad-topbar-right">
+      <a href="/logout"><i class="bi bi-box-arrow-right"></i></a>
+    </div>
+  </div>
+  <div class="cad-root">
+    <div class="cad-rail">
+      <div class="cad-rail-btn" id="btnJobs" title="CAD Stack">
+        <i class="bi bi-stack"></i>
+      </div>
+      <div class="cad-rail-btn" id="btnUnits" title="Units">
+        <i class="bi bi-truck-front"></i>
+      </div>
+      <div class="cad-rail-btn" id="btnMsgs" title="Messages">
+        <i class="bi bi-chat-dots"></i>
+      </div>
+    </div>
+    <div class="cad-main" id="cadMain">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</body>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// Provide a BroadcastChannel-like shim backed by Socket.IO when available.
+(function(){
+  try{
+    if(typeof io !== 'undefined'){
+      const socket = io();
+      // Polyfill BroadcastChannel using Socket.IO so existing code can use it
+      if(typeof window.BroadcastChannel === 'undefined'){
+        window.BroadcastChannel = function(channelName){
+          const ch = channelName || 'default';
+          const obj = { channel: ch, onmessage: null };
+          obj.postMessage = function(msg){ socket.emit('panel_message', {channel: ch, message: msg}); };
+          return obj;
+        };
+      }
+      // If code uses global `bc`, ensure it's backed by socket as well.
+      try{
+        if(!window.bc){ window.bc = new BroadcastChannel('ventus_cad'); }
+      }catch(e){ window.bc = null; }
+      // Relay server-sent panel_message events into bc.onmessage
+      socket.on('panel_message', function(payload){
+        try{
+          if(!payload) return;
+          const ch = payload.channel || 'ventus_cad';
+          const msg = payload.message || payload;
+          if(window.bc && window.bc.channel && window.bc.channel === ch && typeof window.bc.onmessage === 'function'){
+            window.bc.onmessage({data: msg});
+          }
+        }catch(e){}
+      });
+      // Also relay mdt_event for backwards compatibility
+      socket.on('mdt_event', function(msg){
+        try{ if(window.bc && typeof window.bc.onmessage === 'function') window.bc.onmessage({data: msg}); }catch(e){}
+      });
+    }
+  }catch(e){ console.warn('realtime init failed', e); }
+})();
+</script>
+<script>
+// CSRF + fetch shim: read SeaSurf cookie and attach X-CSRFToken header to unsafe requests
+(function(){
+  function readCookie(name){
+    const v = document.cookie.match('(^|;)\\s*'+name+'\\s*=\\s*([^;]+)');
+    return v ? v.pop() : null;
+  }
+  const csrf = readCookie('csrf_token') || readCookie('csrf');
+  if(csrf){
+    const _fetch = window.fetch.bind(window);
+    window.fetch = function(input, init){
+      init = init || {};
+      init.headers = init.headers || {};
+      try{
+        const method = (init.method||'GET').toUpperCase();
+        if(!['GET','HEAD','OPTIONS'].includes(method)){
+          if(!init.headers['X-CSRFToken'] && !init.headers['X-CSRF-Token']){
+            init.headers['X-CSRFToken'] = csrf;
+          }
+        }
+      }catch(e){}
+      return _fetch(input, init);
+    };
+  }
+})();
+</script>
+</html>

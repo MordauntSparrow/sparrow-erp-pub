@@ -41,14 +41,15 @@
     {% for o in openings %}
     <div class="col">
       <div class="rec-job-card">
-        {% if o.status == 'open' %}
-        <span class="rec-ribbon">Live</span>
-        {% endif %}
-        <div class="rec-card-body">
+        <div class="rec-job-card-surface">
+          {% if o.status == 'open' %}
+          <span class="rec-ribbon">Live</span>
+          {% endif %}
+          <div class="rec-card-body">
           <h2 class="rec-job-title">{{ o.title }}</h2>
           <div class="rec-meta-line"><i class="bi bi-person-badge"></i> {{ o.role_title }}</div>
           <div class="rec-meta-line"><i class="bi bi-building"></i> {% if o.role_department %}{{ o.role_department }}{% else %}<span class="text-muted">No department on role</span>{% endif %}</div>
-          <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
             {% if o.status == 'open' %}
             <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25">Open for applications</span>
             {% elif o.status == 'draft' %}
@@ -56,7 +57,16 @@
             {% else %}
             <span class="badge bg-secondary">Closed</span>
             {% endif %}
+            {% if o.capacity_at_limit %}
+            <span class="badge bg-secondary">At capacity</span>
+            {% endif %}
           </div>
+          {% if o.max_applicants %}
+          <p class="small text-muted mb-1">Applications <strong>{{ o.application_count or 0 }}</strong> / {{ o.max_applicants }} max</p>
+          {% endif %}
+          {% if o.positions_to_fill %}
+          <p class="small text-muted mb-2">Hired <strong>{{ o.hired_count or 0 }}</strong> / {{ o.positions_to_fill }} positions</p>
+          {% endif %}
           <div class="rec-metric-row">
             <div class="rec-metric">
               <strong>{{ o.pipeline_count or 0 }}</strong>
@@ -82,23 +92,18 @@
             <span class="rec-alert-pill bg-danger bg-opacity-10 text-danger">Overdue tasks: {{ o.overdue_tasks_count }}</span>
             {% endif %}
           </div>
-        </div>
-        <div class="rec-footer-mini d-flex justify-content-between align-items-center flex-wrap gap-2">
-          <div class="dropdown">
-            <button class="btn btn-sm btn-outline-secondary dropdown-toggle rounded-pill" type="button" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>
-            <ul class="dropdown-menu dropdown-menu-end shadow">
-              <li><a class="dropdown-item" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}"><i class="bi bi-pencil me-2"></i>Edit position</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('internal_recruitment.admin_opening_rules', opening_id=o.id) }}"><i class="bi bi-diagram-3 me-2"></i>Stage &amp; forms</a></li>
-              <li><a class="dropdown-item" href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}"><i class="bi bi-people me-2"></i>Applications</a></li>
-              {% if o.status == 'open' %}
-              <li><hr class="dropdown-divider"></li>
-              <li><a class="dropdown-item" href="{{ url_for('public_recruitment_site.vacancy_detail', slug=o.slug) }}" target="_blank" rel="noopener"><i class="bi bi-link-45deg me-2"></i>Public job page</a></li>
-              {% endif %}
-            </ul>
           </div>
-          {% if o.status == 'open' %}
-          <a class="text-decoration-none small text-teal" style="color: var(--rec-teal);" href="{{ url_for('public_recruitment_site.vacancy_detail', slug=o.slug) }}" target="_blank" rel="noopener">Job page <i class="bi bi-box-arrow-up-right"></i></a>
-          {% endif %}
+        </div>
+        <div class="rec-footer-mini">
+          <div class="d-flex flex-wrap align-items-center gap-1">
+            <div class="dropdown d-inline-block">
+              <button class="btn btn-sm btn-outline-secondary dropdown-toggle rounded-pill" type="button" data-mdb-toggle="dropdown" data-mdb-auto-close="true" aria-expanded="false">Actions</button>
+              <ul class="dropdown-menu dropdown-menu-end shadow">
+                <li><a class="dropdown-item" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}"><i class="bi bi-pencil me-2"></i>Edit position</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('internal_recruitment.admin_opening_rules', opening_id=o.id) }}"><i class="bi bi-diagram-3 me-2"></i>Stage &amp; forms</a></li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -123,12 +128,15 @@
         <tr>
           <td><a class="fw-semibold text-decoration-none" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}">{{ o.title }}</a><br><span class="small text-muted"><code>{{ o.slug }}</code></span></td>
           <td>{{ o.role_title }}{% if o.role_department %}<br><span class="small text-muted">{{ o.role_department }}</span>{% endif %}</td>
-          <td><span class="badge {% if o.status == 'open' %}bg-success{% elif o.status == 'closed' %}bg-secondary{% else %}bg-warning text-dark{% endif %}">{{ o.status }}</span></td>
-          <td class="text-center fw-semibold" style="color: var(--rec-maroon, #9f1239);">{{ o.pipeline_count or 0 }}</td>
-          <td class="text-center">{% if (o.new_applications_count or 0) > 0 %}<a href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}">{{ o.new_applications_count }}</a>{% else %}0{% endif %}</td>
+          <td>
+            <span class="badge {% if o.status == 'open' %}bg-success{% elif o.status == 'closed' %}bg-secondary{% else %}bg-warning text-dark{% endif %}">{{ o.status }}</span>
+            {% if o.capacity_at_limit %}<span class="badge bg-secondary ms-1">At capacity</span>{% endif %}
+          </td>
+          <td class="text-center fw-semibold" style="color: var(--rec-maroon, #9f1239);"><a class="text-decoration-none" style="color: inherit;" href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}">{{ o.pipeline_count or 0 }}</a></td>
+          <td class="text-center"><a class="text-decoration-none" href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}">{% if (o.new_applications_count or 0) > 0 %}{{ o.new_applications_count }}{% else %}<span class="text-muted">0</span>{% endif %}</a></td>
           <td class="text-center">{% if (o.pending_tasks_count or 0) > 0 %}<span class="badge bg-warning text-dark">{{ o.pending_tasks_count }}</span>{% else %}—{% endif %}</td>
           <td class="text-nowrap">
-            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_recruitment.admin_applications', opening_id=o.id) }}">Apps</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_recruitment.admin_opening_edit', opening_id=o.id) }}">Edit</a>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_recruitment.admin_opening_rules', opening_id=o.id) }}">Rules</a>
           </td>
         </tr>

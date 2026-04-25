@@ -1,0 +1,70 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Export log{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Export audit log</h1>
+<p class="text-muted small">Append-only records for successful downloads (scope, format, row count, SHA-256, PIN step-up).</p>
+<div class="table-responsive card shadow-sm">
+  <table class="table table-sm table-hover mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>ID</th>
+        <th>When</th>
+        <th>Trigger</th>
+        <th>User</th>
+        <th>Format</th>
+        <th class="text-nowrap">Scope</th>
+        <th>Rows</th>
+        <th>PIN OK</th>
+        <th>Stored</th>
+        <th>Hash</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      {% set sd = r.scope_display %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td class="text-nowrap small">{{ r.created_at }}</td>
+        <td class="small">{{ r.get('trigger_type','manual') }}</td>
+        <td class="small"><code>{{ r.user_id or '—' }}</code></td>
+        <td>{{ r.export_format }}</td>
+        <td class="small" style="max-width: 14rem;">
+          <details>
+            <summary class="text-primary" style="cursor: pointer;">{{ sd.one_line }}</summary>
+            <div class="pt-2 mt-2 border-top">
+              {% if sd.error %}
+              <p class="text-warning small mb-2">{{ sd.error }}</p>
+              {% endif %}
+              {% for g in sd.groups %}
+              <h6 class="text-muted text-uppercase small mb-1">{{ g.title }}</h6>
+              <dl class="row small mb-3 gx-2">
+                {% for f in g.fields %}
+                <dt class="col-4 text-muted fw-normal mb-1">{{ f.label }}</dt>
+                <dd class="col-8 mb-1">
+                  {% if f.badges %}
+                    {% for b in f.badges %}<span class="badge bg-secondary me-1 mb-1">{{ b }}</span>{% endfor %}
+                  {% else %}
+                    {{ f.value }}
+                  {% endif %}
+                </dd>
+                {% endfor %}
+              </dl>
+              {% endfor %}
+              {% if not sd.groups and not sd.error %}
+              <p class="text-muted small mb-0">No extra scope details.</p>
+              {% endif %}
+            </div>
+          </details>
+        </td>
+        <td>{{ r.row_count }}</td>
+        <td>{% if r.pin_step_up_ok %}yes{% else %}no{% endif %}</td>
+        <td class="small">{% if r.get('stored_path') %}<code>{{ r.stored_path[:48] }}{% if r.stored_path|length > 48 %}…{% endif %}</code>{% else %}—{% endif %}</td>
+        <td class="small font-monospace">{{ (r.file_hash or '')[:12] }}…</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="text-muted p-4">No exports logged yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

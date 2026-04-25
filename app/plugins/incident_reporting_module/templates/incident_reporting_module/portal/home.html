@@ -1,0 +1,13 @@
+{# Employee portal app may not register internal_incident_reporting — use only public_incident_reporting URLs here. #}
+{% extends "incident_reporting_module/base_public.html" %}
+{% block content %}
+<div class="ep-card card shadow-sm p-4 mb-3">
+  <h1 class="h4 fw-semibold mb-2">Safety &amp; incident capture</h1>
+  <p class="text-secondary mb-4">Report near misses, hazards, events, and good catches. Drafts autosave as you go. Medical organisations also see patient safety fields and safeguarding linkage where required.</p>
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard_start') }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary btn-lg"><i class="bi bi-plus-circle me-2"></i>Start quick capture</button>
+    <a class="btn btn-outline-secondary btn-lg ms-2" href="{{ url_for('public_incident_reporting.portal_my') }}">Continue a draft</a>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Intake forms{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item active" aria-current="page">Intake forms</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Lead capture</p>
+        <h1 class="h3 fw-semibold text-dark mb-0"><i class="bi bi-ui-checks me-2 text-primary"></i>Custom intake forms</h1>
+        <p class="small text-muted mb-0 mt-2">Build reusable forms for the desk or a public link. Submissions create opportunities like website contact flows.</p>
+      </div>
+      {% if can_edit %}
+      <a class="btn btn-primary rounded-pill px-3" href="{{ url_for('crm_module.intake_form_new') }}"><i class="bi bi-plus-lg me-1"></i>New form</a>
+      {% endif %}
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('crm_module.dashboard') }}" class="btn btn-sm btn-outline-secondary rounded-pill"><i class="bi bi-speedometer2 me-1"></i>Overview</a>
+      <a href="{{ url_for('crm_module.opportunity_intake') }}" class="btn btn-sm btn-outline-secondary rounded-pill">Event desk intake</a>
+    </div>
+  </div>
+
+  {% if not forms %}
+  <div class="card crm-panel border-0">
+    <div class="card-body text-center py-5 text-muted">
+      <i class="bi bi-inbox display-4 d-block mb-3 opacity-50"></i>
+      <p class="mb-0">No intake forms yet.{% if can_edit %} Create one to capture leads with your own fields.{% endif %}</p>
+      {% if can_edit %}
+      <a class="btn btn-primary mt-3 rounded-pill" href="{{ url_for('crm_module.intake_form_new') }}">Create form</a>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="crm-table-wrap">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Title</th>
+            <th>Slug</th>
+            <th>Stage</th>
+            <th>Status</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in forms %}
+          <tr>
+            <td class="fw-medium">{{ f.title }}</td>
+            <td><code class="small">{{ f.slug }}</code></td>
+            <td class="small">{{ f.default_stage or 'prospecting' }}</td>
+            <td class="small text-nowrap">
+              {% if f.is_active %}<span class="badge rounded-pill bg-success bg-opacity-10 text-success">Active</span>{% else %}<span class="badge rounded-pill bg-secondary bg-opacity-10 text-secondary">Inactive</span>{% endif %}
+              {% if f.is_public and public_routes_ok %}<span class="badge rounded-pill bg-primary bg-opacity-10 text-primary ms-1">Public link</span>{% elif f.is_public and not public_routes_ok %}<span class="badge rounded-pill bg-warning bg-opacity-10 text-warning ms-1" title="Public blueprint not loaded">Public (unavailable)</span>{% endif %}
+            </td>
+            <td class="text-end text-nowrap">
+              {% if f.is_active %}
+              <a class="btn btn-sm btn-primary rounded-pill" href="{{ url_for('crm_module.intake_form_run', form_id=f.id) }}">Run</a>
+              {% endif %}
+              {% if can_edit %}
+              <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.intake_form_edit', form_id=f.id) }}">Edit</a>
+              {% endif %}
+              {% if f.is_public and public_routes_ok %}
+              {% set pub = url_for('crm_public.public_intake_form', slug=f.slug) %}
+              <button type="button" class="btn btn-sm btn-outline-primary rounded-pill js-copy-url" data-url="{{ pub }}" title="{{ pub }}">Copy link</button>
+              {% endif %}
+              {% if can_edit %}
+              <form method="post" action="{{ url_for('crm_module.intake_form_delete', form_id=f.id) }}" class="d-inline" onsubmit="return confirm('Delete this intake form?');">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill">Delete</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(function () {
+  document.querySelectorAll('.js-copy-url').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var u = btn.getAttribute('data-url') || '';
+      if (!u) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(u).then(function () {
+          var t = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = t; }, 1600);
+        });
+      } else {
+        prompt('Copy this URL:', u);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -31,9 +31,9 @@
   </div>
 </div>
 
-{% if invoice.status == 'draft' and invoice.timesheet_status == 'approved' %}
+{% if invoice.status == 'current' and invoice.timesheet_status == 'approved' %}
 <div class="no-print alert alert-warning small mb-3 d-flex flex-wrap align-items-center gap-2">
-  <span>This invoice is still a <strong>draft</strong> while your timesheet is already approved — finalize it to mark it sent (or use the button on the timesheet week).</span>
+  <span>This invoice is still <strong>current</strong> while your timesheet is already approved — finalize it to mark it <strong>paid</strong> (or use the button on the timesheet week).</span>
   <form method="post" action="{{ url_for('public_time_billing.public_week_invoice_finalize', week_id=invoice.timesheet_week_code) }}" class="mb-0">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-sm btn-warning">Finalize invoice</button>
@@ -65,7 +65,7 @@
         {% endif %}
       </div>
       <div class="col-md-4"><strong>Invoice status</strong><br>
-        <span class="badge {% if invoice.status == 'sent' %}bg-primary{% elif invoice.status == 'draft' %}bg-secondary{% else %}bg-dark{% endif %}">{{ invoice.status }}</span>
+        <span class="badge {% if invoice.status == 'paid' %}bg-primary{% elif invoice.status == 'current' %}bg-secondary{% else %}bg-dark{% endif %}">{{ (invoice.status or '')|capitalize }}</span>
         {% if invoice.void_reason %}<div class="text-muted mt-1">Void: {{ invoice.void_reason }}</div>{% endif %}
       </div>
     </div>

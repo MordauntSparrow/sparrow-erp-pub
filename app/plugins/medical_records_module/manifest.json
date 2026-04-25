@@ -1,0 +1,25 @@
+{
+    "system_name": "medical_records_module",
+    "name": "Cura / Medical Records",
+    "description": "EPCR, safeguarding, patient-contact reporting, and optional operational grouping (standalone-capable).",
+    "version": "0.0.10",
+    "icon": "icon.png",
+    "settings": {},
+    "enabled": true,
+    "dependencies": [
+        "website_module"
+    ],
+    "repository": "official",
+    "download_url": "",
+    "changelog": "Migration 013: cura_operational_event_assets (event PDFs + bulletins on Railway-backed uploads). Permission medical_records_module.cura_ops_event_management for non–clinical-lead ops staff. Optional Bearer analytics include_epcr_deep=1.",
+    "care_company_portal_enabled": false,
+    "repository_token": "",
+    "update_available": false,
+    "declared_permissions": [
+        {
+            "id": "medical_records_module.cura_ops_event_management",
+            "label": "Cura ops — event documents & full reporting",
+            "description": "Upload operational event PDFs (persistent/Railway volume), publish text bulletins, and open the extended anonymous statistics report. Admins and clinical leads already have access by role."
+        }
+    ]
+}

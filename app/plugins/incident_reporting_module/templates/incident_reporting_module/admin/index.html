@@ -1,0 +1,181 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}Safety &amp; Incidents · Command centre{% endblock %}
+{% block incident_admin_inner %}
+<div class="ir-dash-surface">
+  {% include 'incident_reporting_module/admin/_incident_dashboard_styles.html' %}
+
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Safety &amp; Incidents</li>
+    </ol>
+  </nav>
+
+  <div class="ir-dash-hero text-white p-4 p-md-5 mb-4">
+    <div class="row align-items-center g-3">
+      <div class="col-lg-8">
+        <p class="text-white-50 ir-upper-tight mb-1">Governance</p>
+        <h1 class="h2 fw-semibold mb-0">Safety &amp; incidents</h1>
+      </div>
+      <div class="col-lg-4 text-lg-end d-flex flex-wrap gap-2 justify-content-lg-end">
+        <form method="post" action="{{ url_for('internal_incident_reporting.admin_incident_new_draft') }}" class="d-inline">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-outline-light btn-lg shadow-sm fw-semibold">
+            <i class="bi bi-plus-circle me-1"></i>New incident / IR1
+          </button>
+        </form>
+        <a href="{{ url_for('internal_incident_reporting.admin_browse') }}" class="btn btn-light btn-lg shadow-sm fw-semibold">
+          <i class="bi bi-list-ul me-1"></i>All incidents
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h6 text-secondary text-uppercase small mb-2 px-1" style="letter-spacing:0.04em;">Workload</h2>
+  <div class="row g-3 mb-4">
+    <div class="col-sm-6 col-xl-3">
+      <a class="text-decoration-none text-reset" href="{{ url_for('internal_incident_reporting.admin_browse', status='draft') }}">
+        <div class="card ir-metric-card h-100 border-start border-4 border-primary">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Drafts</div>
+            <div class="display-6 fw-semibold">{{ metrics.draft }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <a class="text-decoration-none text-reset" href="{{ url_for('internal_incident_reporting.admin_browse', status='submitted') }}">
+        <div class="card ir-metric-card h-100 border-start border-4 border-warning">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Submitted</div>
+            <div class="display-6 fw-semibold">{{ metrics.submitted }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <a class="text-decoration-none text-reset" href="{{ url_for('internal_incident_reporting.admin_browse', status='investigation') }}">
+        <div class="card ir-metric-card h-100 border-start border-4 border-info">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">Investigation</div>
+            <div class="display-6 fw-semibold">{{ metrics.investigation }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+      <a class="text-decoration-none text-reset" href="{{ url_for('internal_incident_reporting.admin_browse', review='sla') }}">
+        <div class="card ir-metric-card h-100 border-start border-4 border-danger">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase">SLA breaches</div>
+            <div class="display-6 fw-semibold">{{ metrics.sla_breaches }}</div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <div class="card ir-panel mb-4">
+    <div class="card-header">Quick actions</div>
+    <div class="card-body">
+      <div class="row g-2">
+        <div class="col-6 col-sm-4 col-lg-3">
+          <form method="post" action="{{ url_for('internal_incident_reporting.admin_incident_new_draft') }}" class="h-100">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="ir-quick-tile">
+              <div class="ir-quick-icon bg-success bg-opacity-10 text-success"><i class="bi bi-plus-circle"></i></div>
+              <span>New incident / IR1</span>
+            </button>
+          </form>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_pipeline') }}">
+            <div class="ir-quick-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-kanban"></i></div>
+            <span>IR1 &amp; stages</span>
+          </a>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse') }}">
+            <div class="ir-quick-icon bg-info bg-opacity-10 text-info"><i class="bi bi-list-ul"></i></div>
+            <span>All incidents</span>
+          </a>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse', status='submitted') }}">
+            <div class="ir-quick-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-inbox"></i></div>
+            <span>Submitted queue</span>
+          </a>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse', status='investigation') }}">
+            <div class="ir-quick-icon bg-info bg-opacity-10 text-info"><i class="bi bi-search"></i></div>
+            <span>Investigation</span>
+          </a>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse', status='draft') }}">
+            <div class="ir-quick-icon bg-secondary bg-opacity-10 text-secondary"><i class="bi bi-pencil-square"></i></div>
+            <span>Drafts</span>
+          </a>
+        </div>
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse', review='sla') }}">
+            <div class="ir-quick-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-alarm"></i></div>
+            <span>SLA breaches</span>
+          </a>
+        </div>
+        {% if can_configure_area and incident_show_hse_form %}
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">
+            <div class="ir-quick-icon bg-success bg-opacity-10 text-success"><i class="bi bi-clipboard-check"></i></div>
+            <span>HSE walkarounds</span>
+          </a>
+        </div>
+        {% endif %}
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_analytics') }}">
+            <div class="ir-quick-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-graph-up-arrow"></i></div>
+            <span>Analytics</span>
+          </a>
+        </div>
+        {% if can_export %}
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_export_csv') }}">
+            <div class="ir-quick-icon bg-secondary bg-opacity-10 text-secondary"><i class="bi bi-download"></i></div>
+            <span>Export CSV</span>
+          </a>
+        </div>
+        {% endif %}
+        {% if can_configure_area %}
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_configuration') }}">
+            <div class="ir-quick-icon bg-dark bg-opacity-10 text-dark"><i class="bi bi-sliders"></i></div>
+            <span>Module settings</span>
+          </a>
+        </div>
+        {% endif %}
+        <div class="col-6 col-sm-4 col-lg-3">
+          <a class="ir-quick-tile d-block" href="{{ url_for('internal_incident_reporting.admin_browse', status='closed') }}">
+            <div class="ir-quick-icon bg-success bg-opacity-10 text-success"><i class="bi bi-check2-circle"></i></div>
+            <span>Closed</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-12">
+      <div class="card ir-panel h-100">
+        <div class="card-body">
+          <h2 class="h6 fw-semibold mb-2"><i class="bi bi-graph-up me-1"></i>90d snapshot</h2>
+          <p class="small mb-2"><span class="text-muted">NM/Hazard ratio</span> <strong>{{ metrics.near_miss_ratio if metrics.near_miss_ratio is not none else '—' }}</strong></p>
+          <p class="small mb-3"><span class="text-muted">Good catches (30d)</span> <strong>{{ metrics.good_catches_30d }}</strong> · <span class="text-muted">Closed (30d)</span> <strong>{{ metrics.closed_30d }}</strong></p>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_incident_reporting.admin_analytics') }}">Analytics</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

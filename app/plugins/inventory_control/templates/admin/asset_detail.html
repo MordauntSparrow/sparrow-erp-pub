@@ -80,7 +80,7 @@
   <div class="card shadow-sm mb-3">
     <div class="card-header fw-semibold">Assign to user or contractor</div>
     <div class="card-body">
-      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_assign_holder', asset_id=asset.id) }}" class="row g-2 align-items-end">
+      <form method="post" action="{{ url_for('inventory_control_internal.equipment_asset_assign_holder', asset_id=asset.id) }}" class="row g-2 align-items-end" id="invAssignHolderForm" onsubmit="return invAssignHolderValidate();">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="col-md-3">
           <label class="form-label small">Storeroom / issue location</label>
@@ -91,26 +91,24 @@
             {% endfor %}
           </select>
         </div>
-        <div class="col-md-2">
-          <label class="form-label small">Assignee type</label>
-          <select class="form-select form-select-sm" name="assignee_type" required>
-            <option value="user">User (staff ID)</option>
-            <option value="contractor">Contractor</option>
-          </select>
+        <div class="col-md-5">
+          <label class="form-label small">Assignee</label>
+          <input type="hidden" name="assignee_type" id="invAssigneeType" value="">
+          <input type="hidden" name="assignee_id" id="invAssigneeId" value="">
+          <input type="search" class="form-control form-control-sm mb-1" id="invAssigneeQ" autocomplete="off" placeholder="Search staff or contractor by name (2+ characters)" data-people-search="{{ url_for('inventory_control_internal.api_people_search') }}">
+          <ul class="list-group list-group-flush small border rounded d-none mb-1" id="invAssigneeUl" style="max-height:9rem;overflow:auto;"></ul>
+          <div class="small text-muted" id="invAssigneePicked">— choose someone from search —</div>
+          <button type="button" class="btn btn-link btn-sm p-0 d-none" id="invAssigneeClear">Clear assignee</button>
         </div>
         <div class="col-md-2">
-          <label class="form-label small">Assignee ID</label>
-          <input class="form-control form-control-sm" name="assignee_id" required placeholder="Staff user id or contractor numeric id (tb_contractors.id)">
-        </div>
-        <div class="col-md-3">
           <label class="form-label small">Display label</label>
-          <input class="form-control form-control-sm" name="assignee_label" placeholder="Name shown on reports">
+          <input class="form-control form-control-sm" name="assignee_label" id="invAssigneeLabelInp" placeholder="Optional override">
         </div>
         <div class="col-md-2">
           <button class="btn btn-sm btn-primary" type="submit" {% if asset.status not in ('in_stock',) %}disabled title="Asset must be in stock"{% endif %}>Sign out</button>
         </div>
       </form>
-      <p class="small text-muted mb-0 mt-2">For clinicians or contractors carrying kit (e.g. AED). Use the same ID convention as elsewhere in inventory.</p>
+      <p class="small text-muted mb-0 mt-2">For clinicians or contractors carrying kit (e.g. AED). Search picks the correct staff user or contractor record — no raw IDs.</p>
     </div>
   </div>
 
@@ -584,5 +582,73 @@
       </tbody>
     </table>
   </div>
+<script>
+function invAssignHolderValidate() {
+  var id = (document.getElementById("invAssigneeId") && document.getElementById("invAssigneeId").value) || "";
+  var typ = (document.getElementById("invAssigneeType") && document.getElementById("invAssigneeType").value) || "";
+  if (!String(id).trim() || !String(typ).trim()) {
+    alert("Choose an assignee using the search field.");
+    return false;
+  }
+  return true;
+}
+(function () {
+  var qinp = document.getElementById("invAssigneeQ");
+  var ul = document.getElementById("invAssigneeUl");
+  var hidT = document.getElementById("invAssigneeType");
+  var hidI = document.getElementById("invAssigneeId");
+  var picked = document.getElementById("invAssigneePicked");
+  var clr = document.getElementById("invAssigneeClear");
+  var labInp = document.getElementById("invAssigneeLabelInp");
+  if (!qinp || !ul || !hidT || !hidI || !qinp.dataset.peopleSearch) return;
+  var t;
+  function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+  function clearPick() {
+    hidT.value = "";
+    hidI.value = "";
+    if (picked) picked.textContent = "— choose someone from search —";
+    if (clr) clr.classList.add("d-none");
+    if (labInp) labInp.value = "";
+    qinp.value = "";
+  }
+  qinp.addEventListener("input", function () {
+    clearTimeout(t);
+    var q = (qinp.value || "").trim();
+    if (q.length < 2) { hide(); return; }
+    t = setTimeout(function () {
+      var url = qinp.dataset.peopleSearch + "?q=" + encodeURIComponent(q) + "&limit=25";
+      fetch(url, { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var rows = (data && data.people) ? data.people : [];
+          ul.innerHTML = "";
+          if (!rows.length) { hide(); return; }
+          rows.forEach(function (row) {
+            if (row.type !== "user" && row.type !== "contractor") return;
+            var li = document.createElement("li");
+            li.className = "list-group-item list-group-item-action py-1";
+            li.textContent = row.label + " (" + row.type + ")";
+            li.addEventListener("click", function () {
+              hidT.value = row.type;
+              hidI.value = String(row.id);
+              if (picked) picked.textContent = row.label + " · " + row.type;
+              if (labInp && !(labInp.value || "").trim()) labInp.value = row.label || "";
+              if (clr) clr.classList.remove("d-none");
+              qinp.value = "";
+              hide();
+            });
+            ul.appendChild(li);
+          });
+          ul.classList.remove("d-none");
+        })
+        .catch(function () { hide(); });
+    }, 250);
+  });
+  if (clr) clr.addEventListener("click", function (e) { e.preventDefault(); clearPick(); });
+  document.addEventListener("click", function (e) {
+    if (!ul.contains(e.target) && e.target !== qinp) hide();
+  });
+})();
+</script>
 </div>
 {% endblock %}

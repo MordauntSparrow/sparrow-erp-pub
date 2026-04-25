@@ -1,0 +1,115 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Safeguarding manager — Sparrow{% endblock %}
+
+{% block content %}
+<div class="mr-page-header mb-3">
+  <h1 class="h3 mb-1">Safeguarding manager</h1>
+  <p class="text-muted mb-0 small">Referrals from the Cura ePCR safeguarding form are listed below. <strong>Category</strong> shows whether the concern relates to an adult or a child. <strong>Abuse / concern</strong> lists the types of concern ticked on the form. <strong>Urgency</strong> matches how urgent the form says follow-up should be (red, amber, or green, like on the form). <strong>Status</strong> shows where the referral is in Sparrow (for example draft or submitted). <strong>EPCR</strong> offers a shortcut to open the linked patient case when a case was attached. Use <strong>Actions</strong> to view the full record or add oversight notes.</p>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body py-3">
+    <form method="get" action="{{ url_for('medical_records_internal.safeguarding_manager_home') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small mb-0" for="sg_status">Status</label>
+        <select class="form-select form-select-sm" id="sg_status" name="status">
+          <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+          <option value="draft" {% if filters.status == 'draft' %}selected{% endif %}>Draft</option>
+          <option value="submitted" {% if filters.status == 'submitted' %}selected{% endif %}>Submitted</option>
+          <option value="closed" {% if filters.status == 'closed' %}selected{% endif %}>Closed</option>
+          <option value="archived" {% if filters.status == 'archived' %}selected{% endif %}>Archived</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small mb-0" for="sg_ev">Operational event</label>
+        <select class="form-select form-select-sm" id="sg_ev" name="operational_event_id">
+          <option value="">Any</option>
+          {% for ev in operational_events %}
+          <option value="{{ ev.id }}" {% if filters.operational_event_id == ev.id|string %}selected{% endif %}>{{ ev.name }} (#{{ ev.id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small mb-0" for="sg_q">Search</label>
+        <input class="form-control form-control-sm" id="sg_q" name="q" value="{{ filters.q }}" placeholder="Username, public id, local id, numeric id…">
+      </div>
+      <div class="col-md-2 text-md-end">
+        <button type="submit" class="btn btn-primary btn-sm w-100">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="table-responsive mr-table-wrap mr-table-wrap--sentence-head">
+  <table class="table table-sm table-hover align-middle mb-0">
+    <thead class="table-light">
+      <tr>
+        <th scope="col" class="text-muted small">Time since raised</th>
+        <th scope="col">Urgency</th>
+        <th scope="col" class="text-muted small">Ref</th>
+        <th scope="col">EPCR</th>
+        <th scope="col">Category</th>
+        <th scope="col">Abuse / concern</th>
+        <th scope="col">Status</th>
+        <th scope="col">Event</th>
+        <th scope="col">Created by</th>
+        <th scope="col">Summary</th>
+        <th scope="col" class="text-muted small">Updated</th>
+        <th scope="col" class="text-muted small">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in referrals %}
+      <tr>
+        <td class="small text-nowrap">
+          <span class="fw-semibold">{{ r.raised_ago }}</span>
+          <div class="text-muted" style="font-size:0.75rem;" title="Raised at">{{ r.created_at_display }}</div>
+        </td>
+        <td class="small text-nowrap">
+          <span class="{{ r.urgency_badge_class }}"{% if r.urgency_title %} title="{{ r.urgency_title|e }}"{% endif %}>{{ r.urgency_label }}</span>
+        </td>
+        <td class="small">
+          <a href="{{ url_for('medical_records_internal.safeguarding_manager_referral', referral_id=r.id) }}" class="fw-medium">{{ r.id }}</a>
+          {% if r.public_id|length > 12 %}
+          <div class="text-muted font-monospace text-lowercase" style="font-size:0.75rem;">{{ (r.public_id|lower)[:12] }}…</div>
+          {% elif r.public_id %}
+          <div class="text-muted font-monospace text-lowercase" style="font-size:0.75rem;">{{ r.public_id|lower }}</div>
+          {% endif %}
+        </td>
+        <td class="small">
+          {% if r.case_id_hint %}
+          <a href="{{ url_for('medical_records_internal.view_epcr_case', case_id=r.case_id_hint) }}">{{ r.case_id_hint }}</a>
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="small">{{ r.category_label }}</td>
+        <td class="small text-body"{% if r.abuse_concerns_title %} title="{{ r.abuse_concerns_title|e }}"{% endif %}>{{ r.abuse_concerns_display }}</td>
+        <td><span class="badge bg-light text-dark border">{{ r.status_label }}</span></td>
+        <td class="small">
+          {% if r.operational_event_id %}
+          {{ r.event_name or '—' }} <span class="text-muted">(#{{ r.operational_event_id }})</span>
+          {% else %}
+          <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td class="small">{{ r.created_by_display }}</td>
+        <td class="small text-body">{{ r.summary_display }}</td>
+        <td class="small text-muted text-nowrap">{{ r.updated_at_display }}</td>
+        <td class="small text-nowrap">
+          {% set ref_detail = url_for('medical_records_internal.safeguarding_manager_referral', referral_id=r.id) %}
+          <div class="btn-group btn-group-sm" role="group" aria-label="Actions for referral {{ r.id }}">
+            <a href="{{ ref_detail }}" class="btn btn-outline-secondary">View</a>
+            <a href="{{ ref_detail }}#section-safeguard-manage" class="btn btn-primary">Manage</a>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="12" class="text-muted py-4 text-center">No referrals match these filters.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -230,10 +230,10 @@ def admin_create_prehire_request(
     description: Optional[str],
     request_type: str,
     required_by_date: Optional[date] = None,
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, Optional[int]]:
     title = (title or "").strip()
     if not title:
-        return False, "Title required"
+        return False, "Title required", None
     rt = (request_type or "other").strip().lower()
     if rt not in PREHIRE_REQUEST_TYPES:
         rt = "other"
@@ -243,6 +243,7 @@ def admin_create_prehire_request(
             False,
             "That document type is not enabled for your organisation's industry profile. "
             "Choose another type or use “Other” with a clear title.",
+            None,
         )
     conn = get_db_connection()
     cur = conn.cursor()
@@ -253,10 +254,10 @@ def admin_create_prehire_request(
         )
         ar = cur.fetchone()
         if not ar:
-            return False, "Application not found"
+            return False, "Application not found", None
         cid = ar[1] if isinstance(ar, (list, tuple)) else ar.get("contractor_id")
         if cid:
-            return False, "Application already hired — use HR for further documents"
+            return False, "Application already hired — use HR for further documents", None
         cur.execute(
             """
             INSERT INTO rec_prehire_document_requests
@@ -265,11 +266,12 @@ def admin_create_prehire_request(
             """,
             (application_id, title, (description or "")[:65535] or None, rt, required_by_date),
         )
+        new_id = int(cur.lastrowid) if cur.lastrowid else None
         conn.commit()
-        return True, "ok"
+        return True, "ok", new_id
     except Exception as e:
         conn.rollback()
-        return False, str(e)
+        return False, str(e), None
     finally:
         cur.close()
         conn.close()
@@ -784,12 +786,19 @@ def _copy_prehire_and_cv_to_hr(
         pc = (app_row.get("postcode") or "").strip() or None
         ecn = (app_row.get("emergency_contact_name") or "").strip() or None
         ecp = (app_row.get("emergency_contact_phone") or "").strip() or None
+        et = (app_row.get("hire_employment_type") or "").strip().lower()
+        contract_type: Optional[str] = None
+        if et == "paye":
+            contract_type = "PAYE"
+        elif et == "self_employed":
+            contract_type = "Self-employed"
         cur.execute(
             """
             INSERT INTO hr_staff_details (
               contractor_id, phone, address_line1, address_line2, postcode,
-              emergency_contact_name, emergency_contact_phone, date_of_birth
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+              emergency_contact_name, emergency_contact_phone, date_of_birth,
+              contract_type
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
               phone = COALESCE(VALUES(phone), hr_staff_details.phone),
               address_line1 = COALESCE(VALUES(address_line1), hr_staff_details.address_line1),
@@ -801,9 +810,10 @@ def _copy_prehire_and_cv_to_hr(
               emergency_contact_phone = COALESCE(
                 VALUES(emergency_contact_phone), hr_staff_details.emergency_contact_phone
               ),
-              date_of_birth = COALESCE(VALUES(date_of_birth), hr_staff_details.date_of_birth)
+              date_of_birth = COALESCE(VALUES(date_of_birth), hr_staff_details.date_of_birth),
+              contract_type = COALESCE(VALUES(contract_type), hr_staff_details.contract_type)
             """,
-            (contractor_id, phone, a1, a2, pc, ecn, ecp, dob),
+            (contractor_id, phone, a1, a2, pc, ecn, ecp, dob, contract_type),
         )
         for col, path in staff_updates.items():
             cur.execute(
@@ -1125,6 +1135,101 @@ def builder_rows_from_post(form) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def parse_optional_positive_int(raw: Any) -> Optional[int]:
+    """Positive int for DB caps, or None = unlimited / not set."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        v = int(s)
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def opening_blocks_new_applications(opening: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    True when this opening should not accept further applications on the public site.
+    Expects ``application_count`` and ``hired_count`` on ``opening`` (see public listing/detail queries).
+    """
+    max_a = parse_optional_positive_int(opening.get("max_applicants"))
+    slots = parse_optional_positive_int(opening.get("positions_to_fill"))
+    try:
+        ac = int(opening.get("application_count") or 0)
+    except (TypeError, ValueError):
+        ac = 0
+    try:
+        hc = int(opening.get("hired_count") or 0)
+    except (TypeError, ValueError):
+        hc = 0
+    if max_a is not None and ac >= max_a:
+        return True, "This vacancy has reached its maximum number of applications."
+    if slots is not None and hc >= slots:
+        return True, "All advertised positions for this vacancy have been filled."
+    return False, ""
+
+
+def annotate_vacancies_capacity(rows: Optional[List[Dict[str, Any]]]) -> None:
+    """Set ``capacity_at_limit`` on each row (expects counts + caps from list query)."""
+    if not rows:
+        return
+    for row in rows:
+        row["capacity_at_limit"] = opening_blocks_new_applications(row)[0]
+
+
+def _attach_listing_pay_display_one(row: Dict[str, Any], cur) -> None:
+    """Sets ``listing_pay_display`` for public vacancy list/detail (plain text)."""
+    mode = (row.get("listing_pay_mode") or "none").strip().lower()
+    row["listing_pay_display"] = None
+    if mode == "none" or not mode:
+        return
+    if mode == "custom":
+        t = (row.get("listing_pay_custom_text") or "").strip()
+        row["listing_pay_display"] = t or None
+        return
+    if mode != "wage_card":
+        return
+    cid: Optional[int] = _parse_optional_int(row.get("listing_pay_wage_card_id"))
+    if cid is None:
+        cid = _parse_optional_int(row.get("job_role_default_wage_rate_card_id"))
+    tb_rid = _parse_optional_int(row.get("job_role_time_billing_role_id"))
+    if cid is None and tb_rid:
+        try:
+            cur.execute(
+                """
+                SELECT id FROM wage_rate_cards
+                WHERE role_id = %s AND active = 1
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (tb_rid,),
+            )
+            w0 = cur.fetchone()
+            if w0 and w0.get("id") is not None:
+                cid = int(w0["id"])
+        except Exception:
+            pass
+    if not cid:
+        return
+    try:
+        cur.execute(
+            "SELECT name FROM wage_rate_cards WHERE id = %s LIMIT 1", (cid,)
+        )
+        w = cur.fetchone()
+        if w:
+            nm = (w.get("name") or "").strip()
+            row["listing_pay_display"] = nm or None
+    except Exception:
+        row["listing_pay_display"] = None
+
+
+def _attach_listing_pay_display_rows(rows: List[Dict[str, Any]], cur) -> None:
+    for row in rows:
+        _attach_listing_pay_display_one(row, cur)
+
+
 def list_open_vacancies(limit: int = 200) -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
@@ -1132,7 +1237,14 @@ def list_open_vacancies(limit: int = 200) -> List[Dict[str, Any]]:
         cur.execute(
             """
             SELECT o.id, o.title, o.slug, o.summary, o.published_at, o.closes_at,
-                   r.title AS role_title, r.slug AS role_slug
+                   o.max_applicants, o.positions_to_fill,
+                   o.listing_pay_mode, o.listing_pay_wage_card_id, o.listing_pay_custom_text,
+                   r.title AS role_title, r.slug AS role_slug,
+                   r.default_wage_rate_card_id AS job_role_default_wage_rate_card_id,
+                   r.time_billing_role_id AS job_role_time_billing_role_id,
+                   (SELECT COUNT(*) FROM rec_applications a WHERE a.opening_id = o.id) AS application_count,
+                   (SELECT COUNT(*) FROM rec_applications a
+                     WHERE a.opening_id = o.id AND a.stage = 'hired') AS hired_count
             FROM rec_openings o
             JOIN rec_job_roles r ON r.id = o.job_role_id
             WHERE o.status = 'open' AND r.active = 1
@@ -1141,7 +1253,13 @@ def list_open_vacancies(limit: int = 200) -> List[Dict[str, Any]]:
             """,
             (limit,),
         )
-        return cur.fetchall() or []
+        rows = cur.fetchall() or []
+        try:
+            _attach_listing_pay_display_rows(rows, cur)
+        except Exception:
+            for r in rows:
+                r.setdefault("listing_pay_display", None)
+        return rows
     finally:
         cur.close()
         conn.close()
@@ -1156,7 +1274,12 @@ def get_opening_public_by_slug(slug: str) -> Optional[Dict[str, Any]]:
     try:
         cur.execute(
             """
-            SELECT o.*, r.title AS role_title, r.slug AS role_slug, r.description AS role_description
+            SELECT o.*, r.title AS role_title, r.slug AS role_slug, r.description AS role_description,
+                   r.default_wage_rate_card_id AS job_role_default_wage_rate_card_id,
+                   r.time_billing_role_id AS job_role_time_billing_role_id,
+                   (SELECT COUNT(*) FROM rec_applications a WHERE a.opening_id = o.id) AS application_count,
+                   (SELECT COUNT(*) FROM rec_applications a
+                     WHERE a.opening_id = o.id AND a.stage = 'hired') AS hired_count
             FROM rec_openings o
             JOIN rec_job_roles r ON r.id = o.job_role_id
             WHERE o.slug = %s AND o.status = 'open' AND r.active = 1
@@ -1164,7 +1287,13 @@ def get_opening_public_by_slug(slug: str) -> Optional[Dict[str, Any]]:
             """,
             (slug,),
         )
-        return cur.fetchone()
+        row = cur.fetchone()
+        if row:
+            try:
+                _attach_listing_pay_display_one(row, cur)
+            except Exception:
+                row.setdefault("listing_pay_display", None)
+        return row
     finally:
         cur.close()
         conn.close()
@@ -1351,35 +1480,51 @@ def create_application(
     app_id: Optional[int] = None
     err: Optional[str] = None
     try:
-        cur.execute(
-            "SELECT id, status FROM rec_openings WHERE id = %s LIMIT 1",
-            (opening_id,),
-        )
+        cur.execute("SELECT * FROM rec_openings WHERE id = %s LIMIT 1", (opening_id,))
         op = cur.fetchone()
         if not op or op.get("status") != "open":
             err = "This vacancy is not open for applications"
         else:
             cur.execute(
-                """
-                SELECT id FROM rec_applications
-                WHERE opening_id = %s AND applicant_id = %s LIMIT 1
-                """,
-                (opening_id, applicant_id),
+                "SELECT COUNT(*) AS c FROM rec_applications WHERE opening_id = %s",
+                (opening_id,),
             )
-            if cur.fetchone():
-                err = "You have already applied for this role"
+            row_ac = cur.fetchone() or {}
+            op["application_count"] = int(row_ac.get("c") or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c FROM rec_applications
+                WHERE opening_id = %s AND stage = 'hired'
+                """,
+                (opening_id,),
+            )
+            row_h = cur.fetchone() or {}
+            op["hired_count"] = int(row_h.get("c") or 0)
+            blocked, cap_msg = opening_blocks_new_applications(op)
+            if blocked:
+                err = cap_msg
             else:
-                cur2 = conn.cursor()
-                cur2.execute(
+                cur.execute(
                     """
-                    INSERT INTO rec_applications (opening_id, applicant_id, stage, status, cover_note, cv_path)
-                    VALUES (%s, %s, 'applied', 'active', %s, %s)
+                    SELECT id FROM rec_applications
+                    WHERE opening_id = %s AND applicant_id = %s LIMIT 1
                     """,
-                    (opening_id, applicant_id, cover_note or None, cv_path),
+                    (opening_id, applicant_id),
                 )
-                app_id = cur2.lastrowid
-                conn.commit()
-                cur2.close()
+                if cur.fetchone():
+                    err = "You have already applied for this role"
+                else:
+                    cur2 = conn.cursor()
+                    cur2.execute(
+                        """
+                        INSERT INTO rec_applications (opening_id, applicant_id, stage, status, cover_note, cv_path)
+                        VALUES (%s, %s, 'applied', 'active', %s, %s)
+                        """,
+                        (opening_id, applicant_id, cover_note or None, cv_path),
+                    )
+                    app_id = cur2.lastrowid
+                    conn.commit()
+                    cur2.close()
     except Exception as e:
         conn.rollback()
         err = str(e)
@@ -1937,6 +2082,157 @@ def time_billing_roles_for_select() -> List[Dict[str, Any]]:
         conn.close()
 
 
+def _next_free_rec_role_slug(cur, title: str, tb_role_id: int) -> str:
+    """Unique slug for rec_job_roles.slug (max 191)."""
+    base = (_slugify(title) or "role")[:160]
+    candidates = [base, f"{base}-tb-{tb_role_id}"]
+    for n in range(2, 40):
+        candidates.append(f"{base}-{tb_role_id}-{n}")
+    for cand in candidates:
+        s = cand[:191]
+        cur.execute("SELECT id FROM rec_job_roles WHERE slug = %s LIMIT 1", (s,))
+        if not cur.fetchone():
+            return s
+    return f"role-tb-{tb_role_id}"[:191]
+
+
+def sync_rec_job_roles_from_time_billing_roles(
+    conn=None,
+) -> Tuple[bool, str, Dict[str, int]]:
+    """
+    Mirror each active Time Billing ``roles`` row into ``rec_job_roles``:
+    - If a recruitment role already links that ``time_billing_role_id``, skip.
+    - Else if an unlinked recruitment role has the same title (case-insensitive), set the link
+      (and default wage card when missing).
+    - Else insert a new recruitment role titled like the TB role, linked to TB.
+
+    When ``conn`` is omitted, opens its own connection and commits on success.
+    When ``conn`` is passed (e.g. module install), the caller must commit.
+    """
+    import mysql.connector
+
+    own_conn = conn is None
+    if own_conn:
+        conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    stats = {"updated": 0, "inserted": 0, "already_linked": 0}
+    try:
+        cur.execute("SHOW TABLES LIKE 'roles'")
+        if not cur.fetchone():
+            return True, "No roles table.", stats
+        cur.execute("SHOW TABLES LIKE 'rec_job_roles'")
+        if not cur.fetchone():
+            return True, "No rec_job_roles table.", stats
+        try:
+            cur.execute(
+                """
+                SELECT id, name FROM roles
+                WHERE active = 1
+                ORDER BY name ASC, id ASC
+                """
+            )
+        except mysql.connector.Error as e:
+            if getattr(e, "errno", None) != 1054:
+                raise
+            cur.execute(
+                "SELECT id, name FROM roles ORDER BY name ASC, id ASC"
+            )
+        tb_rows = cur.fetchall() or []
+        wage_table_ok = True
+        cur.execute("SHOW TABLES LIKE 'wage_rate_cards'")
+        if not cur.fetchone():
+            wage_table_ok = False
+
+        for tr in tb_rows:
+            tb_id = int(tr["id"])
+            name = (tr.get("name") or "").strip() or "Role"
+            cur.execute(
+                "SELECT id FROM rec_job_roles WHERE time_billing_role_id = %s LIMIT 1",
+                (tb_id,),
+            )
+            if cur.fetchone():
+                stats["already_linked"] += 1
+                continue
+
+            cur.execute(
+                """
+                SELECT id, default_wage_rate_card_id FROM rec_job_roles
+                WHERE (time_billing_role_id IS NULL OR time_billing_role_id = 0)
+                  AND LOWER(TRIM(title)) = LOWER(TRIM(%s))
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (name,),
+            )
+            match = cur.fetchone()
+            wage_id: Optional[int] = None
+            if wage_table_ok:
+                try:
+                    cur.execute(
+                        """
+                        SELECT id FROM wage_rate_cards
+                        WHERE role_id = %s AND active = 1
+                        ORDER BY id ASC
+                        LIMIT 1
+                        """,
+                        (tb_id,),
+                    )
+                    wc = cur.fetchone()
+                    if wc and wc.get("id") is not None:
+                        wage_id = int(wc["id"])
+                except mysql.connector.Error:
+                    wage_table_ok = False
+
+            if match:
+                mid = int(match["id"])
+                cur.execute(
+                    """
+                    UPDATE rec_job_roles
+                    SET time_billing_role_id = %s,
+                        default_wage_rate_card_id = IFNULL(default_wage_rate_card_id, %s)
+                    WHERE id = %s
+                    """,
+                    (tb_id, wage_id, mid),
+                )
+                stats["updated"] += 1
+                continue
+
+            slug = _next_free_rec_role_slug(cur, name, tb_id)
+            cur.execute(
+                """
+                INSERT INTO rec_job_roles (
+                  title, slug, description, department, active,
+                  time_billing_role_id, default_wage_rate_card_id
+                )
+                VALUES (%s, %s, %s, NULL, 1, %s, %s)
+                """,
+                (
+                    name[:255],
+                    slug,
+                    "Synced from Time Billing staff roles.",
+                    tb_id,
+                    wage_id,
+                ),
+            )
+            stats["inserted"] += 1
+
+        if own_conn:
+            conn.commit()
+        return True, "ok", stats
+    except Exception as e:
+        if own_conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.warning("sync_rec_job_roles_from_time_billing_roles: %s", e)
+        return False, str(e), stats
+    finally:
+        cur.close()
+        if own_conn:
+            conn.close()
+
+
 def time_billing_wage_cards_for_select() -> List[Dict[str, Any]]:
     """Wage rate cards for linking to recruitment job roles (filter by role in UI)."""
     conn = get_db_connection()
@@ -2346,7 +2642,9 @@ def admin_list_openings_dashboard(
                 INNER JOIN rec_applications a ON a.id = t.application_id
                 WHERE a.opening_id = o.id AND t.status = 'pending'
                   AND t.assigned_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
-              ) AS overdue_tasks_count
+              ) AS overdue_tasks_count,
+              (SELECT COUNT(*) FROM rec_applications a
+                WHERE a.opening_id = o.id AND a.stage = 'hired') AS hired_count
             FROM rec_openings o
             JOIN rec_job_roles r ON r.id = o.job_role_id
             WHERE {" AND ".join(where)}
@@ -2355,7 +2653,10 @@ def admin_list_openings_dashboard(
               o.updated_at DESC
         """
         cur.execute(sql, tuple(params))
-        return cur.fetchall() or []
+        rows = cur.fetchall() or []
+        for r in rows:
+            r["capacity_at_limit"] = opening_blocks_new_applications(r)[0]
+        return rows
     finally:
         cur.close()
         conn.close()
@@ -2367,7 +2668,9 @@ def admin_get_opening(opening_id: int) -> Optional[Dict[str, Any]]:
     try:
         cur.execute(
             """
-            SELECT o.*, r.title AS role_title
+            SELECT o.*, r.title AS role_title,
+                   r.time_billing_role_id AS job_role_time_billing_role_id,
+                   r.default_wage_rate_card_id AS job_role_default_wage_rate_card_id
             FROM rec_openings o
             JOIN rec_job_roles r ON r.id = o.job_role_id
             WHERE o.id = %s
@@ -2380,6 +2683,35 @@ def admin_get_opening(opening_id: int) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
+def _validate_listing_wage_card_for_job_role(
+    cur, job_role_id: int, wage_card_id: Optional[int]
+) -> bool:
+    if not wage_card_id:
+        return True
+    cur.execute(
+        "SELECT time_billing_role_id FROM rec_job_roles WHERE id = %s LIMIT 1",
+        (int(job_role_id),),
+    )
+    jr = cur.fetchone()
+    if not jr:
+        return False
+    if isinstance(jr, dict):
+        tb_rid = jr.get("time_billing_role_id")
+    else:
+        tb_rid = jr[0]
+    if not tb_rid:
+        return False
+    cur.execute(
+        """
+        SELECT id FROM wage_rate_cards
+        WHERE id = %s AND (role_id IS NULL OR role_id = %s)
+        LIMIT 1
+        """,
+        (int(wage_card_id), int(tb_rid)),
+    )
+    return cur.fetchone() is not None
+
+
 def admin_save_opening(
     opening_id: Optional[int],
     job_role_id: int,
@@ -2390,6 +2722,12 @@ def admin_save_opening(
     status: str,
     published_at: Optional[str],
     closes_at: Optional[str],
+    max_applicants: Optional[int] = None,
+    positions_to_fill: Optional[int] = None,
+    listing_pay_mode: Optional[str] = None,
+    listing_pay_wage_card_id: Optional[int] = None,
+    listing_pay_custom_text: Optional[str] = None,
+    hire_employment_type: Optional[str] = None,
 ) -> Tuple[bool, str, Optional[int]]:
     title = (title or "").strip()
     if not title:
@@ -2398,15 +2736,37 @@ def admin_save_opening(
     if status not in ("draft", "open", "closed"):
         status = "draft"
     slug = (slug or "").strip() or _slugify(title)
+    mode = (listing_pay_mode or "none").strip().lower()
+    if mode not in ("none", "wage_card", "custom"):
+        mode = "none"
+    custom_txt = (listing_pay_custom_text or "").strip() or None
+    if mode == "custom" and not custom_txt:
+        return False, "Enter custom pay text, or choose another pay display option.", None
+    card_id = _parse_optional_int(listing_pay_wage_card_id)
+    if mode != "wage_card":
+        card_id = None
+    et = (hire_employment_type or "").strip().lower()
+    if et not in ("", "paye", "self_employed"):
+        et = ""
+    et_store = et or None
     conn = get_db_connection()
     cur = conn.cursor()
     try:
+        if card_id and not _validate_listing_wage_card_for_job_role(cur, job_role_id, card_id):
+            return (
+                False,
+                "Advertised wage card must belong to this vacancy’s Time Billing role (set on Job roles).",
+                None,
+            )
         if opening_id:
             cur.execute(
                 """
                 UPDATE rec_openings
                 SET job_role_id=%s, title=%s, slug=%s, summary=%s, description=%s,
-                    status=%s, published_at=%s, closes_at=%s
+                    status=%s, published_at=%s, closes_at=%s,
+                    max_applicants=%s, positions_to_fill=%s,
+                    listing_pay_mode=%s, listing_pay_wage_card_id=%s, listing_pay_custom_text=%s,
+                    hire_employment_type=%s
                 WHERE id=%s
                 """,
                 (
@@ -2418,6 +2778,12 @@ def admin_save_opening(
                     status,
                     published_at or None,
                     closes_at or None,
+                    max_applicants,
+                    positions_to_fill,
+                    mode,
+                    card_id,
+                    custom_txt,
+                    et_store,
                     opening_id,
                 ),
             )
@@ -2426,8 +2792,10 @@ def admin_save_opening(
         cur.execute(
             """
             INSERT INTO rec_openings (
-              job_role_id, title, slug, summary, description, status, published_at, closes_at
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+              job_role_id, title, slug, summary, description, status, published_at, closes_at,
+              max_applicants, positions_to_fill,
+              listing_pay_mode, listing_pay_wage_card_id, listing_pay_custom_text, hire_employment_type
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
             (
                 job_role_id,
@@ -2438,6 +2806,12 @@ def admin_save_opening(
                 status,
                 published_at or None,
                 closes_at or None,
+                max_applicants,
+                positions_to_fill,
+                mode,
+                card_id,
+                custom_txt,
+                et_store,
             ),
         )
         oid = cur.lastrowid
@@ -2670,6 +3044,7 @@ def admin_get_application(application_id: int) -> Optional[Dict[str, Any]]:
                 SELECT a.*, ap.email, ap.name, ap.phone,
                        o.title AS opening_title, o.slug AS opening_slug,
                        o.job_role_id AS rec_opening_job_role_id,
+                       o.hire_employment_type AS hire_employment_type,
                        jr.title AS rec_job_role_title,
                        jr.time_billing_role_id AS job_role_time_billing_role_id,
                        jr.default_wage_rate_card_id AS job_role_default_wage_rate_card_id,
@@ -2689,7 +3064,8 @@ def admin_get_application(application_id: int) -> Optional[Dict[str, Any]]:
             cur = conn.cursor(dictionary=True)
             cur.execute(
                 """
-                SELECT a.*, ap.email, ap.name, ap.phone, o.title AS opening_title, o.slug AS opening_slug
+                SELECT a.*, ap.email, ap.name, ap.phone, o.title AS opening_title, o.slug AS opening_slug,
+                       o.hire_employment_type AS hire_employment_type
                 FROM rec_applications a
                 JOIN rec_applicants ap ON ap.id = a.applicant_id
                 JOIN rec_openings o ON o.id = a.opening_id
@@ -2703,6 +3079,7 @@ def admin_get_application(application_id: int) -> Optional[Dict[str, Any]]:
             row.setdefault("job_role_time_billing_role_id", None)
             row.setdefault("job_role_default_wage_rate_card_id", None)
             row.setdefault("job_role_tb_role_name", None)
+            row.setdefault("hire_employment_type", None)
         return row
     finally:
         if cur:
@@ -2847,6 +3224,17 @@ def hire_application_as_contractor(
             (email, name, pwd_hash, role_id, wage_card_id, initials),
         )
         cid = cur2.lastrowid
+        hire_et = (app.get("hire_employment_type") or "").strip().lower()
+        if hire_et not in ("paye", "self_employed"):
+            hire_et = "self_employed"
+        try:
+            cur2.execute(
+                "UPDATE tb_contractors SET employment_type = %s WHERE id = %s",
+                (hire_et, cid),
+            )
+        except Exception as ex:
+            if getattr(ex, "errno", None) != 1054 and "1054" not in str(ex):
+                raise
         cur2.execute(
             """
             INSERT IGNORE INTO tb_contractor_roles (contractor_id, role_id)

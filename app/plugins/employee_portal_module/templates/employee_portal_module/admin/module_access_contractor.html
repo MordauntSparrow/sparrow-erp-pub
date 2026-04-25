@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Portal modules – {{ contractor.name or contractor.email }} – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_index') }}">Employee Portal</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Portal modules (person)</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Portal modules for one person</h1>
+  <p class="mb-1"><strong>{{ contractor.name or contractor.email }}</strong> · {{ contractor.email }}</p>
+  <p class="text-muted small">Job role: {{ contractor.role_name or '—' }} (id {{ contractor.role_id or '—' }})</p>
+  <p class="text-muted mb-4">Per-person list is combined with the <strong>role</strong> list using intersection. Leave this off to follow the role only.</p>
+
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_module_access_contractor_save', cid=contractor.id) }}" class="card card-body mb-4" style="max-width: 720px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="apply_restriction" value="1" id="apply_restriction" {% if restrict %}checked{% endif %}>
+      <label class="form-check-label" for="apply_restriction"><strong>Limit modules for this person</strong></label>
+      <p class="small text-muted mb-0">Untick and save to remove only the per-person rule.</p>
+    </div>
+    <fieldset class="mb-3">
+      <legend class="h6">Tiles</legend>
+      <div class="row row-cols-1 row-cols-md-2 g-2">
+        {% for key, label in choices %}
+        <div class="col">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="module_key" value="{{ key }}" id="ck-{{ loop.index0 }}"
+              {% if key in selected %}checked{% endif %}>
+            <label class="form-check-label" for="ck-{{ loop.index0 }}">{{ label }}</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{{ url_for('internal_employee_portal.admin_contractor_portal', cid=contractor.id) }}" class="btn btn-outline-secondary">Portal preview</a>
+      <a href="{{ url_for('internal_employee_portal.admin_contractors') }}?q={{ (contractor.email or '')|urlencode }}" class="btn btn-outline-secondary">Back to search</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -46,7 +46,7 @@
             {% if o.amount is not none %}<div class="mt-1 font-monospace">£{{ o.amount }}</div>{% endif %}
             <div class="mt-2 d-flex flex-wrap gap-1">
               <a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ url_for('crm_module.opportunity_edit', opp_id=o.id) }}">Open</a>
-              <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_new', opportunity_id=o.id) }}">Quote</a>
+              <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.quote_new') }}?opportunity_id={{ o.id }}&amp;flow=1">Quote</a>
             </div>
           </div>
         </div>

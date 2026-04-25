@@ -2,7 +2,7 @@
   "system_name": "crm_module",
   "name": "CRM",
   "description": "CRM, quotes (rules, conditions, revisions), activities, medical event plans and branded PDFs.",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "icon": "icon.png",
   "settings": {},
   "enabled": true,
@@ -20,6 +20,16 @@
       "description": "Create, update, and delete CRM records, quotes, and quote rule sets."
     }
   ],
+  "accounting_integration_consumer": {
+    "summary": "When core invoice automation is enabled, CRM can create draft invoices in the connected accounting provider (e.g. accepted quotes).",
+    "provider_ids": ["xero", "freeagent", "quickbooks", "sage", "freshbooks"],
+    "permission_ids": ["crm_module.edit"],
+    "options": [
+      {"label": "Default accounting provider (core)", "integration_setting": "default_provider"},
+      {"label": "Automatically create draft invoice", "integration_setting": "auto_draft_invoice"},
+      {"label": "Draft trigger", "integration_setting": "auto_draft_trigger"}
+    ]
+  },
   "dependencies": ["website_module"],
   "repository": "official",
   "download_url": "",

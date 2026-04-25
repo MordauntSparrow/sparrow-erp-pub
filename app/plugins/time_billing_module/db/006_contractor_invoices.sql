@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS contractor_invoices (
   timesheet_week_id BIGINT NOT NULL,
   invoice_number VARCHAR(64) NOT NULL,
   total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-  status ENUM('draft','sent','void') NOT NULL DEFAULT 'draft',
+  status ENUM('current','paid','void') NOT NULL DEFAULT 'current',
   sent_at DATETIME DEFAULT NULL,
   voided_at DATETIME DEFAULT NULL,
   void_reason VARCHAR(255) DEFAULT NULL,

@@ -1,0 +1,232 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}MI custom forms — Cura ops{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Event manager</a></li>
+    <li class="breadcrumb-item active" aria-current="page">MI custom forms</li>
+  </ol>
+</nav>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h1 class="h4 mb-1">Minor injury — custom forms</h1>
+    <p class="text-muted small mb-0">Build add-on questions with the form below (shown in Cura per MI event). Types: short text, long text, number (optional min/max), or single-choice list. Assign templates from each operational period’s Minor injury row.</p>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Back to event manager</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header">New form template</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('medical_records_internal.cura_ops_mi_form_templates') }}" id="mi_ft_form" novalidate>
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label" for="mi_ft_name">Display name</label>
+            <input class="form-control" id="mi_ft_name" name="name" required maxlength="255" placeholder="e.g. Festival welfare checklist">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="mi_ft_slug">Slug</label>
+            <input class="form-control font-monospace" id="mi_ft_slug" name="slug" required maxlength="64" pattern="[a-z0-9][a-z0-9_-]*" placeholder="e.g. festival_welfare_v1">
+            <div class="form-text">Lowercase letters, digits, underscores, hyphens. Unique across templates.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="mi_ft_desc">Description (optional)</label>
+            <input class="form-control" id="mi_ft_desc" name="description" maxlength="512">
+          </div>
+          <div class="mb-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <label class="form-label mb-0">Questions</label>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="mi_ft_add_q">Add question</button>
+            </div>
+            <div id="mi_ft_questions" class="d-flex flex-column gap-2"></div>
+            <p class="form-text mb-0 mt-2">Each field needs a unique <strong>key</strong> (e.g. <code>zone</code>) used in reports. Drag order is top to bottom in Cura.</p>
+          </div>
+          <input type="hidden" name="schema_json" id="mi_ft_schema_json" value="">
+          <button type="submit" class="btn btn-primary">Save template</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header">Existing templates</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0 align-middle">
+            <thead class="table-light"><tr><th>ID</th><th>Slug</th><th>Name</th><th>Active</th><th class="text-end">Actions</th></tr></thead>
+            <tbody>
+              {% for t in templates %}
+              <tr>
+                <td class="text-muted">{{ t.id }}</td>
+                <td><code>{{ t.slug }}</code></td>
+                <td>{{ t.name }}</td>
+                <td>{% if t.is_active %}<span class="badge bg-success">yes</span>{% else %}<span class="badge bg-secondary">no</span>{% endif %}</td>
+                <td class="text-end text-nowrap">
+                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('medical_records_internal.cura_ops_mi_form_template_edit', template_id=t.id) }}">Edit</a>
+                  <form method="post" class="d-inline" action="{{ url_for('medical_records_internal.cura_ops_mi_form_template_delete', template_id=t.id) }}" onsubmit="return confirm('Delete this template? It will be removed from any MI events that use it.');">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="text-muted px-3 py-4">No templates yet. Add one on the left after running DB migration 018.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<template id="mi_ft_q_tpl">
+  <div class="mi-ft-q-row border rounded p-3 bg-light position-relative">
+    <button type="button" class="btn btn-sm btn-outline-danger position-absolute top-0 end-0 m-2 mi-ft-q-remove" title="Remove question" aria-label="Remove question">&times;</button>
+    <div class="row g-2 pe-4">
+      <div class="col-md-4">
+        <label class="form-label small text-muted mb-0">Field key</label>
+        <input type="text" class="form-control form-control-sm font-monospace mi-ft-key" maxlength="64" pattern="[a-z][a-z0-9_]*" placeholder="e.g. zone" title="Lowercase, start with a letter">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label small text-muted mb-0">Label (shown in Cura)</label>
+        <input type="text" class="form-control form-control-sm mi-ft-label" maxlength="255" placeholder="e.g. Zone">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small text-muted mb-0">Type</label>
+        <select class="form-select form-select-sm mi-ft-type">
+          <option value="text">Short text</option>
+          <option value="textarea">Long text</option>
+          <option value="number">Number</option>
+          <option value="select">Single choice</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-4 d-flex align-items-end">
+        <div class="form-check mb-1">
+          <input class="form-check-input mi-ft-required" type="checkbox">
+          <label class="form-check-label small mi-ft-required-label">Required</label>
+        </div>
+      </div>
+    </div>
+    <div class="mi-ft-q-opts mt-2 d-none">
+      <label class="form-label small text-muted mb-1">Choices (one per line)</label>
+      <textarea class="form-control form-control-sm font-monospace mi-ft-options" rows="3" placeholder="low&#10;medium&#10;high"></textarea>
+    </div>
+    <div class="mi-ft-q-num mt-2 d-none">
+      <div class="row g-2">
+        <div class="col-6">
+          <label class="form-label small text-muted mb-0">Min (optional)</label>
+          <input type="number" class="form-control form-control-sm mi-ft-min" step="any">
+        </div>
+        <div class="col-6">
+          <label class="form-label small text-muted mb-0">Max (optional)</label>
+          <input type="number" class="form-control form-control-sm mi-ft-max" step="any">
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById('mi_ft_form');
+  const list = document.getElementById('mi_ft_questions');
+  const tpl = document.getElementById('mi_ft_q_tpl');
+  const hidden = document.getElementById('mi_ft_schema_json');
+  const addBtn = document.getElementById('mi_ft_add_q');
+  if (!form || !list || !tpl || !hidden || !addBtn) return;
+
+  function syncTypeRow(row) {
+    const t = row.querySelector('.mi-ft-type').value;
+    row.querySelector('.mi-ft-q-opts').classList.toggle('d-none', t !== 'select');
+    row.querySelector('.mi-ft-q-num').classList.toggle('d-none', t !== 'number');
+  }
+
+  function addRow() {
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    const id = 'mi_ft_req_' + Math.random().toString(36).slice(2, 9);
+    const cb = node.querySelector('.mi-ft-required');
+    const lbl = node.querySelector('.mi-ft-required-label');
+    cb.id = id;
+    lbl.setAttribute('for', id);
+    node.querySelector('.mi-ft-type').addEventListener('change', function () { syncTypeRow(node); });
+    node.querySelector('.mi-ft-q-remove').addEventListener('click', function () {
+      node.remove();
+      if (!list.querySelector('.mi-ft-q-row')) addRow();
+    });
+    list.appendChild(node);
+    syncTypeRow(node);
+  }
+
+  addBtn.addEventListener('click', function () { addRow(); });
+
+  function buildSchemaFromDom() {
+    const questions = [];
+    const seen = Object.create(null);
+    const rows = list.querySelectorAll('.mi-ft-q-row');
+    rows.forEach(function (row, idx) {
+      const key = (row.querySelector('.mi-ft-key').value || '').trim().toLowerCase();
+      const label = (row.querySelector('.mi-ft-label').value || '').trim();
+      const type = (row.querySelector('.mi-ft-type').value || 'text').toLowerCase();
+      const required = row.querySelector('.mi-ft-required').checked;
+      if (!key && !label) return;
+      if (!key) {
+        throw new Error('Question ' + (idx + 1) + ': enter a field key (e.g. zone).');
+      }
+      if (!/^[a-z][a-z0-9_]*$/.test(key)) {
+        throw new Error('Question "' + key + '": key must start with a letter and use only lowercase letters, digits, underscores.');
+      }
+      if (seen[key]) {
+        throw new Error('Duplicate field key: ' + key);
+      }
+      seen[key] = true;
+      const q = { key: key, label: label || key, type: type };
+      if (required) q.required = true;
+      if (type === 'select') {
+        const raw = (row.querySelector('.mi-ft-options').value || '').split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+        if (!raw.length) {
+          throw new Error('Question "' + label + '": add at least one choice (one per line) for single-choice fields.');
+        }
+        q.options = raw;
+      }
+      if (type === 'number') {
+        const minEl = row.querySelector('.mi-ft-min');
+        const maxEl = row.querySelector('.mi-ft-max');
+        if (minEl.value !== '' && minEl.value != null) {
+          const n = Number(minEl.value);
+          if (Number.isNaN(n)) throw new Error('Question "' + label + '": min must be a number.');
+          q.min = n;
+        }
+        if (maxEl.value !== '' && maxEl.value != null) {
+          const n = Number(maxEl.value);
+          if (Number.isNaN(n)) throw new Error('Question "' + label + '": max must be a number.');
+          q.max = n;
+        }
+      }
+      questions.push(q);
+    });
+    if (!questions.length) {
+      throw new Error('Add at least one question, or remove empty rows.');
+    }
+    return { questions: questions };
+  }
+
+  form.addEventListener('submit', function (e) {
+    try {
+      const schema = buildSchemaFromDom();
+      hidden.value = JSON.stringify(schema);
+    } catch (err) {
+      e.preventDefault();
+      alert(err.message || String(err));
+    }
+  });
+
+  addRow();
+})();
+</script>
+{% endblock %}

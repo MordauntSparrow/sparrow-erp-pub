@@ -9,7 +9,7 @@
 
 <!-- MDB UI Kit (includes Bootstrap 5) -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.4.0/mdb.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 
 <style>
@@ -122,87 +122,28 @@ select,
 
 /* Footer separation */
 .footer { {% if config.theme_settings.theme != 'dark' %} border-top: 1px solid rgba(0,0,0,.06); {% endif %} }
+
+/* Module subnav — active link (runsheets + siblings) */
+.erp-module-subnav .nav-link.active {
+  font-weight: 600;
+  color: #4338ca !important;
+  background: rgba(67, 56, 202, 0.1);
+  border-radius: 0.35rem;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.erp-module-subnav .nav-link.active {
+  color: #c4b5fd !important;
+  background: rgba(99, 102, 241, 0.18);
+}
+{% endif %}
 </style>
+{% block tb_page_head %}{% endblock %}
 {% include 'partials/sparrow_csrf_head.html' %}
 </head>
 <body>
 <!-- Modals & page logic: use MDB (mdb.min.js below). Per-page scripts go in block page_scripts. -->
 
-<!-- Navbar (aligned with core app/templates/base.html) -->
-<nav class="navbar navbar-expand-lg navbar-light sticky-top shadow-sm navbar-erp">
-<div class="container-fluid px-3">
-  {% if _site.get('branding') == 'logo' and _site.get('logo_path') %}
-<a class="navbar-brand py-2 d-flex align-items-center" href="/"><img src="{{ url_for('static', filename=_site.get('logo_path')) }}" alt="Logo" style="{{ navbar_logo_inline_style(_site) }}"></a>
-{% else %}
-<a class="navbar-brand fw-semibold py-2" href="/">{{ _site.get('company_name') or 'Sparrow ERP' }}</a>
-{% endif %}
-
-  <button class="navbar-toggler" type="button" data-mdb-toggle="collapse" data-mdb-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-    <i class="fas fa-bars"></i>
-  </button>
-
-  <div class="collapse navbar-collapse" id="navbarNav">
-    <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1 nav-primary">
-      <li class="nav-item">
-        <a class="nav-link py-2 px-3 {% if request.path == '/' %}active{% endif %}" href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>
-          <i class="bi bi-speedometer2 me-1"></i> Dashboard
-        </a>
-      </li>
-      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
-      <li class="nav-item">
-        <a class="nav-link py-2 px-3 {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}" {% if request.path.startswith('/core/settings') %}aria-current="page"{% endif %}>
-          <i class="bi bi-sliders me-1"></i> Settings
-        </a>
-      </li>
-      {% endif %}
-      {% if current_user.is_authenticated and can_open_user_management() %}
-      <li class="nav-item">
-        <a class="nav-link py-2 px-3 {% if request.path.startswith('/users') %}active{% endif %}" href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>
-          <i class="bi bi-people me-1"></i> Users
-        </a>
-      </li>
-      {% endif %}
-      {% if current_user.is_authenticated and can_open_org_admin_nav() %}
-      <li class="nav-item dropdown">
-        <a class="nav-link dropdown-toggle py-2 px-3 {% if request.path.startswith('/plugins') or request.path == '/version' %}active{% endif %}" href="#" id="systemAdminDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
-          <i class="bi bi-wrench-adjustable me-1"></i> System
-        </a>
-        <ul class="dropdown-menu dropdown-menu-end shadow-3" aria-labelledby="systemAdminDropdown">
-          <li><span class="nav-label-muted">Install &amp; updates</span></li>
-          <li>
-            <a class="dropdown-item {% if request.path.startswith('/plugins') %}active{% endif %}" href="/plugins">
-              <i class="bi bi-box-seam me-2 text-primary"></i> Plugin library
-            </a>
-          </li>
-          <li>
-            <a class="dropdown-item {% if request.path == '/version' %}active{% endif %}" href="/version">
-              <i class="bi bi-arrow-down-circle me-2 text-primary"></i> Updates
-            </a>
-          </li>
-          <li><hr class="dropdown-divider"></li>
-          <li>
-            <a class="dropdown-item {% if request.path.startswith('/core/settings') %}active{% endif %}" href="{{ url_for('routes.core_module_settings') }}">
-              <i class="bi bi-gear me-2 text-secondary"></i> Core settings
-            </a>
-          </li>
-        </ul>
-      </li>
-      {% endif %}
-      <li class="w-100 d-lg-none my-2"><hr class="my-0"></li>
-      <li class="nav-item dropdown">
-        <a class="nav-link dropdown-toggle py-2 px-3 d-flex align-items-center" href="#" id="userDropdown" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false">
-          <i class="bi bi-person-circle me-1"></i>
-          <span class="text-truncate" style="max-width:160px">{{ session.get('first_name') or session.get('site_settings', {}).get('user_name', 'User') }}</span>
-        </a>
-        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
-          <li><h6 class="dropdown-header d-flex align-items-center"><i class="bi bi-person-badge me-2"></i> {{ current_user.username if current_user.is_authenticated else 'Account' }}</h6></li>
-          <li><a class="dropdown-item" href="/logout"><i class="bi bi-box-arrow-right me-2"></i> Logout</a></li>
-        </ul>
-      </li>
-    </ul>
-  </div>
-</div>
-</nav>
+{% include 'partials/sparrow_admin_top_nav.html' %}
 
 <!-- Module subnav: Shift Timesheets -->
 <nav class="nav-module erp-module-subnav border-bottom py-2 px-3">
@@ -211,10 +152,10 @@ select,
       <a class="nav-link {% if request.endpoint == 'internal_time_billing.admin_dashboard_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">
         <i class="bi bi-speedometer2 me-1"></i> Dashboard
       </a>
-      <a class="nav-link {% if 'runsheets' in request.path and 'edit' not in request.path and 'staffing-overview' not in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_page') }}">
+      <a class="nav-link {% if request.endpoint in ('internal_time_billing.runsheets_page', 'internal_time_billing.runsheets_edit_page') %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_page') }}">
         <i class="bi bi-clipboard2-check me-1"></i> Runsheets
       </a>
-      <a class="nav-link {% if 'staffing-overview' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}">
+      <a class="nav-link {% if request.endpoint == 'internal_time_billing.runsheets_staffing_overview_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}">
         <i class="bi bi-calendar2-check me-1"></i> Staffing overview
       </a>
       <a class="nav-link {% if 'timesheets' in request.path or 'week' in request.path %}active{% endif %}" href="{{ url_for('internal_time_billing.timesheets_overview_page') }}">
@@ -242,7 +183,7 @@ select,
         <i class="bi bi-receipt me-1"></i> Invoices
       </a>
       <a class="nav-link {% if request.endpoint == 'internal_time_billing.admin_invoices_analytics_page' %}active{% endif %}" href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}">
-        <i class="bi bi-graph-up me-1"></i> Invoice totals
+        <i class="bi bi-graph-up me-1"></i> Invoice analytics
       </a>
     </div>
   </div>

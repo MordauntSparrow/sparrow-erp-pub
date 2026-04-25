@@ -1,4 +1,22 @@
 {% extends "base.html" %}
+{% macro compliance_document_control(cid, stored_path, path_field_name, file_input_name, linked_field_key, short_label) -%}
+{% set p = (stored_path or '')|trim %}
+<div>
+  <label class="form-label">Document</label>
+  <input type="hidden" name="{{ path_field_name }}" value="{{ p|e }}">
+  {% if p %}
+  <div class="mb-2">
+    <a href="{{ url_for('internal_hr.admin_contractor_profile_linked_file', cid=cid, field=linked_field_key, disposition='inline') }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">View / download</a>
+  </div>
+  <p class="small text-muted text-break font-monospace mb-2" style="font-size:0.8rem;">{{ p }}</p>
+  <label class="form-label small mb-0" for="hr_doc_{{ file_input_name }}">Replace file</label>
+  <input type="file" class="form-control form-control-sm" id="hr_doc_{{ file_input_name }}" name="{{ file_input_name }}" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*">
+  {% else %}
+  <input type="file" class="form-control form-control-sm" id="hr_doc_{{ file_input_name }}" name="{{ file_input_name }}" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*" aria-label="Upload {{ short_label }}">
+  <div class="form-text">PDF or image. Applies when you click Save.</div>
+  {% endif %}
+</div>
+{%- endmacro %}
 {% block title %}Edit {{ profile.name or profile.email }} – HR Admin{% endblock %}
 {% block content %}
 <div class="container mt-4">
@@ -12,6 +30,45 @@
   </nav>
   <h1 class="mb-3">Edit profile</h1>
   <p class="text-muted">{{ profile.name or profile.email }}</p>
+
+  {# Promote-to-admin must NOT be nested inside the main edit <form> — nested forms are invalid HTML
+     and browsers close the outer form early, leaving Save + file inputs outside any form. #}
+  {% if hr_superuser|default(false) %}
+  <div class="card border-info bg-light mb-4">
+    <div class="card-body py-3">
+      <h3 class="h6 mb-2">Core ERP login (superuser)</h3>
+      <p class="small text-muted mb-3">
+        Creates or updates a core <strong>users</strong> row with <code>contractor_id</code> set to this profile
+        (Admin role)—the mirror of an admin who already has a portal contractor record.
+        The row uses this contractor’s <strong>username</strong>, <strong>work email</strong>, and
+        <strong>display name</strong> (first word → first name, rest → last name), same password hash as the portal.
+        Staff <strong>/login</strong> accepts <strong>username or email</strong>.
+        <a href="{{ url_for('routes.users') }}">Users &amp; access</a>
+      </p>
+      {% set lu = profile.linked_core_user %}
+      {% if lu %}
+      <p class="small mb-2">
+        Linked core account: <code class="user-select-all">{{ lu.username }}</code>
+        · {{ lu.email }} · role <strong>{{ lu.role }}</strong>
+      </p>
+      {% if (lu.role or '')|lower == 'admin' %}
+      <p class="small text-success mb-0">Already an Admin user. No action needed.</p>
+      {% else %}
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_promote_core_admin', cid=profile.id) }}" class="d-inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Set this linked core user to Admin? They can then sign in at /login with their username or work email and portal password.');">Set linked user to Admin</button>
+      </form>
+      {% endif %}
+      {% else %}
+      <form method="post" action="{{ url_for('internal_hr.admin_contractor_promote_core_admin', cid=profile.id) }}" class="d-inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-primary" onclick="return confirm('Create or link a core Admin user for this contractor? They sign in at /login with username or work email and the same password as the employee portal.');">Grant core Admin login</button>
+      </form>
+      <p class="small text-muted mt-2 mb-0">Requires a saved portal password on this profile. If a core user already exists with the same email, they will be linked and set to Admin.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <form method="post" action="{{ url_for('internal_hr.admin_contractor_edit_save', cid=profile.id) }}" enctype="multipart/form-data" class="card card-body mb-4">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -97,12 +154,13 @@
       <div class="form-text">Stored on the Time Billing contractor record; controls whether invoicing appears in the contractor portal.</div>
     </div>
     <div class="mb-4">
-      <label class="form-label" for="invoice_billing_frequency">Invoice billing frequency</label>
+      <label class="form-label" for="invoice_billing_frequency">Pay / invoice cadence (self-employed)</label>
       <select class="form-select" id="invoice_billing_frequency" name="invoice_billing_frequency">
         <option value="weekly" {% if (profile.invoice_billing_frequency or 'weekly')|lower == 'weekly' %}selected{% endif %}>Weekly — one invoice per timesheet week (default)</option>
+        <option value="biweekly" {% if (profile.invoice_billing_frequency or '')|lower == 'biweekly' %}selected{% endif %}>Bi-weekly — combine two weeks’ timesheets via <strong>My invoices</strong> in the portal</option>
         <option value="monthly" {% if (profile.invoice_billing_frequency or '')|lower == 'monthly' %}selected{% endif %}>Monthly — combine weeks from <strong>My invoices</strong> in the portal</option>
       </select>
-      <div class="form-text">Applies when employment type is <strong>Self-employed</strong>. Weekly shows per-week “Create invoice” after submit; monthly hides that and expects a combined invoice.</div>
+      <div class="form-text">Applies when employment type is <strong>Self-employed</strong>. Weekly: per-week “Create invoice” after submit. Bi-weekly and monthly: hide per-week invoice creation; contractor builds combined invoices on <strong>My invoices</strong>.</div>
     </div>
     <div class="row">
       <div class="col-md-6 mb-3" id="hr-job-title-block" data-pay-role-name="{{ (profile.tb_role_name or '')|e }}">
@@ -176,8 +234,7 @@
         <input type="date" class="form-control" name="driving_licence_expiry" value="{{ profile.driving_licence_expiry|string if profile.driving_licence_expiry else '' }}">
       </div>
       <div class="col-md-4 mb-3">
-        <label class="form-label">Document path</label>
-        <input type="text" class="form-control" name="driving_licence_document_path" value="{{ profile.driving_licence_document_path or '' }}" placeholder="e.g. uploads/hr/...">
+        {{ compliance_document_control(profile.id, profile.driving_licence_document_path, 'driving_licence_document_path', 'driving_licence_file', 'driving_licence', 'driving licence') }}
       </div>
     </div>
 
@@ -192,8 +249,7 @@
         <input type="date" class="form-control" name="right_to_work_expiry" value="{{ profile.right_to_work_expiry|string if profile.right_to_work_expiry else '' }}">
       </div>
       <div class="col-md-4 mb-3">
-        <label class="form-label">Document path</label>
-        <input type="text" class="form-control" name="right_to_work_document_path" value="{{ profile.right_to_work_document_path or '' }}">
+        {{ compliance_document_control(profile.id, profile.right_to_work_document_path, 'right_to_work_document_path', 'right_to_work_file', 'right_to_work', 'right to work') }}
       </div>
     </div>
 
@@ -212,8 +268,7 @@
         <input type="date" class="form-control" name="dbs_expiry" value="{{ profile.dbs_expiry|string if profile.dbs_expiry else '' }}">
       </div>
       <div class="col-md-3 mb-3">
-        <label class="form-label">Document path</label>
-        <input type="text" class="form-control" name="dbs_document_path" value="{{ profile.dbs_document_path or '' }}">
+        {{ compliance_document_control(profile.id, profile.dbs_document_path, 'dbs_document_path', 'dbs_file', 'dbs', 'DBS') }}
       </div>
     </div>
 
@@ -507,8 +562,7 @@
         <input type="date" class="form-control" name="contract_end" value="{{ profile.contract_end|string if profile.contract_end else '' }}">
       </div>
       <div class="col-md-3 mb-3">
-        <label class="form-label">Document path</label>
-        <input type="text" class="form-control" name="contract_document_path" value="{{ profile.contract_document_path or '' }}">
+        {{ compliance_document_control(profile.id, profile.contract_document_path, 'contract_document_path', 'contract_file', 'contract', 'contract') }}
       </div>
     </div>
 

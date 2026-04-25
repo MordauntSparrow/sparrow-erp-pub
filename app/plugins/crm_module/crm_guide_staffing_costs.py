@@ -4,8 +4,11 @@ Approximate wage-only cost hints for the CRM event guide, using Time & Billing w
 Optional: requires wage_rate_cards / wage_rate_rows / job_types tables (time_billing_module).
 Set SPARROW_CRM_GUIDE_WAGE_CARD_ID to pick a specific card; otherwise the first active card is used.
 
-Explicit **clinical** / **driver** job type IDs are read from ``crm_guide_wage_job_map`` (configure under
-CRM → Quotes → Guide & wage mapping) so costing does not rely only on fuzzy name matching.
+Job type IDs are read from ``crm_guide_wage_job_map`` (CRM → Guide & wage mapping): per-role slots
+(clinical lead, advanced paramedic, paramedic, technician, first aider, ECA, solo, optional doctor)
+plus **driver** for vehicle crew (many providers map this to **ECA** — e.g. FREC4 responder with
+blue-light training). If **driver** is unset, costing tries **eca** then **emt** on the same map.
+Optional **clinical** / legacy **als** / **emt** remain blended fallbacks for on-foot roles.
 """
 from __future__ import annotations
 
@@ -23,7 +26,8 @@ _CLINICAL_HINTS = re.compile(
     re.I,
 )
 _DRIVER_HINTS = re.compile(
-    r"\bdriver\b|ambulance\s*driver|ecas|response\s*driver|crew\s*driver",
+    r"\bdriver\b|ambulance\s*driver|ecas|response\s*driver|crew\s*driver|"
+    r"emergency\s+care\s+assistant|\beca\b|frec|blue\s*light",
     re.I,
 )
 
@@ -133,7 +137,7 @@ def _rate_from_effective_rows(
 
 
 def load_guide_wage_slot_map(conn) -> dict[str, int]:
-    """slot -> job_type_id for CRM-configured guide costing (clinical / driver)."""
+    """slot -> job_type_id for CRM-configured guide costing (clinical roles + vehicle crew)."""
     try:
         cur = conn.cursor()
         try:
@@ -145,17 +149,92 @@ def load_guide_wage_slot_map(conn) -> dict[str, int]:
         return {}
 
 
+_WAGE_SLOT_FALLBACK: dict[str, tuple[str, ...]] = {
+    "clinical_lead": ("clinical_lead", "paramedic_advanced", "als", "clinical"),
+    "paramedic_advanced": ("paramedic_advanced", "clinical_lead", "als", "clinical"),
+    "paramedic": ("paramedic", "als", "clinical"),
+    "als": ("als", "paramedic", "clinical"),
+    "doctor": ("doctor", "clinical_lead", "clinical"),
+    "emt": ("emt", "technician", "first_aider", "eca", "clinical"),
+    "technician": ("technician", "emt", "clinical"),
+    "first_aider": ("first_aider", "emt", "clinical"),
+    "eca": ("eca", "emt", "clinical"),
+    "solo_clinical": ("solo_clinical", "paramedic", "emt", "clinical"),
+}
+
+# Vehicle crew £/h: explicit driver map first, then typical ambulance driver grade (ECA / FREC4).
+_CREW_RATE_SLOT_ORDER = ("driver", "eca", "emt")
+
+
+def _mapped_vehicle_crew_rate(
+    rows: list[dict[str, Any]],
+    slot_map: dict[str, int],
+    conn,
+) -> tuple[Decimal | None, str | None, str | None]:
+    """First mapped slot in order driver → eca → emt with a positive £/h on the card."""
+    for key in _CREW_RATE_SLOT_ORDER:
+        if key not in slot_map:
+            continue
+        rate, lab = _rate_from_effective_rows(rows, int(slot_map[key]))
+        if rate is not None and rate > 0:
+            return rate, lab, key
+    return None, None, None
+
+
+def _rate_for_wage_slot(
+    rows: list[dict[str, Any]],
+    slot_map: dict[str, int],
+    conn,
+    wage_slot: str,
+) -> tuple[Decimal | None, str | None]:
+    if wage_slot == "driver":
+        chain = _CREW_RATE_SLOT_ORDER
+    elif wage_slot == "clinical":
+        chain = ("clinical",)
+    else:
+        chain = _WAGE_SLOT_FALLBACK.get(wage_slot, (wage_slot,))
+        if "clinical" not in chain:
+            chain = chain + ("clinical",)
+    for key in dict.fromkeys(chain):
+        if key not in slot_map:
+            continue
+        rate, lab = _rate_from_effective_rows(rows, slot_map[key])
+        if rate is not None and rate > 0:
+            return rate, lab or _job_type_name(conn, slot_map[key])
+    return None, None
+
+
 def save_guide_wage_slot_map(
     conn,
     *,
-    clinical_job_type_id: int | None,
-    driver_job_type_id: int | None,
+    clinical: int | None = None,
+    driver: int | None = None,
+    clinical_lead: int | None = None,
+    doctor: int | None = None,
+    paramedic_advanced: int | None = None,
+    paramedic: int | None = None,
+    als: int | None = None,
+    emt: int | None = None,
+    technician: int | None = None,
+    first_aider: int | None = None,
+    eca: int | None = None,
+    solo_clinical: int | None = None,
 ) -> None:
     cur = conn.cursor()
     try:
         for slot, jtid in (
-            ("clinical", clinical_job_type_id),
-            ("driver", driver_job_type_id),
+            ("clinical", clinical),
+            ("driver", driver),
+            ("clinical_lead", clinical_lead),
+            ("doctor", doctor),
+            ("paramedic_advanced", paramedic_advanced),
+            ("paramedic", paramedic),
+            ("als", als),
+            ("emt", emt),
+            ("technician", technician),
+            ("first_aider", first_aider),
+            ("eca", eca),
+            ("solo_clinical", solo_clinical),
         ):
             if jtid is None:
                 cur.execute(
@@ -277,6 +356,7 @@ def estimate_guide_staffing_costs(
         "driver_job": None,
         "used_clinical_mapping": False,
         "used_driver_mapping": False,
+        "used_per_role_lines": False,
     }
 
     conn = get_db_connection()
@@ -312,32 +392,27 @@ def estimate_guide_staffing_costs(
                 out["tb_note"] = (
                     f"Clinical is mapped to “{nm}” (#{slot_map['clinical']}) but that job type "
                     f"has no £/h row on wage card “{card_name}” for the costing date. "
-                    "Add a rate row in Time & Billing or change the mapping under CRM → Quotes & rules → Guide & wage mapping."
+                    "Add a rate row in Time & Billing or change the mapping under CRM → Guide & wage mapping."
                 )
         else:
             med_rate, med_label = h_med, h_ml
 
         drv_rate: Decimal | None
         drv_label: str | None
-        if "driver" in slot_map:
-            drv_rate, drv_label = _rate_from_effective_rows(
-                rows, slot_map["driver"]
+        crew_slot: str | None
+        drv_rate, drv_label, crew_slot = _mapped_vehicle_crew_rate(rows, slot_map, conn)
+        if drv_rate is None and "driver" in slot_map and vehicles:
+            nm = _job_type_name(conn, slot_map["driver"])
+            extra = (
+                f"Driver/crew is mapped to “{nm}” (#{slot_map['driver']}) with no £/h on this card for the costing date — "
+                "tried ECA / EMT slots next, then name match."
             )
-            if drv_rate is None and vehicles:
-                nm = _job_type_name(conn, slot_map["driver"])
-                drv_label = nm
-                extra = (
-                    f"Driver/crew is mapped to “{nm}” (#{slot_map['driver']}) with no £/h on this card for the costing date — "
-                    "using automatic name match if possible."
-                )
-                out["tb_note"] = (
-                    f"{out['tb_note']} {extra}".strip()
-                    if out.get("tb_note")
-                    else extra
-                )
-            if drv_rate is None:
-                drv_rate, drv_label = h_drv, h_dl
-        else:
+            out["tb_note"] = (
+                f"{out['tb_note']} {extra}".strip()
+                if out.get("tb_note")
+                else extra
+            )
+        if drv_rate is None:
             drv_rate, drv_label = h_drv, h_dl
 
         out["clinical_job"] = med_label
@@ -345,8 +420,50 @@ def estimate_guide_staffing_costs(
         out["used_clinical_mapping"] = "clinical" in slot_map
         out["used_driver_mapping"] = "driver" in slot_map
 
+        sb = risk.get("staffing_breakdown") or {}
+        roles = sb.get("clinical_roles") if isinstance(sb, dict) else None
+
         total = Decimal("0")
-        if medics and med_rate is not None:
+        priced_heads = 0
+
+        if isinstance(roles, list) and roles and medics > 0:
+            for role in roles:
+                if not isinstance(role, dict):
+                    continue
+                ws = str(role.get("wage_slot") or "")
+                cnt = int(role.get("count") or 0)
+                title = str(role.get("role") or "Clinical post")
+                if not ws or cnt <= 0:
+                    continue
+                rate, lab = _rate_for_wage_slot(rows, slot_map, conn, ws)
+                if rate is None:
+                    continue
+                line_cost = (rate * hours) * cnt
+                total += line_cost
+                if ws != "doctor":
+                    priced_heads += cnt
+                out["lines"].append(
+                    {
+                        "label": f"{title} (wage estimate)",
+                        "detail": f"{cnt} × {lab or ws} × {hours} h @ £{rate}/h",
+                        "amount_gbp": float(line_cost.quantize(Decimal("0.01"))),
+                    }
+                )
+            if priced_heads > 0:
+                out["used_per_role_lines"] = True
+
+        remainder = medics - priced_heads
+        if remainder > 0 and med_rate is not None and priced_heads > 0:
+            line_cost = (med_rate * hours) * remainder
+            total += line_cost
+            out["lines"].append(
+                {
+                    "label": "Other clinical posts (wage estimate, blended)",
+                    "detail": f"{remainder} × {med_label or 'clinical role'} × {hours} h @ £{med_rate}/h",
+                    "amount_gbp": float(line_cost.quantize(Decimal("0.01"))),
+                }
+            )
+        elif priced_heads == 0 and medics and med_rate is not None:
             line_cost = (med_rate * hours) * medics
             total += line_cost
             out["lines"].append(
@@ -357,21 +474,30 @@ def estimate_guide_staffing_costs(
                 }
             )
         elif medics and med_rate is None:
-            if "clinical" not in slot_map:
+            if "clinical" not in slot_map and priced_heads == 0:
                 out["tb_note"] = (
-                    "Could not match a clinical job type on the wage card "
-                    "(name pattern), or set an explicit mapping under CRM → Quotes & rules → Guide & wage mapping."
+                    "Could not match clinical £/h on the wage card (name pattern). "
+                    "Map job types under CRM → Guide & wage mapping."
                 )
 
         crew_slots = vehicles * 2 if vehicles else 0
         if crew_slots and drv_rate is not None:
             line_cost = (drv_rate * hours) * crew_slots
             total += line_cost
+            crew_src = (
+                "driver slot"
+                if crew_slot == "driver"
+                else "ECA slot"
+                if crew_slot == "eca"
+                else "EMT slot"
+                if crew_slot == "emt"
+                else "wage card name match"
+            )
             out["lines"].append(
                 {
-                    "label": "Response drivers / crew (wage estimate)",
+                    "label": "Vehicle crew (wage estimate — often ECA / blue-light driver + clinician)",
                     "detail": f"{vehicles} vehicles × ~2 crew × {hours} h @ £{drv_rate}/h "
-                    f"({drv_label or 'driver role'})",
+                    f"({drv_label or 'crew role'}; rate from {crew_src})",
                     "amount_gbp": float(line_cost.quantize(Decimal("0.01"))),
                 }
             )
@@ -393,7 +519,7 @@ def estimate_guide_staffing_costs(
     except Exception:
         out["tb_note"] = (
             "Time & Billing wage tables are not available or could not be read. "
-            "Staffing counts above still reflect the purple guide."
+            "Staffing counts above still reflect the Purple Guide tier mix."
         )
     finally:
         conn.close()

@@ -1,0 +1,898 @@
+{% extends "base.html" %}
+{% block title %}Edit Patient Record - {{ patient.first_name }} {{ patient.last_name }}{% endblock %}
+{% block content %}
+<style>
+        /* Base CSS Override for checkboxes */
+input[type="checkbox"]:checked {
+  background-color: #007bff !important; /* Blue */
+  border-color: #007bff !important;
+}
+
+input[type="checkbox"]:checked::after {
+  content: "\2713"; /* Unicode checkmark */
+  font-size: 14px;
+  color: #fff !important;
+  position: absolute;
+  top: 1px;
+  left: 3px;
+}
+
+input[type="checkbox"] {
+  position: relative;
+}
+</style>
+
+<div class="container mt-5">
+  <h1>Edit Patient Record: {{ patient.first_name }} {{ patient.last_name }}</h1>
+  <form action="{{ url_for('medical_records_internal.edit_patient_record', id=patient.id) }}" method="POST" id="editClientForm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <!-- Basic Information -->
+    <h3>Basic Information</h3>
+    <div class="mb-3">
+      <label for="first_name" class="form-label">First Name</label>
+      <input type="text" class="form-control" name="first_name" id="first_name" value="{{ patient.first_name }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="middle_name" class="form-label">Middle Name</label>
+      <input type="text" class="form-control" name="middle_name" id="middle_name" value="{{ patient.middle_name }}">
+    </div>
+    <div class="mb-3">
+      <label for="last_name" class="form-label">Last Name</label>
+      <input type="text" class="form-control" name="last_name" id="last_name" value="{{ patient.last_name }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="address" class="form-label">Address</label>
+      <textarea class="form-control" name="address" id="address" required>{{ patient.address }}</textarea>
+    </div>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label for="date_of_birth" class="form-label">Date of Birth (YYYY-MM-DD)</label>
+        <input type="text" class="form-control" name="date_of_birth" id="date_of_birth" value="{{ patient.date_of_birth }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label for="gender" class="form-label">Gender</label>
+        <input type="text" class="form-control" name="gender" id="gender" value="{{ patient.gender }}">
+      </div>
+      <div class="col-md-4 mb-3">
+        <label for="postcode" class="form-label">Postcode</label>
+        <input type="text" class="form-control" name="postcode" id="postcode" value="{{ patient.postcode }}" required>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label for="package_type" class="form-label">Package Type</label>
+      <input type="text" class="form-control" name="package_type" id="package_type" value="{{ patient.package_type or 'None' }}">
+    </div>
+    <div class="mb-3">
+      <label for="contact_number" class="form-label">Contact Number</label>
+      <input type="tel" class="form-control" name="contact_number" id="contact_number" value="{{ patient.contact_number or 'None' }}">
+    </div>
+
+    
+    <!-- Sensitive Medical Data Section -->
+    <h3>Sensitive Medical Data</h3>
+    {% if unlocked %}
+      <!-- GP Details -->
+      <div class="card mb-3">
+        <div class="card-header">GP Details</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label for="gp_name" class="form-label">GP Name</label>
+            <input type="text" class="form-control" name="gp_name" id="gp_name" value="{{ patient.gp_details.name or '' }}">
+          </div>
+          <div class="mb-3">
+            <label for="gp_address" class="form-label">GP Address</label>
+            <textarea class="form-control" name="gp_address" id="gp_address">{{ patient.gp_details.address or '' }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label for="gp_contact" class="form-label">GP Contact Number</label>
+            <input type="text" class="form-control" name="gp_contact" id="gp_contact" value="{{ patient.gp_details.contact or '' }}">
+          </div>
+          <div class="mb-3">
+            <label for="gp_email" class="form-label">GP Email</label>
+            <input type="email" class="form-control" name="gp_email" id="gp_email" value="{{ patient.gp_details.email or '' }}">
+          </div>
+        </div>
+      </div>
+      
+      <!-- Latest Weight -->
+      <div class="card mb-3">
+        <div class="card-header">Latest Weight</div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label for="weight_value" class="form-label">Weight (kg)</label>
+              <input type="number" step="0.1" class="form-control" name="weight_value" id="weight_value" value="{{ patient.weight.weight or '' }}">
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="date_weighed" class="form-label">Date Weighed</label>
+              <input type="date" class="form-control" name="date_weighed" id="date_weighed" value="{{ patient.weight.date_weighed or '' }}">
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="weight_source" class="form-label">Source of Weight Measurement</label>
+              <select class="form-select" name="weight_source" id="weight_source">
+                <option value="">Select Source</option>
+                <option value="Home" {% if patient.weight.source=='Home' %}selected{% endif %}>Home</option>
+                <option value="Relative" {% if patient.weight.source=='Relative' %}selected{% endif %}>Relative</option>
+                <option value="Hospital" {% if patient.weight.source=='Hospital' %}selected{% endif %}>Hospital</option>
+                <option value="Crew" {% if patient.weight.source=='Crew' %}selected{% endif %}>Crew</option>
+                <option value="Assessments" {% if patient.weight.source=='Assessments' %}selected{% endif %}>Assessments</option>
+                <option value="Other" {% if patient.weight.source=='Other' %}selected{% endif %}>Other</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Payment Details -->
+      <div class="card mb-3">
+        <div class="card-header">Payment Details</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label for="payment_method" class="form-label">Payment Method</label>
+            <input type="text" class="form-control" name="payment_method" id="payment_method" value="{{ patient.payment_details.payment_method or '' }}">
+          </div>
+          <div class="mb-3">
+            <label for="billing_email" class="form-label">Billing Email</label>
+            <input type="email" class="form-control" name="billing_email" id="billing_email" value="{{ patient.payment_details.billing_email or '' }}">
+          </div>
+        </div>
+      </div>
+      
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Next of Kin Details</legend>
+        <div id="nok_container">
+          {% for nok in patient.next_of_kin_details %}
+            <div class="row mb-2 nok-row">
+              <div class="col-md-3"><input type="text" class="form-control nok-name"        placeholder="Name"        value="{{ nok.name }}"></div>
+              <div class="col-md-3"><input type="text" class="form-control nok-relationship" placeholder="Relationship" value="{{ nok.relationship }}"></div>
+              <div class="col-md-3"><input type="text" class="form-control nok-contact"     placeholder="Contact"     value="{{ nok.contact }}"></div>
+              <div class="col-md-2"><input type="text" class="form-control nok-address"     placeholder="Address"     value="{{ nok.address }}"></div>
+              <div class="col-md-1"><button type="button" class="btn btn-danger remove-nok">&times;</button></div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_nok">Add Next of Kin</button>
+        <input type="hidden" name="next_of_kin_details" id="next_of_kin_details">
+      </fieldset>
+      
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">LPA Details</legend>
+        <div id="lpa_container">
+          {% for lpa in patient.lpa_details %}
+            <div class="row mb-2 lpa-row">
+              <div class="col-md-3"><input type="text" class="form-control lpa-name"        placeholder="Name"        value="{{ lpa.name }}"></div>
+              <div class="col-md-3"><input type="text" class="form-control lpa-relationship" placeholder="Relationship" value="{{ lpa.relationship }}"></div>
+              <div class="col-md-3"><input type="text" class="form-control lpa-contact"     placeholder="Contact"     value="{{ lpa.contact }}"></div>
+              <div class="col-md-2"><input type="text" class="form-control lpa-address"     placeholder="Address"     value="{{ lpa.address }}"></div>
+              <div class="col-md-1"><button type="button" class="btn btn-danger remove-lpa">&times;</button></div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_lpa">Add LPA</button>
+        <input type="hidden" name="lpa_details" id="lpa_details">
+      </fieldset>
+      
+      <!-- Resuscitation Directive & Documents -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Resuscitation Directive</legend>
+        <div class="mb-3">
+          <label for="resus_option" class="form-label">For Resuscitation</label>
+          <select class="form-select" name="resus_option" id="resus_option" required>
+            <option value="">Select an option</option>
+            <option value="Yes" {% if patient.resuscitation_directive.for_resuscitation == "Yes" %}selected{% endif %}>Yes</option>
+            <option value="No" {% if patient.resuscitation_directive.for_resuscitation == "No" %}selected{% endif %}>No</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Documents in Place</label><br>
+          {% set docs = patient.resuscitation_directive.documents if patient.resuscitation_directive and patient.resuscitation_directive.documents else [] %}
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_dnar" id="doc_dnar" value="DNAR" {% if "DNAR" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_dnar">DNAR</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_respect" id="doc_respect" value="Respect Form" {% if "Respect Form" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_respect">Respect Form</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_advanced" id="doc_advanced" value="Advanced Directive" {% if "Advanced Directive" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_advanced">Advanced Directive</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_living" id="doc_living" value="Living Will" {% if "Living Will" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_living">Living Will</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_lpa" id="doc_lpa" value="LPA" {% if "LPA" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_lpa">LPA</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="checkbox" name="doc_care" id="doc_care" value="Care Plan" {% if "Care Plan" in docs %}checked{% endif %}>
+            <label class="form-check-label" for="doc_care">Care Plan</label>
+          </div>
+        </div>
+      </fieldset>
+      
+      <!-- File Upload for Documents -->
+      <div class="mb-3">
+        <label for="documents" class="form-label">Documents (Upload new files to replace)</label>
+        <input type="file" class="form-control" id="documents" name="documents" multiple>
+      </div>
+      
+      <!-- Dynamic List Sections -->
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Medical Conditions</legend>
+        <div id="medical_conditions_container">
+          {% if patient.medical_conditions and patient.medical_conditions|length > 0 %}
+            {% for condition in patient.medical_conditions %}
+              <div class="row mb-2 condition-row">
+                <div class="col-md-4">
+                  <input type="month" class="form-control condition_date" value="{{ condition.diagnosed_date }}" placeholder="Diagnosed Date">
+                </div>
+                <div class="col-md-4">
+                  <input type="text" class="form-control condition_severity" value="{{ condition.severity }}" placeholder="Severity/Stage">
+                </div>
+                <div class="col-md-3">
+                  <input type="text" class="form-control condition_name" value="{{ condition.condition_name }}" placeholder="Condition Name">
+                </div>
+                <div class="col-md-1">
+                  <button type="button" class="btn btn-danger remove_condition">&times;</button>
+                </div>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_medical_condition">Add Condition</button>
+      </fieldset>
+      <input type="hidden" name="medical_conditions" id="medical_conditions">
+      
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Allergies</legend>
+        <div id="allergies_container">
+          {% if patient.allergies and patient.allergies|length > 0 %}
+            {% for allergy in patient.allergies %}
+              <div class="row mb-2 allergy-row">
+                <div class="col-md-4">
+                  <input type="month" class="form-control allergy_date" value="{{ allergy.diagnosed_date }}" placeholder="Diagnosed Date">
+                </div>
+                <div class="col-md-4">
+                  <input type="text" class="form-control allergy_name" value="{{ allergy.allergy_name }}" placeholder="Allergy Name">
+                </div>
+                <div class="col-md-3">
+                  <input type="text" class="form-control allergy_severity" value="{{ allergy.severity }}" placeholder="Severity">
+                </div>
+                <div class="col-md-1">
+                  <button type="button" class="btn btn-danger remove_allergy">&times;</button>
+                </div>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_allergy">Add Allergy</button>
+      </fieldset>
+      <input type="hidden" name="allergies" id="allergies">
+      
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Medications</legend>
+        <div id="medications_container">
+          {% if patient.medications and patient.medications|length > 0 %}
+            {% for med in patient.medications %}
+              <div class="border p-2 mb-2 medication-row">
+                <div class="mb-2">
+                  <label>Medication Name</label>
+                  <input type="text" class="form-control med_name" value="{{ med.medication_name }}">
+                </div>
+                <div class="mb-2">
+                  <label>Date Prescribed</label>
+                  <input type="date" class="form-control med_date_prescribed" value="{{ med.date_prescribed }}">
+                </div>
+                <div class="mb-2">
+                  <label>Dosage</label>
+                  <input type="text" class="form-control med_dosage" value="{{ med.dosage }}">
+                </div>
+                <div class="mb-2">
+                  <label>Frequency</label>
+                  <input type="text" class="form-control med_frequency" value="{{ med.frequency }}">
+                </div>
+                <div class="mb-2">
+                  <label>Prescriber (if Known)</label>
+                  <input type="text" class="form-control med_prescriber" value="{{ med.prescriber }}">
+                </div>
+                <div class="mb-2">
+                  <label>Review Date</label>
+                  <input type="date" class="form-control med_review_date" value="{{ med.review_date }}">
+                  <div class="form-check">
+                    <input type="checkbox" class="form-check-input med_indefinite" {% if med.review_date == "Indefinite" %}checked{% endif %}>
+                    <label class="form-check-label">Indefinite</label>
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <label>Reason For Prescription</label>
+                  <input type="text" class="form-control med_reason" value="{{ med.reason }}">
+                </div>
+                <button type="button" class="btn btn-danger remove_medication">Remove Medication</button>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_medication">Add Medication</button>
+      </fieldset>
+      <input type="hidden" name="medications" id="medications">
+      
+      <fieldset class="border p-3 mb-3">
+        <legend class="w-auto">Access Requirements</legend>
+        <div id="access_requirements_container">
+          {% if patient.access_requirements and patient.access_requirements|length > 0 %}
+            {% for access in patient.access_requirements %}
+              <div class="row mb-2 access-row">
+                <div class="col-md-5">
+                  <input type="text" class="form-control access_category" value="{{ access.category }}" placeholder="Category">
+                </div>
+                <div class="col-md-5">
+                  <input type="text" class="form-control access_details" value="{{ access.details }}" placeholder="Details">
+                </div>
+                <div class="col-md-2">
+                  <button type="button" class="btn btn-danger remove_access_requirement">&times;</button>
+                </div>
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+        <button type="button" class="btn btn-secondary" id="add_access_requirement">Add Access Requirement</button>
+      </fieldset>
+      <input type="hidden" name="access_requirements" id="access_requirements">
+      
+    {% else %}
+      <!-- Locked state -->
+      <div class="mb-3">
+        <label class="form-label">Sensitive Data</label>
+        <input type="text" class="form-control" value="*******" disabled>
+      </div>
+      <p class="text-muted">Sensitive data is locked. Click "Unlock Sensitive Data" to view and edit.</p>
+    {% endif %}
+    
+    {% if not unlocked %}
+      <div class="mb-3">
+        <button type="button" class="btn btn-info" data-mdb-toggle="modal" data-mdb-target="#unlockModal">
+          Unlock Sensitive Data
+        </button>
+      </div>
+    {% endif %}
+    
+    <button type="submit" class="btn btn-primary">Update Record</button>
+    <a href="{{ url_for('medical_records_internal.admin_view_record', id=patient.id) }}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+
+<!-- Unlock / Request PIN Modal -->
+<div class="modal fade" id="unlockModal" tabindex="-1" aria-labelledby="unlockModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="unlockForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="unlockModalLabel">Unlock Sensitive Data</h5>
+          <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="unlockError" class="alert alert-danger" style="display:none;"></div>
+          <input type="hidden" name="patient_id" value="{{ patient.id }}" id="patient_id">
+
+          <!-- PIN entry -->
+          <div class="mb-3" id="pinEntry">
+            <label for="unlock_pin" class="form-label">PIN</label>
+            <input type="password" class="form-control" id="unlock_pin" name="pin" autocomplete="one-time-code">
+          </div>
+
+          <!-- Justification always required -->
+          <div class="mb-3" id="justificationGroup">
+            <label for="justification" class="form-label">Justification / Access Reason</label>
+            <textarea class="form-control" id="justification" name="justification" rows="3" required></textarea>
+          </div>
+
+          <p class="small text-muted">
+            Pins are single‑use to maintain Caldicott principles.
+          </p>
+        </div>
+        <div class="modal-footer">
+          <!-- This button triggers the form’s submit handler -->
+          <button type="submit" class="btn btn-primary btn-rounded" id="btnUnlock">Unlock</button>
+          <!-- This one fires a separate request -->
+          <button type="button" class="btn btn-warning btn-rounded" id="btnRequestPin">Request PIN</button>
+          <button type="button" class="btn btn-secondary btn-rounded" data-mdb-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+<!-- Hidden inputs for dynamic sections -->
+<input type="hidden" name="medical_conditions" id="medical_conditions">
+<input type="hidden" name="allergies" id="allergies">
+<input type="hidden" name="medications" id="medications">
+<input type="hidden" name="access_requirements" id="access_requirements">
+<input type="hidden" name="weight_records" id="weight_records">
+
+
+<!-- Persistent Modal for Personal PIN Entry -->
+<div class="modal fade" id="pinModal" tabindex="-1" aria-labelledby="pinModalLabel" aria-hidden="true"
+data-mdb-backdrop="static" data-mdb-keyboard="false">
+<div class="modal-dialog modal-dialog-centered">
+<div class="modal-content">
+ <div class="modal-header">
+   <h5 class="modal-title" id="pinModalLabel">Enter Your Personal PIN</h5>
+ </div>
+ <div class="modal-body">
+   <div class="form-outline mb-3">
+     <input type="password" id="personalPinInput" class="form-control" maxlength="6" placeholder="6-digit PIN" required>
+     <label class="form-label" for="personalPinInput">Personal PIN</label>
+   </div>
+   <div id="pinError" class="text-danger" style="display:none;"></div>
+ </div>
+ <div class="modal-footer">
+   <button type="button" id="verifyPinButton" class="btn btn-primary">Verify PIN</button>
+ </div>
+</div>
+</div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+// Initialize the MDB Modal
+var pinModalEl = document.getElementById("pinModal");
+var pinModal = new mdb.Modal(pinModalEl);
+
+// Show the modal immediately on page load
+pinModal.show();
+
+// Whenever the modal is about to be shown, we wait a moment and then
+// apply our inline blur styles to the MDB-generated backdrop.
+pinModalEl.addEventListener("show.mdb.modal", function() {
+setTimeout(function() {
+ var backdrop = document.querySelector(".modal-backdrop.show");
+ if (backdrop) {
+   backdrop.style.backgroundColor = "rgba(255, 255, 255, 0.6)";
+   backdrop.style.backdropFilter = "blur(6px)";
+   backdrop.style.webkitBackdropFilter = "blur(6px)"; // Safari support
+ }
+}, 10);
+});
+
+// Handle PIN verification when "Verify PIN" is clicked
+document.getElementById("verifyPinButton").addEventListener("click", function() {
+var pinValue = document.getElementById("personalPinInput").value.trim();
+if (pinValue.length !== 6) {
+ document.getElementById("pinError").innerText = "Please enter a valid 6-digit PIN.";
+ document.getElementById("pinError").style.display = "block";
+ return;
+}
+
+// Example AJAX request to verify the PIN (replace with your own endpoint / logic)
+fetch("{{ url_for('medical_records_internal.verify_pin') }}", {
+ method: "POST",
+ headers: { "Content-Type": "application/json" },
+ body: JSON.stringify({ personal_pin: pinValue })
+})
+.then(response => response.json().then(data => ({ status: response.status, data: data })))
+.then(obj => {
+ if (obj.status !== 200) {
+   document.getElementById("pinError").innerText = obj.data.error || "Invalid PIN.";
+   document.getElementById("pinError").style.display = "block";
+ } else {
+   // PIN verified: hide the modal
+   pinModal.hide();
+   // Optionally update page state, localStorage, etc.
+ }
+})
+.catch(error => {
+ console.error("Error verifying PIN:", error);
+});
+});
+});
+</script>
+
+<script>
+  // Cache DOM elements
+  const unlockForm      = document.getElementById("unlockForm");
+  const btnRequestPin   = document.getElementById("btnRequestPin");
+  const unlockError     = document.getElementById("unlockError");
+  const patientIdInput  = document.getElementById("patient_id");
+  const justificationEl = document.getElementById("justification");
+  const pinEntry        = document.getElementById("pinEntry");
+  
+  // Helper to show a message
+  function showMessage(msg, isError = true) {
+    unlockError.textContent = msg;
+    unlockError.className   = isError
+      ? "alert alert-danger"
+      : "alert alert-success";
+    unlockError.style.display = "block";
+  }
+  
+  // 1) Request PIN flow
+  btnRequestPin.addEventListener("click", () => {
+    const patient_id    = patientIdInput.value;
+    const justification = justificationEl.value.trim();
+  
+    if (!justification) {
+      return showMessage("Please provide a justification.");
+    }
+  
+    fetch("{{ url_for('medical_records_internal.request_unlock_pin') }}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: patient_id, justification })
+    })
+    .then(res => res.json().then(data => ({ status: res.status, data })))
+    .then(obj => {
+      if (obj.status !== 200) {
+        showMessage(obj.data.error || "Failed to send PIN request.");
+      } else {
+        showMessage("PIN request sent! A clinical lead will call you.", false);
+        // reset state after a short pause
+        setTimeout(() => {
+          unlockError.style.display = "none";
+          justificationEl.value = "";
+          pinEntry.style.display = "";
+          // restore Unlock button style if you ever changed it
+        }, 2000);
+      }
+    })
+    .catch(err => {
+      console.error("Error requesting PIN:", err);
+      showMessage("Network error sending PIN request.");
+    });
+  });
+  
+  // 2) Unlock flow (existing logic, plus justification)
+  unlockForm.addEventListener("submit", function(e) {
+    e.preventDefault();
+  
+    const formData = new FormData(this);
+    // ensure justification is included
+    if (!formData.get("justification") || formData.get("justification").trim() === "") {
+      return showMessage("PIN and justification are both required.");
+    }
+  
+    fetch("{{ url_for('medical_records_internal.unlock_record') }}", {
+      method: "POST",
+      body: formData
+    })
+    .then(response =>
+      response.json().then(data => ({ status: response.status, data }))
+    )
+    .then(obj => {
+      if (obj.status !== 200) {
+        showMessage(obj.data.error || "Failed to unlock record.");
+      } else {
+        // successful unlock reloads page to show data
+        window.location.reload();
+      }
+    })
+    .catch(error => {
+      console.error("Error unlocking sensitive data:", error);
+      showMessage("Network error unlocking record.");
+    });
+  });
+
+
+// Dynamic row creation for Medical Conditions
+function createMedicalConditionRow() {
+  var row = document.createElement('div');
+  row.className = 'row mb-2 condition-row';
+  row.innerHTML = `
+    <div class="col-md-4">
+      <input type="month" class="form-control condition_date" placeholder="Diagnosed Date">
+    </div>
+    <div class="col-md-4">
+      <input type="text" class="form-control condition_severity" placeholder="Severity/Stage">
+    </div>
+    <div class="col-md-3">
+      <input type="text" class="form-control condition_name" placeholder="Condition Name">
+    </div>
+    <div class="col-md-1">
+      <button type="button" class="btn btn-danger remove_condition">&times;</button>
+    </div>
+  `;
+  return row;
+}
+
+// Dynamic row creation for Allergies
+function createAllergyRow() {
+  var row = document.createElement('div');
+  row.className = 'row mb-2 allergy-row';
+  row.innerHTML = `
+    <div class="col-md-4">
+      <input type="month" class="form-control allergy_date" placeholder="Diagnosed Date">
+    </div>
+    <div class="col-md-4">
+      <input type="text" class="form-control allergy_name" placeholder="Allergy Name">
+    </div>
+    <div class="col-md-3">
+      <input type="text" class="form-control allergy_severity" placeholder="Severity">
+    </div>
+    <div class="col-md-1">
+      <button type="button" class="btn btn-danger remove_allergy">&times;</button>
+    </div>
+  `;
+  return row;
+}
+
+// Dynamic row creation for Medications
+function createMedicationRow() {
+  var row = document.createElement('div');
+  row.className = 'border p-2 mb-2 medication-row';
+  row.innerHTML = `
+    <div class="mb-2">
+      <label>Medication Name</label>
+      <input type="text" class="form-control med_name">
+    </div>
+    <div class="mb-2">
+      <label>Date Prescribed</label>
+      <input type="date" class="form-control med_date_prescribed">
+    </div>
+    <div class="mb-2">
+      <label>Dosage</label>
+      <input type="text" class="form-control med_dosage">
+    </div>
+    <div class="mb-2">
+      <label>Frequency</label>
+      <input type="text" class="form-control med_frequency">
+    </div>
+    <div class="mb-2">
+      <label>Prescriber (if Known)</label>
+      <input type="text" class="form-control med_prescriber">
+    </div>
+    <div class="mb-2">
+      <label>Review Date</label>
+      <input type="date" class="form-control med_review_date">
+      <div class="form-check">
+        <input type="checkbox" class="form-check-input med_indefinite">
+        <label class="form-check-label">Indefinite</label>
+      </div>
+    </div>
+    <div class="mb-2">
+      <label>Reason For Prescription</label>
+      <input type="text" class="form-control med_reason">
+    </div>
+    <button type="button" class="btn btn-danger remove_medication">Remove Medication</button>
+  `;
+  return row;
+}
+
+// Dynamic row creation for Access Requirements
+function createAccessRequirementRow() {
+  var row = document.createElement('div');
+  row.className = 'row mb-2 access-row';
+  row.innerHTML = `
+    <div class="col-md-5">
+      <select class="form-control access_category">
+        <option value="">Select Category</option>
+        <option value="Keysafe Number">Keysafe Number</option>
+        <option value="Access Requirements">Access Requirements</option>
+        <option value="Door Code">Door Code</option>
+        <option value="Entry Instructions">Entry Instructions</option>
+      </select>
+    </div>
+    <div class="col-md-5">
+      <input type="text" class="form-control access_details" placeholder="Details">
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-danger remove_access_requirement">&times;</button>
+    </div>
+  `;
+  return row;
+}
+
+// Dynamic row creation for Weight Record (single)
+function createWeightRecordRow() {
+  var row = document.createElement('div');
+  row.className = 'row mb-2 weight-record-row';
+  row.innerHTML = `
+    <div class="col-md-4">
+      <input type="number" step="0.1" class="form-control weight_value" placeholder="Weight (kg)">
+    </div>
+    <div class="col-md-4">
+      <input type="date" class="form-control weight_date" placeholder="Date Weighed">
+    </div>
+    <div class="col-md-3">
+      <select class="form-select weight_source">
+        <option value="">Select Source</option>
+        <option value="Home">Home</option>
+        <option value="Relative">Relative</option>
+        <option value="Hospital">Hospital</option>
+        <option value="Crew">Crew</option>
+        <option value="Assessments">Assessments</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+    <div class="col-md-1">
+      <button type="button" class="btn btn-danger remove_weight_record">&times;</button>
+    </div>
+  `;
+  return row;
+}
+
+if(document.getElementById('add_medical_condition')) {
+  document.getElementById('add_medical_condition').addEventListener('click', function() {
+    document.getElementById('medical_conditions_container').appendChild(createMedicalConditionRow());
+  });
+}
+
+if(document.getElementById('add_allergy')) {
+  document.getElementById('add_allergy').addEventListener('click', function() {
+    document.getElementById('allergies_container').appendChild(createAllergyRow());
+  });
+}
+
+if(document.getElementById('add_medication')) {
+  document.getElementById('add_medication').addEventListener('click', function() {
+    document.getElementById('medications_container').appendChild(createMedicationRow());
+  });
+}
+
+if(document.getElementById('add_access_requirement')) {
+  document.getElementById('add_access_requirement').addEventListener('click', function() {
+    document.getElementById('access_requirements_container').appendChild(createAccessRequirementRow());
+  });
+}
+
+if(document.getElementById('add_weight_record')) {
+  document.getElementById('add_weight_record').addEventListener('click', function() {
+    document.getElementById('weight_records_container').appendChild(createWeightRecordRow());
+  });
+}
+
+document.addEventListener('click', function(e) {
+  if(e.target && e.target.classList.contains('remove_condition')) {
+    e.target.closest('.condition-row').remove();
+  }
+  if(e.target && e.target.classList.contains('remove_allergy')) {
+    e.target.closest('.allergy-row').remove();
+  }
+  if(e.target && e.target.classList.contains('remove_medication')) {
+    e.target.closest('.medication-row').remove();
+  }
+  if(e.target && e.target.classList.contains('remove_access_requirement')) {
+    e.target.closest('.access-row').remove();
+  }
+  if(e.target && e.target.classList.contains('remove_weight_record')) {
+    e.target.closest('.weight-record-row').remove();
+  }
+});
+
+document.getElementById("editClientForm").addEventListener("submit", function(e) {
+  // Medical Conditions
+  var medicalConditions = [];
+  document.querySelectorAll('#medical_conditions_container .condition-row').forEach(function(row) {
+    medicalConditions.push({
+      diagnosed_date: row.querySelector('.condition_date').value,
+      severity: row.querySelector('.condition_severity').value,
+      condition_name: row.querySelector('.condition_name').value
+    });
+  });
+  document.getElementById('medical_conditions').value = JSON.stringify(medicalConditions);
+  
+  // Allergies
+  var allergies = [];
+  document.querySelectorAll('#allergies_container .allergy-row').forEach(function(row) {
+    allergies.push({
+      diagnosed_date: row.querySelector('.allergy_date').value,
+      allergy_name: row.querySelector('.allergy_name').value,
+      severity: row.querySelector('.allergy_severity').value
+    });
+  });
+  document.getElementById('allergies').value = JSON.stringify(allergies);
+  
+  // Medications
+  var medications = [];
+  document.querySelectorAll('#medications_container .medication-row').forEach(function(row) {
+    medications.push({
+      medication_name: row.querySelector('.med_name').value,
+      date_prescribed: row.querySelector('.med_date_prescribed').value,
+      dosage: row.querySelector('.med_dosage').value,
+      frequency: row.querySelector('.med_frequency').value,
+      prescriber: row.querySelector('.med_prescriber').value,
+      review_date: row.querySelector('.med_indefinite').checked ? "Indefinite" : row.querySelector('.med_review_date').value,
+      reason: row.querySelector('.med_reason').value
+    });
+  });
+  document.getElementById('medications').value = JSON.stringify(medications);
+  
+  // Access Requirements
+  var accessRequirements = [];
+  document.querySelectorAll('#access_requirements_container .access-row').forEach(function(row) {
+    accessRequirements.push({
+      category: row.querySelector('.access_category').value,
+      details: row.querySelector('.access_details').value
+    });
+  });
+  document.getElementById('access_requirements').value = JSON.stringify(accessRequirements);
+  
+  // Weight Record (single)
+  var weightRecord = {
+    value: document.querySelector('.weight_value').value,
+    date_weighed: document.querySelector('.weight_date').value,
+    source: document.querySelector('.weight_source').value
+  };
+  document.getElementById('weight_records').value = JSON.stringify(weightRecord);
+});
+
+// minimal helper
+function createRow(html, cls) {
+  const d = document.createElement('div');
+  d.className = cls + ' row mb-2';
+  d.innerHTML = html;
+  return d;
+}
+
+const templates = {
+  nok: {
+    container: 'nok_container',
+    cls: 'nok-row',
+    html: `
+      <div class="col-md-3"><input type="text" class="form-control nok-name"        placeholder="Name"></div>
+      <div class="col-md-3"><input type="text" class="form-control nok-relationship" placeholder="Relationship"></div>
+      <div class="col-md-3"><input type="text" class="form-control nok-contact"     placeholder="Contact"></div>
+      <div class="col-md-2"><input type="text" class="form-control nok-address"     placeholder="Address"></div>
+      <div class="col-md-1"><button type="button" class="btn btn-danger remove-nok">&times;</button></div>`
+  },
+  lpa: {
+    container: 'lpa_container',
+    cls: 'lpa-row',
+    html: `
+      <div class="col-md-3"><input type="text" class="form-control lpa-name"        placeholder="Name"></div>
+      <div class="col-md-3"><input type="text" class="form-control lpa-relationship" placeholder="Relationship"></div>
+      <div class="col-md-3"><input type="text" class="form-control lpa-contact"     placeholder="Contact"></div>
+      <div class="col-md-2"><input type="text" class="form-control lpa-address"     placeholder="Address"></div>
+      <div class="col-md-1"><button type="button" class="btn btn-danger remove-lpa">&times;</button></div>`
+  }
+};
+
+// add buttons
+document.getElementById('add_nok').onclick = () =>
+  document.getElementById(templates.nok.container)
+          .appendChild(createRow(templates.nok.html, templates.nok.cls));
+document.getElementById('add_lpa').onclick = () =>
+  document.getElementById(templates.lpa.container)
+          .appendChild(createRow(templates.lpa.html, templates.lpa.cls));
+
+// delegate removes
+document.addEventListener('click', e => {
+  if (e.target.matches('.remove-nok')) e.target.closest('.nok-row').remove();
+  if (e.target.matches('.remove-lpa')) e.target.closest('.lpa-row').remove();
+});
+
+// serialize on submit
+document.getElementById('editClientForm').addEventListener('submit', () => {
+  function serialize(id, cls, fields) {
+    return Array.from(document.querySelectorAll(`#${id} .${cls}`))
+      .map(row => {
+        const o = {};
+        fields.forEach(f => {
+          const el = row.querySelector(f.sel);
+          o[f.key] = el ? el.value : '';
+        });
+        return o;
+      });
+  }
+
+  document.getElementById('next_of_kin_details').value =
+    JSON.stringify(serialize('nok_container','nok-row',[
+      {key:'name',sel:'.nok-name'},
+      {key:'relationship',sel:'.nok-relationship'},
+      {key:'contact',sel:'.nok-contact'},
+      {key:'address',sel:'.nok-address'}
+    ]));
+
+  document.getElementById('lpa_details').value =
+    JSON.stringify(serialize('lpa_container','lpa-row',[
+      {key:'name',sel:'.lpa-name'},
+      {key:'relationship',sel:'.lpa-relationship'},
+      {key:'contact',sel:'.lpa-contact'},
+      {key:'address',sel:'.lpa-address'}
+    ]));
+});
+
+</script>
+{% endblock %}

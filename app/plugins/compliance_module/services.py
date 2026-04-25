@@ -540,6 +540,64 @@ def get_published_policy(policy_id: int) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
+def list_website_public_policies() -> List[Dict[str, Any]]:
+    """
+    Documents opted in for the public marketing site (/policies).
+    Active lifecycle only; excludes internal summary (not selected).
+    """
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT p.id, p.title, p.slug, p.version, p.category,
+                   p.published_at, p.updated_at, p.next_review_date, p.last_reviewed_date,
+                   (p.file_path IS NOT NULL AND p.file_path != '') AS has_file,
+                   (p.body_text IS NOT NULL AND TRIM(p.body_text) != '') AS has_body,
+                   dt.label AS document_type_label, dt.slug AS document_type_slug,
+                   dt.sort_order AS document_type_sort
+            FROM comp_policies p
+            LEFT JOIN comp_document_types dt ON dt.id = p.document_type_id
+            WHERE p.expose_on_website = 1
+              AND p.lifecycle_status = %s AND p.published = 1
+            ORDER BY dt.sort_order IS NULL, dt.sort_order, p.title
+            """,
+            (LIFECYCLE_ACTIVE,),
+        )
+        return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_website_public_policy_by_slug(slug: str) -> Optional[Dict[str, Any]]:
+    """Single public document by URL slug (no summary column)."""
+    s = (slug or "").strip()
+    if not s:
+        return None
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            """
+            SELECT p.id, p.title, p.slug, p.version, p.category, p.body_text, p.file_path,
+                   p.published_at, p.updated_at, p.next_review_date, p.last_reviewed_date,
+                   dt.label AS document_type_label, dt.slug AS document_type_slug
+            FROM comp_policies p
+            LEFT JOIN comp_document_types dt ON dt.id = p.document_type_id
+            WHERE p.slug = %s
+              AND p.expose_on_website = 1
+              AND p.lifecycle_status = %s AND p.published = 1
+            LIMIT 1
+            """,
+            (s[:191], LIFECYCLE_ACTIVE),
+        )
+        return cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+
 def contractor_has_acknowledged(contractor_id: int, policy_id: int, version: int) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
@@ -803,6 +861,7 @@ def admin_save_policy(
     lifecycle_status: Optional[str] = None,
     lifecycle_change_reason: Optional[str] = None,
     actor_label: Optional[str] = None,
+    expose_on_website: bool = False,
 ) -> Tuple[bool, str, Optional[int]]:
     title = (title or "").strip()
     if not title:
@@ -850,6 +909,7 @@ def admin_save_policy(
                 """
                 UPDATE comp_policies
                 SET title=%s, slug=%s, category=%s, document_type_id=%s, summary=%s, body_text=%s, mandatory=%s,
+                    expose_on_website=%s,
                     next_review_date=%s, last_reviewed_date=%s,
                     lifecycle_status=%s, published=%s,
                     published_at = IF(%s = 1 AND published_at IS NULL, NOW(), published_at)
@@ -863,6 +923,7 @@ def admin_save_policy(
                     summary or None,
                     body_text or None,
                     1 if mandatory else 0,
+                    1 if expose_on_website else 0,
                     nrd,
                     lrd,
                     ls,
@@ -882,10 +943,10 @@ def admin_save_policy(
         cur.execute(
             """
             INSERT INTO comp_policies
-            (title, slug, category, document_type_id, summary, body_text, mandatory,
+            (title, slug, category, document_type_id, summary, body_text, mandatory, expose_on_website,
              published, lifecycle_status, version, published_at,
              next_review_date, last_reviewed_date)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s)
             """,
             (
                 title[:255],
@@ -895,6 +956,7 @@ def admin_save_policy(
                 summary or None,
                 body_text or None,
                 1 if mandatory else 0,
+                1 if expose_on_website else 0,
                 new_pub,
                 ls,
                 published_at_val,

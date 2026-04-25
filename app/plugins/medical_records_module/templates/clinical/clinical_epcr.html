@@ -1,0 +1,708 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}EPCR cases — {{ (session.get('site_settings', {}).get('company_name')) or (config.site_settings.company_name if config and config.site_settings else 'Sparrow ERP') }}{% endblock %}
+{% block content %}
+<div class="mr-page-header">
+  <h1 class="h2 mb-2">EPCR cases</h1>
+  <p class="lead mb-0">{{ current_user.username }} — filter by ID, status, dates, dispatch reference, or <strong>assigned usernames</strong> (Sparrow accounts on the case; not patient data). Clinical record content is not shown until you unlock a case.</p>
+  <p class="small text-muted mb-0">Created, updated, and closed times are shown in <strong>{{ epcr_display_timezone_label }}</strong>. Stored values are in UTC.</p>
+  {% if epcr_locked_mode %}
+    <div class="alert alert-warning mt-3 mb-0">
+      <strong>Confidential access control</strong> — every role (including superuser) must request or enter a one-time access code and give a justification before opening a case. <strong>Entering the code also requires your Sparrow personal PIN</strong> so an unattended signed-in session cannot be opened with the code alone. <strong>Returning to this list clears your open-case access</strong> — you must unlock again to view the same or another case (you can print or review freely while you stay on the case page). Open-case access also <strong>expires after a server-configured time limit</strong> even if you stay on the case. Repeated wrong codes or PINs trigger a short lockout. Another clinical lead or superuser approves requests; you cannot approve your own.
+    </div>
+    <div class="card border-0 shadow-sm mt-3" style="border: 1px solid var(--mr-card-border, #e2e8f0) !important;">
+      <div class="card-body p-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div>
+            <strong>My EPCR access requests</strong>
+            <div class="small text-muted">Each row shows <strong>case ID</strong>, <strong>CAD / dispatch ref</strong> (if set), <strong>operational period</strong> (id / name from the case submission), and <strong>case opened</strong> time — no clinical content. Only one <strong>pending</strong> request per case is kept: a new request withdraws your older pending ones for that case. Pending requests that are not reviewed <strong>expire</strong> after a number of days (server setting). You can <strong>withdraw</strong> a pending request from here. <strong>Hide</strong> clears cards from this browser only (withdrawn, expired, rejected, or approved); use <strong>Hide all finished</strong> to tidy the list, or <strong>Show hidden</strong> to bring them back.</div>
+          </div>
+          <div class="d-flex flex-wrap gap-1 align-items-center justify-content-end">
+            <button id="epcrHideAllFinishedBtn" type="button" class="btn btn-sm btn-outline-secondary">Hide all finished</button>
+            <button id="epcrShowHiddenReqsBtn" type="button" class="btn btn-sm btn-outline-secondary">Show hidden</button>
+            <button id="refreshMyEpcrRequestsBtn" type="button" class="btn btn-sm btn-outline-primary">Refresh request status</button>
+          </div>
+        </div>
+        <div id="myEpcrRequestsSection" class="mt-3"></div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+  <div class="mb-3">
+    <label for="searchInput" class="form-label small text-muted mb-1">Quick filter</label>
+    <div class="input-group input-group-lg">
+      <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
+      <input type="search" id="searchInput" class="form-control" placeholder="Filter by case ID, status, dates, dispatch ref, assigned username…" autocomplete="off">
+    </div>
+  </div>
+
+  <div class="table-responsive mr-table-wrap">
+    <table class="table table-hover align-middle mb-0" id="casesTable">
+      <thead>
+        <tr>
+          <th scope="col">ID</th>
+          <th scope="col">Assigned users</th>
+          <th scope="col">Status</th>
+          <th scope="col">Created</th>
+          <th scope="col">Updated</th>
+          <th scope="col">Closed</th>
+          <th scope="col" class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for case in epcr_cases %}
+        <tr id="case-{{ case.id }}">
+          <td class="font-monospace">{{ case.id }}</td>
+          <td class="small font-monospace">
+            {% if case.assignedUsers and case.assignedUsers|length %}
+              {{ case.assignedUsers | join(', ') }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge rounded-pill mr-badge-soft bg-light text-dark border">{{ case.status }}</span>
+          </td>
+          <td class="small text-muted">{{ case.created_at or '—' }}</td>
+          <td class="small text-muted">{{ case.updated_at or '—' }}</td>
+          <td class="small text-muted">{{ case.closed_at or '—' }}</td>
+          <td class="text-end text-nowrap">
+            {% if epcr_locked_mode %}
+              <button type="button" class="btn btn-sm btn-outline-secondary request-access-btn" data-case-id="{{ case.id }}">Request code</button>
+              <button type="button" class="btn btn-sm btn-outline-primary unlock-access-btn" data-case-id="{{ case.id }}">Enter code</button>
+              {% if epcr_admin_force_close_allowed|default(false) and (case.status or '')|lower != 'closed' %}
+              <button type="button" class="btn btn-sm btn-warning text-dark force-close-epcr-btn" data-case-id="{{ case.id }}">Force close</button>
+              {% endif %}
+              {% if current_user.role|lower in ['superuser', 'clinical_lead', 'admin'] %}
+              <button type="button" class="btn btn-sm btn-outline-danger delete-case-btn" data-case-id="{{ case.id }}">Delete</button>
+              {% endif %}
+            {% else %}
+              <a href="{{ url_for('medical_records_internal.view_epcr_case', case_id=case.id) }}" class="btn btn-sm btn-outline-primary">View</a>
+              {% if epcr_admin_force_close_allowed|default(false) and (case.status or '')|lower != 'closed' %}
+              <button type="button" class="btn btn-sm btn-warning text-dark force-close-epcr-btn" data-case-id="{{ case.id }}">Force close</button>
+              {% endif %}
+              <button type="button" class="btn btn-sm btn-outline-danger delete-case-btn" data-case-id="{{ case.id }}">Delete</button>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+{% if epcr_locked_mode %}
+<style>
+  .epcr-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+  .epcr-modal-backdrop.is-open { display: flex; }
+  .epcr-modal-card {
+    width: min(560px, 92vw);
+    background: #fff;
+    border: 1px solid #d9e2ec;
+    border-radius: 10px;
+    box-shadow: 0 16px 42px rgba(2, 6, 23, 0.26);
+    overflow: hidden;
+  }
+  .epcr-modal-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e6edf5;
+    background: #f8fafc;
+    font-weight: 600;
+  }
+  .epcr-modal-body { padding: 16px; }
+  .epcr-modal-foot {
+    padding: 12px 16px;
+    border-top: 1px solid #e6edf5;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .epcr-req-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    background: #fafbfc;
+  }
+  .epcr-req-meta {
+    font-size: 0.8125rem;
+    color: #64748b;
+    margin-bottom: 8px;
+  }
+  .epcr-req-meta strong { color: #334155; }
+  .epcr-use-code-btn {
+    box-shadow: 0 4px 14px rgba(13, 110, 253, 0.35);
+    font-weight: 600;
+  }
+</style>
+
+<div id="epcrAccessModal" class="epcr-modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="epcr-modal-card">
+    <div class="epcr-modal-head">EPCR locked case access</div>
+    <div class="epcr-modal-body">
+      <input type="hidden" id="epcrModalAction">
+      <input type="hidden" id="epcrModalCaseId">
+      <div class="mb-2">
+        <label class="form-label">Case ID</label>
+        <input class="form-control" id="epcrModalCaseDisplay" disabled>
+      </div>
+      <div class="mb-2" id="epcrModalCodeWrap" style="display:none;">
+        <label class="form-label">Access code</label>
+        <input class="form-control" id="epcrModalCodeInput" autocomplete="off">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Reason / justification</label>
+        <textarea class="form-control" id="epcrModalReasonInput" rows="3" placeholder="Clinical / operational reason"></textarea>
+      </div>
+      <div class="mb-2" id="epcrModalPersonalPinWrap" style="display:none;">
+        <label class="form-label">Your Sparrow personal PIN</label>
+        <input type="password" class="form-control" id="epcrModalPersonalPinInput" autocomplete="current-password" aria-describedby="epcrPersonalPinHelp">
+        <div id="epcrPersonalPinHelp" class="form-text">Confirms you are at this device; not the one-time access code from your approver.</div>
+      </div>
+      <div id="epcrModalMessage" class="small text-muted"></div>
+    </div>
+    <div class="epcr-modal-foot">
+      <button class="btn btn-outline-secondary btn-sm" id="epcrModalCancelBtn">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="epcrModalSubmitBtn">Submit</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if epcr_admin_force_close_allowed|default(false) %}
+<div id="epcrForceCloseModal" class="epcr-modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="epcr-modal-card" style="width: min(620px, 94vw);">
+    <div class="epcr-modal-head">Force close EPCR (administrative)</div>
+    <div class="epcr-modal-body">
+      <input type="hidden" id="epcrForceCloseCaseId">
+      <p class="small text-muted mb-3">Use when clinicians cannot complete or close the record in Cura (e.g. app block, stood down, duplicate case). Requires your personal PIN, a category, audit notes, and typing <strong>FORCE CLOSE</strong>. Logged to Sparrow audit; case JSON will carry <code>epcrAdminForceClose</code> for PDFs and governance.</p>
+      <div class="mb-2">
+        <label class="form-label">Case ID</label>
+        <input class="form-control font-monospace" id="epcrForceCloseCaseDisplay" disabled>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Category</label>
+        <select class="form-select" id="epcrForceCloseCategory">
+          {% for key, label in (epcr_force_close_categories or ()) %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Audit notes (min. 20 characters)</label>
+        <textarea class="form-control" id="epcrForceCloseNotes" rows="4" placeholder="Why could clinicians not close this record? Include enough detail for audit/CQC."></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Your Sparrow personal PIN</label>
+        <input type="password" class="form-control" id="epcrForceClosePersonalPin" autocomplete="current-password">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Confirmation — type exactly: FORCE CLOSE</label>
+        <input class="form-control font-monospace" id="epcrForceCloseConfirm" autocomplete="off">
+      </div>
+      <div id="epcrForceCloseMsg" class="small"></div>
+    </div>
+    <div class="epcr-modal-foot">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="epcrForceCloseCancelBtn">Cancel</button>
+      <button type="button" class="btn btn-warning btn-sm text-dark" id="epcrForceCloseSubmitBtn">Force close case</button>
+    </div>
+  </div>
+</div>
+<style>
+  {% if not epcr_locked_mode %}
+  .epcr-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+  }
+  .epcr-modal-backdrop.is-open { display: flex; }
+  .epcr-modal-card {
+    width: min(560px, 92vw);
+    background: #fff;
+    border: 1px solid #d9e2ec;
+    border-radius: 10px;
+    box-shadow: 0 16px 42px rgba(2, 6, 23, 0.26);
+    overflow: hidden;
+  }
+  .epcr-modal-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e6edf5;
+    background: #f8fafc;
+    font-weight: 600;
+  }
+  .epcr-modal-body { padding: 16px; }
+  .epcr-modal-foot {
+    padding: 12px 16px;
+    border-top: 1px solid #e6edf5;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  {% endif %}
+</style>
+{% endif %}
+
+<!-- JavaScript to filter table rows based on the search input and handle deletion -->
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  // Search filtering
+  const searchInput = document.getElementById('searchInput');
+  const tableRows = document.querySelectorAll("#casesTable tbody tr");
+
+  searchInput.addEventListener("keyup", function() {
+    const filterText = searchInput.value.toLowerCase();
+    tableRows.forEach(function(row) {
+      const rowText = row.textContent.toLowerCase();
+      row.style.display = rowText.indexOf(filterText) > -1 ? "" : "none";
+    });
+  });
+
+  {% if epcr_admin_force_close_allowed|default(false) %}
+  (function () {
+    const fcModal = document.getElementById('epcrForceCloseModal');
+    if (!fcModal) return;
+    const fcCaseId = document.getElementById('epcrForceCloseCaseId');
+    const fcCaseDisp = document.getElementById('epcrForceCloseCaseDisplay');
+    const fcCat = document.getElementById('epcrForceCloseCategory');
+    const fcNotes = document.getElementById('epcrForceCloseNotes');
+    const fcPin = document.getElementById('epcrForceClosePersonalPin');
+    const fcConfirm = document.getElementById('epcrForceCloseConfirm');
+    const fcMsg = document.getElementById('epcrForceCloseMsg');
+    const fcCancel = document.getElementById('epcrForceCloseCancelBtn');
+    const fcSubmit = document.getElementById('epcrForceCloseSubmitBtn');
+    const fcUrlTpl = {{ url_for('medical_records_internal.admin_force_close_epcr', case_id=0)|tojson }};
+    const buildFcUrl = (id) => String(fcUrlTpl).replace(/\/epcr\/0(?=\/)/, '/epcr/' + String(id));
+
+    const openFc = (caseId) => {
+      fcCaseId.value = String(caseId || '');
+      fcCaseDisp.value = String(caseId || '');
+      fcNotes.value = '';
+      fcPin.value = '';
+      fcConfirm.value = '';
+      fcMsg.textContent = '';
+      fcMsg.className = 'small';
+      fcModal.classList.add('is-open');
+      fcModal.setAttribute('aria-hidden', 'false');
+      setTimeout(() => { fcCat.focus(); }, 0);
+    };
+    const closeFc = () => {
+      fcModal.classList.remove('is-open');
+      fcModal.setAttribute('aria-hidden', 'true');
+    };
+    fcCancel.addEventListener('click', closeFc);
+    fcModal.addEventListener('click', (e) => { if (e.target === fcModal) closeFc(); });
+    document.querySelectorAll('.force-close-epcr-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openFc(btn.getAttribute('data-case-id')));
+    });
+    fcSubmit.addEventListener('click', async () => {
+      const cid = fcCaseId.value.trim();
+      const category = fcCat.value;
+      const audit_notes = fcNotes.value.trim();
+      const personal_pin = fcPin.value.trim();
+      const confirm_phrase = fcConfirm.value.trim();
+      if (!cid) return;
+      if (audit_notes.length < 20) {
+        fcMsg.className = 'small text-danger';
+        fcMsg.textContent = 'Audit notes must be at least 20 characters.';
+        return;
+      }
+      if (!personal_pin) {
+        fcMsg.className = 'small text-danger';
+        fcMsg.textContent = 'Personal PIN is required.';
+        return;
+      }
+      fcSubmit.disabled = true;
+      fcMsg.className = 'small text-muted';
+      fcMsg.textContent = 'Closing case…';
+      try {
+        const res = await fetch(buildFcUrl(cid), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({
+            category,
+            audit_notes,
+            personal_pin,
+            confirm_phrase,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || ('HTTP ' + res.status));
+        }
+        closeFc();
+        window.location.reload();
+      } catch (e) {
+        fcMsg.className = 'small text-danger';
+        fcMsg.textContent = e.message || 'Force close failed';
+      } finally {
+        fcSubmit.disabled = false;
+      }
+    });
+  })();
+  {% endif %}
+
+  {% if epcr_locked_mode %}
+  const modalEl = document.getElementById('epcrAccessModal');
+  const modalActionEl = document.getElementById('epcrModalAction');
+  const modalCaseIdEl = document.getElementById('epcrModalCaseId');
+  const modalCaseDisplayEl = document.getElementById('epcrModalCaseDisplay');
+  const modalCodeWrapEl = document.getElementById('epcrModalCodeWrap');
+  const modalCodeEl = document.getElementById('epcrModalCodeInput');
+  const modalReasonEl = document.getElementById('epcrModalReasonInput');
+  const modalMsgEl = document.getElementById('epcrModalMessage');
+  const modalPersonalPinWrapEl = document.getElementById('epcrModalPersonalPinWrap');
+  const modalPersonalPinEl = document.getElementById('epcrModalPersonalPinInput');
+  const modalSubmitBtn = document.getElementById('epcrModalSubmitBtn');
+  const modalCancelBtn = document.getElementById('epcrModalCancelBtn');
+  const myReqBtn = document.getElementById('refreshMyEpcrRequestsBtn');
+  const myReqSection = document.getElementById('myEpcrRequestsSection');
+  const epcrHideAllFinishedBtn = document.getElementById('epcrHideAllFinishedBtn');
+  const epcrShowHiddenReqsBtn = document.getElementById('epcrShowHiddenReqsBtn');
+  const epcrActor = {{ current_user.username|tojson }};
+  const epcrHiddenReqLsKey = 'epcr_my_access_req_hidden_' + String(epcrActor || 'user');
+
+  let myEpcrRequestsCache = [];
+
+  const loadEpcrHiddenRequestIds = () => {
+    try {
+      const raw = localStorage.getItem(epcrHiddenReqLsKey);
+      const arr = JSON.parse(raw || '[]');
+      return new Set(Array.isArray(arr) ? arr.map(String) : []);
+    } catch (e) {
+      return new Set();
+    }
+  };
+
+  const saveEpcrHiddenRequestIds = (set) => {
+    try {
+      localStorage.setItem(epcrHiddenReqLsKey, JSON.stringify([...set]));
+    } catch (e) { /* quota / private mode */ }
+  };
+
+  const epcrRequestDismissable = (state) => {
+    const s = (state || '').toLowerCase();
+    return s === 'withdrawn' || s === 'expired' || s === 'rejected' || s === 'approved';
+  };
+
+  const hideEpcrRequestId = (rid) => {
+    if (!rid) return;
+    const s = loadEpcrHiddenRequestIds();
+    s.add(String(rid));
+    saveEpcrHiddenRequestIds(s);
+  };
+
+  const escapeHtml = (s) => {
+    if (s == null || s === '') return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
+  const fmtWhen = (iso) => {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return escapeHtml(iso);
+      return escapeHtml(sparrowFormatDateTimeShort(d));
+    } catch (e) {
+      return escapeHtml(iso);
+    }
+  };
+
+  const openAccessModal = (mode, caseId, opts) => {
+    opts = opts || {};
+    modalActionEl.value = mode;
+    modalCaseIdEl.value = String(caseId || '');
+    modalCaseDisplayEl.value = String(caseId || '');
+    modalCodeWrapEl.style.display = mode === 'unlock' ? '' : 'none';
+    if (modalPersonalPinWrapEl) modalPersonalPinWrapEl.style.display = mode === 'unlock' ? '' : 'none';
+    if (mode === 'unlock' && opts.pin) {
+      modalCodeEl.value = String(opts.pin);
+    } else {
+      modalCodeEl.value = '';
+    }
+    modalReasonEl.value = '';
+    if (modalPersonalPinEl) modalPersonalPinEl.value = '';
+    modalMsgEl.textContent = mode === 'request'
+      ? 'Request a one-time code from clinical lead/superuser.'
+      : 'Enter the one-time code, your reason, and your personal Sparrow PIN — the PIN proves you are at this device.';
+    modalSubmitBtn.textContent = mode === 'request' ? 'Request code' : 'Unlock and view';
+    modalEl.classList.add('is-open');
+    modalEl.setAttribute('aria-hidden', 'false');
+    setTimeout(() => { modalReasonEl.focus(); }, 0);
+  };
+
+  const closeAccessModal = () => {
+    modalEl.classList.remove('is-open');
+    modalEl.setAttribute('aria-hidden', 'true');
+  };
+
+  modalCancelBtn.addEventListener('click', closeAccessModal);
+  modalEl.addEventListener('click', (e) => {
+    if (e.target === modalEl) closeAccessModal();
+  });
+
+  document.querySelectorAll('.request-access-btn').forEach(function(button) {
+    button.addEventListener('click', function(){
+      openAccessModal('request', this.getAttribute('data-case-id'));
+    });
+  });
+
+  document.querySelectorAll('.unlock-access-btn').forEach(function(button) {
+    button.addEventListener('click', function(){
+      openAccessModal('unlock', this.getAttribute('data-case-id'));
+    });
+  });
+
+  const renderMyRequests = (items) => {
+    if (!myReqSection) return;
+    myEpcrRequestsCache = Array.isArray(items) ? items : [];
+    const hidden = loadEpcrHiddenRequestIds();
+    const visible = myEpcrRequestsCache.filter((r) => r && r.request_id && !hidden.has(String(r.request_id)));
+    if (!myEpcrRequestsCache.length) {
+      myReqSection.innerHTML = '<div class="small text-muted">No access requests yet.</div>';
+      return;
+    }
+    if (!visible.length) {
+      myReqSection.innerHTML = '<div class="small text-muted">No requests shown — all are hidden in this browser. <button type="button" class="btn btn-link btn-sm p-0 align-baseline epcr-show-hidden-inline">Show hidden</button></div>';
+      return;
+    }
+    const rows = visible.map((req) => {
+      const state = (req.status || '').toLowerCase();
+      let stateBadge = '<span class="badge bg-secondary">Unknown</span>';
+      if (state === 'pending') stateBadge = '<span class="badge bg-warning text-dark">Pending</span>';
+      if (state === 'approved') stateBadge = '<span class="badge bg-success">Approved</span>';
+      if (state === 'rejected') stateBadge = '<span class="badge bg-danger">Rejected</span>';
+      if (state === 'expired') stateBadge = '<span class="badge bg-secondary">Expired</span>';
+      if (state === 'withdrawn') stateBadge = '<span class="badge bg-secondary">Withdrawn</span>';
+      const rawCaseId = String(req.case_id != null ? req.case_id : '');
+      const cid = escapeHtml(rawCaseId);
+      const cad = req.cad_reference ? escapeHtml(req.cad_reference) : '—';
+      const opId = req.operational_event_id != null && req.operational_event_id !== ''
+        ? String(req.operational_event_id) : '';
+      const opName = req.operational_event_name ? escapeHtml(req.operational_event_name) : '';
+      const opLoc = req.operational_event_location ? escapeHtml(req.operational_event_location) : '';
+      let opBits = 'Ops —';
+      if (opId) {
+        opBits = `Ops <strong>#${escapeHtml(opId)}</strong>`;
+        if (opName) opBits += ` <span>${opName}</span>`;
+        if (opLoc) opBits += ` <span class="text-muted">(${opLoc})</span>`;
+      }
+      const meta = `<div class="epcr-req-meta">Case <span class="font-monospace">${cid}</span> · CAD <strong>${cad}</strong> · ${opBits} · Opened <strong>${fmtWhen(req.case_opened_at)}</strong></div>`;
+      const rawPin = req.access_code ? String(req.access_code) : '';
+      const codeLine = state === 'approved' && rawPin
+        ? `<div class="small mb-2">One-time code <code style="user-select:all">${escapeHtml(rawPin)}</code>${req.code_expires_at ? ` <span class="text-muted">(expires ${escapeHtml(req.code_expires_at)})</span>` : ''}</div>`
+        : '';
+      const escAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const useBtn = state === 'approved' && rawPin
+        ? `<button type="button" class="btn btn-sm btn-primary epcr-use-code-btn mb-1" data-case-id="${escAttr(rawCaseId)}" data-pin="${escAttr(rawPin)}">Use this code for this case</button>`
+        : '';
+      const noteLine = req.review_note ? `<div class="small text-muted mt-1">Note: ${escapeHtml(req.review_note)}</div>` : '';
+      const rid = String(req.request_id || '');
+      const ridEsc = escAttr(rid);
+      const withdrawBtn = req.can_withdraw
+        ? `<button type="button" class="btn btn-sm btn-outline-secondary epcr-withdraw-req-btn mt-1" data-request-id="${ridEsc}">Withdraw request</button>`
+        : '';
+      const hideBtn = epcrRequestDismissable(state)
+        ? `<button type="button" class="btn btn-sm btn-link text-muted py-0 px-1 epcr-dismiss-req-btn" data-request-id="${ridEsc}" title="Hide from this list (this browser only)">Hide</button>`
+        : '';
+      const head = `<div class="d-flex justify-content-between align-items-start gap-2 mb-1"><div class="flex-grow-1">${stateBadge}</div>${hideBtn}</div>`;
+      return `<div class="epcr-req-card">${head}${meta}<div class="small text-muted mb-1">Request <span class="font-monospace">${escapeHtml(rid)}</span></div>${codeLine}${useBtn}${withdrawBtn}${noteLine}</div>`;
+    }).join('');
+    myReqSection.innerHTML = rows;
+  };
+
+  if (myReqSection) {
+    myReqSection.addEventListener('click', function(e) {
+      const showHiddenInline = e.target.closest('.epcr-show-hidden-inline');
+      if (showHiddenInline) {
+        e.preventDefault();
+        try { localStorage.removeItem(epcrHiddenReqLsKey); } catch (err) { /* ignore */ }
+        renderMyRequests(myEpcrRequestsCache);
+        return;
+      }
+      const dismissBtn = e.target.closest('.epcr-dismiss-req-btn');
+      if (dismissBtn) {
+        e.preventDefault();
+        const rid = dismissBtn.getAttribute('data-request-id');
+        hideEpcrRequestId(rid);
+        renderMyRequests(myEpcrRequestsCache);
+        return;
+      }
+      const useBtn = e.target.closest('.epcr-use-code-btn');
+      if (useBtn) {
+        e.preventDefault();
+        const caseId = useBtn.getAttribute('data-case-id');
+        const pin = useBtn.getAttribute('data-pin') || '';
+        openAccessModal('unlock', caseId, { pin: pin });
+        const crow = document.getElementById('case-' + caseId);
+        if (crow) crow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      const wBtn = e.target.closest('.epcr-withdraw-req-btn');
+      if (!wBtn) return;
+      e.preventDefault();
+      const rid = wBtn.getAttribute('data-request-id');
+      if (!rid || !confirm('Withdraw this access request? Clinical leads will no longer see it as pending.')) return;
+      wBtn.disabled = true;
+      fetch("{{ url_for('medical_records_internal.withdraw_epcr_access_request') }}", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ request_id: rid }),
+      })
+        .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+          if (!ok || d.error) throw new Error(d.error || 'Withdraw failed');
+          hideEpcrRequestId(rid);
+          if (myReqBtn) myReqBtn.click();
+        })
+        .catch((err) => {
+          alert(err.message || 'Withdraw failed');
+          wBtn.disabled = false;
+        });
+    });
+  }
+
+  if (epcrHideAllFinishedBtn) {
+    epcrHideAllFinishedBtn.addEventListener('click', function() {
+      const set = loadEpcrHiddenRequestIds();
+      (myEpcrRequestsCache || []).forEach((r) => {
+        if (!r || !r.request_id) return;
+        if (epcrRequestDismissable(r.status)) set.add(String(r.request_id));
+      });
+      saveEpcrHiddenRequestIds(set);
+      renderMyRequests(myEpcrRequestsCache);
+    });
+  }
+  if (epcrShowHiddenReqsBtn) {
+    epcrShowHiddenReqsBtn.addEventListener('click', function() {
+      try { localStorage.removeItem(epcrHiddenReqLsKey); } catch (e) { /* ignore */ }
+      renderMyRequests(myEpcrRequestsCache);
+    });
+  }
+
+  if (myReqBtn) {
+    myReqBtn.addEventListener('click', async () => {
+      try {
+        myReqBtn.disabled = true;
+        const res = await fetch("{{ url_for('medical_records_internal.my_epcr_access_requests') }}");
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to load');
+        renderMyRequests(data.requests || []);
+      } catch (e) {
+        myReqSection.innerHTML = `<div class="small text-danger">${e.message || 'Failed to load request statuses.'}</div>`;
+      } finally {
+        myReqBtn.disabled = false;
+      }
+    });
+    myReqBtn.click();
+  }
+
+  modalSubmitBtn.addEventListener('click', async () => {
+    const mode = modalActionEl.value;
+    const caseId = modalCaseIdEl.value;
+    const justification = modalReasonEl.value.trim();
+    if (!caseId || !justification) {
+      modalMsgEl.textContent = 'Case ID and reason are required.';
+      return;
+    }
+    modalSubmitBtn.disabled = true;
+    modalMsgEl.textContent = 'Submitting...';
+    try {
+      if (mode === 'request') {
+        const res = await fetch("{{ url_for('medical_records_internal.request_epcr_access_code') }}", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ case_id: caseId, justification }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed');
+        modalMsgEl.textContent = `Access request submitted (ID: ${data.request_id || 'n/a'}). Waiting for clinical lead approval.`;
+        if (myReqBtn) myReqBtn.click();
+        setTimeout(closeAccessModal, 500);
+      } else {
+        const pin = modalCodeEl.value.trim();
+        if (!pin) throw new Error('Access code is required.');
+        const personalPin = modalPersonalPinEl ? modalPersonalPinEl.value.trim() : '';
+        if (!personalPin) throw new Error('Your Sparrow personal PIN is required.');
+        const res = await fetch("{{ url_for('medical_records_internal.unlock_epcr_case') }}", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ case_id: caseId, pin, justification, personal_pin: personalPin }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Unlock failed');
+        window.location.href = data.redirect_url;
+      }
+    } catch (e) {
+      modalMsgEl.textContent = e.message || 'Request failed';
+    } finally {
+      modalSubmitBtn.disabled = false;
+    }
+  });
+
+  document.querySelectorAll('.delete-case-btn').forEach(function(button) {
+    button.addEventListener('click', function(){
+      if(confirm('Are you sure you want to delete this case?')) {
+        const caseId = this.getAttribute('data-case-id');
+        fetch("{{ url_for('medical_records_internal.delete_epcr', case_id=0) }}".replace('0', caseId), {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(response => response.json())
+        .then(data => {
+          if(data.success) {
+            var row = document.getElementById('case-' + caseId);
+            if (row) row.remove();
+          } else {
+            alert('Error deleting case: ' + data.error);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting case:', error);
+          alert('Error deleting case.');
+        });
+      }
+    });
+  });
+  {% else %}
+  document.querySelectorAll('.delete-case-btn').forEach(function(button) {
+    button.addEventListener('click', function(){
+      if(confirm('Are you sure you want to delete this case?')) {
+        const caseId = this.getAttribute('data-case-id');
+        fetch("{{ url_for('medical_records_internal.delete_epcr', case_id=0) }}".replace('0', caseId), {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(response => response.json())
+        .then(data => {
+          if(data.success) {
+            var row = document.getElementById('case-' + caseId);
+            if (row) row.remove();
+          } else {
+            alert('Error deleting case: ' + (data.error || 'unknown'));
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting case:', error);
+          alert('Error deleting case.');
+        });
+      }
+    });
+  });
+  {% endif %}
+});
+</script>
+{% endblock %}

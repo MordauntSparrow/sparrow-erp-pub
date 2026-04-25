@@ -38,8 +38,13 @@
         <input class="form-control" type="number" name="grace_days" value="{{ course.grace_days or 0 }}" min="0">
       </div>
       <div class="col-md-4 mb-2">
-        <label class="form-label">Compliance policy ID</label>
-        <input class="form-control" type="number" name="comp_policy_id" value="{{ course.comp_policy_id or '' }}" placeholder="optional">
+        <label class="form-label">Compliance policy (optional)</label>
+        <select class="form-select" name="comp_policy_id">
+          <option value="">— None —</option>
+          {% for p in compliance_policies %}
+          <option value="{{ p.id }}" {% if course.comp_policy_id == p.id %}selected{% endif %}>{{ (p.title or ('Policy ' ~ p.id))|e }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div class="col-12">
         <div class="form-check">

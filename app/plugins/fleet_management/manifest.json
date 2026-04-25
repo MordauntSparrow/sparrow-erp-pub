@@ -1,0 +1,43 @@
+{
+  "system_name": "fleet_management",
+  "name": "Fleet Management",
+  "description": "Vehicles, compliance (MOT/tax/insurance), VDI at /VDIs, dynamic inspection forms, issue kanban, VIN/ID photos, auto VOR on expired compliance, employee portal Fleet link.",
+  "version": "0.2.0",
+  "icon": "icon.png",
+  "settings": {},
+  "user_role_categories": [
+    {
+      "id": "fleet_all_staff",
+      "label": "All field staff (default VDI)",
+      "sort": 5,
+      "roles": []
+    },
+    {
+      "id": "fleet_workshop",
+      "label": "Workshop & mechanics",
+      "parent": "fleet_all_staff",
+      "sort": 10,
+      "roles": ["mechanic", "garage", "workshop", "technician"]
+    },
+    {
+      "id": "fleet_leadership",
+      "label": "Fleet / operations managers",
+      "parent": "fleet_all_staff",
+      "sort": 20,
+      "roles": ["admin", "superuser", "fleet manager", "operations manager", "supervisor", "lead"]
+    }
+  ],
+  "enabled": true,
+  "dependencies": ["website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "Portal form access (VDI vs safety): Fleet admin → Portal form access — role groups from manifest + roles table; employee portal and /VDIs enforce selections.",
+  "repository_token": "",
+  "access_permission": "fleet_management.access",
+  "alternate_access_permissions": ["fleet_management.driver"],
+  "declared_permissions": [
+    {"id": "fleet_management.access", "label": "Fleet — module access", "description": "View fleet dashboard and vehicles."},
+    {"id": "fleet_management.edit", "label": "Fleet — edit", "description": "Create/edit vehicles, compliance, maintenance, driver assignments."},
+    {"id": "fleet_management.driver", "label": "Fleet — driver", "description": "Log mileage and report vehicle issues (driver portal)."}
+  ]
+}

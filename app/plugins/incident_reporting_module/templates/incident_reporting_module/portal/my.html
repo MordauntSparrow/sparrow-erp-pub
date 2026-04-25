@@ -1,0 +1,27 @@
+{% extends "incident_reporting_module/base_public.html" %}
+{% block content %}
+<h1 class="h4 fw-semibold mb-3">My submissions</h1>
+<div class="table-responsive ep-card card shadow-sm">
+  <table class="table table-sm mb-0 align-middle">
+    <thead><tr><th>Ref</th><th>Title</th><th>Status</th><th>Mode</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="text-nowrap small">{{ r.reference_code or r.public_uuid[:8] }}</td>
+        <td>{{ (r.title or '')|e }}</td>
+        <td><span class="badge text-bg-secondary">{{ r.status }}</span></td>
+        <td class="small">{{ r.incident_mode }}</td>
+        <td class="small text-nowrap">{{ r.created_at }}</td>
+        <td>
+          {% if r.status == 'draft' %}
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=r.public_uuid) }}">Edit</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="text-secondary p-4">No incidents yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

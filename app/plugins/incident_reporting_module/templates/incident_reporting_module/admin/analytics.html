@@ -1,0 +1,43 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}Safety analytics{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Analytics</li>
+    </ol>
+  </nav>
+  <h1 class="h4 fw-semibold mb-3">Analytics</h1>
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h2 class="h6">Pareto — contributory factors</h2>
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Factor</th><th>Count</th></tr></thead>
+            <tbody>
+              {% for r in pareto %}
+              <tr><td>{{ (r.label or r.code)|e }}</td><td>{{ r.c }}</td></tr>
+              {% else %}<tr><td colspan="2" class="text-muted">No data.</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h2 class="h6">Time to close (90d)</h2>
+          <p class="small mb-0">Samples: <strong>{{ ttc.n }}</strong></p>
+          <p class="small">Avg hours: <strong>{% if ttc.avg_hours is not none %}{{ '%.1f'|format(ttc.avg_hours) }}{% else %}—{% endif %}</strong></p>
+          <p class="small">Min / max hours: <strong>{{ ttc.min_hours or '—' }}</strong> / <strong>{{ ttc.max_hours or '—' }}</strong></p>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_incident_reporting.admin_export_csv') }}">Download CSV</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

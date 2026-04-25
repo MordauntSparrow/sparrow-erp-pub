@@ -58,7 +58,7 @@
     <div class="card-body p-0">
       <div class="table-responsive">
         <table class="table table-sm table-hover mb-0">
-          <thead class="table-light"><tr><th>ID</th><th>Asset #</th><th>Template</th><th>Kind</th><th>Parent</th><th>Status</th><th></th></tr></thead>
+          <thead class="table-light"><tr><th>ID</th><th>Asset #</th><th>Template</th><th>Kind</th><th>Parent</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
           <tbody>
             {% for r in instances %}
             <tr>
@@ -68,7 +68,10 @@
               <td><span class="badge bg-light text-dark border">{{ r.bag_kind }}</span></td>
               <td class="small">{% if r.parent_instance_id %}<a href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=r.parent_instance_id) }}">#{{ r.parent_instance_id }}</a>{% if r.parent_template_code %} <span class="text-muted">{{ r.parent_template_code }}</span>{% endif %}{% else %}—{% endif %}</td>
               <td>{% if r.status == 'in_store' %}<span class="badge bg-success">In store</span>{% elif r.status == 'issued' %}<span class="badge bg-primary">Issued</span>{% elif r.status == 'returned' %}<span class="badge bg-info text-dark">Returned</span>{% elif r.status == 'retired' %}<span class="badge bg-secondary">Retired</span>{% else %}<span class="badge bg-light text-dark border">{{ r.status }}</span>{% endif %}</td>
-              <td class="text-end"><a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=r.id) }}">Open</a></td>
+              <td class="text-end text-nowrap">
+                <a class="btn btn-sm btn-outline-primary py-0" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=r.id) }}">Open</a>
+                <a class="btn btn-sm btn-outline-secondary py-0" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_check', instance_id=r.id) }}" title="Digital kit loadlist check">Check</a>
+              </td>
             </tr>
             {% else %}
             <tr><td colspan="7" class="text-muted small p-4">No instances.</td></tr>

@@ -334,6 +334,53 @@ def _ensure_rec_application_interview_columns(conn):
         cur.close()
 
 
+def _ensure_rec_openings_capacity_columns(conn):
+    """Optional caps: max total applications, and headcount (hired slots) before listing is 'full'."""
+    cur = conn.cursor()
+    try:
+        if not _column_exists(conn, "rec_openings", "max_applicants"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN max_applicants INT NULL DEFAULT NULL AFTER closes_at"
+            )
+        if not _column_exists(conn, "rec_openings", "positions_to_fill"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN positions_to_fill INT NULL DEFAULT NULL AFTER max_applicants"
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
+def _ensure_rec_openings_listing_pay_and_hire_columns(conn):
+    """Public pay display + employment basis carried into Time Billing / HR on hire."""
+    cur = conn.cursor()
+    try:
+        after = "positions_to_fill"
+        if not _column_exists(conn, "rec_openings", after):
+            after = "closes_at"
+        if not _column_exists(conn, "rec_openings", "listing_pay_mode"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN listing_pay_mode VARCHAR(16) NOT NULL DEFAULT 'none' AFTER {}".format(
+                    after
+                )
+            )
+        if not _column_exists(conn, "rec_openings", "listing_pay_wage_card_id"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN listing_pay_wage_card_id INT NULL DEFAULT NULL AFTER listing_pay_mode"
+            )
+        if not _column_exists(conn, "rec_openings", "listing_pay_custom_text"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN listing_pay_custom_text VARCHAR(512) NULL DEFAULT NULL AFTER listing_pay_wage_card_id"
+            )
+        if not _column_exists(conn, "rec_openings", "hire_employment_type"):
+            cur.execute(
+                "ALTER TABLE rec_openings ADD COLUMN hire_employment_type VARCHAR(24) NULL DEFAULT NULL AFTER listing_pay_custom_text"
+            )
+        conn.commit()
+    finally:
+        cur.close()
+
+
 def _ensure_rec_job_roles_time_billing_columns(conn):
     """Link recruitment job roles to time billing roles + default wage card for hire."""
     cur = conn.cursor()
@@ -448,8 +495,28 @@ def install():
         _ensure_recruitment_application_hr_columns(conn)
         _ensure_rec_application_profile_columns(conn)
         _ensure_rec_application_interview_columns(conn)
+        _ensure_rec_openings_capacity_columns(conn)
+        _ensure_rec_openings_listing_pay_and_hire_columns(conn)
         _ensure_rec_job_roles_time_billing_columns(conn)
         _seed_recruitment_job_roles_if_empty(conn)
+        try:
+            from app.plugins.recruitment_module.services import (
+                sync_rec_job_roles_from_time_billing_roles,
+            )
+
+            ok, _msg, _st = sync_rec_job_roles_from_time_billing_roles(conn)
+            if ok:
+                conn.commit()
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "recruitment_module install: TB role sync skipped: %s", exc
+            )
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     finally:
         conn.close()
 

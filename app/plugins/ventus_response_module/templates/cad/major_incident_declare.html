@@ -1,0 +1,269 @@
+{% extends "cad/ventus_admin_base.html" %}
+
+{% block content %}
+<style>
+.cad-mi-declare-page-root {
+  height: 100%;
+  overflow-y: auto;
+  padding: max(20px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(40px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.cad-mi-page-shell {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+  max-width: 640px;
+  margin: 0 auto;
+}
+.cad-mi-page-shell-head {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel-header-bg);
+  border-bottom: 1px solid var(--panel-header-border);
+}
+.cad-mi-page-shell-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+.cad-mi-page-shell-sub {
+  margin: 6px 0 0;
+  width: 100%;
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.cad-mi-page-shell-body {
+  padding: 16px 18px 18px;
+  background: var(--panel-body-bg, var(--panel-bg));
+}
+.cad-mi-page-shell-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-color);
+  background: var(--panel-bg);
+}
+{% include "cad/_major_incident_form_shared_css.inc.html" %}
+</style>
+
+<div id="cadMiDeclarePageRoot" class="cad-mi-declare-page-root"
+     data-dashboard-url={{ cad_mi_return_url | tojson }} data-mi-template="">
+  <div class="cad-mi-page-shell">
+    <div class="cad-mi-page-shell-head">
+      <div style="flex:1;min-width:0;">
+        <h1 class="cad-mi-page-shell-title">Major Incident declaration</h1>
+        <p class="cad-mi-page-shell-sub">Dispatcher declaration (API v1). This form is tied to <strong>CAD #{{ cad_mi_declare_cad | int }}</strong> (no separate CAD field). Same pathway as <strong>Declare MI</strong> from the CAD stack.</p>
+      </div>
+      <a class="btn" style="background:transparent;border:1px solid var(--border-color);flex-shrink:0;" href={{ cad_mi_return_url | tojson }}><i class="bi bi-arrow-left"></i> Back to CAD</a>
+    </div>
+    <div class="cad-mi-page-shell-body">
+      {% include "cad/_major_incident_declare_form_fields.html" %}
+    </div>
+    <div class="cad-mi-page-shell-foot">
+      <a class="btn" style="background:transparent;border:1px solid var(--border-color);" href={{ cad_mi_return_url | tojson }}>Cancel</a>
+      <button type="button" class="btn" id="cadMi_btn_submit" style="background:var(--cad-soft-red-bg);border:1px solid var(--accent-danger);color:var(--cad-soft-red-text);font-weight:700;"><i class="bi bi-exclamation-octagon-fill"></i> Submit declaration</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  function cadMiNewClientRequestId() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch (e) {}
+    return 'mi-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
+  }
+  function cadMiResolvedTemplateKind() {
+    var sel = document.getElementById('cadMi_template');
+    if (!sel) return 'custom';
+    var opts = new Set(Array.from(sel.querySelectorAll('option')).map(function(o) { return String(o.value || '').trim(); }).filter(Boolean));
+    var v = String(sel.value || '').trim();
+    if (!opts.has(v)) v = opts.has('methane') ? 'methane' : 'custom';
+    return v;
+  }
+  function cadMiSyncTemplateFieldsets() {
+    var t = cadMiResolvedTemplateKind();
+    function setVis(id, on) {
+      var e = document.getElementById(id);
+      if (e) e.style.display = on ? '' : 'none';
+    }
+    setVis('cadMiFsMethane', t === 'methane');
+    var phaseRow = document.getElementById('cadMi_phase_row');
+    if (phaseRow) {
+      phaseRow.style.display = '';
+      phaseRow.removeAttribute('hidden');
+      phaseRow.setAttribute('aria-hidden', t === 'methane' ? 'true' : 'false');
+    }
+    var pageRoot = document.getElementById('cadMiDeclarePageRoot');
+    if (pageRoot) pageRoot.setAttribute('data-mi-template', t);
+    var hint = document.getElementById('cadMiFsCustomHint');
+    if (hint) hint.style.display = t === 'custom' ? '' : 'none';
+  }
+  var CAD_MI_DIV_ALL = '__all__';
+  function cadMiEscAttr(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;');
+  }
+  function refreshCadMiDivisionSelectPage() {
+    var sel = document.getElementById('cadMi_division');
+    if (!sel || sel.tagName !== 'SELECT') return;
+    var prev = String(sel.value || '').trim().toLowerCase();
+    fetch('/plugin/ventus_response_module/dispatch/divisions', { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        var items = Array.isArray(data && data.items) && data.items.length
+          ? data.items
+          : (Array.isArray(data && data.divisions)
+            ? data.divisions.map(function(d) { return { slug: d, name: d }; })
+            : [{ slug: 'general', name: 'General' }]);
+        var list = items.filter(function(i) {
+          var slug = String((i && i.slug) || '').trim();
+          return slug && slug.toLowerCase() !== String(CAD_MI_DIV_ALL).toLowerCase();
+        });
+        list.sort(function(a, b) {
+          return String(a.name || a.slug || '').localeCompare(String(b.name || b.slug || ''), undefined, { sensitivity: 'base' });
+        });
+        var parts = ['<option value="">No division tag</option>'];
+        list.forEach(function(r) {
+          var slug = String(r.slug || '').trim();
+          var lab = String(r.name || slug).trim();
+          parts.push('<option value="' + cadMiEscAttr(slug) + '">' + cadMiEscAttr(lab) + '</option>');
+        });
+        sel.innerHTML = parts.join('');
+        var m = Array.from(sel.options).find(function(o) { return String(o.value || '').trim().toLowerCase() === prev; });
+        sel.value = m ? m.value : '';
+      })
+      .catch(function() {
+        sel.innerHTML = '<option value="">No division tag</option><option value="general">General</option>';
+      });
+  }
+  function cadMiResetForm() {
+    var fixed = document.getElementById('cadMiDeclarePageRoot');
+    var fixedCad = fixed && fixed.dataset ? String(fixed.dataset.fixedCad || '').trim() : '';
+    ['cadMi_phase', 'cadMi_notes',
+      'cadMi_m_major_incident_declared', 'cadMi_m_exact_location', 'cadMi_m_type_of_incident',
+      'cadMi_m_hazards', 'cadMi_m_access_routes', 'cadMi_m_number_casualties', 'cadMi_m_emergency_services'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    var divSel = document.getElementById('cadMi_division');
+    if (divSel && divSel.tagName === 'SELECT') divSel.value = '';
+    var tpl = document.getElementById('cadMi_template');
+    if (tpl) {
+      var hasMethane = tpl.querySelector('option[value="methane"]');
+      tpl.value = hasMethane ? 'methane' : 'custom';
+    }
+    var rid = document.getElementById('cadMi_client_request_id');
+    if (rid) rid.value = cadMiNewClientRequestId();
+    var cEl = document.getElementById('cadMi_cad');
+    if (cEl && fixedCad) cEl.value = fixedCad;
+    cadMiSyncTemplateFieldsets();
+    var err = document.getElementById('cadMi_error');
+    if (err) err.textContent = '';
+  }
+  function cadMiBuildPayload() {
+    var out = {};
+    var notesEl = document.getElementById('cadMi_notes');
+    var n = notesEl ? String(notesEl.value || '').trim() : '';
+    if (n) out.summary = n;
+    var tpl = cadMiResolvedTemplateKind();
+    if (tpl === 'methane') {
+      [['major_incident_declared', 'cadMi_m_major_incident_declared'], ['exact_location', 'cadMi_m_exact_location'],
+        ['type_of_incident', 'cadMi_m_type_of_incident'], ['hazards', 'cadMi_m_hazards'], ['access_routes', 'cadMi_m_access_routes'],
+        ['number_casualties', 'cadMi_m_number_casualties'], ['emergency_services', 'cadMi_m_emergency_services']].forEach(function(pair) {
+        var el = document.getElementById(pair[1]);
+        var s = el ? String(el.value || '').trim() : '';
+        if (s) out[pair[0]] = s;
+      });
+    }
+    return out;
+  }
+  function submitCadMajorIncidentDeclarePage() {
+    var errEl = document.getElementById('cadMi_error');
+    if (errEl) errEl.textContent = '';
+    var submitBtn = document.getElementById('cadMi_btn_submit');
+    var tpl = cadMiResolvedTemplateKind();
+    var notesTrim = String((document.getElementById('cadMi_notes') || {}).value || '').trim();
+    if (tpl === 'custom' && !notesTrim) {
+      if (errEl) errEl.textContent = 'Custom template requires a free-text summary.';
+      return;
+    }
+    var payload = cadMiBuildPayload();
+    if (Object.keys(payload).length === 0) {
+      if (errEl) errEl.textContent = 'Enter a free-text summary or at least one structured field.';
+      return;
+    }
+    var cadRaw = String((document.getElementById('cadMi_cad') || {}).value || '').trim();
+    var cad = undefined;
+    if (cadRaw) {
+      var n = parseInt(cadRaw, 10);
+      if (!Number.isInteger(n) || n <= 0) {
+        if (errEl) errEl.textContent = 'CAD must be a positive integer or left blank.';
+        return;
+      }
+      cad = n;
+    }
+    var phase = tpl === 'methane' ? '' : String((document.getElementById('cadMi_phase') || {}).value || '').trim();
+    var division = String((document.getElementById('cadMi_division') || {}).value || '').trim();
+    var clientRequestId = String((document.getElementById('cadMi_client_request_id') || {}).value || '').trim() || cadMiNewClientRequestId();
+    var body = { api_version: 1, client_request_id: clientRequestId, template: tpl, payload: payload };
+    if (phase) body.phase = phase;
+    if (cad != null) body.cad = cad;
+    if (division) body.division = division;
+    if (submitBtn) { submitBtn.dataset.busy = '1'; submitBtn.disabled = true; }
+    fetch('/plugin/ventus_response_module/dispatch/major-incidents', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(function(res) { return res.json().then(function(d) { return { ok: res.ok, res: res, d: d }; }); })
+      .then(function(_ref) {
+        var ok = _ref.ok, res = _ref.res, data = _ref.d;
+        if (!ok) {
+          var det = Array.isArray(data.details) ? data.details.join(' ') : (typeof data.details === 'string' ? data.details : '');
+          var human = data.message != null && String(data.message).trim() ? String(data.message).trim() : '';
+          var msg = human || ((data.error ? String(data.error) : 'Request failed') + (det ? ' — ' + det : ''));
+          if (errEl) errEl.textContent = msg || ('HTTP ' + res.status);
+          return;
+        }
+        var root = document.getElementById('cadMiDeclarePageRoot');
+        var url = root && root.dataset && root.dataset.dashboardUrl ? root.dataset.dashboardUrl : '/plugin/ventus_response_module/cad';
+        window.location.href = url;
+      })
+      .catch(function() {
+        if (errEl) errEl.textContent = 'Network error — try again.';
+      })
+      .finally(function() {
+        if (submitBtn) { submitBtn.dataset.busy = '0'; submitBtn.disabled = false; }
+      });
+  }
+  document.addEventListener('DOMContentLoaded', function() {
+    var root = document.getElementById('cadMiDeclarePageRoot');
+    if (root) root.dataset.fixedCad = '{{ cad_mi_declare_cad | int }}';
+    cadMiResetForm();
+    try { refreshCadMiDivisionSelectPage(); } catch (eDiv) {}
+    var tpl = document.getElementById('cadMi_template');
+    if (tpl) tpl.addEventListener('change', cadMiSyncTemplateFieldsets);
+    var sub = document.getElementById('cadMi_btn_submit');
+    if (sub) sub.addEventListener('click', function() { submitCadMajorIncidentDeclarePage(); });
+  });
+})();
+</script>
+{% endblock %}

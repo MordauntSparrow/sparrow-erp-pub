@@ -1,0 +1,118 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Audit timeline{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Audit timeline</h1>
+{% if matter_row %}
+<div class="alert alert-info py-2 small mb-3">
+  Loaded saved matter <strong>{{ matter_row.reference_code }}</strong> — {{ matter_row.title }}.
+  <a href="{% if inspection_mode %}{{ url_for('compliance_audit_internal.timeline', mode='inspection') }}{% else %}{{ url_for('compliance_audit_internal.timeline') }}{% endif %}" class="alert-link">Clear matter</a>
+  · <a href="{{ url_for('compliance_audit_internal.ediscovery') }}">eDiscovery</a>
+</div>
+{% endif %}
+{% if filt.domains is not none and filt.domains|length == 0 %}
+<div class="alert alert-warning py-2 small mb-3">No data sources are selected — choose at least one under <strong>Data sources</strong> or reset filters.</div>
+{% endif %}
+<form method="get" action="{{ url_for('compliance_audit_internal.timeline') }}" class="card shadow-sm mb-4">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+    <input type="hidden" name="ca_filter_applied" value="1">
+    {% if inspection_mode %}<input type="hidden" name="mode" value="inspection">{% endif %}
+    {% if matter_row %}<input type="hidden" name="matter_id" value="{{ matter_row.id }}">{% endif %}
+    <div class="col-md-2">
+      <label class="form-label small">From</label>
+      <input class="form-control form-control-sm" type="date" name="date_from" value="{{ request.args.get('date_from','') or (filt.date_from.strftime('%Y-%m-%d') if filt.date_from else '') }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">To</label>
+      <input class="form-control form-control-sm" type="date" name="date_to" value="{{ request.args.get('date_to','') or (filt.date_to.strftime('%Y-%m-%d') if filt.date_to else '') }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">CAD</label>
+      <input class="form-control form-control-sm" name="cad" placeholder="#" value="{{ request.args.get('cad','') or (filt.cad or '') }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small">Case ID</label>
+      <input class="form-control form-control-sm" name="case_id" value="{{ request.args.get('case_id','') or (filt.case_id or '') }}">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">Search text</label>
+      <input class="form-control form-control-sm" name="q" value="{{ request.args.get('q','') or (filt.q or '') }}" placeholder="summary, actor, action, detail…">
+    </div>
+    <div class="col-12">
+      <details class="border rounded px-3 py-2 mt-1">
+        <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Advanced filters</summary>
+        <div class="row g-2 mt-2 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label small">Path contains</label>
+            <input class="form-control form-control-sm" name="path_like" value="{{ request.args.get('path_like','') or (filt.path_like or '') }}" placeholder="admin staff paths">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Actor contains</label>
+            <input class="form-control form-control-sm" name="actor" value="{{ request.args.get('actor','') or (filt.actor_sub or '') }}" placeholder="user id / name">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Entity type contains</label>
+            <input class="form-control form-control-sm" name="entity_type" value="{{ request.args.get('entity_type','') or (filt.entity_type_sub or '') }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Action contains</label>
+            <input class="form-control form-control-sm" name="action" value="{{ request.args.get('action','') or (filt.action_sub or '') }}">
+          </div>
+        </div>
+      </details>
+    </div>
+    <div class="col-12">
+      <details class="border rounded px-3 py-2 mt-2" open>
+        <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Data sources</summary>
+        <p class="small text-muted mb-2 mt-2">Uncheck types you do not need — fewer sources load faster.</p>
+        <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-2">
+          {% for opt in domain_options %}
+          <div class="col">
+            <label class="small mb-0 d-block text-truncate" title="{{ opt.label }}">
+              <input type="checkbox" name="dom_{{ opt.key }}" value="1" class="form-check-input me-1"
+                {% if not filt.domains or opt.key in filt.domains %}checked{% endif %}>
+              {{ opt.label }}
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+    <div class="col-12 mt-3">
+      <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('compliance_audit_internal.timeline') }}">Reset</a>
+      {% if can_export %}
+      <button type="submit" class="btn btn-outline-primary btn-sm" formaction="{{ url_for('compliance_audit_internal.export_wizard') }}" formmethod="get">Send filters to export…</button>
+      {% endif %}
+    </div>
+    </div>
+  </div>
+</form>
+<p class="text-muted small">{{ events|length }} row(s) (cap applies).</p>
+<div class="table-responsive card shadow-sm">
+  <table class="table table-sm table-hover mb-0">
+    <thead class="table-light">
+      <tr>
+        <th>When</th>
+        <th>Domain</th>
+        <th>Actor</th>
+        <th>Entity</th>
+        <th>Summary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td class="text-nowrap small">{{ e.occurred_at }}</td>
+        <td><span class="badge bg-secondary">{{ domain_label_map.get(e.domain, e.domain) }}</span></td>
+        <td class="small">{{ e.actor or '—' }}</td>
+        <td class="small">{{ e.entity_type }} <code>{{ e.entity_id }}</code></td>
+        <td class="small">{{ e.summary[:240] }}{% if e.summary|length > 240 %}…{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="text-muted p-4">No events for these filters (or source tables missing).</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

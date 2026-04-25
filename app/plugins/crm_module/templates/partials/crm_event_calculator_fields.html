@@ -1,34 +1,26 @@
 {# Shared: public calculator + staff intake. fv = form values dict (optional). #}
 {% set fv = fv if fv is defined else {} %}
+{% set _eih = event_intake_hidden if event_intake_hidden is defined else [] %}
 <div class="col-12">
-  <h3 class="h6 text-uppercase text-muted mb-2">Event profile <span class="fw-normal text-muted small">(Purple Guide–style risk factors)</span></h3>
+  <h3 class="h6 text-uppercase text-muted mb-1">Risk and hospitals</h3>
+  <p class="small text-muted mb-3">Defaults match a simple daytime event. Open <strong>More detail</strong> only if you already know things like crowd posture, season, or hospital size.</p>
 </div>
 <div class="col-md-6">
   <label class="form-label" for="activity_risk">Activity / programme risk</label>
   <select class="form-select" id="activity_risk" name="activity_risk">
-    {% set ar = fv.get('activity_risk', 'low') %}
-    <option value="low" {% if ar == 'low' %}selected{% endif %}>Low — seated, exhibition, low-energy</option>
-    <option value="moderate" {% if ar == 'moderate' %}selected{% endif %}>Moderate — general public event</option>
-    <option value="significant" {% if ar == 'significant' %}selected{% endif %}>Significant — sport, water, stages, machinery</option>
-    <option value="high" {% if ar == 'high' %}selected{% endif %}>High — motors, combat sport, major structures</option>
+    {% set ar = fv.get('activity_risk', 'moderate') %}
+    <option value="low" {% if ar == 'low' %}selected{% endif %}>Low: exhibition, cinema, calm programme</option>
+    <option value="moderate" {% if ar == 'moderate' %}selected{% endif %}>Moderate: typical public event</option>
+    <option value="significant" {% if ar == 'significant' %}selected{% endif %}>Significant: sport, water, stages, machinery</option>
+    <option value="high" {% if ar == 'high' %}selected{% endif %}>High: motors, combat sport, major structures</option>
   </select>
+  <div class="form-text">Programme danger, not seating layout. Seating is under More detail.</div>
 </div>
 <div class="col-md-6">
-  <label class="form-label" for="duration_span">Programme length (tiering)</label>
-  <select class="form-select" id="duration_span" name="duration_span">
-    {% set ds = fv.get('duration_span', '') %}
-    <option value="" {% if not ds %}selected{% endif %}>Use hours on site (auto)</option>
-    <option value="few_hours" {% if ds == 'few_hours' %}selected{% endif %}>Few hours or less</option>
-    <option value="single_day" {% if ds == 'single_day' %}selected{% endif %}>Single day (no overnight)</option>
-    <option value="multi_day" {% if ds == 'multi_day' %}selected{% endif %}>Multi-day / overnight / camping</option>
-  </select>
-</div>
-<div class="col-md-6">
-  <label class="form-label" for="alcohol_level">Alcohol</label>
+  <label class="form-label" for="alcohol_level">Alcohol on site</label>
   <select class="form-select" id="alcohol_level" name="alcohol_level">
-    {% set al = fv.get('alcohol_level', '') %}
-    <option value="" {% if not al %}selected{% endif %}>Match checkboxes below (auto)</option>
-    <option value="none" {% if al == 'none' %}selected{% endif %}>None / minimal</option>
+    {% set al = fv.get('alcohol_level', 'none') %}
+    <option value="none" {% if al == 'none' or al == '' %}selected{% endif %}>None / not sold</option>
     <option value="social" {% if al == 'social' %}selected{% endif %}>Social drinking</option>
     <option value="likely" {% if al == 'likely' %}selected{% endif %}>Intoxication likely</option>
     <option value="expected" {% if al == 'expected' %}selected{% endif %}>Intoxication expected</option>
@@ -45,12 +37,201 @@
   </select>
 </div>
 <div class="col-md-6">
-  <label class="form-label" for="hospital_referrals">Expected hospital transfers</label>
+  <label class="form-label" for="duration_span">Programme pattern</label>
+  <select class="form-select" id="duration_span" name="duration_span">
+    {% set ds = fv.get('duration_span', '') %}
+    <option value="" {% if not ds %}selected{% endif %}>Auto from “hours on site” above</option>
+    <option value="few_hours" {% if ds == 'few_hours' %}selected{% endif %}>Short visit (few hours)</option>
+    <option value="single_day" {% if ds == 'single_day' %}selected{% endif %}>Single day (no overnight programme)</option>
+    <option value="multi_day" {% if ds == 'multi_day' %}selected{% endif %}>Multi-day / overnight / camping programme</option>
+  </select>
+  <div class="form-text">Leave on auto unless the hours box does not match how long the event runs (e.g. multi day festival).</div>
+</div>
+<div class="col-12 col-md-6">
+  <label class="form-label" for="hospital_referrals">Hospital transfers (A&amp;E)</label>
   <select class="form-select" id="hospital_referrals" name="hospital_referrals">
     {% set hr = fv.get('hospital_referrals', '') %}
     <option value="" {% if not hr %}selected{% endif %}>Auto from crowd size</option>
     <option value="unlikely" {% if hr == 'unlikely' %}selected{% endif %}>Unlikely</option>
     <option value="possible" {% if hr == 'possible' %}selected{% endif %}>Possible</option>
-    <option value="likely" {% if hr == 'likely' %}selected{% endif %}>Likely — plan ambulances &amp; CQC-registered providers</option>
+    <option value="likely" {% if hr == 'likely' %}selected{% endif %}>Likely: plan ambulances and registered providers</option>
   </select>
+</div>
+<div class="col-12 col-md-6">
+  <label class="form-label" for="hospital_drive_band">Drive time to nearest A&amp;E / hospital</label>
+  <select class="form-select" id="hospital_drive_band" name="hospital_drive_band">
+    {% set hd = fv.get('hospital_drive_band', 'unknown') %}
+    <option value="unknown" {% if hd == 'unknown' or not hd %}selected{% endif %}>Not sure / prefer not to say</option>
+    <option value="under_15" {% if hd == 'under_15' %}selected{% endif %}>Under ~15 minutes (by road)</option>
+    <option value="15_30" {% if hd == '15_30' %}selected{% endif %}>About 15–30 minutes</option>
+    <option value="over_30" {% if hd == 'over_30' %}selected{% endif %}>Over ~30 minutes</option>
+  </select>
+  <div class="form-text">Longer drives mean you need spare capacity while an ambulance is out.</div>
+</div>
+<div class="col-12 col-md-6 d-flex align-items-end">
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" id="late_finish" name="late_finish" value="yes"
+           {% if fv.get('late_finish') %}checked{% endif %}>
+    <label class="form-check-label" for="late_finish">Programme runs past 23:00</label>
+  </div>
+</div>
+<div class="col-12">
+  {% if 'risk_more_detail' not in _eih %}
+  <details class="border rounded px-3 py-2 bg-body-secondary bg-opacity-25">
+    <summary class="fw-semibold small" style="cursor:pointer;">More detail (posture, history, season, hospital)</summary>
+    <p class="small text-muted mt-2 mb-3 mb-md-2">Only if relevant. “Not specified” is fine.</p>
+    <div class="row g-3 pb-2">
+      <div class="col-md-6">
+        <label class="form-label" for="audience_posture">Audience: seated vs standing</label>
+        <select class="form-select" id="audience_posture" name="audience_posture">
+          {% set ap = fv.get('audience_posture', 'unknown') %}
+          <option value="unknown" {% if ap == 'unknown' or not ap %}selected{% endif %}>Not specified</option>
+          <option value="seated" {% if ap == 'seated' %}selected{% endif %}>Mostly seated</option>
+          <option value="mixed" {% if ap == 'mixed' %}selected{% endif %}>Mixed</option>
+          <option value="standing" {% if ap == 'standing' %}selected{% endif %}>Mostly standing</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="disorder_risk">Marches / disorder / tension</label>
+        <select class="form-select" id="disorder_risk" name="disorder_risk">
+          {% set dr2 = fv.get('disorder_risk', 'none') %}
+          <option value="none" {% if dr2 == 'none' or not dr2 %}selected{% endif %}>None / not applicable</option>
+          <option value="low" {% if dr2 == 'low' %}selected{% endif %}>Low risk</option>
+          <option value="medium" {% if dr2 == 'medium' %}selected{% endif %}>Medium: demonstrations possible</option>
+          <option value="high" {% if dr2 == 'high' %}selected{% endif %}>High disorder risk</option>
+          <option value="opposing_factions" {% if dr2 == 'opposing_factions' %}selected{% endif %}>Opposing factions / high tension</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="casualty_history">Past events: casualty history</label>
+        <select class="form-select" id="casualty_history" name="casualty_history">
+          {% set ch = fv.get('casualty_history', 'unknown') %}
+          <option value="unknown" {% if ch == 'unknown' or not ch %}selected{% endif %}>Not sure / not stated</option>
+          <option value="first_event" {% if ch == 'first_event' %}selected{% endif %}>First event: no prior data</option>
+          <option value="low_rate" {% if ch == 'low_rate' %}selected{% endif %}>Good data: low on-site casualty rate (&lt; ~1%)</option>
+          <option value="medium_rate" {% if ch == 'medium_rate' %}selected{% endif %}>Medium rate (~1 to 2%)</option>
+          <option value="high_rate" {% if ch == 'high_rate' %}selected{% endif %}>High rate (&gt; ~2%)</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="audience_dwell">Typical audience stay (dwell)</label>
+        <select class="form-select" id="audience_dwell" name="audience_dwell">
+          {% set ad = fv.get('audience_dwell', 'unknown') %}
+          <option value="unknown" {% if ad == 'unknown' or not ad %}selected{% endif %}>Same as cover window / not stated</option>
+          <option value="under_4h" {% if ad == 'under_4h' %}selected{% endif %}>Typical stay under ~4 hours</option>
+          <option value="over_4h" {% if ad == 'over_4h' %}selected{% endif %}>Many attendees 4–12 hours</option>
+          <option value="over_12h" {% if ad == 'over_12h' %}selected{% endif %}>Very long dwell (12+ hours)</option>
+        </select>
+        <div class="form-text">Only matters if people stay longer on site than medics are booked.</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="season">Season (main event dates)</label>
+        <select class="form-select" id="season" name="season">
+          {% set sn = fv.get('season', 'unknown') %}
+          <option value="unknown" {% if sn == 'unknown' or not sn %}selected{% endif %}>Not specified</option>
+          <option value="spring" {% if sn == 'spring' %}selected{% endif %}>Spring</option>
+          <option value="summer" {% if sn == 'summer' %}selected{% endif %}>Summer</option>
+          <option value="autumn" {% if sn == 'autumn' %}selected{% endif %}>Autumn</option>
+          <option value="winter" {% if sn == 'winter' %}selected{% endif %}>Winter</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="definitive_care">Receiving hospital / A&amp;E profile</label>
+        <select class="form-select" id="definitive_care" name="definitive_care">
+          {% set dc = fv.get('definitive_care', 'unknown') %}
+          <option value="unknown" {% if dc == 'unknown' or not dc %}selected{% endif %}>Not specified</option>
+          <option value="choice_ae" {% if dc == 'choice_ae' %}selected{% endif %}>Choice of A&amp;E departments</option>
+          <option value="large_ae" {% if dc == 'large_ae' %}selected{% endif %}>Large A&amp;E nearby</option>
+          <option value="small_ae" {% if dc == 'small_ae' %}selected{% endif %}>Smaller / rural A&amp;E: offload may take longer</option>
+        </select>
+      </div>
+      {% set _hz = fv.get('additional_hazards') %}
+      {% set hz_sel = [_hz] if _hz is string else (_hz or []) %}
+      {% set _fc = fv.get('on_site_facilities') %}
+      {% set fc_sel = [_fc] if _fc is string else (_fc or []) %}
+      <div class="col-12 mt-2">
+        <p class="form-label mb-2">Extra on the programme <span class="text-muted fw-normal small">(tick any that apply)</span></p>
+        <div class="row g-2 small">
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="additional_hazards" value="carnival" id="hz_carnival"
+                     {% if 'carnival' in hz_sel %}checked{% endif %}>
+              <label class="form-check-label" for="hz_carnival">Carnival / procession</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="additional_hazards" value="parachute_display" id="hz_parachute"
+                     {% if 'parachute_display' in hz_sel %}checked{% endif %}>
+              <label class="form-check-label" for="hz_parachute">Parachute / aerial display</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="additional_hazards" value="helicopters" id="hz_heli"
+                     {% if 'helicopters' in hz_sel %}checked{% endif %}>
+              <label class="form-check-label" for="hz_heli">Helicopters (ops / display)</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="additional_hazards" value="street_theatre" id="hz_street"
+                     {% if 'street_theatre' in hz_sel %}checked{% endif %}>
+              <label class="form-check-label" for="hz_street">Street theatre / roaming performance</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="additional_hazards" value="motor_sport" id="hz_motor"
+                     {% if 'motor_sport' in hz_sel %}checked{% endif %}>
+              <label class="form-check-label" for="hz_motor">Motor sport on programme</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-text">If activity risk is already <strong>high</strong> for motors, this adds a small extra nudge only.</div>
+      </div>
+      <div class="col-12 mt-2">
+        <p class="form-label mb-2">Treatment-centre capabilities in discussion <span class="text-muted fw-normal small">(tick all that apply)</span></p>
+        <div class="row g-2 small">
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="on_site_facilities" value="suturing" id="fc_suture"
+                     {% if 'suturing' in fc_sel %}checked{% endif %}>
+              <label class="form-check-label" for="fc_suture">Suturing / wound care</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="on_site_facilities" value="plastering" id="fc_plaster"
+                     {% if 'plastering' in fc_sel %}checked{% endif %}>
+              <label class="form-check-label" for="fc_plaster">Plastering / immobilisation</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="on_site_facilities" value="xray" id="fc_xray"
+                     {% if 'xray' in fc_sel %}checked{% endif %}>
+              <label class="form-check-label" for="fc_xray">Imaging / X-ray discussed</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="on_site_facilities" value="psych_gp" id="fc_psych"
+                     {% if 'psych_gp' in fc_sel %}checked{% endif %}>
+              <label class="form-check-label" for="fc_psych">Psychiatric / GP-style assessment</label>
+            </div>
+          </div>
+          <div class="col-6 col-md-4 col-lg-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="on_site_facilities" value="minor_surgery" id="fc_surg"
+                     {% if 'minor_surgery' in fc_sel %}checked{% endif %}>
+              <label class="form-check-label" for="fc_surg">Minor procedures / surgery discussed</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-text">These raise the score and tell us what you are discussing. They do not mean you must provide everything on site.</div>
+      </div>
+    </div>
+  </details>
+  {% endif %}
 </div>

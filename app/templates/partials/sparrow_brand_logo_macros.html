@@ -1,0 +1,22 @@
+{# Mirrors app.branding_utils clamp rules so public templates never rely on Jinja globals. #}
+{% macro navbar_logo_inline_style(site) -%}
+{%- set d = site if site is mapping else {} -%}
+{%- set raw_h = d.get('logo_navbar_max_height_px') -%}
+{%- set vh = raw_h|int(default=48) -%}
+{%- set nh = 32 if vh < 32 else (120 if vh > 120 else vh) -%}
+{%- set raw_w = d.get('logo_navbar_max_width_px') -%}
+{%- set vw = raw_w|int(default=300) -%}
+{%- set nw = 120 if vw < 120 else (420 if vw > 420 else vw) -%}
+max-height:{{ nh }}px;max-width:{{ nw }}px;width:auto;height:auto;object-fit:contain;vertical-align:middle;
+{%- endmacro %}
+
+{% macro auth_logo_inline_style(site) -%}
+{%- set d = site if site is mapping else {} -%}
+{%- set raw_h = d.get('logo_auth_max_height_px') -%}
+{%- set vh = raw_h|int(default=128) -%}
+{%- set nh = 72 if vh < 72 else (280 if vh > 280 else vh) -%}
+{%- set raw_w = d.get('logo_auth_max_width_px') -%}
+{%- set vw = raw_w|int(default=380) -%}
+{%- set nw = 160 if vw < 160 else (520 if vw > 520 else vw) -%}
+max-height:{{ nh }}px;max-width:{{ nw }}px;width:auto;height:auto;object-fit:contain;vertical-align:middle;
+{%- endmacro %}

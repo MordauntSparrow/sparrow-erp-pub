@@ -1,13 +1,3 @@
 restart flag
-1774617167.0662107 remote install compliance_module
-1774617247.6036181 enabled compliance_module
-1774617299.886638 remote install hr_module
-1774617649.9567983 enabled hr_module
-1774617776.5851185 remote install inventory_control
-1774617811.043061 remote install news_blog_module
-1774617859.3264556 enabled news_blog_module
-1774617906.5286274 remote install scheduling_module
-1774617978.2705538 enabled scheduling_module
-1774618003.310913 remote install recruitment_module
-1774618032.0446248 remote install training_module
-1774618115.0068974 enabled recruitment_module
+1772404178.7974524 enabled inventory_control
+1773016205.450745 enabled time_billing_module

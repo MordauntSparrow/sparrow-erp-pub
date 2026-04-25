@@ -6,7 +6,7 @@ INV-KIT-002, CURA-DRUG-INV-001).
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,7 +26,61 @@ BAG_KINDS = (
     "other",
 )
 INSTANCE_STATUSES = ("in_store", "issued", "returned", "retired")
-RETURN_STATUSES = ("present", "missing", "to_add")
+BAG_USAGE_CONTEXTS = ("patient_care", "training")
+BAG_USAGE_CONTEXT_LABELS = {
+    "patient_care": "Patient-facing care",
+    "training": "Training only (expiry not flagged for patient use on this bag)",
+}
+# Stored on inventory_med_bag_instance_lines.return_status (VARCHAR(24)).
+RETURN_STATUSES = (
+    "present",
+    "missing",
+    "to_add",
+    "wrong_lot",
+    "bad_expiry",
+    "wrong_qty",
+)
+RETURN_STATUS_LABELS = {
+    "present": "Present / OK",
+    "missing": "Missing",
+    "to_add": "To add",
+    "wrong_lot": "Wrong lot / batch",
+    "bad_expiry": "Expiry issue",
+    "wrong_qty": "Quantity mismatch",
+}
+
+
+def enrich_sections_expiry_hints(sections: List[Dict[str, Any]]) -> None:
+    """Annotate each line with expiry_tier and expiry_hint for UI (mutates sections in place)."""
+    today = date.today()
+    for sec in sections:
+        ctx = str(sec.get("usage_context") or "patient_care").strip().lower()
+        for ln in sec.get("lines") or []:
+            if ctx == "training":
+                ln["expiry_tier"] = "training_suppressed"
+                ln["expiry_hint"] = "Training bag — not flagged for patient care"
+                continue
+            ed = ln.get("expiry_date")
+            if not ed:
+                ln["expiry_tier"] = "none"
+                ln["expiry_hint"] = ""
+                continue
+            try:
+                ds = str(ed)[:10]
+                d = date.fromisoformat(ds)
+            except ValueError:
+                ln["expiry_tier"] = "unknown"
+                ln["expiry_hint"] = ""
+                continue
+            if d < today:
+                ln["expiry_tier"] = "expired"
+                ln["expiry_hint"] = "Expired"
+            elif (d - today).days <= 30:
+                ln["expiry_tier"] = "near"
+                ln["expiry_hint"] = f"Due within 30 days ({ds})"
+            else:
+                ln["expiry_tier"] = "ok"
+                ln["expiry_hint"] = ""
 
 # Default tamper tag colours (pull-off seals) — store lowercase in DB.
 TAMPER_TAG_COLOURS = ("green", "orange", "red")
@@ -503,6 +557,272 @@ class MedBagService:
             cur.close()
             conn.close()
 
+    def build_hierarchical_loadlist(self, root_instance_id: int) -> Optional[Dict[str, Any]]:
+        """
+        This bag plus every nested child instance (pods/modules), depth-first, for a kit loadlist.
+        Each section includes catalogue lines with lot and expiry from instance lines.
+        """
+        root = self.get_instance(root_instance_id)
+        if not root:
+            return None
+        sections: List[Dict[str, Any]] = []
+        visited: set[int] = set()
+
+        def walk(iid: int, depth: int) -> None:
+            if iid in visited:
+                return
+            visited.add(iid)
+            row = self.get_instance(iid)
+            if not row:
+                return
+            lines = self.list_instance_lines(iid)
+            norm_lines: List[Dict[str, Any]] = []
+            for ln in lines:
+                norm_lines.append(
+                    {
+                        "id": ln.get("id"),
+                        "instance_id": int(iid),
+                        "inventory_item_id": ln.get("inventory_item_id"),
+                        "sku": ln.get("sku"),
+                        "item_name": ln.get("item_name"),
+                        "quantity_expected": ln.get("quantity_expected"),
+                        "quantity_on_bag": ln.get("quantity_on_bag"),
+                        "lot_number": ln.get("lot_number"),
+                        "expiry_date": ln.get("expiry_date"),
+                        "return_status": ln.get("return_status"),
+                    }
+                )
+            title_bits = [f"Bag #{iid}"]
+            if row.get("public_asset_number"):
+                title_bits.append(str(row["public_asset_number"]))
+            if row.get("template_code"):
+                title_bits.append(str(row["template_code"]))
+            uctx = str(row.get("usage_context") or "patient_care").strip().lower()
+            if uctx not in BAG_USAGE_CONTEXTS:
+                uctx = "patient_care"
+            sections.append(
+                {
+                    "instance_id": iid,
+                    "depth": depth,
+                    "title": " — ".join(title_bits),
+                    "template_name": row.get("template_name") or "",
+                    "template_code": row.get("template_code") or "",
+                    "public_asset_number": row.get("public_asset_number"),
+                    "status": row.get("status"),
+                    "bag_kind": row.get("bag_kind"),
+                    "usage_context": uctx,
+                    "lines": norm_lines,
+                }
+            )
+            for ch in self.list_child_instances(iid):
+                walk(int(ch["id"]), depth + 1)
+
+        walk(int(root_instance_id), 0)
+        generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+        enrich_sections_expiry_hints(sections)
+        return {
+            "root_instance_id": int(root_instance_id),
+            "root": {
+                "id": root.get("id"),
+                "public_asset_number": root.get("public_asset_number"),
+                "template_code": root.get("template_code"),
+                "template_name": root.get("template_name"),
+            },
+            "generated_at_label": generated,
+            "sections": sections,
+        }
+
+    def list_instance_ids_in_subtree(self, root_instance_id: int) -> List[int]:
+        """Root instance and all nested child bag instances, depth-first."""
+        out: List[int] = []
+        seen: set[int] = set()
+
+        def walk(iid: int) -> None:
+            if iid in seen:
+                return
+            seen.add(iid)
+            out.append(iid)
+            for ch in self.list_child_instances(iid):
+                walk(int(ch["id"]))
+
+        walk(int(root_instance_id))
+        return out
+
+    def get_instance_ids_for_lines(self, line_ids: List[int]) -> Dict[int, int]:
+        """Map line id -> bag instance id."""
+        ids_set: set[int] = set()
+        for x in line_ids:
+            try:
+                v = int(x)
+                if v > 0:
+                    ids_set.add(v)
+            except (TypeError, ValueError):
+                continue
+        ids = sorted(ids_set)
+        if not ids:
+            return {}
+        conn = self._conn()
+        cur = conn.cursor(dictionary=True)
+        try:
+            placeholders = ",".join(["%s"] * len(ids))
+            cur.execute(
+                f"SELECT id, instance_id FROM inventory_med_bag_instance_lines WHERE id IN ({placeholders})",
+                tuple(ids),
+            )
+            rows = cur.fetchall() or []
+            return {int(r["id"]): int(r["instance_id"]) for r in rows}
+        finally:
+            cur.close()
+            conn.close()
+
+    def apply_loadlist_check_updates(
+        self,
+        root_instance_id: int,
+        rows: List[Dict[str, Any]],
+        *,
+        can_edit_trace: bool,
+    ) -> Dict[str, Any]:
+        """
+        Apply checklist status and optional lot/expiry updates for lines under root_instance_id
+        (including nested bags). rows: line_id, return_status, lot_number, expiry_date, trace_changed.
+        """
+        allowed = set(self.list_instance_ids_in_subtree(root_instance_id))
+        line_ids: List[int] = []
+        for r in rows:
+            try:
+                v = int(r.get("line_id") or 0)
+                if v > 0:
+                    line_ids.append(v)
+            except (TypeError, ValueError):
+                continue
+        id_map = self.get_instance_ids_for_lines(line_ids)
+        errors: List[str] = []
+        n_status = 0
+        n_trace = 0
+        for r in rows:
+            lid = int(r.get("line_id") or 0)
+            if lid <= 0:
+                continue
+            iid = id_map.get(lid)
+            if iid is None or iid not in allowed:
+                errors.append(f"Line {lid} is not part of this kit.")
+                continue
+            if "return_status" in r:
+                try:
+                    self.set_instance_line_return_status(lid, r.get("return_status") or "clear")
+                    n_status += 1
+                except ValueError as e:
+                    errors.append(str(e))
+            if can_edit_trace and r.get("trace_changed"):
+                try:
+                    self.update_instance_line_trace(
+                        lid,
+                        lot_number=r.get("lot_number"),
+                        expiry_date=r.get("expiry_date"),
+                    )
+                    n_trace += 1
+                except ValueError as e:
+                    errors.append(f"Line {lid}: {e}")
+        return {
+            "ok": not errors,
+            "errors": errors,
+            "status_updates": n_status,
+            "trace_updates": n_trace,
+        }
+
+    def get_line_instance_and_item(self, line_id: int) -> Optional[Tuple[int, int]]:
+        """Return (bag_instance_id, inventory_item_id) for a med bag instance line."""
+        conn = self._conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT instance_id, inventory_item_id
+                FROM inventory_med_bag_instance_lines
+                WHERE id = %s
+                """,
+                (int(line_id),),
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            return (int(r[0]), int(r[1]))
+        finally:
+            cur.close()
+            conn.close()
+
+    def apply_loadlist_inline_movements(
+        self,
+        root_instance_id: int,
+        movements: List[Dict[str, Any]],
+        *,
+        performed_by: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Record restock_hq / restock_bag / disposal from the digital loadlist check form.
+        Each movement must belong to a line under root_instance_id's subtree.
+        """
+        allowed_inst = set(self.list_instance_ids_in_subtree(root_instance_id))
+        errors: List[str] = []
+        n_ok = 0
+        for m in movements:
+            lid = int(m.get("line_id") or 0)
+            if lid <= 0:
+                continue
+            pair = self.get_line_instance_and_item(lid)
+            if not pair:
+                errors.append(f"Line {lid} not found.")
+                continue
+            db_inst, db_item = pair
+            if db_inst not in allowed_inst:
+                errors.append(f"Line {lid} is not in this kit.")
+                continue
+            try:
+                form_inst = int(m.get("instance_id") or 0)
+                form_item = int(m.get("inventory_item_id") or 0)
+            except (TypeError, ValueError):
+                errors.append(f"Line {lid}: invalid bag or item reference.")
+                continue
+            if form_inst != db_inst or form_item != db_item:
+                errors.append(f"Line {lid}: bag/item mismatch — refresh the page and try again.")
+                continue
+            try:
+                qty = float(m.get("quantity") or 0)
+            except (TypeError, ValueError):
+                errors.append(f"Line {lid}: invalid quantity.")
+                continue
+            et = (m.get("event_type") or "").strip()
+            res = self.record_restock_event(
+                instance_id=db_inst,
+                inventory_item_id=db_item,
+                quantity=qty,
+                event_type=et,
+                witness_user_id=(m.get("witness_user_id") or "").strip() or None,
+                witness_user_id_2=(m.get("witness_user_id_2") or "").strip() or None,
+                performed_by=(performed_by or "").strip() or None,
+                notes=(m.get("notes") or "").strip() or None,
+            )
+            if res.get("ok"):
+                n_ok += 1
+            else:
+                err = str(res.get("error") or "error")
+                pretty = {
+                    "witness_required": "Witness 1 is required for this movement type.",
+                    "second_witness_required": "A second witness is required.",
+                    "quantity_must_be_positive": "Quantity must be greater than zero.",
+                    "item_not_on_bag": "That item is not on this bag line.",
+                    "insufficient_qty_on_bag": "Not enough quantity on the bag for removal.",
+                    "would_go_negative": "That would remove more than is currently on the bag.",
+                    "invalid_event_type": "Invalid movement type.",
+                    "internal_error": "Something went wrong — try again.",
+                }.get(err, err.replace("_", " "))
+                errors.append(f"Line {lid}: {pretty}")
+        return {
+            "ok": not errors,
+            "errors": errors,
+            "movements_recorded": n_ok,
+        }
+
     def list_ledger(self, instance_id: int, *, limit: int = 100) -> List[Dict[str, Any]]:
         conn = self._conn()
         cur = conn.cursor(dictionary=True)
@@ -962,6 +1282,28 @@ class MedBagService:
             cur.close()
             if hasattr(conn, "autocommit"):
                 conn.autocommit = prev_ac
+            conn.close()
+
+    def set_instance_usage_context(self, instance_id: int, usage_context: str) -> bool:
+        """patient_care = normal expiry prompts; training = kit for drills only (same physical stock rules)."""
+        raw = (usage_context or "").strip().lower()
+        if raw not in BAG_USAGE_CONTEXTS:
+            raise ValueError("usage_context must be patient_care or training.")
+        conn = self._conn()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE inventory_med_bag_instances
+                SET usage_context = %s
+                WHERE id = %s
+                """,
+                (raw, int(instance_id)),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
             conn.close()
 
     def set_instance_line_return_status(self, line_id: int, status: Optional[str]) -> bool:

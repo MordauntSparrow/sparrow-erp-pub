@@ -1,39 +1,40 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}New event plan{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}New medical event plan — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item active" aria-current="page">New plan</li>
+  </ol>
+</nav>
 <div class="container-fluid py-3" style="max-width: 640px;">
-  <h1 class="h4 mb-3">New event plan</h1>
+  <h1 class="h4 mb-2">New event plan</h1>
+  {% include 'admin/partials/crm_pipeline_flow_bar.html' %}
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <form method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if request.args.get('flow') == '1' %}
+        <input type="hidden" name="crm_flow_active" value="1">
+        {% endif %}
         <div class="mb-3">
           <label class="form-label">Title</label>
           <input class="form-control" name="title" maxlength="255" placeholder="e.g. Summer festival — main arena"
             value="{{ suggested_title or '' }}">
         </div>
         <div class="mb-3">
-          <label class="form-label">Link quote (optional)</label>
-          <select class="form-select" name="quote_id">
-            <option value="">—</option>
+          <label class="form-label">Link quote <span class="text-danger">*</span></label>
+          <select class="form-select" name="quote_id" required>
+            <option value="">— Select a quote —</option>
             {% for q in quotes %}
             <option value="{{ q.id }}" {% if pre_quote_id == q.id %}selected{% endif %}>#{{ q.id }} {{ q.title }} (account {{ q.account_id or '—' }})</option>
             {% endfor %}
           </select>
-          <p class="small text-muted mt-1">Prefills account and opportunity when present on the quote. If a quote is selected, the opportunity link below is ignored.</p>
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Link opportunity (optional)</label>
-          <select class="form-select" name="opportunity_id">
-            <option value="">—</option>
-            {% for o in opportunities %}
-            <option value="{{ o.id }}" {% if pre_opportunity_id == o.id %}selected{% endif %}>{{ o.account_name }} — {{ o.name }}</option>
-            {% endfor %}
-          </select>
-          <p class="small text-muted mt-1">Prefills account when no quote is linked.</p>
+          <p class="small text-muted mt-1">Required. The plan is tied to the quote; account and opportunity come from the quote when present.</p>
         </div>
         <button type="submit" class="btn btn-primary rounded-pill">Create draft</button>
-        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.event_plans_list') }}">Cancel</a>
+        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Cancel</a>
       </form>
     </div>
   </div>

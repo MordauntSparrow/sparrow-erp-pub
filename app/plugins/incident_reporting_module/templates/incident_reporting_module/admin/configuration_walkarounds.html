@@ -1,0 +1,32 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}Walkaround definitions · Safety &amp; Incidents{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_configuration') }}" class="text-decoration-none">Settings</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Walkaround definitions</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+      <h1 class="h4 fw-semibold mb-1">Walkaround definitions</h1>
+      <p class="small text-muted mb-0">Edit tour names, repeat interval, and checklist questions. Day-to-day completion lives under <a href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">HSE walkarounds</a>.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}">Open walkarounds</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_incident_reporting.admin_configuration') }}">All settings</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-10 col-xl-8">
+      {% include 'incident_reporting_module/admin/_walkaround_definitions_panel.html' %}
+    </div>
+  </div>
+</div>
+{% endblock %}

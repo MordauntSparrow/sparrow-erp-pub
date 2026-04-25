@@ -1,0 +1,477 @@
+{% extends "response/call_centre_base.html" %}
+{% block page_title %}Response Centre Wallboard{% endblock %}
+{% set nav_section = 'call_centre' %}
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+  main.shell > section.page:has(.wallboard-root) {
+    max-width: none !important;
+    width: 100%;
+  }
+  .wallboard-root { width: 100%; }
+  .wallboard-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: stretch;
+    min-height: min(58vh, 640px);
+  }
+  @media (max-width: 1100px) {
+    .wallboard-layout { grid-template-columns: 1fr; min-height: 0; }
+  }
+  .wallboard-map-panel {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--panel-strong);
+    display: flex;
+    flex-direction: column;
+    min-height: 320px;
+  }
+  #wbMap { flex: 1; min-height: 280px; }
+  .wallboard-map-foot {
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    border-top: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .wallboard-cards { min-height: 0; }
+  #wbMap .leaflet-container { font-family: inherit; background: #0b1222; }
+  :root[data-theme="light"] #wbMap .leaflet-container { background: #e2e8f0; }
+  .wb-mrk-job .wb-mrk-job-inner {
+    min-width: 38px;
+    padding: 3px 6px 4px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    color: #fff;
+    border: 1px solid rgba(0,0,0,0.25);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    line-height: 1.15;
+  }
+  .wb-mrk-job .wb-mrk-elapsed {
+    display: block;
+    font-size: 9px;
+    font-weight: 700;
+    opacity: 0.95;
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+  }
+  .wb-mrk-job { background: transparent !important; border: none !important; }
+  .leaflet-tooltip.wb-unit-map-label {
+    background: rgba(15, 23, 42, 0.9);
+    color: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: 0 2px 10px rgba(2, 6, 23, 0.35);
+    max-width: 160px;
+  }
+  :root[data-theme="light"] .leaflet-tooltip.wb-unit-map-label {
+    background: rgba(248, 250, 252, 0.95);
+    color: #0f172a;
+    border-color: rgba(100, 116, 139, 0.45);
+  }
+</style>
+{% endblock %}
+{% block cc_content %}
+<div class="wallboard-root">
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <h1 class="panel-title">Response Centre Wallboard</h1>
+      <div class="muted">Live CAD queue and map — read-only overview (dispatch controls assignments)</div>
+    </div>
+    <div class="muted" id="stamp">--</div>
+  </div>
+  <div class="panel-body" style="padding:10px;">
+    <div class="wallboard-layout">
+      <div class="wallboard-map-panel">
+        <div id="wbMap" role="application" aria-label="Live incident and unit map"></div>
+        <div class="wallboard-map-foot muted">
+          Rain / precipitation overlays are not shown here. CAD markers use stored incident coordinates; units use GPS, standby, or incident fallback — same rules as dispatch map, without pop-out tools or assignment actions.
+        </div>
+      </div>
+      <div class="wallboard-cards">
+        <div id="grid" style="display:grid;grid-template-columns:1fr;gap:10px;max-height:min(70vh,900px);overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+function esc(v) {
+  return String(v ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function statusClass(status) {
+  const s = String(status || '').toLowerCase().trim();
+  if (!s) return 'success';
+  if (s === 'queued') return 'secondary';
+  if (s === 'assigned' || s === 'claimed') return 'primary';
+  if (s === 'mobile' || s === 'on_scene' || s === 'leave_scene' || s === 'at_hospital') return 'warning';
+  if (s === 'cleared') return 'success';
+  return 'danger';
+}
+
+function prettyStatus(status) {
+  const raw = String(status || '').trim();
+  if (!raw) return 'Unknown';
+  return raw
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function priorityClass(p) {
+  const s = String(p || '').toLowerCase().replaceAll(' ', '_');
+  if (!s) return '';
+  if (['high','critical','p1'].includes(s)) return 'danger';
+  if (['urgent','medium','p2'].includes(s)) return 'warning';
+  if (['low','p3'].includes(s)) return 'success';
+  return 'secondary';
+}
+
+function fmtDate(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? String(v) : sparrowFormatDateTimeShort(d);
+}
+
+function fmtElapsed(startValue) {
+  if (!startValue) return '-';
+  const d = new Date(startValue);
+  if (Number.isNaN(d.getTime())) return '-';
+  const ms = Date.now() - d.getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '-';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hrs = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  if (hrs > 0) return `${hrs}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+  return `${mins}m ${String(secs).padStart(2, '0')}s`;
+}
+
+function wbCadTooltipHtml(cad, status, startTs) {
+  const st = esc(prettyStatus(status || 'unknown'));
+  const el = esc(fmtElapsed(startTs));
+  return `CAD #${esc(String(cad))} · ${st}<br><span style="font-size:11px;opacity:0.9">Elapsed ${el}</span>`;
+}
+
+/** Live-update elapsed label on CAD divIcons and tooltips (same clock as the card list). */
+function wbRefreshCadMarkerElapsed() {
+  if (!wbLayerJobs) return;
+  wbLayerJobs.eachLayer((ly) => {
+    if (!(ly instanceof L.Marker) || ly._wbCad == null) return;
+    const start = ly._wbElapsedStart;
+    const t = fmtElapsed(start);
+    try {
+      const ic = ly._icon && ly._icon.querySelector('.wb-mrk-elapsed');
+      if (ic) ic.textContent = t;
+    } catch (e0) { /* ignore */ }
+    try {
+      if (typeof ly.getTooltip === 'function' && ly.getTooltip()) {
+        ly.setTooltipContent(wbCadTooltipHtml(ly._wbCad, ly._wbStatus, start));
+      }
+    } catch (e1) { /* ignore */ }
+  });
+}
+
+function tickElapsed() {
+  const nodes = document.querySelectorAll('.elapsed-live[data-start]');
+  nodes.forEach((el) => {
+    const start = el.getAttribute('data-start');
+    el.textContent = fmtElapsed(start);
+  });
+  wbRefreshCadMarkerElapsed();
+}
+
+function wbStatusHex(status) {
+  const s = String(status || '').toLowerCase().trim();
+  if (s === 'queued') return '#64748b';
+  if (s === 'assigned' || s === 'claimed') return '#3b82f6';
+  if (s === 'mobile' || s === 'on_scene' || s === 'leave_scene' || s === 'at_hospital') return '#f59e0b';
+  if (s === 'cleared') return '#22c55e';
+  return '#ef4444';
+}
+
+function wbNumCoord(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function wbUnitHasCrew(u) {
+  if (u && typeof u.has_crew === 'boolean') return u.has_crew;
+  const raw = u && u.crew;
+  if (raw == null || raw === '') return false;
+  try {
+    const arr = typeof raw === 'string' ? (JSON.parse(raw) || []) : (Array.isArray(raw) ? raw : []);
+    if (!Array.isArray(arr) || !arr.length) return false;
+    return arr.some((m) => m && typeof m === 'object' && !!(m.username || m.user));
+  } catch (e) {
+    return false;
+  }
+}
+
+function wbGetUnitPos(unit, jobCoordByCad) {
+  if (!unit || typeof unit !== 'object') return null;
+  let lat = wbNumCoord(unit.latitude);
+  let lng = wbNumCoord(unit.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng, approx: false, approxKind: null };
+  }
+  lat = wbNumCoord(unit.standby_lat);
+  lng = wbNumCoord(unit.standby_lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng, approx: true, approxKind: 'standby' };
+  }
+  const cad = parseInt(unit.assignedIncident, 10);
+  if (Number.isFinite(cad) && cad > 0 && jobCoordByCad && jobCoordByCad.has(cad)) {
+    const p = jobCoordByCad.get(cad);
+    if (p && Number.isFinite(p[0]) && Number.isFinite(p[1])) {
+      return { lat: p[0], lng: p[1], approx: true, approxKind: 'job' };
+    }
+  }
+  return null;
+}
+
+function wbHaversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toR = Math.PI / 180;
+  const p1 = lat1 * toR;
+  const p2 = lat2 * toR;
+  const dLat = (lat2 - lat1) * toR;
+  const dLon = (lon2 - lon1) * toR;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function wbFormatSpeedMphOrMps(mps) {
+  if (!Number.isFinite(mps) || mps < 0) return '';
+  const mph = mps * 2.2369362920544;
+  if (mph < 3) return `${mps.toFixed(2)} m/s`;
+  return `${mph.toFixed(1)} mph`;
+}
+
+function wbUnitSpeedMps(unit, pos, prevPingSnap) {
+  if (!pos || pos.approx) return null;
+  const cs = String(unit.callSign || '').trim().toUpperCase();
+  if (!cs) return null;
+  const lat = wbNumCoord(unit.latitude);
+  const lng = wbNumCoord(unit.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const prev = prevPingSnap.get(cs);
+  if (!prev || !Number.isFinite(prev.lat) || !Number.isFinite(prev.lng)) return null;
+  const seenRaw = unit.lastSeenAt || unit.signOnTime;
+  const seenMs = seenRaw ? Date.parse(seenRaw) : NaN;
+  const recvMs = Date.now();
+  let dtSec = NaN;
+  if (Number.isFinite(seenMs) && Number.isFinite(prev.seenMs) && seenMs > prev.seenMs) {
+    dtSec = (seenMs - prev.seenMs) / 1000;
+  }
+  if (!Number.isFinite(dtSec) || dtSec < 1.25) {
+    dtSec = (recvMs - prev.recvMs) / 1000;
+  }
+  if (!Number.isFinite(dtSec) || dtSec < 1.25 || dtSec > 7200) return null;
+  const distM = wbHaversineMeters(prev.lat, prev.lng, lat, lng);
+  const mps = distM / dtSec;
+  if (!Number.isFinite(mps) || mps < 0 || mps > 80) return null;
+  return mps;
+}
+
+function wbUnitSpeedLabel(unit, pos, prevPingSnap) {
+  const mps = wbUnitSpeedMps(unit, pos, prevPingSnap);
+  if (mps == null || !Number.isFinite(mps)) return '';
+  return wbFormatSpeedMphOrMps(mps);
+}
+
+function wbJobDivIcon(cad, status, startTs) {
+  const bg = wbStatusHex(status);
+  const el = esc(fmtElapsed(startTs));
+  return L.divIcon({
+    className: 'wb-mrk-job',
+    html: `<div class="wb-mrk-job-inner" style="background:${bg};"><span class="wb-mrk-cad">#${esc(String(cad))}</span><span class="wb-mrk-elapsed">${el}</span></div>`,
+    iconSize: [44, 36],
+    iconAnchor: [22, 18],
+  });
+}
+
+let wbMap = null;
+let wbLayerJobs = null;
+let wbLayerUnits = null;
+let wbUnitPingSnapshot = new Map();
+
+function wbEnsureMap() {
+  const el = document.getElementById('wbMap');
+  if (!el || typeof L === 'undefined' || wbMap) return;
+  wbMap = L.map('wbMap', { zoomControl: true }).setView([54.2, -2.5], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap',
+  }).addTo(wbMap);
+  wbLayerJobs = L.layerGroup().addTo(wbMap);
+  wbLayerUnits = L.layerGroup().addTo(wbMap);
+  window.addEventListener('resize', function () {
+    try { if (wbMap) wbMap.invalidateSize(true); } catch (e) {}
+  });
+}
+
+function wbRenderMap(rows, units) {
+  wbEnsureMap();
+  if (!wbMap || !wbLayerJobs || !wbLayerUnits) return;
+  wbLayerJobs.clearLayers();
+  wbLayerUnits.clearLayers();
+  const prevPingSnap = new Map(wbUnitPingSnapshot);
+  const nextPingSnap = new Map();
+  const jobCoordByCad = new Map();
+  const boundsPts = [];
+  (Array.isArray(rows) ? rows : []).forEach((j) => {
+    const jLat = j && j.lat != null ? Number(j.lat) : NaN;
+    const jLng = j && j.lng != null ? Number(j.lng) : NaN;
+    if (!Number.isFinite(jLat) || !Number.isFinite(jLng)) return;
+    const cadInt = parseInt(j.cad, 10);
+    if (Number.isFinite(cadInt)) jobCoordByCad.set(cadInt, [jLat, jLng]);
+    const startTs = j.created_at || j.updated_at || null;
+    const m = L.marker([jLat, jLng], { icon: wbJobDivIcon(j.cad, j.status, startTs) }).addTo(wbLayerJobs);
+    m._wbElapsedStart = startTs;
+    m._wbCad = j.cad;
+    m._wbStatus = j.status;
+    const reason = esc((j.reason_for_call || '').slice(0, 120));
+    const st = esc(prettyStatus(j.status || 'unknown'));
+    m.bindTooltip(wbCadTooltipHtml(j.cad, j.status, startTs), { direction: 'top' });
+    m.bindPopup(
+      () => `<div style="min-width:200px;max-width:280px;font-size:13px;line-height:1.4;">`
+        + `<div style="font-weight:700;margin-bottom:4px;">CAD #${esc(String(j.cad))}</div>`
+        + `<div class="muted" style="margin-bottom:6px;">${st}</div>`
+        + `<div class="muted" style="margin-bottom:6px;">Elapsed: <strong>${esc(fmtElapsed(j.created_at || j.updated_at))}</strong></div>`
+        + `<div>${reason || '<span class="muted">No reason</span>'}</div>`
+        + `<div class="muted" style="margin-top:8px;font-size:11px;">Wallboard — view only</div></div>`,
+      { maxWidth: 300 }
+    );
+    boundsPts.push([jLat, jLng]);
+  });
+  (Array.isArray(units) ? units : []).forEach((u) => {
+    if (!wbUnitHasCrew(u)) return;
+    const pos = wbGetUnitPos(u, jobCoordByCad);
+    if (!pos || !Number.isFinite(pos.lat) || !Number.isFinite(pos.lng)) return;
+    const speedLabel = wbUnitSpeedLabel(u, pos, prevPingSnap);
+    const speedTip = speedLabel
+      ? `<br><span style="font-size:10px;opacity:0.88;line-height:1.15;">${esc(speedLabel)}</span>`
+      : '';
+    const approxTip = pos.approx
+      ? `<br><span style="font-size:9px;opacity:0.75;">${pos.approxKind === 'job' ? 'CAD position' : 'Standby'}</span>`
+      : '';
+    const cm = L.circleMarker([pos.lat, pos.lng], {
+      radius: 7,
+      weight: 2,
+      color: '#22d3ee',
+      fillColor: '#0e7490',
+      fillOpacity: 0.85,
+    }).addTo(wbLayerUnits);
+    const cs = esc(u.callSign || '');
+    const ust = esc(prettyStatus(u.status || 'unknown'));
+    cm.bindTooltip(
+      `<div style="text-align:center;line-height:1.2;"><strong>${cs}</strong><br><span style="font-size:11px;opacity:0.9">${ust}</span>${speedTip}${approxTip}</div>`,
+      { direction: 'bottom', permanent: true, className: 'wb-unit-map-label', offset: [0, 8] }
+    );
+    const spdPopup = speedLabel
+      ? `<div class="muted" style="margin-top:4px;">Speed ≈ <strong>${esc(speedLabel)}</strong> <span style="font-size:10px;opacity:0.8;">(between updates)</span></div>`
+      : '';
+    cm.bindPopup(
+      `<div style="font-size:13px;line-height:1.4;"><div style="font-weight:700;">${cs}</div>`
+      + `<div class="muted">${ust}</div>`
+      + spdPopup
+      + (u.assignedIncident ? `<div class="muted" style="margin-top:6px;">CAD #${esc(String(u.assignedIncident))}</div>` : '')
+      + `<div class="muted" style="margin-top:8px;font-size:11px;">Wallboard — view only</div></div>`,
+      { maxWidth: 260 }
+    );
+    boundsPts.push([pos.lat, pos.lng]);
+    if (!pos.approx) {
+      const la = wbNumCoord(u.latitude);
+      const lo = wbNumCoord(u.longitude);
+      if (Number.isFinite(la) && Number.isFinite(lo)) {
+        const seenRaw = u.lastSeenAt || u.signOnTime;
+        const seenMs = seenRaw ? Date.parse(seenRaw) : NaN;
+        nextPingSnap.set(String(u.callSign || '').trim().toUpperCase(), {
+          lat: la,
+          lng: lo,
+          seenMs: Number.isFinite(seenMs) ? seenMs : NaN,
+          recvMs: Date.now(),
+        });
+      }
+    }
+  });
+  wbUnitPingSnapshot = nextPingSnap;
+  if (boundsPts.length) {
+    try {
+      wbMap.fitBounds(L.latLngBounds(boundsPts), { padding: [36, 36], maxZoom: 14, animate: false });
+    } catch (e) {}
+  }
+  try { wbMap.invalidateSize(true); } catch (e2) {}
+}
+
+async function tick() {
+  const grid = document.getElementById('grid');
+  document.getElementById('stamp').textContent = `Updated ${sparrowFormatTime(new Date())}`;
+  try {
+    const stackUrl = '/plugin/ventus_response_module/call-centre/stack';
+    const unitsUrl = '/plugin/ventus_response_module/units';
+    const [resStack, resUnits] = await Promise.all([
+      fetch(stackUrl, { credentials: 'same-origin' }),
+      fetch(unitsUrl, { credentials: 'same-origin' }),
+    ]);
+    const rows = await resStack.json().catch(() => []);
+    let units = await resUnits.json().catch(() => []);
+    if (!Array.isArray(units)) units = [];
+    if (!Array.isArray(rows) || !rows.length) {
+      grid.innerHTML = '<div class="panel"><div class="panel-body">No active incidents</div></div>';
+      wbRenderMap([], units);
+      return;
+    }
+    grid.innerHTML = rows.map((j) => {
+      const priority = j.priority ? `<span class="badge ${priorityClass(j.priority)}" style="margin-left:6px;">${esc(j.priority)}</span>` : '';
+      const unitsLine = (Array.isArray(j.assigned_units) && j.assigned_units.length) ? j.assigned_units.join(', ') : 'Unassigned';
+      const location = [j.address, j.postcode, j.what3words].filter(Boolean).join(' | ');
+      const elapsed = fmtElapsed(j.created_at || j.updated_at);
+      return `
+        <article class="panel">
+          <div class="panel-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="font-size:22px;font-weight:700;">CAD #${esc(j.cad)} ${priority}</div>
+              <span class="badge ${statusClass(j.status)}">${esc(prettyStatus(j.status || 'unknown'))}</span>
+            </div>
+            <div style="margin-bottom:6px;">${esc(j.reason_for_call || 'No reason provided')}</div>
+            <div class="muted">Elapsed: <span class="elapsed-live" data-start="${esc(j.created_at || j.updated_at || '')}">${esc(elapsed)}</span></div>
+            <div class="muted">${esc(location || 'No location')}</div>
+            <div class="muted">Units: ${esc(unitsLine)}</div>
+            <div class="muted">Updated: ${esc(fmtDate(j.updated_at || j.created_at))}</div>
+          </div>
+        </article>
+      `;
+    }).join('');
+    wbRenderMap(rows, units);
+  } catch (e) {
+    grid.innerHTML = '<div class="panel"><div class="panel-body" style="color:#ef4444;">Failed to load wallboard data</div></div>';
+    wbRenderMap([], []);
+  }
+}
+
+tick();
+setInterval(tick, 8000);
+setInterval(tickElapsed, 1000);
+</script>
+{% endblock %}

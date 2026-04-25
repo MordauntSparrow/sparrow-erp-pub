@@ -1,0 +1,178 @@
+{% extends "admin/inventory_admin_base.html" %}
+{% block page_title %}Kit loadlist check — Bag #{{ loadlist.root_instance_id }}{% endblock %}
+{% block content %}
+{% set ncol = 8 + (1 if can_edit else 0) %}
+<div class="container-fluid py-4">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_instances_list') }}">Instances</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=loadlist.root_instance_id) }}">Bag #{{ loadlist.root_instance_id }}</a></li>
+      <li class="breadcrumb-item active">Loadlist check</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h1 class="h4 mb-1">Digital kit loadlist check</h1>
+      <p class="text-muted small mb-0">
+        <strong>{{ loadlist.root.template_code }}</strong> — {{ loadlist.root.template_name }}
+        {% if loadlist.root.public_asset_number %} · Asset <strong>{{ loadlist.root.public_asset_number }}</strong>{% endif %}
+        · Generated {{ loadlist.generated_at_label }}
+      </p>
+      <p class="text-muted small mb-0 mt-2">
+        One page for the <strong>whole kit tree</strong>: mark checklist issues, fix lot/expiry, and
+        {% if can_transact %}<strong>record restock or disposal</strong> on the same save.{% else %}save checklist and lot/expiry — stock movements need <strong>transaction</strong> permission.{% endif %}
+        Witness rules still apply to movements (same as the bag detail page).
+        For <strong>warehouse</strong> lots that are out of date for patients but kept for drills, use the Inventory dashboard to move stock into the <strong>training pool</strong> location or dispose it.
+      </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-danger btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_pdf', instance_id=loadlist.root_instance_id) }}" target="_blank" rel="noopener">
+        <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+      </a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_csv', instance_id=loadlist.root_instance_id) }}">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>CSV
+      </a>
+    </div>
+  </div>
+
+  <form method="post" class="mb-5">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    {% if can_transact %}
+    <div class="card border-info mb-3">
+      <div class="card-header py-2 fw-semibold small bg-info bg-opacity-10">Witness defaults (optional)</div>
+      <div class="card-body py-2 small">
+        <p class="text-muted mb-2">If witness fields are required for your org, you can set defaults here — they apply to any movement row where witness boxes are left blank.</p>
+        <div class="row g-2 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label small mb-0">Default witness 1 (user id)</label>
+            <input class="form-control form-control-sm" name="default_witness_1" autocomplete="off" placeholder="User id">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-0">Default witness 2</label>
+            <input class="form-control form-control-sm" name="default_witness_2" autocomplete="off" placeholder="If required">
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="submit" class="btn btn-primary btn-sm">
+        {% if can_transact and can_edit %}Save checklist, lot/expiry, and stock movements{% elif can_transact %}Save checklist and stock movements{% elif can_edit %}Save checklist and lot/expiry{% else %}Save checklist{% endif %}
+      </button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=loadlist.root_instance_id) }}">Back to bag</a>
+    </div>
+
+    {% for sec in loadlist.sections %}
+    <div class="card mb-4" style="margin-left: {{ (sec.depth or 0) * 1.25 }}rem">
+      <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span class="fw-semibold small">{{ sec.title }}{% if sec.usage_context|default('patient_care') == 'training' %} <span class="badge bg-info text-dark">Training bag</span>{% endif %}</span>
+        <span class="small text-muted">{{ sec.template_name }} · status {{ sec.status }}</span>
+        <a class="btn btn-sm btn-link py-0 ms-auto small" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=sec.instance_id) }}">Open bag detail</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>SKU</th>
+                <th>Item</th>
+                <th class="text-end">Expected</th>
+                <th class="text-end">On bag</th>
+                <th>Lot</th>
+                <th>Expiry</th>
+                <th>Date check</th>
+                <th style="min-width:11rem">Checklist</th>
+                {% if can_edit %}<th style="min-width:14rem">Lot and expiry (edit)</th>{% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in sec.lines %}
+              <tr class="{% if line.expiry_tier == 'expired' %}table-danger{% elif line.expiry_tier == 'near' %}table-warning{% elif line.return_status == 'missing' %}table-danger{% elif line.return_status == 'to_add' %}table-warning{% elif line.return_status in ('wrong_lot', 'bad_expiry', 'wrong_qty') %}table-warning{% endif %}">
+                <td class="text-nowrap small">{{ line.sku }}</td>
+                <td class="small">{{ line.item_name }}</td>
+                <td class="text-end small">{{ line.quantity_expected }}</td>
+                <td class="text-end small">{{ line.quantity_on_bag }}</td>
+                <td class="small">{{ line.lot_number or '—' }}</td>
+                <td class="small text-nowrap">{{ line.expiry_date or '—' }}</td>
+                <td class="small">
+                  {% if line.expiry_hint %}<span class="badge bg-secondary">{{ line.expiry_hint }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                  <select class="form-select form-select-sm" name="status_{{ line.id }}" aria-label="Checklist for {{ line.sku }}">
+                    <option value="" {% if not line.return_status %}selected{% endif %}>Not set</option>
+                    {% for rs in return_statuses %}
+                    <option value="{{ rs }}" {% if line.return_status == rs %}selected{% endif %}>{{ return_status_labels.get(rs, rs) }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                {% if can_edit %}
+                <td>
+                  <input type="hidden" name="orig_lot_{{ line.id }}" value="{{ line.lot_number or '' }}">
+                  <input type="hidden" name="orig_exp_{{ line.id }}" value="{{ line.expiry_date or '' }}">
+                  <div class="d-flex flex-column gap-1">
+                    <input class="form-control form-control-sm" type="text" name="lot_{{ line.id }}" value="{{ line.lot_number or '' }}" placeholder="Lot / batch" autocomplete="off">
+                    <input class="form-control form-control-sm" type="date" name="exp_{{ line.id }}" value="{{ line.expiry_date or '' }}" aria-label="Expiry for {{ line.sku }}">
+                  </div>
+                </td>
+                {% endif %}
+              </tr>
+              {% if can_transact %}
+              <tr class="table-light border-bottom">
+                <td colspan="{{ ncol }}" class="py-2">
+                  <input type="hidden" name="mov_inst_{{ line.id }}" value="{{ line.instance_id }}">
+                  <input type="hidden" name="mov_item_{{ line.id }}" value="{{ line.inventory_item_id }}">
+                  <div class="row g-2 align-items-end small">
+                    <div class="col-12 text-muted mb-1">
+                      <strong>Stock movement</strong> (optional) — add from HQ, move onto this bag, or dispose. Leave quantity empty to skip.
+                    </div>
+                    <div class="col-6 col-md-1">
+                      <label class="form-label small mb-0">Qty</label>
+                      <input class="form-control form-control-sm" type="number" step="0.0001" min="0.0001" name="mov_qty_{{ line.id }}" placeholder="—" autocomplete="off" aria-label="Movement quantity {{ line.sku }}">
+                    </div>
+                    <div class="col-12 col-md-2">
+                      <label class="form-label small mb-0">Movement</label>
+                      <select class="form-select form-select-sm" name="mov_evt_{{ line.id }}" aria-label="Movement type {{ line.sku }}">
+                        <option value="">—</option>
+                        <option value="restock_bag">Restock to bag</option>
+                        <option value="restock_hq">Restock from HQ</option>
+                        <option value="disposal">Disposal (remove)</option>
+                      </select>
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label small mb-0">Witness 1</label>
+                      <input class="form-control form-control-sm" type="text" name="mov_w1_{{ line.id }}" placeholder="User id" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-md-2">
+                      <label class="form-label small mb-0">Witness 2</label>
+                      <input class="form-control form-control-sm" type="text" name="mov_w2_{{ line.id }}" placeholder="If required" autocomplete="off">
+                    </div>
+                    <div class="col-12 col-md-3">
+                      <label class="form-label small mb-0">Notes</label>
+                      <input class="form-control form-control-sm" type="text" name="mov_notes_{{ line.id }}" placeholder="Optional" autocomplete="off">
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              {% endif %}
+              {% else %}
+              <tr><td colspan="{{ ncol }}" class="text-muted small p-3">No lines on this bag.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+
+    <div class="d-flex flex-wrap gap-2 mt-3">
+      <button type="submit" class="btn btn-primary btn-sm">
+        {% if can_transact and can_edit %}Save checklist, lot/expiry, and stock movements{% elif can_transact %}Save checklist and stock movements{% elif can_edit %}Save checklist and lot/expiry{% else %}Save checklist{% endif %}
+      </button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_detail', instance_id=loadlist.root_instance_id) }}">Back to bag</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

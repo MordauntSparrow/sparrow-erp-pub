@@ -1,0 +1,2179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ventus CAD — Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  {% include 'partials/sparrow_date_locale.html' %}
+  
+  <style>
+    :root {
+      --primary: #1e40af;
+      --primary-light: #3b82f6;
+      --primary-dark: #1e3a8a;
+      --secondary: #0f172a;
+      --secondary-light: #1e293b;
+      --secondary-lighter: #475569;
+      --accent: #06b6d4;
+      --accent-warning: #f59e0b;
+      --accent-danger: #ef4444;
+      --accent-success: #10b981;
+      --bg-dark: #0f172a;
+      --bg-darker: #0a0e27;
+      --text-primary: #f1f5f9;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --border-color: #1e293b;
+      --border-light: #334155;
+      --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.15);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.2);
+      --shadow-xl: 0 16px 40px rgba(0,0,0,0.25);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(135deg, var(--bg-darker) 0%, var(--bg-dark) 100%);
+      color: var(--text-primary);
+      font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .popout-container {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .popout-header {
+      padding: 16px 20px;
+      background: linear-gradient(90deg, rgba(30,41,66,0.9), rgba(6,182,214,0.1));
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .popout-title {
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .popout-title i {
+      font-size: 18px;
+      color: var(--accent);
+    }
+
+    .popout-controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    .popout-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      font-size: 15px;
+    }
+
+    .popout-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: var(--text-primary);
+      border-color: var(--border-light);
+    }
+
+    .popout-content {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(15,23,42,0.95) 0%, rgba(15,23,42,0.90) 100%);
+    }
+
+    .popout-content::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .popout-content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .popout-content::-webkit-scrollbar-thumb {
+      background: var(--border-light);
+      border-radius: 3px;
+    }
+
+    .popout-content::-webkit-scrollbar-thumb:hover {
+      background: var(--secondary-lighter);
+    }
+
+    .panel-list-item {
+      list-style: none;
+      padding: 12px;
+      margin-bottom: 8px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 8px;
+      border-left: 2px solid var(--primary-light);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .panel-list-item:hover {
+      background: rgba(6,182,214,0.1);
+      border-left-color: var(--accent);
+      box-shadow: inset 0 0 10px rgba(6,182,214,0.1);
+    }
+
+    .panel-list-item span {
+      flex: 1;
+    }
+
+    .panel-list-item .status {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: rgba(59,130,246,0.2);
+      color: var(--primary-light);
+    }
+
+    .panel-list-item .status.cleared {
+      background: rgba(16,185,129,0.2);
+      color: var(--accent-success);
+    }
+
+    .panel-list-item .status.assigned {
+      background: rgba(59,130,246,0.2);
+      color: var(--primary-light);
+    }
+
+    .panel-list-item .meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    input[type="text"],
+    input[type="search"] {
+      width: 100%;
+      padding: 10px 14px;
+      background: rgba(0,0,0,0.2);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 13px;
+      transition: all 0.2s ease;
+      margin-bottom: 10px;
+    }
+
+    input[type="text"]:focus,
+    input[type="search"]:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: rgba(6,182,214,0.05);
+      box-shadow: 0 0 10px rgba(6,182,214,0.2);
+    }
+
+    .btn {
+      padding: 10px 16px;
+      background: linear-gradient(135deg, var(--primary-light), var(--primary));
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: linear-gradient(135deg, var(--primary-dark), var(--primary-dark));
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .btn.full {
+      width: 100%;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-top: 14px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .action-group {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .action-group .btn {
+      flex: 1;
+      padding: 8px 12px;
+      font-size: 11px;
+    }
+
+    .popout-footer {
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.2);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* CAD job detail — same tab pattern as main CAD dashboard */
+    .ud-main-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 12px 0;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .ud-main-tab {
+      border: 1px solid var(--border-color);
+      background: transparent;
+      color: var(--text-primary);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+    .ud-main-tab:hover {
+      background: rgba(148, 163, 184, 0.12);
+      border-color: var(--border-light);
+    }
+    .ud-main-tab[aria-selected="true"],
+    .ud-main-tab.ud-main-tab--active {
+      border-color: rgba(56, 189, 248, 0.55);
+      background: rgba(59, 130, 246, 0.2);
+      font-weight: 600;
+    }
+    .ud-tab-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ud-tab-panel[hidden] {
+      display: none !important;
+    }
+    .job-detail-tabbed {
+      margin-top: 4px;
+    }
+    .cad-msg-section {
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.18);
+    }
+  </style>
+  {% include 'partials/sparrow_csrf_head.html' %}
+</head>
+<body>
+  <div class="popout-container">
+    <div class="popout-header">
+      <div class="popout-title">
+        <i id="titleIcon" class="bi bi-stack"></i>
+        <span id="titleText">Panel</span>
+      </div>
+      <div class="popout-controls">
+        <button class="popout-btn" id="refreshBtn" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+        <button class="popout-btn" id="closeBtn" title="Close"><i class="bi bi-x"></i></button>
+      </div>
+    </div>
+
+    <div class="popout-content" id="content">
+      <div style="text-align:center;color:var(--text-muted);padding:40px 20px;">
+        <i class="bi bi-hourglass-split" style="font-size:32px;display:block;margin-bottom:12px;"></i>
+        <div>Loading...</div>
+      </div>
+    </div>
+
+    <div class="popout-footer">
+      <span id="statusText">Ready</span>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='vendor/socket.io-4.7.5.min.js') }}"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const defaultPanel = "{{ panel|default('jobs') }}";
+    const panelType = String(params.get('type') || defaultPanel || 'jobs').trim().toLowerCase();
+    const selectedDivision = String(params.get('division') || '').trim().toLowerCase();
+    const includeExternal = String(params.get('include_external') || '1').trim().toLowerCase();
+    const defaultTitles = {
+      jobs: 'CAD Stack',
+      units: 'Active Units',
+      messages: 'Messages',
+      past_jobs: 'Past / Closed Jobs',
+      audit: 'Audit'
+    };
+    const panelTitle = params.get('title') || defaultTitles[panelType] || 'Panel';
+
+    let socket = null;
+    try {
+      if (typeof io !== 'undefined') socket = io();
+    } catch (e) {}
+
+    const titleEl = document.getElementById('titleText');
+    const iconEl = document.getElementById('titleIcon');
+    const contentEl = document.getElementById('content');
+    const statusEl = document.getElementById('statusText');
+    const closeBtn = document.getElementById('closeBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    let panelJobDetailOpen = false;
+    let panelJobDetailCad = null;
+    let panelJobDetailIsPast = false;
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    async function ventusFetchBngEastingNorthing(lat, lng) {
+      const la = Number(lat);
+      const lo = Number(lng);
+      if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
+      try {
+        const url = `/plugin/ventus_response_module/map/wgs84-to-bng?lat=${encodeURIComponent(la)}&lng=${encodeURIComponent(lo)}`;
+        const res = await fetch(url, { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return null;
+        const e = data.easting;
+        const n = data.northing;
+        if (e == null || n == null || !Number.isFinite(Number(e)) || !Number.isFinite(Number(n))) return null;
+        return { easting: Math.round(Number(e)), northing: Math.round(Number(n)) };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function ventusHydrateBngSlots(root) {
+      if (!root || typeof root.querySelectorAll !== 'function') return;
+      const slots = root.querySelectorAll('.ventus-incident-bng-slot[data-bng-lat][data-bng-lng]');
+      if (!slots.length) return;
+      await Promise.all(Array.from(slots).map(async (el) => {
+        const la = parseFloat(el.getAttribute('data-bng-lat') || '');
+        const lo = parseFloat(el.getAttribute('data-bng-lng') || '');
+        const en = await ventusFetchBngEastingNorthing(la, lo);
+        if (en) {
+          el.innerHTML = `<span class="muted" style="font-size:12px;line-height:1.35;"><b>Easting:</b> ${escapeHtml(String(en.easting))} · <b>Northing:</b> ${escapeHtml(String(en.northing))}</span>`;
+        } else {
+          el.innerHTML = '<span class="muted" style="font-size:12px;line-height:1.35;">Easting &amp; northing: not available</span>';
+        }
+        el.removeAttribute('data-bng-lat');
+        el.removeAttribute('data-bng-lng');
+      }));
+    }
+
+    function systemLogChannelMeta(sourceRaw) {
+      const s = String(sourceRaw || '').trim().toLowerCase();
+      const rows = {
+        comms: {
+          label: 'CAD log',
+          code: 'comms',
+          hint: 'Dispatcher-facing lines stored on this CAD (updates, closures, Major Incident, backup requests, etc.). Same store as many rows under Updates & Messages.',
+          fg: 'var(--accent)',
+          bg: 'rgba(59,130,246,0.18)',
+          bd: 'rgba(59,130,246,0.5)',
+        },
+        mdt: {
+          label: 'Unit / MDT',
+          code: 'mdt',
+          hint: 'Vehicle MDT response log for this CAD (status ladder: assigned, mobile, on scene, stood down, etc.).',
+          fg: 'var(--accent-warning)',
+          bg: 'rgba(245,158,11,0.15)',
+          bd: 'rgba(245,158,11,0.45)',
+        },
+        dispatch: {
+          label: 'Dispatch',
+          code: 'dispatch',
+          hint: 'Dispatch-side records (e.g. unit assignment rows, reopen events logged from the stack).',
+          fg: 'var(--text-secondary)',
+          bg: 'rgba(100,116,139,0.22)',
+          bd: 'var(--border-color)',
+        },
+        intake: {
+          label: 'Intake',
+          code: 'intake',
+          hint: 'CAD created from Response Centre / triage intake. The By line is the logged-in intake username.',
+          fg: 'var(--cad-soft-green-text, #166534)',
+          bg: 'var(--cad-soft-green-bg, rgba(220,252,231,0.55))',
+          bd: 'rgba(22, 163, 74, 0.45)',
+        },
+        system: {
+          label: 'System',
+          code: 'system',
+          hint: 'Engine-side events with no attributed user (e.g. closure review after last unit cleared). CAD creation from intake or MDT shows under Intake or Unit / MDT when known.',
+          fg: 'var(--text-secondary)',
+          bg: 'rgba(0,0,0,0.2)',
+          bd: 'var(--border-color)',
+        },
+      };
+      const o = rows[s];
+      if (o) return o;
+      return {
+        label: s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Event',
+        code: s || '—',
+        hint: 'Event origin: ' + (s || 'unknown'),
+        fg: 'var(--text-secondary)',
+        bg: 'rgba(0,0,0,0.2)',
+        bd: 'var(--border-color)',
+      };
+    }
+
+    function displayStackStatusWhenClosedSnippet(text) {
+      const t = String(text || '').trim();
+      if (/^dispatch\s+review\.?$/i.test(t)) {
+        return t.endsWith('.') ? 'Closure review.' : 'Closure review';
+      }
+      return t;
+    }
+
+    function formatSystemLogMessageHtml(raw) {
+      const msg = String(raw || '').trim();
+      if (!msg) return '<div class="meta">—</div>';
+      const pieces = [];
+      let remainder = msg;
+      const ixLks = remainder.search(/\bLast known stack status:\s*/i);
+      if (ixLks >= 0) {
+        const head = remainder.slice(0, ixLks).trim();
+        remainder = remainder.slice(ixLks).replace(/\bLast known stack status:\s*/i, '').trim();
+        if (head) pieces.push({ k: 'What happened', text: head });
+      }
+      const ixCl = remainder.search(/\bClosure:\s*/i);
+      if (ixCl >= 0) {
+        const mid = remainder.slice(0, ixCl).trim();
+        const tail = remainder.slice(ixCl).replace(/\bClosure:\s*/i, '').trim();
+        if (mid) pieces.push({ k: 'Stack when closed', text: displayStackStatusWhenClosedSnippet(mid) });
+        if (tail) pieces.push({ k: 'Closure / remarks', text: tail });
+      } else if (remainder.trim()) {
+        pieces.push({ k: pieces.length ? 'Detail' : null, text: remainder.trim() });
+      }
+      if (!pieces.length) pieces.push({ k: null, text: msg });
+      return pieces.map((p) => {
+        const lab = p.k
+          ? `<div class="meta" style="font-size:11px;font-weight:600;margin:0 0 4px 0;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);">${escapeHtml(p.k)}</div>`
+          : '';
+        return `<div style="margin-bottom:8px;">${lab}<div style="white-space:pre-wrap;word-break:break-word;line-height:1.5;color:var(--text-primary);">${escapeHtml(p.text)}</div></div>`;
+      }).join('');
+    }
+
+    function renderJobSystemLogCardHtml(ev, timeFormatted) {
+      const ch = systemLogChannelMeta(ev.source);
+      const actor = escapeHtml(String(ev.actor || '').trim() || '—');
+      const hintEsc = escapeHtml(ch.hint);
+      const t = escapeHtml(String(timeFormatted || '—'));
+      const body = formatSystemLogMessageHtml(ev.message);
+      return `<div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;background:rgba(0,0,0,0.2);">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;">
+          <div style="font-weight:600;font-size:13px;color:var(--text-primary);line-height:1.35;">${t}</div>
+          <span style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;background:${ch.bg};color:${ch.fg};border:1px solid ${ch.bd};max-width:min(100%,240px);text-align:center;line-height:1.25;" title="${hintEsc}">${escapeHtml(ch.label)}</span>
+        </div>
+        <div class="meta" style="font-size:12px;color:var(--text-secondary);">By <strong style="color:var(--text-primary);">${actor}</strong> · <span style="cursor:help;border-bottom:1px dotted var(--text-muted);" title="${hintEsc}">channel <code style="font-size:11px;">${escapeHtml(ch.code)}</code></span></div>
+        <div style="margin-top:10px;border-top:1px solid var(--border-color);padding-top:10px;">${body}</div>
+      </div>`;
+    }
+
+    const divisionMeta = new Map();
+
+    async function refreshDivisionMeta() {
+      try {
+        const res = await fetch('/plugin/ventus_response_module/dispatch/divisions', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const items = Array.isArray(data.items) && data.items.length
+          ? data.items
+          : (Array.isArray(data.divisions) ? data.divisions.map((d) => ({ slug: d, name: d, color: '#64748b', map_icon_url: null })) : []);
+        divisionMeta.clear();
+        items.forEach((i) => {
+          const slug = String(i.slug || '').trim();
+          if (!slug) return;
+          divisionMeta.set(slug.toLowerCase(), { name: i.name, color: i.color || '#64748b', map_icon_url: i.map_icon_url || null });
+        });
+      } catch (e) {}
+    }
+
+    function divisionDisplayName(slug) {
+      const s = String(slug == null || slug === '' ? 'general' : slug).trim() || 'general';
+      const meta = divisionMeta.get(s.toLowerCase()) || divisionMeta.get(s);
+      const label = meta && meta.name != null && String(meta.name).trim() !== ''
+        ? String(meta.name).trim()
+        : '';
+      if (label) return label;
+      return s.replaceAll('_', ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+    }
+
+    function divisionColorHex(slug) {
+      const s = String(slug == null || slug === '' ? 'general' : slug).trim().toLowerCase();
+      const meta = divisionMeta.get(s);
+      const raw = meta && meta.color != null ? String(meta.color).trim() : '';
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) {
+        if (raw.length === 4) {
+          return ('#' + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3]).toLowerCase();
+        }
+        return raw.toLowerCase();
+      }
+      return '#64748b';
+    }
+
+    function jobDivisionLabel(job) {
+      if (!job) return divisionDisplayName('general');
+      const fixed = String(job.division_label || '').trim();
+      if (fixed) return fixed;
+      return divisionDisplayName(job.division);
+    }
+
+    function jobDivisionColorHex(job) {
+      if (!job) return divisionColorHex('general');
+      const c = String(job.division_color || '').trim();
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c)) {
+        if (c.length === 4) {
+          return ('#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3]).toLowerCase();
+        }
+        return c.toLowerCase();
+      }
+      return divisionColorHex(job.division);
+    }
+
+    function divisionMapIconUrl(slug) {
+      const s = String(slug == null || slug === '' ? 'general' : slug).trim().toLowerCase();
+      const meta = divisionMeta.get(s);
+      const u = meta && meta.map_icon_url;
+      return u ? String(u).trim() : '';
+    }
+
+    function panelDivisionJobGlyphHtml(slug) {
+      const hex = divisionColorHex(slug);
+      return `<i class="bi bi-geo-alt" style="color:${hex};"></i>`;
+    }
+
+    function panelDivisionUnitGlyphHtml(slug) {
+      const url = divisionMapIconUrl(slug);
+      const hex = divisionColorHex(slug);
+      if (url) {
+        return `<img src="${escapeHtml(url)}" alt="" width="18" height="18" decoding="async" style="width:1.05rem;height:1.05rem;object-fit:contain;vertical-align:-0.12em;border-radius:3px;box-shadow:0 0 0 1px rgba(15,23,42,0.28);">`;
+      }
+      return `<i class="bi bi-truck-front" style="color:${hex};"></i>`;
+    }
+
+    function setIcon(type) {
+      if (type === 'jobs') iconEl.className = 'bi bi-stack';
+      else if (type === 'units') iconEl.className = 'bi bi-truck-front';
+      else if (type === 'messages') iconEl.className = 'bi bi-chat-dots';
+      else if (type === 'past_jobs') iconEl.className = 'bi bi-clock-history';
+      else iconEl.className = 'bi bi-layout-sidebar';
+    }
+
+    async function fetchJson(url) {
+      const needsScope = (
+        url.includes('/plugin/ventus_response_module/jobs') ||
+        url.includes('/plugin/ventus_response_module/units') ||
+        url.includes('/plugin/ventus_response_module/history')
+      );
+      let scopedUrl = url;
+      if (needsScope && selectedDivision) {
+        const sep = url.includes('?') ? '&' : '?';
+        scopedUrl = `${url}${sep}division=${encodeURIComponent(selectedDivision)}&include_external=${encodeURIComponent(includeExternal)}`;
+      }
+      const res = await fetch(scopedUrl, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    /** Append division scope to per-CAD API paths (matches main CAD dashboard). */
+    function jobScopedUrl(pathAfterJobPrefix) {
+      let u = `/plugin/ventus_response_module/job/${pathAfterJobPrefix}`;
+      if (!selectedDivision) return u;
+      const sep = u.includes('?') ? '&' : '?';
+      return `${u}${sep}division=${encodeURIComponent(selectedDivision)}&include_external=${encodeURIComponent(includeExternal)}`;
+    }
+
+    function switchPanelJobDetailTab(cad, tab) {
+      const cadStr = String(cad);
+      const root = document.querySelector('.job-detail-tabbed[data-job-cad="' + cadStr + '"]');
+      if (!root) return;
+      const allowed = new Set(['summary', 'comms', 'panic', 'times', 'admin']);
+      const t = allowed.has(String(tab || '').trim().toLowerCase()) ? String(tab).trim().toLowerCase() : 'summary';
+      root.setAttribute('data-pj-active-tab', t);
+      root.querySelectorAll('[data-pj-panel]').forEach((p) => {
+        const pid = (p.getAttribute('data-pj-panel') || '').trim().toLowerCase();
+        p.hidden = pid !== t;
+      });
+      root.querySelectorAll('[data-pj-tab]').forEach((btn) => {
+        const bid = (btn.getAttribute('data-pj-tab') || '').trim().toLowerCase();
+        const on = bid === t;
+        btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        btn.classList.toggle('ud-main-tab--active', on);
+      });
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function parseTime(value) {
+      if (!value) return null;
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function calcAgeFromDateString(value) {
+      const d = parseTime(value);
+      if (!d) return null;
+      const now = new Date();
+      let age = now.getFullYear() - d.getFullYear();
+      const md = now.getMonth() - d.getMonth();
+      if (md < 0 || (md === 0 && now.getDate() < d.getDate())) age -= 1;
+      return age >= 0 ? age : null;
+    }
+
+    function prettyStatus(status) {
+      const raw = String(status || '').trim();
+      if (!raw) return 'Unknown';
+      if (String(raw).trim().toLowerCase() === 'dispatch_review') return 'Closure review';
+      return raw
+        .replaceAll('_', ' ')
+        .replace(/\s+/g, ' ')
+        .toLowerCase()
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '-';
+      const totalMinutes = Math.floor(ms / 60000);
+      const h = Math.floor(totalMinutes / 60);
+      const m = totalMinutes % 60;
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    function prettyFieldLabel(key) {
+      return String(key || '')
+        .replaceAll('_', ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function formatDisplayValue(v) {
+      if (v === undefined || v === null) return '';
+      if (typeof v === 'string') return v.trim();
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      if (Array.isArray(v)) {
+        return v.map(function(item) {
+          if (item === null || item === undefined) return '';
+          if (typeof item === 'object') {
+            const parts = Object.entries(item).map(function(entry) { return prettyFieldLabel(entry[0]) + ': ' + formatDisplayValue(entry[1]); });
+            return parts.filter(Boolean).join(' · ');
+          }
+          return String(item);
+        }).filter(Boolean).join('; ');
+      }
+      if (typeof v === 'object') {
+        const lines = Object.entries(v).map(function(entry) {
+          const key = prettyFieldLabel(entry[0]);
+          const val = formatDisplayValue(entry[1]);
+          if (val === '') return '';
+          return key + ': ' + val;
+        }).filter(Boolean);
+        return lines.join(' · ');
+      }
+      return String(v);
+    }
+
+    function formatRiskFlagDescriptionForCad(v) {
+      if (v === undefined || v === null) return '';
+      if (typeof v === 'string') return v.trim();
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      if (Array.isArray(v)) {
+        return v.map(formatRiskFlagDescriptionForCad).filter(Boolean).join('; ');
+      }
+      if (typeof v === 'object') {
+        const o = v;
+        const pick = (o.description ?? o.detail ?? o.message ?? o.text ?? o.label ?? o.value ?? o.name ?? o.risk ?? o.title ?? '');
+        return String(pick || '').trim();
+      }
+      return String(v);
+    }
+
+    function extractRiskFlagTimestampForCad(o) {
+      if (!o || typeof o !== 'object') return '';
+      const ts = (o.timestamp ?? o.created_at ?? o.added_at ?? o.recorded_at ?? o.at ?? '');
+      return String(ts || '').trim();
+    }
+
+    function parseVerboseRiskFlagString(s) {
+      const flat = String(s || '').replace(/\s+/g, ' ').trim();
+      if (!flat) return { desc: '', ts: '' };
+      let desc = '';
+      const dmFull = flat.match(/Description:\s*(.+?)\s*·\s*Flag Type:/i);
+      if (dmFull) desc = dmFull[1].trim();
+      if (!desc) {
+        const dm = flat.match(/Description:\s*([^·]+?)(?:\s*·\s*Flag Type:|$)/i);
+        if (dm) desc = dm[1].trim();
+      }
+      let ts = '';
+      const tm = flat.match(/Timestamp:\s*(.+?)(?:\s*·\s*|$)/i);
+      if (tm) ts = tm[1].trim();
+      if (!desc) {
+        desc = flat.replace(/^Risk Flags:\s*/i, '').trim();
+        if (/Description:/i.test(desc)) {
+          const m2 = desc.match(/Description:\s*([^·]+)/i);
+          if (m2) desc = m2[1].trim();
+        }
+      }
+      if (!desc) desc = flat;
+      return { desc, ts };
+    }
+
+    function riskFlagCadEntryFromValue(val) {
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        return {
+          desc: formatRiskFlagDescriptionForCad(val),
+          ts: extractRiskFlagTimestampForCad(val)
+        };
+      }
+      const raw = formatDisplayValue(val);
+      const parsed = parseVerboseRiskFlagString(raw);
+      if (parsed.desc && (/Description:\s*/i.test(raw) || /Flag Type:\s*/i.test(raw) || /Timestamp:\s*/i.test(raw))) {
+        return parsed;
+      }
+      return { desc: String(raw || '').trim(), ts: '' };
+    }
+
+    function capitalizeWord(s) {
+      const t = String(s || '').trim();
+      if (!t) return '';
+      return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+    }
+
+    const CAD_TRIAGE_EXCLUSION_LABELS = {
+      exclusion_cardiac: 'Cardiac / respiratory arrest',
+      exclusion_major_trauma: 'Major trauma',
+      exclusion_bleeding: 'Serious bleeding',
+      exclusion_unconscious: 'Unconsciousness',
+      exclusion_stroke: 'Suspected stroke',
+      exclusion_seizures: 'Seizures'
+    };
+
+    function cadTriagePrettyKeyLabel(key) {
+      return String(key || '').replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
+    function cadTriageCollectExclusionStates(triage) {
+      const t = (triage && typeof triage === 'object') ? triage : {};
+      const answers = (t.form_answers && typeof t.form_answers === 'object') ? t.form_answers : {};
+      const out = {};
+      function normExclusionVal(val) {
+        if (val === true) return 'yes';
+        if (val === false) return 'no';
+        return String(val).trim().toLowerCase();
+      }
+      function mergeFrom(obj) {
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+        Object.keys(obj).forEach((key) => {
+          const k = String(key || '').trim();
+          if (!k.toLowerCase().startsWith('exclusion_')) return;
+          if (k.toLowerCase() === 'exclusion_data') return;
+          const val = obj[key];
+          if (val == null || val === '') return;
+          out[k] = normExclusionVal(val);
+        });
+      }
+      mergeFrom(answers);
+      let exd = t.exclusion_data;
+      if (typeof exd === 'string' && exd.trim()) {
+        try {
+          exd = JSON.parse(exd);
+        } catch (e) {
+          exd = null;
+        }
+      }
+      mergeFrom(exd);
+      Object.keys(t).forEach((key) => {
+        const k = String(key || '').trim();
+        if (!k.toLowerCase().startsWith('exclusion_') || k.toLowerCase() === 'exclusion_data') return;
+        if (t[key] == null || t[key] === '') return;
+        out[k] = normExclusionVal(t[key]);
+      });
+      return out;
+    }
+
+    function cadTriageFormatDecisionDisplay(v) {
+      const s = String(v ?? '').trim().toUpperCase().replace(/\s+/g, '_');
+      if (s === 'ACCEPT') return 'Accept';
+      if (s === 'REJECT') return 'Reject';
+      if (s === 'ACCEPT_WITH_EXCLUSION') return 'Accept with exclusions';
+      if (!s) return '';
+      return prettyStatus(s.replace(/_/g, ' '));
+    }
+
+    function cadTriageFormatExclusionsSummary(triage) {
+      const states = cadTriageCollectExclusionStates(triage);
+      const keys = Object.keys(states);
+      if (!keys.length) return 'None';
+      const yesLabels = [];
+      keys.forEach((key) => {
+        const st = states[key];
+        if (st === 'yes' || st === 'true' || st === '1') {
+          yesLabels.push(CAD_TRIAGE_EXCLUSION_LABELS[key] || cadTriagePrettyKeyLabel(String(key).replace(/^exclusion_/i, '')));
+        }
+      });
+      if (!yesLabels.length) return 'None';
+      return yesLabels.join('; ');
+    }
+
+    function renderIncidentDetails(triageRaw) {
+      const triage = (triageRaw && typeof triageRaw === 'object') ? triageRaw : {};
+      const take = (k) => triage[k];
+      const row = (label, val) => {
+        if (val === undefined || val === null || String(val).trim() === '') return '';
+        const display = typeof val === 'object' ? formatDisplayValue(val) : String(val).trim();
+        if (!display) return '';
+        return `<div style="padding:4px 0;"><b>${escapeHtml(label)}:</b> ${escapeHtml(display)}</div>`;
+      };
+      const rowOrEmpty = (label, val) => {
+        const display = (val === undefined || val === null || String(val).trim() === '') ? '—' : (typeof val === 'object' ? formatDisplayValue(val) : String(val).trim());
+        return `<div style="padding:4px 0;"><b>${escapeHtml(label)}:</b> ${escapeHtml(display || '—')}</div>`;
+      };
+
+      const ageValue = (() => {
+        const fromDob = calcAgeFromDateString(take('patient_dob'));
+        if (fromDob != null) return String(fromDob);
+        const direct = take('patient_age') != null ? take('patient_age') : take('age');
+        return (direct != null && direct !== '') ? String(Math.round(Number(direct))) : '';
+      })();
+      const patientName = [take('first_name'), take('middle_name'), take('last_name')].filter(Boolean).join(' ');
+
+      const coreRows = [
+        row('Reason for Call', take('reason_for_call')),
+        row('Additional Details', take('additional_details')),
+        rowOrEmpty('Gender', take('patient_gender') ? capitalizeWord(take('patient_gender')) : ''),
+        rowOrEmpty('Age', ageValue),
+        rowOrEmpty('DOB', take('patient_dob')),
+        row('Patient', patientName),
+        row('Address', take('address')),
+        row('Postcode', take('postcode')),
+        row('what3words', take('what3words')),
+        (() => {
+          const c = take('coordinates');
+          if (!c || typeof c !== 'object' || c.error) return '';
+          const la = c.lat != null ? c.lat : c.latitude;
+          const lo = c.lng != null ? c.lng : c.longitude;
+          if (la == null || lo == null) return '';
+          const laN = Number(la);
+          const loN = Number(lo);
+          if (!Number.isFinite(laN) || !Number.isFinite(loN)) return '';
+          const src = String(c.source || '').replace(/_/g, ' ').trim();
+          const suffix = src ? ` (${src})` : '';
+          const latLngLine = row('Latitude & longitude', `${laN.toFixed(6)}, ${loN.toFixed(6)}${suffix}`);
+          const bngSlot = `<div class="ventus-incident-bng-slot" style="padding:0 0 4px 0;margin-top:-2px;" data-bng-lat="${escapeHtml(String(laN))}" data-bng-lng="${escapeHtml(String(loN))}"><span class="muted" style="font-size:12px;">Easting & northing: …</span></div>`;
+          return latLngLine + bngSlot;
+        })(),
+        row('Caller Name', take('caller_name')),
+        row('Caller Phone', take('caller_phone')),
+        rowOrEmpty('Form Profile', [take('form_name'), take('form_slug') ? `(${take('form_slug')})` : ''].join(' ').trim())
+      ].filter(Boolean);
+
+      const answers = (take('form_answers') && typeof take('form_answers') === 'object') ? take('form_answers') : {};
+      const answerRows = Object.entries(answers).map(([k, v]) => row(prettyFieldLabel(k), v)).filter(Boolean);
+
+      const riskFlags = (() => {
+        const entries = [];
+        const ignored = new Set(['', 'no', 'none', 'unknown', 'false', '0', 'n/a', 'na', 'nil']);
+        const pushEntry = (val) => {
+          if (Array.isArray(val)) {
+            val.forEach(pushEntry);
+            return;
+          }
+          const { desc: rawDesc, ts } = riskFlagCadEntryFromValue(val);
+          const desc = normalizeToken(rawDesc);
+          if (!desc || ignored.has(desc.toLowerCase())) return;
+          const key = desc.toLowerCase();
+          const idx = entries.findIndex((e) => e.desc.toLowerCase() === key);
+          if (idx >= 0) {
+            if (ts && !entries[idx].ts) entries[idx].ts = ts;
+            return;
+          }
+          entries.push({ desc, ts: ts || '' });
+        };
+        const pull = (key) => {
+          const raw = take(key);
+          if (raw == null || raw === '') return;
+          if (Array.isArray(raw)) {
+            raw.forEach((item) => pushEntry(item));
+            return;
+          }
+          if (typeof raw === 'object') {
+            Object.values(raw).forEach(pushEntry);
+            return;
+          }
+          const s = String(raw).trim();
+          if (!s) return;
+          if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+            try {
+              const parsed = JSON.parse(s);
+              if (Array.isArray(parsed)) {
+                parsed.forEach((item) => pushEntry(item));
+                return;
+              }
+            } catch (e) {}
+          }
+          s.split(/[\n,;|]+/).forEach(pushEntry);
+        };
+        ['risk_flags', 'riskFlags', 'risk_flag', 'risk'].forEach(pull);
+        return entries;
+      })();
+
+      const updates = Array.isArray(take('incident_updates')) ? take('incident_updates') : [];
+      const updateRows = updates.length
+        ? updates.slice(-8).reverse().map((u) => {
+            const t = u && u.time ? sparrowFormatDateTime(u.time) : '';
+            const by = (u && u.by) ? ` by ${u.by}` : '';
+            const text = (u && u.text) ? u.text : '';
+            return `<div style="padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px;background:rgba(0,0,0,0.15);"><div class="meta" style="margin-bottom:4px;">${escapeHtml(t)}${escapeHtml(by)}</div><div>${escapeHtml(text)}</div></div>`;
+          }).join('')
+        : '<div class="meta"><i>No controller updates logged.</i></div>';
+
+      const decisionRaw = take('decision');
+      const divisionRaw = take('division');
+      const stackMetaRows = [];
+      if (decisionRaw != null && String(decisionRaw).trim() !== '') {
+        const d = cadTriageFormatDecisionDisplay(decisionRaw);
+        if (d) stackMetaRows.push(row('Decision', d));
+      }
+      const divSlug = divisionRaw != null && String(divisionRaw).trim() !== '' ? String(divisionRaw).trim() : '';
+      if (divSlug) stackMetaRows.push(row('Division', divisionDisplayName(divSlug)));
+      stackMetaRows.push(row('Exclusions', cadTriageFormatExclusionsSummary(triage)));
+
+      return `
+        <div>
+          ${riskFlags.length ? `
+          <div style="margin-bottom:10px;padding:10px;border:1px solid rgba(239,68,68,0.55);border-radius:10px;background:rgba(127,29,29,0.25);">
+            <div style="font-weight:700;color:#fecaca;margin-bottom:6px;"><i class="bi bi-exclamation-triangle-fill"></i> Risk Flags — Crew Warning</div>
+            <div style="color:#fecaca;font-size:13px;line-height:1.45;">
+              ${riskFlags.map((e) => `
+                <div style="margin-bottom:10px;">
+                  <div>${escapeHtml(e.desc)}</div>
+                  ${e.ts ? `<div style="opacity:0.88;font-size:12px;margin-top:3px;">${escapeHtml(e.ts)}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>` : ''}
+          <div style="font-weight:600;margin-bottom:6px;">Incident Summary</div>
+          <div style="font-size:12px;color:var(--text-secondary);">${coreRows.join('') || '<i>No incident summary fields.</i>'}</div>
+          <hr style="border:none;border-top:1px solid var(--border-color);margin:10px 0;">
+          <div style="font-weight:600;margin-bottom:6px;">Profile Questions</div>
+          <div style="font-size:12px;color:var(--text-secondary);">${answerRows.join('') || '<i>No profile answers captured.</i>'}</div>
+          <hr style="border:none;border-top:1px solid var(--border-color);margin:10px 0;">
+          <div style="font-weight:600;margin-bottom:6px;">Incident Updates</div>
+          <div style="font-size:12px;color:var(--text-secondary);">${updateRows}</div>
+          ${stackMetaRows.length ? `<hr style="border:none;border-top:1px solid var(--border-color);margin:10px 0;"><div style="font-weight:600;margin-bottom:6px;">Triage</div><div style="font-size:12px;color:var(--text-secondary);">${stackMetaRows.join('')}</div>` : ''}
+        </div>
+      `;
+    }
+
+    const CAD_STATUS_TIMINGS_ORDER = [
+      ['created_time', 'CAD Created'],
+      ['assigned_time', 'Assigned'],
+      ['received_time', 'Received'],
+      ['mobile_time', 'Mobile'],
+      ['on_scene_time', 'On Scene'],
+      ['leave_scene_time', 'Leave Scene'],
+      ['at_hospital_time', 'At Hospital'],
+      ['closure_review_time', 'Closure review'],
+      ['cleared_time', 'Cleared'],
+      ['stood_down_time', 'Stood Down'],
+      ['dispatch_reopened_time', 'Reopened (dispatch)'],
+    ];
+
+    function cadStatusPointsFromSegmentTimes(segmentTimes, order) {
+      if (!segmentTimes || typeof segmentTimes !== 'object') return [];
+      const crT = parseTime(segmentTimes.closure_review_time);
+      const pts = [];
+      for (let oi = 0; oi < order.length; oi++) {
+        const key = order[oi][0];
+        const label = order[oi][1];
+        if (key === 'created_time') continue;
+        const time = parseTime(segmentTimes[key]);
+        if (!time) continue;
+        let outLabel = label;
+        if (key === 'cleared_time' && crT && time.getTime() >= crT.getTime()) {
+          outLabel = 'Closed after review';
+        }
+        pts.push({ key, label: outLabel, time });
+      }
+      pts.sort((a, b) => {
+        const d = a.time - b.time;
+        if (d !== 0) return d;
+        return String(a.key).localeCompare(String(b.key));
+      });
+      return pts;
+    }
+
+    function formatStatusTimesTable(job, timingRow) {
+      const order = CAD_STATUS_TIMINGS_ORDER;
+      if (!timingRow && !(job && job.created_at)) return '<div class="meta"><i>No status timestamps available.</i></div>';
+
+      if (timingRow && Array.isArray(timingRow.timeline) && timingRow.timeline.length) {
+        const createdT = parseTime(job && job.created_at);
+        const blocks = [];
+        let segmentIndex = 0;
+        for (let ci = 0; ci < timingRow.timeline.length; ci++) {
+          const chunk = timingRow.timeline[ci];
+          if (!chunk || typeof chunk !== 'object') continue;
+          if (chunk.kind === 'segment') {
+            const segPts = cadStatusPointsFromSegmentTimes(chunk.times, order);
+            if (segmentIndex === 0) {
+              const blk = segPts.slice();
+              if (createdT) blk.push({ key: 'created_time', label: 'CAD Created', time: createdT });
+              blk.sort((a, b) => {
+                const d = a.time - b.time;
+                if (d !== 0) return d;
+                return String(a.key).localeCompare(String(b.key));
+              });
+              blocks.push(blk);
+            } else {
+              blocks.push(segPts);
+            }
+            segmentIndex++;
+          } else if (chunk.kind === 'reopen') {
+            const rt = parseTime(chunk.time);
+            if (rt) {
+              blocks.push([{ key: 'dispatch_reopened_marker', label: 'Reopened (dispatch)', time: rt }]);
+            }
+          }
+        }
+        const points = [];
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const b = blocks[bi];
+          for (let pi = 0; pi < b.length; pi++) points.push(b[pi]);
+        }
+        if (!points.length) return '<div class="meta"><i>No status timestamps available.</i></div>';
+        const currentStatus = String(job.status || '').toLowerCase().trim();
+        let rows = '';
+        for (let i = 0; i < points.length; i++) {
+          const current = points[i];
+          const next = points[i + 1];
+          let dur = '-';
+          if (next && next.time) {
+            const delta = next.time - current.time;
+            dur = delta >= 0 ? (formatDuration(delta) || '-') : '-';
+          } else if (!['cleared', 'stood_down'].includes(currentStatus) && current.key !== 'dispatch_reopened_marker') {
+            dur = formatDuration(new Date() - current.time) || '-';
+          }
+          rows += `
+          <tr>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(current.label)}</td>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(sparrowFormatDateTime(current.time))}</td>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(dur)}</td>
+          </tr>
+        `;
+        }
+        return `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Status</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Time</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Duration</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+      }
+
+      const crT = parseTime(timingRow && timingRow.closure_review_time);
+      const points = order
+        .map(([key, label]) => {
+          let time = null;
+          if (key === 'created_time') {
+            time = parseTime(job && job.created_at);
+          } else {
+            time = parseTime(timingRow && timingRow[key]);
+          }
+          let outLabel = label;
+          if (key === 'cleared_time' && time && crT && time.getTime() >= crT.getTime()) {
+            outLabel = 'Closed after review';
+          }
+          return { key, label: outLabel, time };
+        })
+        .filter(p => p.time);
+      if (!points.length) return '<div class="meta"><i>No status timestamps available.</i></div>';
+
+      points.sort((a, b) => {
+        const d = a.time - b.time;
+        if (d !== 0) return d;
+        return String(a.key).localeCompare(String(b.key));
+      });
+
+      const currentStatus = String(job.status || '').toLowerCase().trim();
+      let rows = '';
+      for (let i = 0; i < points.length; i++) {
+        const current = points[i];
+        const next = points[i + 1];
+        let dur = '-';
+        if (next && next.time) {
+          const delta = next.time - current.time;
+          dur = delta >= 0 ? (formatDuration(delta) || '-') : '-';
+        } else if (!['cleared', 'stood_down'].includes(currentStatus)) {
+          dur = formatDuration(new Date() - current.time);
+        }
+        rows += `
+          <tr>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(current.label)}</td>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(sparrowFormatDateTime(current.time))}</td>
+            <td style="padding:6px;border-bottom:1px solid var(--border-color);">${escapeHtml(dur)}</td>
+          </tr>
+        `;
+      }
+      return `
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Status</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Time</th>
+              <th style="text-align:left;padding:6px;border-bottom:1px solid var(--border-color);">Duration</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    async function fetchTimings(cad) {
+      try {
+        const rows = await fetchJson(`/plugin/ventus_response_module/jobs/timings?cad=${encodeURIComponent(cad)}`);
+        if (Array.isArray(rows) && rows.length) return rows[0];
+      } catch (e) {}
+      return null;
+    }
+
+    async function renderJobDetail(cad, isPast) {
+      panelJobDetailOpen = false;
+      panelJobDetailCad = null;
+      contentEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;">Loading details...</div>';
+      setStatus(`Loading CAD #${cad}...`);
+      try {
+        const cadNum = parseInt(String(cad), 10);
+        if (!Number.isFinite(cadNum) || cadNum <= 0) throw new Error('Invalid CAD');
+        const cadEnc = encodeURIComponent(cadNum);
+
+        const [job, timingRow, commsRes, systemLog, panicPayload] = await Promise.all([
+          fetchJson(jobScopedUrl(String(cadEnc))),
+          fetchTimings(cadNum),
+          fetch(jobScopedUrl(`${cadEnc}/comms`), { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : [])),
+          fetch(jobScopedUrl(`${cadEnc}/system-log`), { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { events: [] })),
+          fetch(jobScopedUrl(`${cadEnc}/panic-voices`), { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { recordings: [] })),
+        ]);
+
+        if (!job || typeof job !== 'object' || job.error || !job.cad) {
+          throw new Error((job && job.error) ? String(job.error) : 'Job not available');
+        }
+
+        const triage = job.triage_data || {};
+        const triageRows = renderIncidentDetails(triage);
+        const createdAt = job.created_at ? sparrowFormatDateTime(job.created_at) : 'N/A';
+        const updatedAt = job.updated_at ? sparrowFormatDateTime(job.updated_at) : 'N/A';
+        const finalStatus = job.final_status || job.status || 'N/A';
+        const outcome = job.outcome || 'N/A';
+        const publicNotes = job.public_notes || 'None';
+        const privateNotes = job.private_notes || 'None';
+        const statusTable = formatStatusTimesTable(job, timingRow);
+
+        const comms = Array.isArray(commsRes) ? commsRes : [];
+        const commItems = comms.slice(-40);
+        const commsHtml = commItems.length
+          ? commItems.map((m) => {
+            const t = m && m.created_at ? sparrowFormatDateTime(m.created_at) : '';
+            const by = m && (m.sender_user || m.sender_role) ? escapeHtml(String(m.sender_user || m.sender_role)) : 'unknown';
+            const mt = m && m.message_type ? escapeHtml(String(m.message_type)) : '';
+            const tx = m && m.message_text ? escapeHtml(String(m.message_text)) : '';
+            return `<div style="padding:6px 8px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:6px;background:rgba(0,0,0,0.15);"><div class="meta" style="margin-bottom:4px;">${escapeHtml(t)} · ${by} · ${mt}</div><div style="font-size:13px;">${tx}</div></div>`;
+          }).join('')
+          : '<div class="meta"><i>No job comms recorded.</i></div>';
+
+        const eventsRaw = Array.isArray(systemLog && systemLog.events) ? systemLog.events : [];
+        const compactEvents = [];
+        eventsRaw.forEach((ev) => {
+          const e = ev && typeof ev === 'object' ? ev : {};
+          const key = `${String(e.type || '')}|${String(e.actor || '')}|${String(e.message || '')}`;
+          const prev = compactEvents.length ? compactEvents[compactEvents.length - 1] : null;
+          if (prev && prev._dedupKey === key) return;
+          compactEvents.push({
+            _dedupKey: key,
+            time: e.time,
+            actor: String(e.actor || 'system'),
+            source: String(e.source || 'system'),
+            message: String(e.message || '').trim(),
+          });
+        });
+        const systemHtml = compactEvents.length
+          ? compactEvents.slice(-60).reverse().map((ev) => {
+            const t = ev.time ? sparrowFormatDateTime(ev.time) : '-';
+            return renderJobSystemLogCardHtml(ev, t);
+          }).join('')
+          : '<div class="meta"><i>No system events logged.</i></div>';
+
+        const panicRecs = Array.isArray(panicPayload && panicPayload.recordings) ? panicPayload.recordings : [];
+        const panicHtml = panicRecs.length
+          ? panicRecs.map((r) => {
+            const kb = (r.file_bytes != null && !isNaN(Number(r.file_bytes))) ? (Number(r.file_bytes) / 1024).toFixed(1) : '?';
+            const cs = escapeHtml(String(r.callsign || ''));
+            const id = parseInt(r.id, 10) || 0;
+            const playUrl = escapeHtml(jobScopedUrl(`${cadEnc}/panic-voice/${id}/play`));
+            const dlUrl = escapeHtml(jobScopedUrl(`${cadEnc}/panic-voice/${id}`));
+            const t0 = r.started_at ? escapeHtml(sparrowFormatDateTime(r.started_at)) : '';
+            const t1 = r.ended_at ? escapeHtml(sparrowFormatDateTime(r.ended_at)) : '';
+            const timeLine = (t0 || t1) ? (`<div class="meta" style="margin-top:4px;">Recorded ${t0}${t0 && t1 ? ' → ' : ''}${t1}</div>`) : '';
+            const audioErr = '<p class="meta js-panic-seg-audio-fail" hidden style="margin-top:6px;color:var(--accent-danger);">Audio could not load — try Download.</p>';
+            const audioOnErr = "var p=this.parentElement;var e=p&&p.querySelector('.js-panic-seg-audio-fail');if(e){e.hidden=false;}try{this.removeAttribute('src');if(typeof this.load==='function')this.load();}catch(x){}";
+            return '<div style="margin-bottom:12px;padding:10px;border:1px solid var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);">'
+              + `<div class="meta" style="margin-bottom:6px;">Segment <strong>#${id}</strong> · unit <strong>${cs}</strong> · ${kb} KB</div>`
+              + timeLine
+              + audioErr
+              + `<audio controls preload="metadata" src="${playUrl}" style="width:100%;margin-top:8px;max-height:40px;" onerror="${audioOnErr}"></audio>`
+              + `<div style="margin-top:6px;"><a href="${dlUrl}" download class="btn" style="padding:4px 10px;font-size:12px;display:inline-block;">Download .webm</a></div>`
+              + '</div>';
+          }).join('')
+          : '<div class="meta"><i>No archived panic voice for this CAD.</i></div>';
+
+        const summaryPastExtra = isPast
+          ? `
+            <div class="cad-msg-section">
+              <div style="font-weight:700;margin-bottom:8px;">CAD Overview</div>
+              <div class="meta" style="margin-bottom:8px;">Division: ${escapeHtml(jobDivisionLabel(job))}</div>
+              <div class="meta" style="margin-bottom:8px;">Created: ${escapeHtml(createdAt)} • Cleared: ${escapeHtml(updatedAt)}</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <span class="status cleared">${escapeHtml(prettyStatus(job.status || 'unknown'))}</span>
+                <span class="status">${escapeHtml('Final: ' + prettyStatus(finalStatus))}</span>
+              </div>
+              <div style="margin-bottom:8px;"><b>Outcome:</b> ${escapeHtml(outcome)}</div>
+              <div style="margin-bottom:8px;"><b>Public Notes:</b><div style="margin-top:5px;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);white-space:pre-wrap;">${escapeHtml(publicNotes)}</div></div>
+              <div style="margin-bottom:0;"><b>Private Notes:</b><div style="margin-top:5px;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);white-space:pre-wrap;">${escapeHtml(privateNotes)}</div></div>
+            </div>
+            <div class="cad-msg-section">
+              <div style="font-weight:700;margin-bottom:8px;">Incident &amp; Triage</div>
+              <div style="font-size:12px;color:var(--text-secondary);">${triageRows || '<i>No job specifics</i>'}</div>
+            </div>
+          `
+          : `
+            <div class="cad-msg-section">
+              <div style="font-weight:700;margin-bottom:8px;">CAD Overview</div>
+              <div class="meta" style="margin-bottom:8px;">Created: ${escapeHtml(createdAt)}</div>
+              <div class="meta" style="margin-bottom:8px;">Division: ${escapeHtml(jobDivisionLabel(job))}</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:0;">
+                <span class="status">${escapeHtml(prettyStatus(job.status || 'unknown'))}</span>
+              </div>
+            </div>
+            <div class="cad-msg-section">
+              <div style="font-weight:700;margin-bottom:8px;">Incident &amp; Triage</div>
+              <div style="font-size:12px;color:var(--text-secondary);">${triageRows || '<i>No job specifics</i>'}</div>
+            </div>
+          `;
+
+        const adminPastBlock = isPast
+          ? `
+            <div style="font-weight:700;margin-bottom:8px;">Reopen CAD</div>
+            <div class="meta" style="margin-bottom:10px;">Returns this CAD to the active stack as queued.</div>
+            <button class="btn full" type="button" id="pjPastReopenBtn" style="background:rgba(245,158,11,0.25);border:1px solid var(--border-color);"><i class="bi bi-arrow-counterclockwise"></i> Reopen onto stack</button>
+          `
+          : `
+            <div style="font-weight:700;margin-bottom:8px;">Update Incident</div>
+            <textarea id="detailReason" style="width:100%;padding:10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border-color);color:var(--text-primary);margin-bottom:8px;min-height:64px;" placeholder="Reason for call">${escapeHtml(triage.reason_for_call || '')}</textarea>
+            <textarea id="detailAdditional" style="width:100%;padding:10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border-color);color:var(--text-primary);margin-bottom:8px;min-height:72px;" placeholder="Additional details">${escapeHtml(triage.additional_details || '')}</textarea>
+            <textarea id="detailUpdateNote" style="width:100%;padding:10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border-color);color:var(--text-primary);margin-bottom:8px;min-height:60px;" placeholder="New update note (appended)"></textarea>
+            <div class="action-group" style="flex-direction:column;gap:8px;">
+              <button class="btn full" id="detailSaveBtn" style="background:linear-gradient(135deg,#0ea5e9,#0284c7);"><i class="bi bi-save"></i> Save Updates</button>
+              <button class="btn full" id="detailAssignBtn"><i class="bi bi-person-check"></i> Assign Unit</button>
+              <button class="btn full" id="detailForceBtn" style="background:linear-gradient(135deg,#f97316,#ea580c);"><i class="bi bi-exclamation-triangle"></i> Force Status Override</button>
+            </div>
+          `;
+
+        contentEl.innerHTML = `
+          <div>
+            <button class="btn full" id="backToListBtn" style="margin-bottom:10px;"><i class="bi bi-arrow-left"></i> Back</button>
+            <div style="font-weight:700;margin-bottom:4px;">CAD #${escapeHtml(job.cad)}</div>
+            <div class="job-detail-tabbed" data-job-cad="${cadNum}" data-pj-active-tab="summary">
+              <div class="ud-main-tabs" role="tablist" aria-label="CAD detail sections">
+                <button type="button" class="ud-main-tab ud-main-tab--active" role="tab" data-pj-tab="summary" aria-selected="true" onclick="switchPanelJobDetailTab(${cadNum},'summary')">Summary</button>
+                <button type="button" class="ud-main-tab" role="tab" data-pj-tab="comms" aria-selected="false" onclick="switchPanelJobDetailTab(${cadNum},'comms')">Updates &amp; Messages</button>
+                <button type="button" class="ud-main-tab" role="tab" data-pj-tab="panic" aria-selected="false" onclick="switchPanelJobDetailTab(${cadNum},'panic')">MDT Panic Voice</button>
+                <button type="button" class="ud-main-tab" role="tab" data-pj-tab="times" aria-selected="false" onclick="switchPanelJobDetailTab(${cadNum},'times')">Status Times</button>
+                <button type="button" class="ud-main-tab" role="tab" data-pj-tab="admin" aria-selected="false" onclick="switchPanelJobDetailTab(${cadNum},'admin')">Admin</button>
+              </div>
+              <div class="ud-tab-panel" data-pj-panel="summary" role="tabpanel">
+                ${summaryPastExtra}
+              </div>
+              <div class="ud-tab-panel" data-pj-panel="comms" role="tabpanel" hidden>
+                <div class="cad-msg-section">
+                  <div style="font-weight:700;margin-bottom:8px;">Thread</div>
+                  <div style="font-size:12px;color:var(--text-secondary);max-height:min(360px,50vh);overflow-y:auto;">${commsHtml}</div>
+                </div>
+              </div>
+              <div class="ud-tab-panel" data-pj-panel="panic" role="tabpanel" hidden>
+                <div class="cad-msg-section">
+                  <div style="font-weight:700;margin-bottom:8px;">Archived Panic Audio</div>
+                  <div class="meta" style="margin-bottom:8px;font-size:12px;line-height:1.45;">Segments from the unit panic microphone linked to this CAD.</div>
+                  ${panicHtml}
+                </div>
+              </div>
+              <div class="ud-tab-panel" data-pj-panel="times" role="tabpanel" hidden>
+                <div class="cad-msg-section">
+                  <div style="font-weight:700;margin-bottom:8px;">Response Timestamps</div>
+                  ${statusTable}
+                </div>
+              </div>
+              <div class="ud-tab-panel" data-pj-panel="admin" role="tabpanel" hidden>
+                <div class="cad-msg-section">
+                  ${adminPastBlock}
+                </div>
+                <div class="cad-msg-section">
+                  <div style="font-weight:700;margin-bottom:6px;">System Log</div>
+                  <div class="meta" style="font-size:11px;line-height:1.45;margin-bottom:8px;color:var(--text-muted);">Combined timeline from CAD job comms, unit MDT logs, and dispatch. Hover the channel pill for what each source means.</div>
+                  <div class="meta" style="font-size:12px;color:var(--text-secondary);max-height:min(360px,50vh);overflow-y:auto;padding:4px 0;">${systemHtml}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        void ventusHydrateBngSlots(contentEl);
+
+        panelJobDetailOpen = true;
+        panelJobDetailCad = cadNum;
+        panelJobDetailIsPast = !!isPast;
+
+        const backBtn = document.getElementById('backToListBtn');
+        if (backBtn) {
+          backBtn.addEventListener('click', () => {
+            panelJobDetailOpen = false;
+            panelJobDetailCad = null;
+            if (isPast) renderPastJobs().catch(() => setStatus('Load failed'));
+            else renderJobs().catch(() => setStatus('Load failed'));
+          });
+        }
+        const reopenBtn = document.getElementById('pjPastReopenBtn');
+        if (reopenBtn && isPast) {
+          reopenBtn.addEventListener('click', () => reopenPastCadFromList(cadNum));
+        }
+        if (!isPast) {
+          const saveBtn = document.getElementById('detailSaveBtn');
+          if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+              const reason = document.getElementById('detailReason')?.value || '';
+              const additional = document.getElementById('detailAdditional')?.value || '';
+              const incident_update = document.getElementById('detailUpdateNote')?.value || '';
+              saveBtn.disabled = true;
+              try {
+                const res = await fetch(jobScopedUrl(`${cadEnc}/update-details`), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ reason_for_call: reason, additional_details: additional, incident_update }),
+                });
+                const payload = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(payload.error || `Update failed (${res.status})`);
+                await renderJobDetail(cadNum, false);
+                setStatus('Details updated');
+              } catch (e) {
+                setStatus(e.message || 'Update failed');
+              } finally {
+                saveBtn.disabled = false;
+              }
+            });
+          }
+          const assignBtn = document.getElementById('detailAssignBtn');
+          if (assignBtn) {
+            assignBtn.addEventListener('click', () => {
+              openAssignUnitsModal({
+                title: `Assign Units to CAD #${cadNum}`,
+                onConfirm: async (callsigns) => {
+                  assignBtn.disabled = true;
+                  try {
+                    const res = await fetch(jobScopedUrl(`${cadEnc}/assign`), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ callsigns, division: selectedDivision || 'general', transfer_division: true }),
+                    });
+                    if (!res.ok) throw new Error(`Assign failed (${res.status})`);
+                    await renderJobDetail(cadNum, false);
+                  } catch (e) {
+                    setStatus(e.message || 'Assign failed');
+                  } finally {
+                    assignBtn.disabled = false;
+                  }
+                },
+              });
+            });
+          }
+          const forceBtn = document.getElementById('detailForceBtn');
+          if (forceBtn) {
+            forceBtn.addEventListener('click', () => {
+              openForceStatusModal({
+                title: `Force Status for CAD #${cadNum}`,
+                currentStatus: String(job.status || ''),
+                onConfirm: async ({ status, reason }) => {
+                  forceBtn.disabled = true;
+                  try {
+                    const res = await fetch(jobScopedUrl(`${cadEnc}/force_status`), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status, reason }),
+                    });
+                    if (!res.ok) throw new Error(`Force failed (${res.status})`);
+                    await renderJobDetail(cadNum, false);
+                  } catch (e) {
+                    setStatus(e.message || 'Force failed');
+                  } finally {
+                    forceBtn.disabled = false;
+                  }
+                },
+              });
+            });
+          }
+        }
+        setStatus(`CAD #${cad}`);
+      } catch (err) {
+        panelJobDetailOpen = false;
+        panelJobDetailCad = null;
+        contentEl.innerHTML = emptyState(`Failed to load CAD #${cad} details.`);
+        setStatus('Load failed');
+      }
+    }
+
+    async function renderUnitDetail(callsign) {
+      contentEl.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;">Loading unit details...</div>';
+      setStatus(`Loading ${callsign}...`);
+      try {
+        const units = await fetchJson('/plugin/ventus_response_module/units');
+        const unit = (Array.isArray(units) ? units : []).find(u => String(u.callSign || '') === String(callsign));
+        if (!unit) {
+          contentEl.innerHTML = emptyState(`Unit ${callsign} not found.`);
+          setStatus('Not found');
+          return;
+        }
+
+        let msgs = [];
+        try {
+          msgs = await fetchJson(`/plugin/ventus_response_module/messages/${encodeURIComponent(callsign)}`);
+        } catch (e) {
+          msgs = [];
+        }
+        const recent = (Array.isArray(msgs) ? msgs : []).slice(-8).reverse();
+        const lat = unit.latitude !== null && unit.latitude !== undefined ? Number(unit.latitude) : null;
+        const lon = unit.longitude !== null && unit.longitude !== undefined ? Number(unit.longitude) : null;
+        const mapHref = (lat !== null && lon !== null) ? `https://www.google.com/maps?q=${encodeURIComponent(lat + ',' + lon)}` : '';
+
+        contentEl.innerHTML = `
+          <div>
+            <button class="btn full" id="backToUnitsBtn" style="margin-bottom:10px;"><i class="bi bi-arrow-left"></i> Back</button>
+            <div style="font-weight:700;margin-bottom:6px;">${escapeHtml(unit.callSign || callsign)}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+              <span class="status">${escapeHtml(prettyStatus(unit.status || 'unknown'))}</span>
+            </div>
+            <div class="meta" style="margin-bottom:8px;">Division: ${escapeHtml(divisionDisplayName(unit.division))}${unit.is_external ? ' (external)' : ''}</div>
+            <div class="meta" style="margin-bottom:6px;">Latitude: ${escapeHtml(lat !== null ? lat.toFixed(6) : 'N/A')}</div>
+            <div class="meta" style="margin-bottom:4px;">Longitude: ${escapeHtml(lon !== null ? lon.toFixed(6) : 'N/A')}</div>
+            ${(lat !== null && lon !== null && Number.isFinite(lat) && Number.isFinite(lon))
+              ? `<div class="ventus-incident-bng-slot" style="margin-bottom:10px;" data-bng-lat="${escapeHtml(String(lat))}" data-bng-lng="${escapeHtml(String(lon))}"><span class="muted" style="font-size:12px;">Easting & northing: …</span></div>`
+              : '<div class="meta" style="margin-bottom:10px;">Easting & northing: —</div>'}
+            ${mapHref ? `<a class="btn full" href="${escapeHtml(mapHref)}" target="_blank" rel="noopener" style="margin-bottom:10px;"><i class="bi bi-geo-alt"></i> Open Location</a>` : ''}
+            <div class="section-title">Recent Messages</div>
+            <ul id="unitRecentMsgs" style="list-style:none;padding:0;margin:0 0 10px 0;">
+              ${recent.length ? recent.map(m => `
+                <li class="panel-list-item">
+                  <i class="bi bi-chat-dots" style="color:var(--accent);"></i>
+                  <span>
+                    <div style="font-weight:600;">${escapeHtml(m.from || 'unknown')}</div>
+                    <div class="meta">${escapeHtml(m.text || '')}</div>
+                    <div class="meta">${escapeHtml(m.timestamp ? sparrowFormatDateTime(m.timestamp) : '')}</div>
+                  </span>
+                </li>
+              `).join('') : `<li>${emptyState('No recent messages for this unit.')}</li>`}
+            </ul>
+            <input type="text" id="unitMsgText" placeholder="Message ${escapeHtml(unit.callSign || callsign)}...">
+            <button class="btn full" id="unitMsgSend"><i class="bi bi-send"></i> Send Message</button>
+          </div>
+        `;
+
+        void ventusHydrateBngSlots(contentEl);
+
+        const backBtn = document.getElementById('backToUnitsBtn');
+        if (backBtn) backBtn.addEventListener('click', () => renderUnits().catch(() => setStatus('Load failed')));
+
+        const sendBtn = document.getElementById('unitMsgSend');
+        const textEl = document.getElementById('unitMsgText');
+        if (sendBtn && textEl) {
+          sendBtn.addEventListener('click', async () => {
+            const text = (textEl.value || '').trim();
+            if (!text) return;
+            sendBtn.disabled = true;
+            try {
+              await fetch(`/plugin/ventus_response_module/messages/${encodeURIComponent(callsign)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, from: 'dispatcher' })
+              });
+              await renderUnitDetail(callsign);
+            } finally {
+              sendBtn.disabled = false;
+            }
+          });
+        }
+        setStatus(`Unit ${callsign}`);
+      } catch (err) {
+        contentEl.innerHTML = emptyState(`Failed to load unit ${callsign}.`);
+        setStatus('Load failed');
+      }
+    }
+
+    function renderMessageDetail(callsign, message, allMessages) {
+      const m = message || {};
+      const when = m.timestamp ? sparrowFormatDateTime(m.timestamp) : 'N/A';
+      contentEl.innerHTML = `
+        <div>
+          <button class="btn full" id="backToMsgsBtn" style="margin-bottom:10px;"><i class="bi bi-arrow-left"></i> Back</button>
+          <div style="font-weight:700;margin-bottom:6px;">Message Detail</div>
+          <div class="meta" style="margin-bottom:4px;">Unit: ${escapeHtml(callsign || 'N/A')}</div>
+          <div class="meta" style="margin-bottom:4px;">From: ${escapeHtml(m.from || 'unknown')}</div>
+          <div class="meta" style="margin-bottom:10px;">Time: ${escapeHtml(when)}</div>
+          <div style="padding:10px;border:1px solid var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);white-space:pre-wrap;margin-bottom:12px;">${escapeHtml(m.text || '')}</div>
+          <input type="text" id="msgReplyText" placeholder="Reply to ${escapeHtml(callsign)}...">
+          <button class="btn full" id="msgReplySend"><i class="bi bi-send"></i> Send Reply</button>
+        </div>
+      `;
+
+      const backBtn = document.getElementById('backToMsgsBtn');
+      if (backBtn) {
+        backBtn.addEventListener('click', () => {
+          renderMessages(callsign).catch(() => setStatus('Load failed'));
+        });
+      }
+      const sendBtn = document.getElementById('msgReplySend');
+      const textEl = document.getElementById('msgReplyText');
+      if (sendBtn && textEl) {
+        sendBtn.addEventListener('click', async () => {
+          const text = (textEl.value || '').trim();
+          if (!text || !callsign) return;
+          sendBtn.disabled = true;
+          try {
+            await fetch(`/plugin/ventus_response_module/messages/${encodeURIComponent(callsign)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text, from: 'dispatcher' })
+            });
+            renderMessages(callsign).catch(() => setStatus('Load failed'));
+          } finally {
+            sendBtn.disabled = false;
+          }
+        });
+      }
+      setStatus(`Message (${callsign})`);
+    }
+
+    function emptyState(text) {
+      return `<div style="color:var(--text-muted);padding:12px 4px;">${escapeHtml(text)}</div>`;
+    }
+
+    function openAssignUnitsModal(options = {}) {
+      const title = options.title || 'Assign Units';
+      const suggested = Array.isArray(options.suggested) ? options.suggested : [];
+      const onConfirm = typeof options.onConfirm === 'function' ? options.onConfirm : null;
+
+      fetchJson('/plugin/ventus_response_module/units')
+        .then(units => {
+          const list = Array.isArray(units) ? units : [];
+          const modal = document.createElement('div');
+          modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9000;';
+          const suggestedSet = new Set(suggested.map(x => String(x || '').trim()).filter(Boolean));
+          const rows = list.map(u => {
+            const cs = String(u.callSign || '').trim();
+            if (!cs) return '';
+            const checked = suggestedSet.has(cs) ? 'checked' : '';
+            return `
+              <label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);cursor:pointer;">
+                <input type="checkbox" class="assign-unit-cb" value="${escapeHtml(cs)}" ${checked}>
+                <span style="font-weight:600;">${escapeHtml(cs)}</span>
+                <span class="meta">${escapeHtml(prettyStatus(u.status || 'unknown'))}</span>
+              </label>
+            `;
+          }).join('');
+
+          modal.innerHTML = `
+            <div style="width:min(560px,92vw);max-height:84vh;overflow:auto;background:rgba(15,23,42,0.98);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+              <div style="font-weight:700;margin-bottom:10px;">${escapeHtml(title)}</div>
+              <div class="meta" style="margin-bottom:10px;">Select one or more units for this CAD.</div>
+              <div style="display:flex;flex-direction:column;gap:8px;">${rows || '<div class="meta">No units available</div>'}</div>
+              <div style="display:flex;gap:8px;margin-top:14px;">
+                <button id="assignUnitsCancel" class="btn full" style="background:transparent;border:1px solid var(--border-color);">Cancel</button>
+                <button id="assignUnitsConfirm" class="btn full"><i class="bi bi-person-check"></i> Assign Selected</button>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(modal);
+
+          const close = () => { try { modal.remove(); } catch (e) {} };
+          modal.querySelector('#assignUnitsCancel')?.addEventListener('click', close);
+          modal.addEventListener('click', (ev) => { if (ev.target === modal) close(); });
+          modal.querySelector('#assignUnitsConfirm')?.addEventListener('click', () => {
+            const selected = Array.from(modal.querySelectorAll('.assign-unit-cb:checked')).map(cb => cb.value);
+            if (!selected.length) return;
+            close();
+            if (onConfirm) onConfirm(selected);
+          });
+        })
+        .catch(() => setStatus('Failed to load units'));
+    }
+
+    function openForceStatusModal(options = {}) {
+      const title = options.title || 'Force Status Override';
+      const currentStatus = String(options.currentStatus || '').trim().toLowerCase();
+      const allowed = Array.isArray(options.allowed) && options.allowed.length
+        ? options.allowed
+        : ['received', 'assigned', 'mobile', 'on_scene', 'leave_scene', 'at_hospital', 'cleared', 'stood_down', 'dispatch_review'];
+      const onConfirm = typeof options.onConfirm === 'function' ? options.onConfirm : null;
+
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9000;';
+      const optionsHtml = allowed.map((status) => {
+        const selected = status === currentStatus ? 'selected' : '';
+        return `<option value="${escapeHtml(status)}" ${selected}>${escapeHtml(prettyStatus(status))}</option>`;
+      }).join('');
+      modal.innerHTML = `
+        <div style="width:min(540px,92vw);max-height:84vh;overflow:auto;background:rgba(15,23,42,0.98);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+          <div style="font-weight:700;margin-bottom:10px;">${escapeHtml(title)}</div>
+          <div class="meta" style="margin-bottom:8px;">Select target status:</div>
+          <select id="forceStatusSelect" style="margin-bottom:10px;">
+            ${optionsHtml}
+            <option value="__other__">Other (please specify)</option>
+          </select>
+          <input id="forceStatusOther" type="text" placeholder="Custom status, e.g. awaiting_transport" style="display:none;margin-bottom:10px;">
+          <div class="meta" style="margin-bottom:8px;">Reason for override:</div>
+          <textarea id="forceStatusReason" rows="3" placeholder="Required reason"></textarea>
+          <div style="display:flex;gap:8px;margin-top:14px;">
+            <button id="forceStatusCancel" class="btn full" style="background:transparent;border:1px solid var(--border-color);">Cancel</button>
+            <button id="forceStatusConfirm" class="btn full" style="background:linear-gradient(135deg,#f97316,#ea580c);"><i class="bi bi-check2-circle"></i> Apply Override</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+
+      const selectEl = modal.querySelector('#forceStatusSelect');
+      const otherEl = modal.querySelector('#forceStatusOther');
+      const reasonEl = modal.querySelector('#forceStatusReason');
+      const close = () => { try { modal.remove(); } catch (e) {} };
+      const updateOtherVisibility = () => {
+        if (!selectEl || !otherEl) return;
+        otherEl.style.display = selectEl.value === '__other__' ? '' : 'none';
+      };
+      updateOtherVisibility();
+
+      selectEl?.addEventListener('change', updateOtherVisibility);
+      modal.querySelector('#forceStatusCancel')?.addEventListener('click', close);
+      modal.addEventListener('click', (ev) => { if (ev.target === modal) close(); });
+      modal.querySelector('#forceStatusConfirm')?.addEventListener('click', () => {
+        let chosen = String(selectEl?.value || '').trim().toLowerCase();
+        if (chosen === '__other__') {
+          chosen = String(otherEl?.value || '').trim().toLowerCase().replaceAll(' ', '_');
+        }
+        if (!chosen) {
+          setStatus('Status required');
+          return;
+        }
+        if (!/^[a-z0-9_]+$/.test(chosen)) {
+          setStatus('Status must use letters/numbers/underscore');
+          return;
+        }
+        const reason = String(reasonEl?.value || '').trim();
+        if (!reason) {
+          setStatus('Reason required');
+          return;
+        }
+        close();
+        if (onConfirm) onConfirm({ status: chosen, reason });
+      });
+    }
+
+    async function renderJobs() {
+      contentEl.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <input type="search" id="jobFilter" placeholder="Search jobs...">
+        </div>
+        <div class="section-title">Active Jobs</div>
+        <ul id="jobsList" style="list-style:none;padding:0;margin:0;"></ul>
+      `;
+      const listEl = document.getElementById('jobsList');
+      const filterEl = document.getElementById('jobFilter');
+      const jobs = await fetchJson('/plugin/ventus_response_module/jobs');
+      const all = Array.isArray(jobs) ? jobs : [];
+
+      const draw = (rows) => {
+        if (!rows.length) {
+          listEl.innerHTML = emptyState('No active jobs.');
+          return;
+        }
+        listEl.innerHTML = rows.map(j => `
+          <li class="panel-list-item" style="${j.is_external ? 'opacity:0.62;border-left-color:#94a3b8;' : ''}" data-cad="${escapeHtml(j.cad)}">
+            ${panelDivisionJobGlyphHtml(j.division)}
+            <span>
+              <div style="font-weight:600;">CAD #${escapeHtml(j.cad)}</div>
+              <div class="meta">${escapeHtml(j.reason_for_call || 'No reason')}</div>
+              <div class="meta">Division: ${escapeHtml(divisionDisplayName(j.division))}${j.is_external ? ' (external)' : ''}</div>
+            </span>
+            <span class="status">${escapeHtml(prettyStatus(j.status || 'unknown'))}</span>
+          </li>
+        `).join('');
+        listEl.querySelectorAll('[data-cad]').forEach(row => {
+          row.addEventListener('click', () => {
+            const cad = row.getAttribute('data-cad');
+            if (cad) renderJobDetail(cad, false).catch(() => setStatus('Load failed'));
+          });
+        });
+      };
+
+      draw(all);
+      filterEl.addEventListener('input', () => {
+        const q = filterEl.value.toLowerCase();
+        draw(all.filter(j =>
+          String(j.cad || '').includes(q) ||
+          String(j.status || '').toLowerCase().includes(q) ||
+          prettyStatus(j.status || '').toLowerCase().includes(q) ||
+          String(j.reason_for_call || '').toLowerCase().includes(q)
+        ));
+      });
+      setStatus(`${all.length} jobs`);
+    }
+
+    async function renderUnits() {
+      contentEl.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <input type="search" id="unitFilter" placeholder="Search units...">
+        </div>
+        <div class="section-title">Units</div>
+        <ul id="unitsList" style="list-style:none;padding:0;margin:0;"></ul>
+      `;
+      const listEl = document.getElementById('unitsList');
+      const filterEl = document.getElementById('unitFilter');
+      const units = await fetchJson('/plugin/ventus_response_module/units');
+      const all = Array.isArray(units) ? units : [];
+
+      const draw = (rows) => {
+        if (!rows.length) {
+          listEl.innerHTML = emptyState('No signed-on units.');
+          return;
+        }
+        listEl.innerHTML = rows.map(u => `
+          <li class="panel-list-item" style="${u.is_external ? 'opacity:0.62;border-left-color:#94a3b8;' : ''}" data-callsign="${escapeHtml(u.callSign || '')}">
+            ${panelDivisionUnitGlyphHtml(u.division)}
+            <span>
+              <div style="font-weight:600;">${escapeHtml(u.callSign || 'Unknown')}</div>
+              <div class="meta">${escapeHtml(u.station || 'Mobile')} • ${escapeHtml(prettyStatus(u.status || 'unknown'))}</div>
+              <div class="meta">Division: ${escapeHtml(divisionDisplayName(u.division))}${u.is_external ? ' (external)' : ''}</div>
+            </span>
+            <span class="status">${escapeHtml(prettyStatus(u.status || 'unknown'))}</span>
+          </li>
+        `).join('');
+        listEl.querySelectorAll('[data-callsign]').forEach(row => {
+          row.addEventListener('click', () => {
+            const cs = row.getAttribute('data-callsign');
+            if (cs) renderUnitDetail(cs).catch(() => setStatus('Load failed'));
+          });
+        });
+      };
+
+      draw(all);
+      filterEl.addEventListener('input', () => {
+        const q = filterEl.value.toLowerCase();
+        draw(all.filter(u =>
+          String(u.callSign || '').toLowerCase().includes(q) ||
+          String(u.status || '').toLowerCase().includes(q) ||
+          prettyStatus(u.status || '').toLowerCase().includes(q)
+        ));
+      });
+      setStatus(`${all.length} units`);
+    }
+
+    function reopenPastCadFromList(cad) {
+      const cadInt = parseInt(String(cad), 10);
+      if (!Number.isInteger(cadInt) || cadInt <= 0) return;
+      const rid = `pjReopen_${cadInt}_`;
+      const modal = document.createElement('div');
+      modal.id = 'reopenCadModal';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:7000;';
+      modal.innerHTML = `
+        <div style="width:min(440px,92vw);background:var(--secondary-light,rgba(30,41,59,0.98));border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+          <div style="font-weight:700;margin-bottom:6px;">Reopen CAD #${escapeHtml(String(cadInt))}</div>
+          <div class="meta" style="margin-bottom:12px;line-height:1.45;color:var(--text-secondary);">Returns this CAD to the <strong>active stack</strong> as queued. Choose why it is being reopened; this is stored on the CAD comms log and audit trail.</div>
+          <div style="margin-bottom:12px;">
+            <label for="${rid}reason" style="display:block;font-weight:600;margin-bottom:6px;">Reopen Reason <span style="font-weight:500;color:var(--text-muted);">(required)</span></label>
+            <select id="${rid}reason" style="width:100%;padding:8px 12px;background:var(--bg-dark);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:13px;">
+              <option value="" selected disabled>Select a reason…</option>
+              <option value="closed_in_error">Closed in error</option>
+              <option value="test_training">Test/Training</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div id="${rid}otherWrap" style="display:none;margin-bottom:14px;">
+            <label for="${rid}notes" style="display:block;font-weight:600;margin-bottom:6px;">Further Details <span style="font-weight:500;color:var(--text-muted);">(required)</span></label>
+            <textarea id="${rid}notes" rows="4" placeholder="Describe why this CAD is being reopened…" style="width:100%;padding:8px 12px;background:var(--bg-dark);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);font-size:13px;resize:vertical;box-sizing:border-box;"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" id="${rid}cancel" class="btn" style="flex:1;background:transparent;border:1px solid var(--border-color);">Cancel</button>
+            <button type="button" id="${rid}confirm" class="btn" style="flex:1;background:rgba(245,158,11,0.25);border:1px solid var(--border-color);color:var(--text-primary);"><i class="bi bi-arrow-counterclockwise"></i> Reopen CAD</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const reasonSel = modal.querySelector(`#${rid}reason`);
+      const otherWrap = modal.querySelector(`#${rid}otherWrap`);
+      const syncUi = () => {
+        const v = reasonSel ? String(reasonSel.value || '').trim() : '';
+        if (otherWrap) otherWrap.style.display = v === 'other' ? 'block' : 'none';
+      };
+      reasonSel?.addEventListener('change', syncUi);
+      syncUi();
+      const closeModal = () => { try { modal.remove(); } catch (e) {} };
+      modal.querySelector(`#${rid}cancel`)?.addEventListener('click', closeModal);
+      modal.addEventListener('click', (ev) => { if (ev.target === modal) closeModal(); });
+      modal.querySelector(`#${rid}confirm`)?.addEventListener('click', async () => {
+        const code = reasonSel ? String(reasonSel.value || '').trim() : '';
+        if (!code) {
+          setStatus('Select a reopen reason before continuing.');
+          return;
+        }
+        let otherText = '';
+        if (code === 'other') {
+          otherText = String(modal.querySelector(`#${rid}notes`)?.value || '').trim();
+          if (!otherText) {
+            setStatus('Enter further details when reopen reason is Other.');
+            return;
+          }
+        }
+        const confirmBtn = modal.querySelector(`#${rid}confirm`);
+        if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Reopening…'; }
+        closeModal();
+        try {
+          const res = await fetch(`/plugin/ventus_response_module/job/${encodeURIComponent(cadInt)}/reopen`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              reopen_reason: code,
+              other_details: code === 'other' ? otherText : '',
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Reopen failed (${res.status})`);
+          setStatus(data.message || `CAD #${cadInt} reopened`);
+          await renderPastJobs();
+        } catch (e) {
+          setStatus(e.message || 'Reopen failed');
+        }
+      });
+    }
+
+    async function renderPastJobs() {
+      contentEl.innerHTML = `
+        <div style="margin-bottom:12px;">
+          <input type="search" id="pastFilter" placeholder="🔍 Search..." autocomplete="off" aria-label="Search past or closed jobs">
+        </div>
+        <div class="section-title">Past / Closed Jobs</div>
+        <ul id="pastList" style="list-style:none;padding:0;margin:0;"></ul>
+      `;
+      const listEl = document.getElementById('pastList');
+      const filterEl = document.getElementById('pastFilter');
+
+      let rows = [];
+      try {
+        rows = await fetchJson('/plugin/ventus_response_module/jobs/history');
+      } catch (e) {
+        rows = await fetchJson('/plugin/ventus_response_module/history');
+      }
+      const all = Array.isArray(rows) ? rows : [];
+
+      const draw = (items) => {
+        if (!items.length) {
+          listEl.innerHTML = emptyState('No past jobs found.');
+          return;
+        }
+        listEl.innerHTML = items.map(j => {
+          const when = j.updated_at || j.completedAt || j.created_at || '';
+          const ts = when ? sparrowFormatDateTime(when) : 'N/A';
+          const jColor = jobDivisionColorHex(j);
+          const rowBorder = `${j.is_external ? 'opacity:0.62;' : ''}border-left:3px solid ${jColor} !important;`;
+          const cadNum = parseInt(String(j.cad || ''), 10) || 0;
+          return `
+            <li class="panel-list-item" data-cad="${escapeHtml(j.cad)}" style="${rowBorder}">
+              <i class="bi bi-check2-circle" style="color:${jColor};"></i>
+              <span style="flex:1;">
+                <div style="font-weight:600;">CAD #${escapeHtml(j.cad)}</div>
+                <div class="meta">${escapeHtml(prettyStatus(j.status || 'cleared'))} • ${escapeHtml(ts)}</div>
+                <div class="meta">Division: ${escapeHtml(jobDivisionLabel(j))}${j.is_external ? ' (external)' : ''}</div>
+              </span>
+              <span style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
+                <button type="button" class="btn" data-reopen-cad="${cadNum}" style="padding:4px 8px;font-size:11px;background:rgba(245,158,11,0.2);color:var(--cad-soft-amber-text);border:1px solid var(--border-color);">Reopen</button>
+              </span>
+            </li>
+          `;
+        }).join('');
+        listEl.querySelectorAll('[data-reopen-cad]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const c = btn.getAttribute('data-reopen-cad');
+            if (c) reopenPastCadFromList(c);
+          });
+        });
+        listEl.querySelectorAll('[data-cad]').forEach(row => {
+          row.addEventListener('click', () => {
+            const cad = row.getAttribute('data-cad');
+            if (cad) renderJobDetail(cad, true).catch(() => setStatus('Load failed'));
+          });
+        });
+      };
+
+      draw(all);
+      filterEl.addEventListener('input', () => {
+        const q = filterEl.value.toLowerCase().trim();
+        const filtered = !q ? all : all.filter((j) => {
+          const c = String(j.cad != null ? j.cad : '');
+          const st = String(j.status || '').toLowerCase();
+          const pst = prettyStatus(j.status || 'cleared').toLowerCase();
+          const reason = String(j.reason_for_call || '').toLowerCase();
+          const addr = String(j.address || '').toLowerCase();
+          const pc = String(j.postcode || '').toLowerCase();
+          const div = String(jobDivisionLabel(j) || '').toLowerCase();
+          const pr = String(j.priority || '').toLowerCase();
+          return c.includes(q) || st.includes(q) || pst.includes(q) || reason.includes(q) || addr.includes(q) || pc.includes(q) || div.includes(q) || pr.includes(q);
+        });
+        draw(filtered);
+      });
+      setStatus(`${all.length} past / closed jobs`);
+    }
+
+    async function renderMessages(preselectCallsign) {
+      contentEl.innerHTML = `
+        <div style="margin-bottom:10px;border:1px solid var(--border-color);border-radius:10px;padding:10px;background:rgba(0,0,0,0.2);">
+          <div style="font-weight:700;margin-bottom:6px;">Dispatch Note / MOTD</div>
+          <div id="motdDisplay" style="font-size:12px;color:var(--text-secondary);padding:8px;border:1px dashed var(--border-color);border-radius:8px;background:rgba(0,0,0,0.2);margin-bottom:8px;">Loading note...</div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn full" id="motdReload" style="background:transparent;border:1px solid var(--border-color);"><i class="bi bi-arrow-clockwise"></i> Refresh Note</button>
+          </div>
+          <div id="motdMeta" class="meta" style="margin-top:6px;">Loading note...</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <select id="msgUnit" style="width:100%;padding:10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid var(--border-color);color:var(--text-primary);margin-bottom:8px;"></select>
+          <button class="btn full" id="msgReload"><i class="bi bi-arrow-clockwise"></i> Reload Messages</button>
+        </div>
+        <div class="section-title">Messages</div>
+        <ul id="msgList" style="list-style:none;padding:0;margin:0 0 10px 0;"></ul>
+        <input type="text" id="msgText" placeholder="Type message...">
+        <button class="btn full" id="msgSend"><i class="bi bi-send"></i> Send</button>
+      `;
+
+      const unitSel = document.getElementById('msgUnit');
+      const listEl = document.getElementById('msgList');
+      const textEl = document.getElementById('msgText');
+      const sendBtn = document.getElementById('msgSend');
+      const reloadBtn = document.getElementById('msgReload');
+      const motdDisplayEl = document.getElementById('motdDisplay');
+      const motdMetaEl = document.getElementById('motdMeta');
+      const motdReloadBtn = document.getElementById('motdReload');
+
+      const loadMotd = async () => {
+        try {
+          const motd = await fetchJson('/plugin/ventus_response_module/dispatch/motd');
+          motdDisplayEl.textContent = (motd.text || '').trim() || 'No dispatch note set.';
+          const when = motd.updated_at ? sparrowFormatDateTime(motd.updated_at) : 'never';
+          motdMetaEl.textContent = `Last updated ${when} by ${motd.updated_by || 'unknown'}`;
+        } catch (e) {
+          motdDisplayEl.textContent = 'Unable to load dispatch note.';
+          motdMetaEl.textContent = `Unable to load note (${e.message || 'error'})`;
+        }
+      };
+
+      motdReloadBtn.addEventListener('click', () => { loadMotd().catch(() => {}); });
+
+      const units = await fetchJson('/plugin/ventus_response_module/units');
+      const callsigns = (Array.isArray(units) ? units : [])
+        .map(u => u.callSign)
+        .filter(Boolean);
+
+      if (!callsigns.length) {
+        unitSel.innerHTML = `<option value="">No units available</option>`;
+        listEl.innerHTML = emptyState('Sign on a unit to view/send messages.');
+        setStatus('No units');
+        return;
+      }
+
+      unitSel.innerHTML = callsigns.map(cs => `<option value="${escapeHtml(cs)}">${escapeHtml(cs)}</option>`).join('');
+      if (preselectCallsign && callsigns.includes(preselectCallsign)) {
+        unitSel.value = preselectCallsign;
+      }
+
+      const loadMsgs = async () => {
+        const cs = unitSel.value;
+        if (!cs) {
+          listEl.innerHTML = emptyState('Select a unit.');
+          return;
+        }
+        const rows = await fetchJson(`/plugin/ventus_response_module/messages/${encodeURIComponent(cs)}`);
+        const all = Array.isArray(rows) ? rows : [];
+        if (!all.length) {
+          listEl.innerHTML = emptyState('No messages yet.');
+        } else {
+          const list = all.slice(-50).reverse();
+          listEl.innerHTML = list.map((m, idx) => `
+            <li class="panel-list-item" data-msg-index="${idx}">
+              <i class="bi bi-chat-dots" style="color:var(--accent);"></i>
+              <span>
+                <div style="font-weight:600;">${escapeHtml(m.from || 'unknown')}</div>
+                <div class="meta">${escapeHtml(m.text || '')}</div>
+                <div class="meta">${escapeHtml(sparrowFormatDateTime(m.timestamp))}</div>
+              </span>
+            </li>
+          `).join('');
+          listEl.querySelectorAll('[data-msg-index]').forEach(row => {
+            row.addEventListener('click', () => {
+              const i = Number(row.getAttribute('data-msg-index'));
+              if (Number.isInteger(i) && list[i]) renderMessageDetail(cs, list[i], list);
+            });
+          });
+        }
+        setStatus(`${all.length} messages (${cs})`);
+      };
+
+      unitSel.addEventListener('change', () => { loadMsgs().catch(() => setStatus('Load failed')); });
+      reloadBtn.addEventListener('click', () => { loadMsgs().catch(() => setStatus('Load failed')); });
+      sendBtn.addEventListener('click', async () => {
+        const cs = unitSel.value;
+        const text = (textEl.value || '').trim();
+        if (!cs || !text) return;
+        sendBtn.disabled = true;
+        try {
+          await fetch(`/plugin/ventus_response_module/messages/${encodeURIComponent(cs)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, from: 'dispatcher' })
+          });
+          textEl.value = '';
+          await loadMsgs();
+        } finally {
+          sendBtn.disabled = false;
+        }
+      });
+
+      await loadMotd();
+      await loadMsgs();
+    }
+
+    async function renderContent() {
+      if (panelType === 'jobs' && panelJobDetailOpen) {
+        return;
+      }
+      setStatus('Loading...');
+      await refreshDivisionMeta();
+      if (panelType === 'jobs') await renderJobs();
+      else if (panelType === 'units') await renderUnits();
+      else if (panelType === 'messages') await renderMessages();
+      else if (panelType === 'past_jobs') await renderPastJobs();
+      else contentEl.innerHTML = emptyState(`Unsupported panel type: ${panelType}`);
+      if (statusEl.textContent === 'Loading...') setStatus('Ready');
+    }
+
+    titleEl.textContent = panelTitle;
+    setIcon(panelType);
+
+    closeBtn.addEventListener('click', () => window.close());
+    refreshBtn.addEventListener('click', () => {
+      if (panelType === 'jobs' && panelJobDetailOpen && panelJobDetailCad != null) {
+        renderJobDetail(panelJobDetailCad, panelJobDetailIsPast).catch(() => setStatus('Refresh failed'));
+        return;
+      }
+      renderContent().catch(() => setStatus('Refresh failed'));
+    });
+
+    renderContent().catch(err => {
+      contentEl.innerHTML = emptyState(`Failed to load panel data (${err.message || 'error'}).`);
+      setStatus('Load failed');
+    });
+
+    if (socket) {
+      socket.on('mdt_event', () => {
+        if (panelType === 'jobs' && panelJobDetailOpen) return;
+        renderContent().catch(() => setStatus('Live refresh failed'));
+      });
+    }
+    setInterval(() => {
+      if (!document.hidden) {
+        if (panelType === 'jobs' && panelJobDetailOpen) return;
+        renderContent().catch(() => setStatus('Auto-refresh failed'));
+      }
+    }, 20000);
+
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('ventus_cad');
+        bc.onmessage = function(ev) {
+          try {
+            const msg = ev.data || {};
+            if (msg && msg.type === 'panel_content' && msg.panel_type === panelType && msg.html) {
+              contentEl.innerHTML = msg.html;
+              if (msg.title) titleEl.textContent = msg.title;
+              setStatus('Live');
+            }
+          } catch (e) {}
+        };
+      }
+    } catch (e) {}
+  </script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% block page_title %}Import vehicles (CSV){% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width:1100px">
+  <h1 class="h4 mb-2"><i class="bi bi-upload text-primary me-2"></i>Import fleet from spreadsheet</h1>
+  <p class="text-muted small mb-4">
+    Upload a CSV export, map each column to a field, then import.
+    Each row needs a <strong>registration</strong> and/or <strong>unit name (internal code)</strong> so Sparrow can match or create the vehicle. Existing records can be updated if you enable that option (matched by plate or internal code).
+    <a href="{{ url_for('fleet_management.vehicles_list') }}">Back to vehicles</a>
+  </p>
+
+  {% if step == 1 %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold">1. Upload CSV</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('fleet_management.fleet_import_csv_upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label">CSV file</label>
+        <input class="form-control" type="file" name="file" accept=".csv,text/csv" required>
+        <p class="small text-muted mt-2 mb-0">UTF-8 or Excel-exported CSV; comma, semicolon, or tab separated (auto-detected). Max ~2,500 rows, 6 MB.</p>
+        <button class="btn btn-primary mt-3" type="submit">Continue to mapping</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if step == 2 %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold">2. Map columns → Sparrow fields</div>
+    <div class="card-body">
+      <p class="small text-muted">File: <strong>{{ original_name }}</strong></p>
+      <p class="small text-muted">Match each spreadsheet column on the left. Use <em>Ignore</em> for columns you do not need.</p>
+      <form method="post" action="{{ url_for('fleet_management.fleet_import_csv_commit') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="table-responsive mb-3">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>Your column</th><th>Sparrow field</th></tr></thead>
+            <tbody>
+              {% for h in headers %}
+              <tr>
+                <td><code>{{ h }}</code></td>
+                <td>
+                  <select class="form-select form-select-sm" name="map_{{ loop.index0 }}">
+                    {% for key, label in fields %}
+                    <option value="{{ key }}">{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" value="1" name="update_existing" id="upd">
+          <label class="form-check-label" for="upd">Update vehicles that already exist (matched by registration or internal code)</label>
+        </div>
+        <button class="btn btn-success" type="submit">Run import</button>
+        <a class="btn btn-outline-secondary ms-2" href="{{ url_for('fleet_management.fleet_import_csv') }}">Start over</a>
+      </form>
+    </div>
+  </div>
+
+  {% if preview_rows %}
+  <h2 class="h6">Preview (first rows)</h2>
+  <div class="table-responsive card shadow-sm">
+    <table class="table table-sm mb-0">
+      <thead><tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>{% for h in headers %}<td class="small">{{ row.get(h, '') }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

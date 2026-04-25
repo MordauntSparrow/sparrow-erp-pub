@@ -12,6 +12,42 @@
     </ol>
   </nav>
 
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+    <a class="btn btn-outline-danger btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_pdf', instance_id=instance.id) }}" target="_blank" rel="noopener">
+      <i class="bi bi-file-earmark-pdf me-1"></i>Kit loadlist (PDF)
+    </a>
+    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_check', instance_id=instance.id) }}">
+      <i class="bi bi-ui-checks me-1"></i>Digital kit check
+    </a>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_csv', instance_id=instance.id) }}">
+      <i class="bi bi-file-earmark-spreadsheet me-1"></i>CSV
+    </a>
+    <span class="text-muted small">PDF/CSV include nested modules. Digital check saves checklist, lot/expiry, and (with transaction permission) restock/disposal in one pass.</span>
+  </div>
+
+  {% if can_edit %}
+  <div class="card mb-3 border-info">
+    <div class="card-header fw-semibold py-2 bg-info bg-opacity-10">Bag use context (patient care vs training)</div>
+    <div class="card-body small">
+      <p class="text-muted mb-2">Training bags keep real kit for drills; <strong>expiry is not highlighted for patient care</strong> on loadlists and checks. Switch back to patient-facing before issuing for clinical use.</p>
+      <form method="post" action="{{ url_for('inventory_control_internal.med_bags_instance_usage_context', instance_id=instance.id) }}" class="row g-2 align-items-end">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="col-md-6">
+          <label class="form-label small mb-0">This physical bag is used for</label>
+          <select class="form-select form-select-sm" name="usage_context">
+            {% for uc in bag_usage_contexts %}
+            <option value="{{ uc }}" {% if (instance.usage_context|default('patient_care')) == uc %}selected{% endif %}>{{ bag_usage_context_labels.get(uc, uc) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3"><button type="submit" class="btn btn-primary btn-sm">Save context</button></div>
+      </form>
+    </div>
+  </div>
+  {% elif (instance.usage_context|default('patient_care')) == 'training' %}
+  <div class="alert alert-info small mb-3">This bag is marked <strong>training only</strong> (expiry prompts suppressed for patient care). Ask an editor to change context if this bag will carry patient-facing stock.</div>
+  {% endif %}
+
   <div class="row g-3 mb-4">
     <div class="col-lg-6">
       <div class="card h-100">
@@ -273,13 +309,18 @@
   </div>
 
   <h2 class="h5">Lines — return checklist</h2>
-  <p class="text-muted small">After a deployment, record whether each line is present, missing, or needs adding.</p>
+  <p class="text-muted small">After a deployment, record present/missing, wrong lot, expiry issues, quantity mismatch, or use <a href="{{ url_for('inventory_control_internal.med_bags_instance_loadlist_check', instance_id=instance.id) }}">Digital kit check</a> for the full tree.</p>
+  {% if can_edit %}
+  <div class="alert alert-light border small mb-2">
+    <strong>Lot and expiry.</strong> Use the <em>Lot and expiry</em> column on each row to record batch or lot numbers and expiry dates. They flow through to the PDF kit loadlist above and support stock audits without retyping from paper.
+  </div>
+  {% endif %}
   <div class="table-responsive card mb-4">
     <table class="table table-sm mb-0 align-middle">
-      <thead class="table-light"><tr><th>SKU</th><th>Item</th><th>Expected</th><th>On bag</th><th>Lot</th><th>Expiry</th><th>Return</th>{% if can_edit %}<th>Trace</th>{% endif %}</tr></thead>
+      <thead class="table-light"><tr><th>SKU</th><th>Item</th><th>Expected</th><th>On bag</th><th>Lot</th><th>Expiry</th><th>Return</th>{% if can_edit %}<th>Lot and expiry</th>{% endif %}</tr></thead>
       <tbody>
         {% for l in lines %}
-        <tr class="{% if l.return_status == 'missing' %}table-danger{% elif l.return_status == 'to_add' %}table-warning{% endif %}">
+        <tr class="{% if l.return_status == 'missing' %}table-danger{% elif l.return_status == 'to_add' %}table-warning{% elif l.return_status in ('wrong_lot', 'bad_expiry', 'wrong_qty') %}table-warning{% endif %}">
           <td>{{ l.sku }}</td>
           <td>{{ l.item_name }}</td>
           <td>{{ l.quantity_expected }}</td>
@@ -294,7 +335,7 @@
               <select class="form-select form-select-sm" style="width:auto;min-width:7rem" name="return_status">
                 <option value="clear" {% if not l.return_status %}selected{% endif %}>Not set</option>
                 {% for rs in return_statuses %}
-                <option value="{{ rs }}" {% if l.return_status == rs %}selected{% endif %}>{% if rs == 'present' %}Present{% elif rs == 'missing' %}Missing{% elif rs == 'to_add' %}To add{% else %}{{ rs }}{% endif %}</option>
+                <option value="{{ rs }}" {% if l.return_status == rs %}selected{% endif %}>{{ return_status_labels.get(rs, rs) }}</option>
                 {% endfor %}
               </select>
               <button type="submit" class="btn btn-sm btn-outline-secondary py-0">Save</button>
@@ -318,9 +359,9 @@
   </div>
 
   {% if can_transact %}
-  <h2 class="h5">Restock and disposal</h2>
+  <h2 class="h5" id="med-bag-restock">Restock and disposal</h2>
   <p class="text-muted small">Witness rules apply — configure under <a href="{{ url_for('inventory_control_internal.med_bags_witness_rules') }}">Witness rules</a>.</p>
-  <div class="card mb-4">
+  <div class="card mb-4" id="med-bag-restock-card">
     <div class="card-body">
       <form method="post" action="{{ url_for('inventory_control_internal.med_bags_restock_post') }}" class="row g-2 align-items-end">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

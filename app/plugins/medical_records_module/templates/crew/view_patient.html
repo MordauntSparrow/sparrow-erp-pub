@@ -1,0 +1,480 @@
+{% extends 'medical_records_shell.html' %}
+
+{# Macro to render a dictionary as a key–value pair table or display "*******" if masked. #}
+{% macro dict_table(d) %}
+  {% if d == '*******' %}
+    <p>*******</p>
+  {% elif d and d|length > 0 %}
+    <table class="table table-sm table-borderless mb-0">
+      <tbody>
+        {% for key, value in d.items() %}
+          <tr>
+            <th class="text-capitalize">{{ key }}</th>
+            <td>{{ value }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-muted">None</p>
+  {% endif %}
+{% endmacro %}
+
+{# Macro to render a list of dictionaries as a table or display "*******" if masked. #}
+{% macro list_of_dicts_table(lst) %}
+  {% if lst == '*******' %}
+    <p>*******</p>
+  {% elif lst and lst|length > 0 %}
+    <table class="table table-sm table-borderless mb-0">
+      <thead>
+        <tr>
+          {% for key in lst[0].keys() %}
+            <th>{{ key|capitalize }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in lst %}
+          <tr>
+            {% for key, value in item.items() %}
+              <td>{{ value }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-muted">None</p>
+  {% endif %}
+{% endmacro %}
+
+{% block title %}Patient Record - {{ patient.first_name }} {{ patient.last_name }}{% endblock %}
+
+{% block content %}
+<div class="mr-page-header d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h1 class="h2 mb-0">Patient record</h1>
+    <p class="text-muted small mb-0">{{ patient.first_name }} {{ patient.last_name }} · ID {{ patient.id }}</p>
+  </div>
+  <a href="{{ url_for('medical_records_internal.crew_view') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Back to crew lookup</a>
+</div>
+  <div class="row">
+    <!-- Left Column: Patient Info, Medical Details, Administrative Data -->
+    <div class="col-md-8">
+      <!-- Patient Information Card -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-primary text-white text-center">
+          <h3 class="h4">Patient Information</h3>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-4">
+              <p><strong>First Name:</strong> {{ patient.first_name }}</p>
+              <p><strong>Middle Name:</strong> {{ patient.middle_name or 'N/A' }}</p>
+              <p><strong>Last Name:</strong> {{ patient.last_name }}</p>
+            </div>
+            <div class="col-md-4">
+              <p><strong>Customer Number:</strong> {{ patient.id }}</p>
+              <p><strong>Package Type:</strong> {{ patient.package_type or 'None' }}</p>
+              <p><strong>Date of Birth:</strong> {{ patient.date_of_birth }}</p>
+            </div>
+            <div class="col-md-4">
+              <p><strong>Age:</strong> {{ age }}</p>
+              <p><strong>Gender:</strong> {{ patient.gender }}</p>
+              <p><strong>Postcode:</strong> {{ patient.postcode or 'N/A' }}</p>
+            </div>
+          </div>
+          <p><strong>Address:</strong> {{ patient.address }}</p>
+        </div>
+      </div>
+      
+      <!-- Medical Details Card -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-secondary text-white">
+          <h5 class="h5">Medical Details</h5>
+        </div>
+        <div class="card-body">
+          {# NHS Number might be masked #}
+          <p><strong>NHS Number:</strong>
+            {% if patient.nhs_number == '*******' %}
+              *******
+            {% else %}
+              {{ patient.nhs_number or 'None' }}
+            {% endif %}
+          </p>
+
+          {# Weight might be dict or masked #}
+          <p><strong>Weight:</strong><br>
+            {% if patient.weight == '*******' %}
+              *******
+            {% else %}
+              {% if patient.weight is mapping %}
+                {{ dict_table(patient.weight) }}
+              {% else %}
+                {{ patient.weight or 'N/A' }}
+              {% endif %}
+            {% endif %}
+          </p>
+
+          {# GP Details might be dict or masked #}
+          <p><strong>GP Details:</strong><br>
+            {% if patient.gp_details == '*******' %}
+              *******
+            {% else %}
+              {{ dict_table(patient.gp_details) }}
+            {% endif %}
+          </p>
+
+          <p><strong>Medical Conditions:</strong></p>
+          {{ list_of_dicts_table(patient.medical_conditions) }}
+
+          <p><strong>Allergies:</strong></p>
+          {{ list_of_dicts_table(patient.allergies) }}
+
+          <p><strong>Medications:</strong></p>
+          {{ list_of_dicts_table(patient.medications) }}
+
+          {# Previous Visits might be a dict, list, or masked #}
+          <p><strong>Previous Visits:</strong><br>
+            {% if patient.previous_visit_records == '*******' %}
+              *******
+            {% else %}
+              {% if patient.previous_visit_records is mapping %}
+                {{ dict_table(patient.previous_visit_records) }}
+              {% elif patient.previous_visit_records is sequence %}
+                {{ list_of_dicts_table(patient.previous_visit_records) }}
+              {% else %}
+                {{ patient.previous_visit_records or 'None' }}
+              {% endif %}
+            {% endif %}
+          </p>
+
+          <p><strong>Access Requirements:</strong></p>
+          {{ list_of_dicts_table(patient.access_requirements) }}
+        </div>
+      </div>
+      
+      <!-- Administrative Data Card -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-info text-white">
+          <h5 class="h5">Administrative Data</h5>
+        </div>
+        <div class="card-body">
+          <p><strong>Next of Kin:</strong></p>
+          {{ list_of_dicts_table(patient.next_of_kin_details) }}
+
+          <p><strong>LPA Details:</strong></p>
+          {{ list_of_dicts_table(patient.lpa_details) }}
+
+          {# Resuscitation Directive might be dict or masked #}
+          <p><strong>Resuscitation Directive:</strong><br>
+            {% if patient.resuscitation_directive == '*******' %}
+              *******
+            {% else %}
+              {{ dict_table(patient.resuscitation_directive) }}
+            {% endif %}
+          </p>
+
+          {# Payment Details might be dict or masked #}
+          <p><strong>Payment Details:</strong><br>
+            {% if patient.payment_details == '*******' %}
+              *******
+            {% else %}
+              {{ dict_table(patient.payment_details) }}
+            {% endif %}
+          </p>
+
+          {# Documents might be an array, a string, or masked #}
+          <p><strong>Documents:</strong>
+            {% if patient.documents == '*******' %}
+              *******
+            {% else %}
+              {{ patient.documents or 'None' }}
+            {% endif %}
+          </p>
+        </div>
+      </div>
+      
+      <!-- Action Buttons -->
+      <div class="mb-4">
+        <a href="{{ url_for('medical_response_internal.response_dashboard') }}" class="btn btn-secondary btn-rounded">Back to Dashboard</a>
+        <a href="{{ url_for('medical_records_internal.crew_edit_patient_record', id=patient.id) }}" class="btn btn-warning btn-rounded">Edit Record</a>
+      </div>
+    </div>
+    
+    <!-- Right Column: Conversation Panels -->
+    <div class="col-md-4">
+      <!-- Message Log Panel (Chat Style) -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-dark text-white">
+          <h5 class="h5">Message Log</h5>
+        </div>
+        <div class="card-body" style="max-height:250px; overflow-y:auto;">
+          {% if patient.message_log and patient.message_log|length > 0 %}
+            <div class="chat-container">
+              {% for msg in patient.message_log %}
+                <div class="chat-message p-2 mb-2 rounded border">
+                  <div class="d-flex justify-content-between">
+                    <span class="fw-bold">{{ msg.author }}</span>
+                    <small class="text-muted">{{ msg.timestamp }}</small>
+                  </div>
+                  {% if msg.category %}
+                    <span class="badge bg-info">{{ msg.category }}</span>
+                  {% endif %}
+                  <p class="mb-0">{{ msg.text }}</p>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-muted">No messages recorded.</p>
+          {% endif %}
+        </div>
+        <div class="card-footer">
+          <form id="messageLogForm" method="POST" action="{{ url_for('medical_records_internal.add_message_log_entry', id=patient.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-2">
+              <label for="message_log_category" class="form-label">Category</label>
+              <select class="form-select" name="category" id="message_log_category" required>
+                <option value="">Select Category</option>
+                <option value="General">General</option>
+                <option value="Update">Update</option>
+                <option value="Other">Other</option>
+              </select>
+              <input type="text" class="form-control mt-1 d-none" name="custom_category" id="message_log_custom_category" placeholder="Enter custom category">
+            </div>
+            <div class="mb-2">
+              <label for="message_log_text" class="form-label">Your Message</label>
+              <textarea class="form-control" name="message" id="message_log_text" placeholder="Type your message here..." required></textarea>
+            </div>
+            <button class="btn btn-primary btn-rounded" type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+      
+      <!-- Risk Flags Panel (with minus button) -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-warning text-dark">
+          <h5 class="h5">Risk Flags</h5>
+        </div>
+        <div class="card-body" style="max-height:250px; overflow-y:auto;">
+          {% if patient.notes and patient.notes|length > 0 %}
+            <table class="table table-sm table-bordered">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Time</th>
+                  <th>Description</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for note in patient.notes %}
+                  <tr data-flag-id="{{ note.id }}">
+                    <td>{{ note.flag_type }}</td>
+                    <td>{{ note.timestamp }}</td>
+                    <td>{{ note.description }}</td>
+                    <td>
+                      <button class="btn btn-sm btn-outline-danger delete-risk-flag" data-flag-id="{{ note.id }}">&#8722;</button>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="text-muted">No risk flags recorded.</p>
+          {% endif %}
+        </div>
+        <div class="card-footer">
+          <form id="riskFlagsForm" method="POST" action="{{ url_for('medical_records_internal.add_risk_flag', id=patient.id) }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-2">
+              <label for="risk_flag_type" class="form-label">Risk Category</label>
+              <select class="form-select" name="flag_type" id="risk_flag_type" required>
+                <option value="">Select Risk Category</option>
+                <option value="Dementia">Dementia</option>
+                <option value="Aggressive Behavior">Aggressive Behavior</option>
+                <option value="Medical Risk">Medical Risk</option>
+                <option value="Other">Other</option>
+              </select>
+              <input type="text" class="form-control mt-1 d-none" name="custom_flag_type" id="risk_flag_custom" placeholder="Enter custom risk category">
+            </div>
+            <div class="mb-2">
+              <label for="risk_flag_description" class="form-label">Description</label>
+              <textarea class="form-control" name="description" id="risk_flag_description" placeholder="Enter details about the risk flag..." required></textarea>
+            </div>
+            <button class="btn btn-warning btn-rounded" type="submit">Add Flag</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Persistent Modal for Personal PIN Entry -->
+<div class="modal fade" id="pinModal" tabindex="-1" aria-labelledby="pinModalLabel" aria-hidden="true"
+data-mdb-backdrop="static" data-mdb-keyboard="false">
+<div class="modal-dialog modal-dialog-centered">
+<div class="modal-content">
+ <div class="modal-header">
+   <h5 class="modal-title" id="pinModalLabel">Enter Your Personal PIN</h5>
+ </div>
+ <div class="modal-body">
+   <div class="form-outline mb-3">
+     <input type="password" id="personalPinInput" class="form-control" maxlength="6" placeholder="6-digit PIN" required>
+     <label class="form-label" for="personalPinInput">Personal PIN</label>
+   </div>
+   <div id="pinError" class="text-danger" style="display:none;"></div>
+ </div>
+ <div class="modal-footer">
+   <button type="button" id="verifyPinButton" class="btn btn-primary">Verify PIN</button>
+ </div>
+</div>
+</div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+// Initialize the MDB Modal
+var pinModalEl = document.getElementById("pinModal");
+var pinModal = new mdb.Modal(pinModalEl);
+
+// Show the modal immediately on page load
+pinModal.show();
+
+// Whenever the modal is about to be shown, we wait a moment and then
+// apply our inline blur styles to the MDB-generated backdrop.
+pinModalEl.addEventListener("show.mdb.modal", function() {
+setTimeout(function() {
+ var backdrop = document.querySelector(".modal-backdrop.show");
+ if (backdrop) {
+   backdrop.style.backgroundColor = "rgba(255, 255, 255, 0.6)";
+   backdrop.style.backdropFilter = "blur(6px)";
+   backdrop.style.webkitBackdropFilter = "blur(6px)"; // Safari support
+ }
+}, 10);
+});
+
+// Handle PIN verification when "Verify PIN" is clicked
+document.getElementById("verifyPinButton").addEventListener("click", function() {
+var pinValue = document.getElementById("personalPinInput").value.trim();
+if (pinValue.length !== 6) {
+ document.getElementById("pinError").innerText = "Please enter a valid 6-digit PIN.";
+ document.getElementById("pinError").style.display = "block";
+ return;
+}
+
+// Example AJAX request to verify the PIN (replace with your own endpoint / logic)
+fetch("{{ url_for('medical_records_internal.verify_pin') }}", {
+ method: "POST",
+ headers: { "Content-Type": "application/json" },
+ body: JSON.stringify({ personal_pin: pinValue })
+})
+.then(response => response.json().then(data => ({ status: response.status, data: data })))
+.then(obj => {
+ if (obj.status !== 200) {
+   document.getElementById("pinError").innerText = obj.data.error || "Invalid PIN.";
+   document.getElementById("pinError").style.display = "block";
+ } else {
+   // PIN verified: hide the modal
+   pinModal.hide();
+   // Optionally update page state, localStorage, etc.
+ }
+})
+.catch(error => {
+ console.error("Error verifying PIN:", error);
+});
+});
+});
+</script>
+
+<script>
+// Toggle custom category field for Message Log form
+document.getElementById("message_log_category").addEventListener("change", function() {
+  var customInput = document.getElementById("message_log_custom_category");
+  if (this.value === "Other") {
+    customInput.classList.remove("d-none");
+    customInput.setAttribute("required", "required");
+  } else {
+    customInput.classList.add("d-none");
+    customInput.removeAttribute("required");
+  }
+});
+
+// Toggle custom risk flag category field for Risk Flags form
+document.getElementById("risk_flag_type").addEventListener("change", function() {
+  var customInput = document.getElementById("risk_flag_custom");
+  if (this.value === "Other") {
+    customInput.classList.remove("d-none");
+    customInput.setAttribute("required", "required");
+  } else {
+    customInput.classList.add("d-none");
+    customInput.removeAttribute("required");
+  }
+});
+
+// AJAX deletion for Risk Flag entries
+document.querySelectorAll(".delete-risk-flag").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    var flagId = this.getAttribute("data-flag-id");
+    var row = this.closest("tr");
+    fetch("{{ url_for('medical_records_internal.delete_risk_flag', id=patient.id) }}", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flag_id: flagId })
+    })
+    .then(response => {
+      if(response.ok) {
+        row.remove();
+      } else {
+        alert("Failed to delete risk flag.");
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert("Error deleting risk flag.");
+    });
+  });
+});
+
+// AJAX submission for Message Log addition
+document.getElementById("messageLogForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var formData = new FormData(this);
+  fetch("{{ url_for('medical_records_internal.add_message_log_entry', id=patient.id) }}", {
+    method: "POST",
+    body: formData
+  })
+  .then(response => response.json().then(data => ({ status: response.status, data: data })))
+  .then(obj => {
+    if (obj.status !== 200) {
+      alert(obj.data.error || "Failed to add message log entry.");
+    } else {
+      window.location.reload();
+    }
+  })
+  .catch(error => {
+    console.error("Error adding message log entry:", error);
+  });
+});
+
+// AJAX submission for Risk Flag addition
+document.getElementById("riskFlagsForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  var formData = new FormData(this);
+  fetch("{{ url_for('medical_records_internal.add_risk_flag', id=patient.id) }}", {
+    method: "POST",
+    body: formData
+  })
+  .then(response => response.json().then(data => ({ status: response.status, data: data })))
+  .then(obj => {
+    if (obj.status !== 200) {
+      alert(obj.data.error || "Failed to add risk flag.");
+    } else {
+      window.location.reload();
+    }
+  })
+  .catch(error => {
+    console.error("Error adding risk flag:", error);
+  });
+});
+</script>
+{% endblock %}

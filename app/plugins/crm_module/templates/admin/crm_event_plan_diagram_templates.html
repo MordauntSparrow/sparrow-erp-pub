@@ -1,10 +1,13 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Plan diagram templates{% endblock %}
-{% block crm_breadcrumb_current %}
-<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
-<li class="breadcrumb-item active" aria-current="page">Event plan diagram templates</li>
-{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}Diagram templates — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Diagram templates</li>
+  </ol>
+</nav>
 <div class="container-fluid px-0 pb-3">
   <div class="crm-page-toolbar mb-3">
     <div>
@@ -13,7 +16,8 @@
       <p class="small text-muted mb-0 mt-2">Upload reusable diagrams (site layouts, cordons, etc.). Event plans can reference a template so PDFs stay current when you replace the template image.</p>
     </div>
     <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
-      <a href="{{ url_for('crm_module.event_plans_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill">All plans</a>
+      <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="btn btn-sm btn-outline-secondary rounded-pill">Event manager</a>
+      <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill">All plans</a>
     </div>
   </div>
 

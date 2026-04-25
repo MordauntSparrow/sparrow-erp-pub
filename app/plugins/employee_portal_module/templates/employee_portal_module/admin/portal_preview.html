@@ -23,6 +23,15 @@
       {% if mod.enabled %}<span class="badge bg-success">On</span>{% else %}<span class="badge bg-secondary">Off</span>{% endif %}
     </li>
     {% endfor %}
+    {% if portal_show_equipment_tile|default(false) %}
+    <li class="list-group-item d-flex justify-content-between align-items-center"><span>My equipment &amp; kit</span><span class="badge bg-success">Shown</span></li>
+    {% endif %}
+    {% if portal_show_inventory_tiles|default(false) %}
+    <li class="list-group-item d-flex justify-content-between align-items-center"><span>Inventory requests (tiles)</span><span class="badge bg-success">Shown</span></li>
+    {% endif %}
+    {% if portal_show_assistant_tile|default(false) %}
+    <li class="list-group-item d-flex justify-content-between align-items-center"><span>Portal assistant</span><span class="badge bg-success">Shown</span></li>
+    {% endif %}
   </ul>
 
   <h6 class="text-uppercase text-muted mb-2">Messages ({{ messages|length }})</h6>

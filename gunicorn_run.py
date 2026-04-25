@@ -36,7 +36,7 @@ def _start_website():
                 f"[WARN] Website module import failed: {ie}. Skipping WebsiteServer startup.")
             return
 
-        web_port = int(os.environ.get("WEB_PORT", "8080"))
+        web_port = int(os.environ.get("WEB_PORT", "80"))
         ws = WebsiteServer(port=web_port)
 
         def _run_website():

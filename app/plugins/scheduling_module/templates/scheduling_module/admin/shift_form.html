@@ -10,24 +10,44 @@
 </nav>
 <h1 class="h4 mb-3">{{ 'Edit shift' if shift else 'New shift' }}</h1>
 
-<form method="post" action="{{ url_for('internal_scheduling.admin_shift_update', shift_id=shift.id) if shift else url_for('internal_scheduling.admin_shift_create') }}" class="card card-body">
+<form method="post" action="{{ url_for('internal_scheduling.admin_shift_update', shift_id=shift.id) if shift else url_for('internal_scheduling.admin_shift_create') }}" class="card card-body" id="shift-form-main">
   <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  {% set _rc = shift.required_count if shift and shift.required_count is not none else 1 %}
+  {% set _ac = assigned_contractor_ids %}
+  {% set use_multi = (_rc > 1) or (_ac|length > 1) %}
   <div class="row g-3">
     <div class="col-md-3">
-      <label class="form-label">Staff needed</label>
-      <input type="number" name="required_count" class="form-control" min="1" value="{{ shift.required_count if (shift and shift.required_count is not none) else 1 }}">
+      <label class="form-label" for="required_count">Staff needed</label>
+      <input type="number" name="required_count" id="required_count" class="form-control" min="1" value="{{ _rc }}">
+      <p class="form-text small text-muted mb-0">One person: single pick or leave open. More than one: multi-select; you can still leave slots empty for open shifts.</p>
     </div>
-    <div class="col-md-6">
-      <label class="form-label">Assigned staff</label>
-      <div class="d-flex gap-1 align-items-start">
-        <select name="contractor_ids" id="contractor_ids" class="form-select" multiple size="5">
+    <div class="col-12">
+      <label class="form-label" for="staff-filter">Find staff</label>
+      <input type="search" id="staff-filter" class="form-control form-control-sm mb-2" placeholder="Search by name or email…" autocomplete="off">
+      <div id="staff-single-wrap" class="mb-2{% if use_multi %} d-none{% endif %}">
+        <label class="form-label">Assignment</label>
+        <p class="small text-muted mb-1">Optional — leave <strong>Open shift</strong> to keep this slot unassigned (claims / later assign).</p>
+        <select id="contractor_single" class="form-select staff-option-list" size="8"{% if not use_multi %} name="contractor_ids"{% endif %}{% if use_multi %} disabled{% endif %}>
+          <option value="" data-search="">Open shift — not assigned yet</option>
           {% for c in contractors %}
-          <option value="{{ c.id }}" {{ 'selected' if c.id in assigned_contractor_ids else '' }}>{{ c.name or c.email }}</option>
+          <option value="{{ c.id }}" data-search="{{ ((c.name or '') ~ ' ' ~ (c.email or ''))|lower|e }}"{% if not use_multi and (((not shift) and default_contractor_id is defined and default_contractor_id == c.id) or (shift and (_ac|length == 1) and (c.id == _ac[0]))) %} selected{% endif %}>{{ c.name or c.email }}{% if c.email and c.name %} <span class="text-muted">({{ c.email }})</span>{% endif %}</option>
           {% endfor %}
         </select>
-        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-suggest-staff" title="Suggest available staff for this date/time">Suggest</button>
       </div>
-      <div id="suggest-list" class="small text-muted mt-1 d-none"></div>
+      <div id="staff-multi-wrap" class="mb-2{% if not use_multi %} d-none{% endif %}">
+        <label class="form-label">Assigned staff</label>
+        <p class="small text-muted mb-1">Select one or more people. Fewer than &ldquo;staff needed&rdquo; is fine — remaining capacity stays open.</p>
+        <select id="contractor_multi" class="form-select staff-option-list" multiple size="10"{% if use_multi %} name="contractor_ids"{% endif %}{% if not use_multi %} disabled{% endif %}>
+          {% for c in contractors %}
+          <option value="{{ c.id }}" data-search="{{ ((c.name or '') ~ ' ' ~ (c.email or ''))|lower|e }}"{% if use_multi and c.id in _ac %} selected{% endif %}>{{ c.name or c.email }}{% if c.email and c.name %} <span class="text-muted">({{ c.email }})</span>{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-suggest-staff" title="List staff who are free in this window">Who is free?</button>
+        <span id="suggest-list" class="small text-muted d-none"></span>
+      </div>
+      <div id="availability-summary" class="small border rounded px-2 py-2 bg-light text-muted d-none" aria-live="polite"></div>
     </div>
     <div class="col-md-6">
       <label class="form-label">{{ assignment_label|default('Client') }} <span class="text-danger">*</span>
@@ -89,6 +109,11 @@
       <label class="form-label">Labour cost (£)</label>
       <input type="number" name="labour_cost" class="form-control" value="{{ shift.labour_cost if (shift and shift.labour_cost is not none) else '' }}" min="0" step="0.01" placeholder="Optional">
     </div>
+    <div class="col-md-3">
+      <label class="form-label">Person-hours (optional)</label>
+      <input type="number" name="shared_labour_hours" class="form-control" min="0" step="0.25" placeholder="e.g. 2" value="{% if shift and shift.shared_labour_hours is not none %}{{ shift.shared_labour_hours }}{% endif %}">
+      <p class="form-text small text-muted mb-0">Fixed labour budget: when set, end time shortens as more people are assigned (people × duration ≈ these hours). Leave blank for a normal fixed start/end window.</p>
+    </div>
     <div class="col-12" id="assignment-instructions-wrap">
       <label class="form-label small text-muted">Location / {{ assignment_label|default('assignment') }} notes</label>
       <div id="assignment-instructions" class="form-control bg-light small" style="min-height: 3rem; white-space: pre-wrap;">{% if assignment_instructions %}{{ assignment_instructions }}{% else %}<span class="text-muted">Select a {{ assignment_label|default('client')|lower }} to see instructions, or edit in More → Location & shift notes.</span>{% endif %}</div>
@@ -107,6 +132,26 @@
     <a href="{{ url_for('internal_scheduling.admin_schedule_week') }}" class="btn btn-outline-secondary">Cancel</a>
   </div>
 </form>
+
+<dialog id="shiftOverlapDialog" class="border-0 rounded-3 shadow-lg p-0" style="max-width: 28rem; width: 92vw;">
+  <div class="card border-0 m-0">
+    <div class="card-header bg-light border-bottom d-flex justify-content-between align-items-center py-2">
+      <strong class="mb-0">Already on another shift</strong>
+      <button type="button" class="btn-close" id="overlap-dialog-close-x" aria-label="Close"></button>
+    </div>
+    <div class="card-body">
+      <p class="small mb-2" id="overlap-dialog-intro"></p>
+      <ul class="small mb-0 ps-3" id="overlap-dialog-list"></ul>
+      <p class="small text-muted mt-2 mb-0 d-none" id="overlap-dialog-timeoff"></p>
+    </div>
+    <div class="card-footer d-flex flex-wrap gap-2 justify-content-end bg-light">
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="overlap-btn-cancel">Cancel selection</button>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="overlap-btn-keep-both">Keep both (allow overlap)</button>
+      <button type="button" class="btn btn-sm btn-danger" id="overlap-btn-unassign">Unassign from other shift(s)</button>
+    </div>
+  </div>
+</dialog>
+
 {% if shift %}
 <div class="mt-2 d-flex gap-2 flex-wrap align-items-center">
   <form method="post" action="{{ url_for('internal_scheduling.admin_shift_repeat', shift_id=shift.id) }}" class="d-inline-flex gap-1 align-items-center">
@@ -205,100 +250,394 @@
 (function() {
   var api = '/plugin/scheduling_module/api';
   var client = document.getElementById('client_id');
-  var contractorEl = document.getElementById('contractor_ids');
+  var requiredCountEl = document.getElementById('required_count');
+  var single = document.getElementById('contractor_single');
+  var multi = document.getElementById('contractor_multi');
+  var staffSingleWrap = document.getElementById('staff-single-wrap');
+  var staffMultiWrap = document.getElementById('staff-multi-wrap');
+  var staffFilter = document.getElementById('staff-filter');
   var workDateEl = document.querySelector('input[name="work_date"]');
   var startEl = document.querySelector('input[name="scheduled_start"]');
   var endEl = document.querySelector('input[name="scheduled_end"]');
   var conflictEl = document.getElementById('conflict-warnings');
   var suggestListEl = document.getElementById('suggest-list');
   var suggestBtn = document.getElementById('btn-suggest-staff');
+  var availEl = document.getElementById('availability-summary');
   var excludeShiftId = {{ shift.id if shift else 'null' }};
+  var dialog = document.getElementById('shiftOverlapDialog');
+  var overlapDoubleBookOk = new Set();
+  var overlapPending = null;
+  var prevSelectedMulti = new Set();
+  var prevSingleVal = '';
+  var nameById = {};
+  var slotTimer = null;
 
-  function getFirstSelectedContractorId() {
-    if (!contractorEl || !contractorEl.options) return null;
-    for (var i = 0; i < contractorEl.options.length; i++) {
-      if (contractorEl.options[i].selected) return contractorEl.options[i].value;
-    }
-    return null;
+  function staffNeeded() {
+    return Math.max(1, parseInt(requiredCountEl && requiredCountEl.value, 10) || 1);
   }
 
-  function checkConflicts() {
-    if (!contractorEl || !workDateEl || !startEl || !endEl || !conflictEl) return;
-    var cid = getFirstSelectedContractorId();
+  function activeSelect() {
+    return staffNeeded() <= 1 ? single : multi;
+  }
+
+  function buildNameMap() {
+    [single, multi].forEach(function(sel) {
+      if (!sel) return;
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        if (!o.value) continue;
+        nameById[o.value] = (o.textContent || '').replace(/\s+/g, ' ').trim();
+      }
+    });
+  }
+
+  function syncStaffMode() {
+    if (!single || !multi || !requiredCountEl) return;
+    var n = staffNeeded();
+    if (n <= 1) {
+      single.disabled = false;
+      single.setAttribute('name', 'contractor_ids');
+      multi.removeAttribute('name');
+      multi.disabled = true;
+      if (staffSingleWrap) staffSingleWrap.classList.remove('d-none');
+      if (staffMultiWrap) staffMultiWrap.classList.add('d-none');
+      var picked = [];
+      for (var i = 0; i < multi.options.length; i++) {
+        if (multi.options[i].selected) picked.push(multi.options[i].value);
+      }
+      if (picked.length) single.value = picked[0];
+      else if (!single.value && prevSingleVal) single.value = prevSingleVal;
+      for (var j = 0; j < multi.options.length; j++) multi.options[j].selected = false;
+    } else {
+      multi.disabled = false;
+      multi.setAttribute('name', 'contractor_ids');
+      single.removeAttribute('name');
+      single.disabled = true;
+      if (staffSingleWrap) staffSingleWrap.classList.add('d-none');
+      if (staffMultiWrap) staffMultiWrap.classList.remove('d-none');
+      if (single.value) {
+        for (var k = 0; k < multi.options.length; k++) {
+          if (multi.options[k].value === single.value) multi.options[k].selected = true;
+        }
+      }
+    }
+    applyStaffFilter();
+    refreshPrevMulti();
+    checkConflictsAll();
+    scheduleSlotStatus();
+  }
+
+  function refreshPrevMulti() {
+    prevSelectedMulti = new Set();
+    if (!multi) return;
+    for (var i = 0; i < multi.options.length; i++) {
+      if (multi.options[i].selected) prevSelectedMulti.add(multi.options[i].value);
+    }
+  }
+
+  function applyStaffFilter() {
+    var q = (staffFilter && staffFilter.value || '').trim().toLowerCase();
+    [single, multi].forEach(function(sel) {
+      if (!sel) return;
+      for (var i = 0; i < sel.options.length; i++) {
+        var o = sel.options[i];
+        if (o.value === '') {
+          o.hidden = false;
+          continue;
+        }
+        var hay = (o.getAttribute('data-search') || o.textContent || '').toLowerCase();
+        o.hidden = !!(q && hay.indexOf(q) === -1);
+      }
+    });
+  }
+
+  function selectedIds() {
+    var n = staffNeeded();
+    if (n <= 1) {
+      if (!single || !single.value) return [];
+      return [single.value];
+    }
+    var out = [];
+    if (!multi) return out;
+    for (var i = 0; i < multi.options.length; i++) {
+      if (multi.options[i].selected) out.push(multi.options[i].value);
+    }
+    return out;
+  }
+
+  function fetchConflictsFor(cid) {
+    var date = workDateEl && workDateEl.value;
+    var start = startEl && startEl.value;
+    var end = endEl && endEl.value;
+    if (!cid || !date || !start || !end) return Promise.resolve({ conflicts: [], overlap_shifts: [] });
+    var q = 'contractor_id=' + encodeURIComponent(cid) + '&date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
+    if (excludeShiftId) q += '&exclude_shift_id=' + excludeShiftId;
+    return fetch(api + '/check-conflicts?' + q, { headers: { 'Accept': 'application/json' } }).then(function(r) { return r.json(); });
+  }
+
+  function checkConflictsAll() {
+    if (!conflictEl || !workDateEl || !startEl || !endEl) return;
+    var ids = selectedIds();
     var date = workDateEl.value;
     var start = startEl.value;
     var end = endEl.value;
-    if (!cid || !date || !start || !end) {
+    if (!ids.length || !date || !start || !end) {
       conflictEl.classList.add('d-none');
       return;
     }
-    var q = 'contractor_id=' + encodeURIComponent(cid) + '&date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
-    if (excludeShiftId) q += '&exclude_shift_id=' + excludeShiftId;
-    fetch(api + '/check-conflicts?' + q, { headers: { 'Accept': 'application/json' } })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.conflicts && data.conflicts.length) {
-          conflictEl.innerHTML = '<strong>Warnings:</strong> ' + data.conflicts.join(' ');
-          conflictEl.classList.remove('d-none');
-        } else {
-          conflictEl.classList.add('d-none');
+    Promise.all(ids.map(function(id) {
+      return fetchConflictsFor(id).then(function(data) { return { id: id, data: data }; });
+    })).then(function(rows) {
+      var lines = [];
+      rows.forEach(function(row) {
+        var msgs = (row.data.conflicts || []).slice();
+        if (overlapDoubleBookOk.has(String(row.id))) {
+          msgs = msgs.filter(function(m) { return m.indexOf('Overlaps') !== 0; });
         }
-      })
-      .catch(function() { conflictEl.classList.add('d-none'); });
+        if (msgs.length) {
+          var nm = nameById[row.id] || ('ID ' + row.id);
+          lines.push('<strong>' + nm + ':</strong> ' + msgs.join(' '));
+        }
+      });
+      if (lines.length) {
+        conflictEl.innerHTML = '<strong>Heads up:</strong><br>' + lines.join('<br>');
+        conflictEl.classList.remove('d-none');
+      } else {
+        conflictEl.classList.add('d-none');
+      }
+    }).catch(function() { conflictEl.classList.add('d-none'); });
   }
 
-  if (contractorEl) contractorEl.addEventListener('change', checkConflicts);
-  if (workDateEl) workDateEl.addEventListener('change', checkConflicts);
-  if (startEl) startEl.addEventListener('change', checkConflicts);
-  if (endEl) endEl.addEventListener('change', checkConflicts);
+  function scheduleSlotStatus() {
+    if (slotTimer) clearTimeout(slotTimer);
+    slotTimer = setTimeout(refreshSlotStatus, 350);
+  }
 
-  if (suggestBtn && suggestListEl && contractorEl) {
+  function refreshSlotStatus() {
+    if (!availEl || !workDateEl || !startEl || !endEl) return;
+    var date = workDateEl.value;
+    var start = startEl.value;
+    var end = endEl.value;
+    if (!date || !start || !end) {
+      availEl.classList.add('d-none');
+      return;
+    }
+    var q = 'date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
+    if (excludeShiftId) q += '&exclude_shift_id=' + excludeShiftId;
+    fetch(api + '/contractors-slot-status?' + q, { headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var rows = data.contractors || [];
+        var free = rows.filter(function(c) { return c.slot_status === 'free'; });
+        var busy = rows.filter(function(c) { return c.slot_status === 'busy'; });
+        var off = rows.filter(function(c) { return c.slot_status === 'time_off'; });
+        var bits = [];
+        bits.push('<span class="text-success">Free: ' + free.length + '</span>');
+        bits.push('<span class="text-secondary">Booked elsewhere: ' + busy.length + '</span>');
+        bits.push('<span class="text-danger">Time off: ' + off.length + '</span>');
+        availEl.innerHTML = bits.join(' · ') + ' <span class="text-muted">(for this date &amp; time)</span>';
+        availEl.classList.remove('d-none');
+      })
+      .catch(function() { availEl.classList.add('d-none'); });
+  }
+
+  function showOverlapDialog(ctx) {
+    overlapPending = ctx;
+    var intro = document.getElementById('overlap-dialog-intro');
+    var listEl = document.getElementById('overlap-dialog-list');
+    var toEl = document.getElementById('overlap-dialog-timeoff');
+    if (intro) intro.textContent = (ctx.label || 'This person') + ' is already on another shift that overlaps this time. Choose how to proceed.';
+    if (listEl) {
+      listEl.innerHTML = '';
+      (ctx.overlap_shifts || []).forEach(function(s) {
+        var li = document.createElement('li');
+        li.textContent = (s.client_name || '—') + ' · ' + (s.scheduled_start || '') + '–' + (s.scheduled_end || '');
+        listEl.appendChild(li);
+      });
+    }
+    if (toEl) {
+      if (ctx.timeoff_msgs && ctx.timeoff_msgs.length) {
+        toEl.textContent = 'Time off also applies: ' + ctx.timeoff_msgs.join(' ');
+        toEl.classList.remove('d-none');
+      } else {
+        toEl.textContent = '';
+        toEl.classList.add('d-none');
+      }
+    }
+    if (dialog && typeof dialog.showModal === 'function') dialog.showModal();
+  }
+
+  function closeOverlapDialog() {
+    if (dialog && typeof dialog.close === 'function') dialog.close();
+    overlapPending = null;
+  }
+
+  function maybePromptOverlap(cidStr, source) {
+    var date = workDateEl && workDateEl.value;
+    var start = startEl && startEl.value;
+    var end = endEl && endEl.value;
+    if (!cidStr || !date || !start || !end) return;
+    if (overlapDoubleBookOk.has(String(cidStr))) return;
+    fetchConflictsFor(cidStr).then(function(data) {
+      var overlaps = data.overlap_shifts || [];
+      if (!overlaps.length) return;
+      var toMsgs = (data.conflicts || []).filter(function(m) { return m.indexOf('Time off') !== -1; });
+      showOverlapDialog({
+        cid: cidStr,
+        label: nameById[cidStr] || ('ID ' + cidStr),
+        overlap_shifts: overlaps,
+        timeoff_msgs: toMsgs,
+        source: source,
+      });
+    });
+  }
+
+  if (single) {
+    prevSingleVal = single.value;
+    single.addEventListener('change', function() {
+      var v = single.value;
+      if (v) maybePromptOverlap(v, 'single');
+      prevSingleVal = v;
+      checkConflictsAll();
+    });
+  }
+
+  if (multi) {
+    multi.addEventListener('change', function() {
+      var now = new Set();
+      for (var i = 0; i < multi.options.length; i++) {
+        if (multi.options[i].selected) now.add(multi.options[i].value);
+      }
+      now.forEach(function(id) {
+        if (!prevSelectedMulti.has(id)) maybePromptOverlap(id, 'multi');
+      });
+      refreshPrevMulti();
+      checkConflictsAll();
+    });
+  }
+
+  if (requiredCountEl) requiredCountEl.addEventListener('change', syncStaffMode);
+  if (requiredCountEl) requiredCountEl.addEventListener('input', syncStaffMode);
+  if (staffFilter) staffFilter.addEventListener('input', applyStaffFilter);
+  [workDateEl, startEl, endEl].forEach(function(el) {
+    if (el) el.addEventListener('change', function() {
+      overlapDoubleBookOk.clear();
+      checkConflictsAll();
+      scheduleSlotStatus();
+    });
+  });
+
+  var btnOverlapCancel = document.getElementById('overlap-btn-cancel');
+  var btnOverlapKeep = document.getElementById('overlap-btn-keep-both');
+  var btnOverlapUnassign = document.getElementById('overlap-btn-unassign');
+  var btnOverlapCloseX = document.getElementById('overlap-dialog-close-x');
+  if (btnOverlapCancel) btnOverlapCancel.addEventListener('click', function() {
+    if (!overlapPending) { closeOverlapDialog(); return; }
+    var cid = overlapPending.cid;
+    if (overlapPending.source === 'single' && single) {
+      single.value = '';
+      prevSingleVal = '';
+    }
+    if (overlapPending.source === 'multi' && multi) {
+      for (var i = 0; i < multi.options.length; i++) {
+        if (multi.options[i].value === cid) multi.options[i].selected = false;
+      }
+      refreshPrevMulti();
+    }
+    closeOverlapDialog();
+    checkConflictsAll();
+    scheduleSlotStatus();
+  });
+
+  if (btnOverlapKeep) btnOverlapKeep.addEventListener('click', function() {
+    if (overlapPending && overlapPending.cid) overlapDoubleBookOk.add(String(overlapPending.cid));
+    closeOverlapDialog();
+    checkConflictsAll();
+  });
+
+  if (btnOverlapUnassign) btnOverlapUnassign.addEventListener('click', function() {
+    if (!overlapPending) return;
+    var cid = parseInt(overlapPending.cid, 10);
+    var date = workDateEl.value;
+    var start = startEl.value;
+    var end = endEl.value;
+    fetch(api + '/unassign-slot-overlap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        contractor_id: cid,
+        date: date,
+        start: start,
+        end: end,
+        exclude_shift_id: excludeShiftId || null,
+      }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.error) return;
+        overlapDoubleBookOk.delete(String(cid));
+        closeOverlapDialog();
+        checkConflictsAll();
+        scheduleSlotStatus();
+      })
+      .catch(function() {});
+  });
+
+  if (btnOverlapCloseX) btnOverlapCloseX.addEventListener('click', closeOverlapDialog);
+
+  function pickContractor(idStr) {
+    if (staffNeeded() <= 1 && single) {
+      single.value = idStr;
+      single.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (multi) {
+      for (var i = 0; i < multi.options.length; i++) {
+        if (multi.options[i].value === idStr) multi.options[i].selected = true;
+      }
+      multi.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  if (suggestBtn && suggestListEl) {
     suggestBtn.addEventListener('click', function() {
       var date = workDateEl && workDateEl.value;
       var start = startEl && startEl.value;
       var end = endEl && endEl.value;
       if (!date || !start || !end) {
-        suggestListEl.textContent = 'Set date and start/end time first.';
+        suggestListEl.textContent = 'Set date and start/end times first.';
         suggestListEl.classList.remove('d-none');
         return;
       }
       var q = 'date=' + encodeURIComponent(date) + '&start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end);
-      if (client && client.value) q += '&client_id=' + client.value;
-      var jt = document.querySelector('select[name="job_type_id"]');
-      if (jt && jt.value) q += '&job_type_id=' + jt.value;
+      if (excludeShiftId) q += '&exclude_shift_id=' + excludeShiftId;
       suggestListEl.textContent = 'Loading…';
       suggestListEl.classList.remove('d-none');
-      fetch(api + '/suggest-contractors?' + q, { headers: { 'Accept': 'application/json' } })
+      fetch(api + '/contractors-slot-status?' + q, { headers: { 'Accept': 'application/json' } })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-          if (data.contractors && data.contractors.length) {
-            suggestListEl.innerHTML = 'Available: ' + data.contractors.map(function(c) {
-              return '<a href="#" class="suggest-pick me-1" data-id="' + c.id + '">' + (c.name || c.email) + '</a>';
-            }).join(', ');
+          var free = (data.contractors || []).filter(function(c) { return c.slot_status === 'free'; });
+          if (free.length) {
+            suggestListEl.innerHTML = 'Free for this slot: ' + free.map(function(c) {
+              return '<a href="#" class="suggest-pick me-1" data-id="' + c.id + '">' + (c.name || c.email || c.id) + '</a>';
+            }).join('');
             suggestListEl.querySelectorAll('.suggest-pick').forEach(function(a) {
               a.addEventListener('click', function(e) {
                 e.preventDefault();
-                var id = this.getAttribute('data-id');
-                for (var i = 0; i < contractorEl.options.length; i++) {
-                  if (contractorEl.options[i].value === id) {
-                    contractorEl.options[i].selected = true;
-                    break;
-                  }
-                }
-                checkConflicts();
+                pickContractor(this.getAttribute('data-id'));
               });
             });
           } else {
-            suggestListEl.textContent = 'No available staff for this slot.';
+            suggestListEl.textContent = 'No one is completely free for this window (check list above for busy / time off).';
           }
         })
-        .catch(function() { suggestListEl.textContent = 'Could not load suggestions.'; });
+        .catch(function() { suggestListEl.textContent = 'Could not load.'; });
     });
   }
 
-  if (contractorEl && workDateEl && startEl && endEl && conflictEl) {
-    if (getFirstSelectedContractorId() && workDateEl.value && startEl.value && endEl.value) checkConflicts();
-  }
+  buildNameMap();
+  refreshPrevMulti();
+  syncStaffMode();
+  if (single) prevSingleVal = single.value;
+  scheduleSlotStatus();
 })();
 </script>
 {% endblock %}

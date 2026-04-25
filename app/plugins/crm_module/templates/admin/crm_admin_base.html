@@ -20,9 +20,9 @@
 </head>
 <body>
   {% include 'partials/sparrow_admin_top_nav.html' %}
-  {% set ep_pipe = request.endpoint in ('crm_module.opportunities_list', 'crm_module.opportunities_board', 'crm_module.opportunity_intake', 'crm_module.opportunity_new', 'crm_module.opportunity_edit') %}
-  {% set ep_quotes = request.endpoint in ('crm_module.quotes_list', 'crm_module.quote_new', 'crm_module.quote_edit', 'crm_module.quote_rule_sets_list', 'crm_module.quote_rule_set_new', 'crm_module.quote_rule_set_edit', 'crm_module.quote_rule_set_test', 'crm_module.guide_wage_job_map', 'crm_module.event_plan_pdf_settings') %}
-  {% set ep_events = request.endpoint in ('crm_module.event_plans_list', 'crm_module.event_plan_new', 'crm_module.event_plan_edit', 'crm_module.event_plan_questions_list', 'crm_module.event_plan_question_edit', 'crm_module.event_plan_diagram_templates_admin') %}
+  {% set ep_pipe = request.endpoint in ('crm_module.opportunities_list', 'crm_module.opportunities_board', 'crm_module.opportunity_new', 'crm_module.opportunity_edit') %}
+  {% set ep_lead_capture = request.endpoint in ('crm_module.intake_forms_list', 'crm_module.intake_form_new', 'crm_module.intake_form_edit', 'crm_module.intake_form_run', 'crm_module.opportunity_intake', 'crm_module.opportunity_intake_private_transfer') %}
+  {% set ep_quotes = request.endpoint in ('crm_module.quotes_list', 'crm_module.quote_new', 'crm_module.quote_edit', 'crm_module.quote_rule_sets_list', 'crm_module.quote_rule_set_new', 'crm_module.quote_rule_set_edit', 'crm_module.quote_rule_set_test', 'crm_module.guide_wage_job_map', 'crm_module.dispatch_bases_settings', 'crm_module.desk_intake_layout_settings', 'crm_module.event_intake_layout_settings') %}
   <nav class="nav-module crm-subnav border-bottom py-2 px-3 bg-white shadow-sm">
     <div class="container-fluid px-3">
       <div class="d-flex flex-wrap align-items-center gap-1">
@@ -30,11 +30,24 @@
         <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.accounts_list', 'crm_module.account_new', 'crm_module.account_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.accounts_list') }}"><i class="bi bi-building me-1"></i>Accounts</a>
         <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.contacts_list', 'crm_module.contact_new', 'crm_module.contact_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.contacts_list') }}"><i class="bi bi-people me-1"></i>Contacts</a>
         <div class="dropdown d-inline-block">
+          <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_lead_capture %}fw-bold text-primary{% endif %}" href="#" id="crmNavLeadCapture" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-ui-checks me-1"></i>Lead capture</a>
+          <ul class="dropdown-menu" aria-labelledby="crmNavLeadCapture">
+            <li><h6 class="dropdown-header">Custom forms</h6></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.intake_forms_list' %}active{% endif %}" href="{{ url_for('crm_module.intake_forms_list') }}">Intake forms</a></li>
+            {% if can_edit %}
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.intake_form_new' %}active{% endif %}" href="{{ url_for('crm_module.intake_form_new') }}">New intake form</a></li>
+            {% endif %}
+            <li><hr class="dropdown-divider"></li>
+            <li><h6 class="dropdown-header">Desk tools</h6></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_intake' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_intake') }}">Event desk intake</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_intake_private_transfer' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_intake_private_transfer') }}">Private transfer intake</a></li>
+          </ul>
+        </div>
+        <div class="dropdown d-inline-block">
           <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_pipe %}fw-bold text-primary{% endif %}" href="#" id="crmNavPipeline" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-funnel me-1"></i>Pipeline</a>
           <ul class="dropdown-menu" aria-labelledby="crmNavPipeline">
             <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunities_list' %}active{% endif %}" href="{{ url_for('crm_module.opportunities_list') }}">All opportunities</a></li>
             <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunities_board' %}active{% endif %}" href="{{ url_for('crm_module.opportunities_board') }}">Kanban board</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_intake' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_intake') }}">Call / desk intake</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'crm_module.opportunity_new' %}active{% endif %}" href="{{ url_for('crm_module.opportunity_new') }}">New opportunity</a></li>
           </ul>
@@ -48,24 +61,14 @@
             <li><a class="dropdown-item {% if request.endpoint in ('crm_module.quote_rule_sets_list', 'crm_module.quote_rule_set_new', 'crm_module.quote_rule_set_edit', 'crm_module.quote_rule_set_test') %}active{% endif %}" href="{{ url_for('crm_module.quote_rule_sets_list') }}">Quote rule sets</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.endpoint == 'crm_module.guide_wage_job_map' %}active{% endif %}" href="{{ url_for('crm_module.guide_wage_job_map') }}">Guide &amp; wage mapping</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plan_pdf_settings' %}active{% endif %}" href="{{ url_for('crm_module.event_plan_pdf_settings') }}">Event plan PDF (cover)</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_pdf_settings') }}">Event plan PDF (cover)</a></li>
+            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.dispatch_bases_settings' %}active{% endif %}" href="{{ url_for('crm_module.dispatch_bases_settings') }}">Dispatch bases (mileage)</a></li>
+            <li><a class="dropdown-item {% if request.endpoint in ('crm_module.desk_intake_layout_settings', 'crm_module.event_intake_layout_settings') %}active{% endif %}" href="{{ url_for('crm_module.desk_intake_layout_settings') }}">Desk intake layout</a></li>
           </ul>
         </div>
         <a class="nav-link py-1 px-2 {% if request.endpoint in ('crm_module.activities_list', 'crm_module.activity_new', 'crm_module.activity_edit') %}fw-bold text-primary{% endif %}" href="{{ url_for('crm_module.activities_list') }}"><i class="bi bi-lightning me-1"></i>Activities</a>
-        {% if industry_visible('medical') %}
-        <div class="dropdown d-inline-block">
-          <a class="nav-link dropdown-toggle py-1 px-2 {% if ep_events %}fw-bold text-primary{% endif %}" href="#" id="crmNavEvents" role="button" data-mdb-toggle="dropdown" data-mdb-auto-close="outside" aria-expanded="false"><i class="bi bi-clipboard2-pulse me-1"></i>Medical events</a>
-          <ul class="dropdown-menu" aria-labelledby="crmNavEvents">
-            <li><h6 class="dropdown-header">Internal — event medical plans</h6></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plans_list' %}active{% endif %}" href="{{ url_for('crm_module.event_plans_list') }}">All plans</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plan_new' %}active{% endif %}" href="{{ url_for('crm_module.event_plan_new') }}">New plan</a></li>
-            <li><a class="dropdown-item {% if request.endpoint in ('crm_module.event_plan_questions_list', 'crm_module.event_plan_question_edit') %}active{% endif %}" href="{{ url_for('crm_module.event_plan_questions_list') }}">Plan questionnaire (admin)</a></li>
-            <li><a class="dropdown-item {% if request.endpoint == 'crm_module.event_plan_diagram_templates_admin' %}active{% endif %}" href="{{ url_for('crm_module.event_plan_diagram_templates_admin') }}">Plan diagram templates</a></li>
-          </ul>
-        </div>
-        {% if crm_cura_ops_hub_url %}
-        <a class="nav-link py-1 px-2 text-secondary" href="{{ crm_cura_ops_hub_url }}"><i class="bi bi-hospital me-1"></i>Cura ops</a>
-        {% endif %}
+        {% if industry_visible('medical') and crm_cura_ops_hub_url %}
+        <a class="nav-link py-1 px-2 text-secondary" href="{{ crm_cura_ops_hub_url }}"><i class="bi bi-hospital me-1"></i>Cura event manager</a>
         {% endif %}
         <form class="d-flex align-items-center ms-auto mt-1 mt-md-0" method="get" action="{{ url_for('crm_module.crm_search') }}" role="search">
           <input type="search" name="q" class="form-control form-control-sm rounded-pill" placeholder="Search CRM…" aria-label="Search CRM" style="max-width:11rem;" minlength="2" maxlength="200">

@@ -1,0 +1,643 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% import "partials/fleet_status_macros.html" as fs %}
+{% block page_title %}{{ vehicle.registration or vehicle.internal_code }}{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="fleet-page-hero d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <div class="d-flex gap-3 align-items-start">
+      {% if vehicle.id_photo_path %}
+      <img src="{{ url_for('static', filename='uploads/' + vehicle.id_photo_path) }}" alt="" class="rounded border" style="width:96px;height:96px;object-fit:cover">
+      {% endif %}
+      <div>
+        <h1 class="h4 mb-0">{{ vehicle.internal_code }}{% if vehicle.registration %} <span class="text-muted small">{{ vehicle.registration }}</span>{% else %} <span class="text-muted small">No registration</span>{% endif %}</h1>
+        <p class="text-muted mb-0">{{ vehicle.make or '' }} {{ vehicle.model or '' }} · {{ fs.status_title_line(vehicle.status) }}
+          {% if vehicle.off_road_reason == 'compliance' %}<span class="badge bg-warning text-dark">Compliance hold</span>{% elif vehicle.off_road_reason == 'issue' %}<span class="badge bg-secondary">Issue (VOR path)</span>{% endif %}
+        </p>
+        {% if vehicle.vehicle_type_name %}<p class="small mb-0"><strong>Type</strong> {{ vehicle.vehicle_type_name }}</p>{% endif %}
+        {% if vehicle.vin %}<p class="small mb-0"><strong>VIN</strong> {{ vehicle.vin }}</p>{% endif %}
+      </div>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('fleet_management.vehicles_list') }}"><i class="bi bi-arrow-left me-1"></i>Back</a>
+  </div>
+
+  <div class="card shadow-sm mb-3 border-{% if deployment_readiness.verdict == 'ready' %}success{% elif deployment_readiness.verdict == 'caution' %}warning{% else %}danger{% endif %} border-2">
+    <div class="card-header bg-body d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <span class="fw-semibold">Deployment readiness</span>
+      {% if deployment_readiness.verdict == 'ready' %}
+      <span class="badge bg-success">Ready (no blockers)</span>
+      {% elif deployment_readiness.verdict == 'caution' %}
+      <span class="badge bg-warning text-dark">Caution</span>
+      {% else %}
+      <span class="badge bg-danger">Not ready</span>
+      {% endif %}
+    </div>
+    <div class="card-body py-3">
+      <p class="small fw-medium mb-2">{{ deployment_readiness.summary }}</p>
+      <p class="text-muted small mb-2">Compliance, safety cycle, service, on-board kit, consumable and expiry flags, and any required kit SKUs set on the vehicle type.</p>
+      <ul class="list-unstyled small mb-0">
+        {% for c in deployment_readiness.checks %}
+        <li class="d-flex gap-2 mb-2 align-items-start">
+          {% if c.level == 'success' %}<span class="badge bg-success flex-shrink-0">{{ c.label }}</span>
+          {% elif c.level == 'warning' %}<span class="badge bg-warning text-dark flex-shrink-0">{{ c.label }}</span>
+          {% elif c.level == 'danger' %}<span class="badge bg-danger flex-shrink-0">{{ c.label }}</span>
+          {% else %}<span class="badge bg-secondary flex-shrink-0">{{ c.label }}</span>{% endif %}
+          <span>{{ c.text }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  {% if can_edit %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">Edit vehicle</div>
+    <div class="card-body">
+      <form method="post" enctype="multipart/form-data" class="row g-2">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if uk_gov_lookup_available %}<div class="col-12">{% include 'admin/partials/fleet_uk_reg_lookup.html' %}</div>{% endif %}
+        <div class="col-md-3"><label class="form-label small">Unit name / callsign</label><input class="form-control form-control-sm" name="internal_code" value="{{ vehicle.internal_code }}" maxlength="64" required></div>
+        <div class="col-md-3"><label class="form-label small">Registration</label><input class="form-control form-control-sm" name="registration" value="{{ vehicle.registration or '' }}" maxlength="32" placeholder="Optional"></div>
+        <div class="col-md-3"><label class="form-label small">VIN</label><input class="form-control form-control-sm" name="vin" value="{{ vehicle.vin or '' }}" maxlength="64"></div>
+        <div class="col-md-3"><label class="form-label small">Make</label><input class="form-control form-control-sm" name="make" value="{{ vehicle.make or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Model</label><input class="form-control form-control-sm" name="model" value="{{ vehicle.model or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Year</label><input class="form-control form-control-sm" type="number" name="year" value="{{ vehicle.year or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Fuel</label><input class="form-control form-control-sm" name="fuel_type" value="{{ vehicle.fuel_type or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Status</label>
+          {{ fs.admin_status_select(vehicle.status) }}
+        </div>
+        <div class="col-md-6"><label class="form-label small">Vehicle type</label>
+          <select class="form-select form-select-sm" name="vehicle_type_id">
+            <option value="">—</option>
+            {% for t in vehicle_types %}
+            <option value="{{ t.id }}" {% if vehicle.vehicle_type_id == t.id %}selected{% endif %}>{{ t.name }}{% if not t.active %} (inactive){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes" value="{{ vehicle.notes or '' }}"></div>
+        <div class="col-md-12"><label class="form-label small">ID photo (thumbnail in lists)</label><input class="form-control form-control-sm" type="file" name="id_photo" accept="image/*"></div>
+        <div class="col-md-4"><label class="form-label small">MOT expiry</label><input class="form-control form-control-sm" type="date" name="mot_expiry" value="{{ vehicle.mot_expiry or '' }}"></div>
+        <div class="col-md-4"><label class="form-label small">Tax expiry</label><input class="form-control form-control-sm" type="date" name="tax_expiry" value="{{ vehicle.tax_expiry or '' }}"></div>
+        <div class="col-md-4"><label class="form-label small">Insurance expiry</label><input class="form-control form-control-sm" type="date" name="insurance_expiry" value="{{ vehicle.insurance_expiry or '' }}"></div>
+        <div class="col-12 mt-2"><span class="small fw-semibold">Planned servicing (compliance)</span></div>
+        <div class="col-md-3"><label class="form-label small">Last service date</label><input class="form-control form-control-sm" type="date" name="last_service_date" value="{{ vehicle.last_service_date or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Last service mileage</label><input class="form-control form-control-sm" type="number" name="last_service_mileage" value="{{ vehicle.last_service_mileage or '' }}" min="0"></div>
+        <div class="col-md-3"><label class="form-label small">Next due (date)</label><input class="form-control form-control-sm" type="date" name="next_service_due_date" value="{{ vehicle.next_service_due_date or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Next due (mileage)</label><input class="form-control form-control-sm" type="number" name="next_service_due_mileage" value="{{ vehicle.next_service_due_mileage or '' }}" min="0" placeholder="Optional"></div>
+        <div class="col-md-12"><label class="form-label small">Servicing notes</label><input class="form-control form-control-sm" name="servicing_notes" value="{{ vehicle.servicing_notes or '' }}"></div>
+        <div class="col-12"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="alert alert-light border shadow-sm small mb-3" role="note">
+    <div class="fw-semibold mb-2 text-dark"><i class="bi bi-info-circle me-1"></i>
+      {% if industry_visible('medical') and industry_visible('security') %}
+      How this vehicle record is organised (medical, security, and general fleets)
+      {% elif industry_visible('medical') %}
+      How this vehicle record is organised (medical transport and general fleets)
+      {% elif industry_visible('security') %}
+      How this vehicle record is organised (security operations and general fleets)
+      {% else %}
+      How this vehicle record is organised (site vehicles and logistics)
+      {% endif %}
+    </div>
+    <ul class="mb-2 ps-3">
+      <li class="mb-1"><strong>Vehicle parts</strong> — chassis and mechanical components fitted to the unit (e.g. compressor, alternator, steering pump, body hardware). Warranty and repeat-repair history belong here.
+        {% if industry_visible('medical') %}
+        This is <em>not</em> where clinical consumables, dressings, or bag stock live.
+        {% else %}
+        Bulk consumables and depot stock stay in <a href="{{ url_for('inventory_control_internal.dashboard') }}">Inventory</a> until issued.
+        {% endif %}
+      </li>
+      <li class="mb-1"><strong>Kit &amp; serial assets</strong> —
+        {% if industry_visible('medical') %}
+        tagged equipment assigned to this unit: response bags, AEDs, suction, radios, body-worn video, locks, and similar.
+        {% elif industry_visible('security') %}
+        tagged equipment on this unit: radios, body-worn video, keys, locks, tools, and similar.
+        {% else %}
+        tagged equipment on this unit (tools, radios, lockers, portable kit, and similar).
+        {% endif %}
+        Sign out and return via <a href="{{ url_for('inventory_control_internal.equipment_servicing_dashboard') }}">Inventory servicing</a> or <a href="{{ url_for('inventory_control_internal.equipment_desk_page') }}">Equipment desk</a>.
+        {% if industry_visible('medical') %}
+        Open an asset to log <strong>consumables inside the kit</strong> (e.g. defib pads) with lot/batch and expiry.
+        {% else %}
+        Open an asset to log <strong>consumables inside the kit</strong> with lot/batch and expiry.
+        {% endif %}
+      </li>
+      <li class="mb-0"><strong>Stores stock</strong> — bulk items and consumables held in depots until issued. Managed under <a href="{{ url_for('inventory_control_internal.dashboard') }}">Inventory</a> (locations, batches, transactions).</li>
+    </ul>
+  </div>
+
+  <ul class="nav nav-pills fleet-tabs mb-3 flex-wrap" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-mdb-toggle="pill" data-mdb-target="#tab-assets" type="button">Kit &amp; serial assets</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-parts" type="button">Vehicle parts</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-mileage" type="button">Mileage</button></li>
+    {% if mot_history_enabled %}
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-mot-dvsa" type="button">Official MOT (DVSA)</button></li>
+    {% endif %}
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-maint" type="button">Maintenance</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-safety" type="button">Safety checks</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-vdi" type="button">VDI logs</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-issues" type="button">Issues</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-history" type="button">History</button></li>
+    <li class="nav-item"><button class="nav-link" data-mdb-toggle="pill" data-mdb-target="#tab-drivers" type="button">Drivers</button></li>
+  </ul>
+  {% if mot_history_gov_uk_fallback and vehicle.registration %}
+  <p class="small text-muted border-start border-3 border-secondary ps-2 mb-3">
+    In-app DVSA MOT history is hidden while the service is unavailable or paused.
+    Check this registration on
+    <a href="https://www.gov.uk/check-mot-history" target="_blank" rel="noopener">GOV.UK — Check the MOT history of a vehicle</a>
+    (enter <strong class="text-body">{{ vehicle.registration }}</strong> there).
+  </p>
+  {% endif %}
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="tab-assets">
+      <p class="small text-muted mb-2">
+        {% if industry_visible('medical') %}
+        Serialised kit and gear on this unit (e.g. response equipment, radios, body-worn video). Chassis parts such as pumps and compressors are recorded under the <strong>Vehicle parts</strong> tab. <strong>Kit consumables</strong> (pads, blades, dated items inside an AED or bag) are tracked on each asset’s detail page with lot/batch/expiry.
+        {% elif industry_visible('security') %}
+        Serialised kit on this unit (radios, body-worn video, keys, tools). Chassis parts belong under the <strong>Vehicle parts</strong> tab. <strong>Kit consumables</strong> are tracked on each asset’s detail page with lot/batch/expiry.
+        {% else %}
+        Serialised kit assigned to this unit. Chassis parts belong under the <strong>Vehicle parts</strong> tab. <strong>Kit consumables</strong> are tracked on each asset’s detail page with lot/batch/expiry.
+        {% endif %}
+        Assign or return from <a href="{{ url_for('inventory_control_internal.equipment_desk_page') }}">Inventory → Equipment</a> (or each asset’s page) or use <strong>Return</strong> below.</p>
+      <div class="table-responsive card shadow-sm mb-4">
+        <table class="table table-sm mb-0 align-middle">
+          <thead><tr><th>Asset</th><th>Serial</th><th>Item</th><th>SKU</th><th>Status</th><th>Kit consumables</th>{% if can_fleet_transactions %}<th class="text-end">Actions</th>{% endif %}</tr></thead>
+          <tbody>
+            {% for a in equipment_on_board %}
+            <tr>
+              <td>
+                {% if a.public_asset_code %}<span class="fw-semibold">{{ a.public_asset_code }}</span><br>{% endif %}
+                <a href="{{ url_for('inventory_control_internal.equipment_asset_detail', asset_id=a.id) }}">Open asset</a>
+              </td>
+              <td>{{ a.serial_number }}</td>
+              <td>{{ a.item_name }}</td>
+              <td class="text-muted">{{ a.sku }}</td>
+              <td><span class="badge bg-secondary">{{ a.status }}</span></td>
+              <td class="small">
+                {% set ca = equipment_consumable_alerts.get(a.id) %}
+                {% if ca and ca.total_lines %}
+                  {% set active_lines = ca.expired + ca.near + ca.in_date + ca.no_expiry_active %}
+                  {% if ca.discrepancy|default(0) > 0 %}
+                  <span class="badge bg-info text-dark">Field report {{ ca.discrepancy }}</span>
+                  {% endif %}
+                  {% if active_lines == 0 and ca.used_up > 0 %}
+                  <span class="badge bg-secondary">All depleted</span>
+                  {% elif ca.expired > 0 %}
+                  <span class="badge bg-danger">Expired {{ ca.expired }}</span>
+                  {% elif ca.near > 0 %}
+                  <span class="badge bg-warning text-dark">Due ≤30d {{ ca.near }}</span>
+                  {% elif ca.worst == 'ok' %}
+                  <span class="badge bg-success">In date</span>
+                  {% else %}
+                  <span class="badge bg-light text-dark border">No expiry set</span>
+                  {% endif %}
+                  {% if ca.used_up > 0 and active_lines > 0 %}<span class="text-muted d-block small">{{ ca.used_up }} used</span>{% endif %}
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              {% if can_fleet_transactions %}
+              <td class="text-end">
+                {% if inventory_locations %}
+                <form method="post" action="{{ url_for('fleet_management.vehicle_return_equipment', vehicle_id=vehicle.id, asset_id=a.id) }}" class="d-inline-flex flex-wrap gap-1 justify-content-end align-items-center">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <select class="form-select form-select-sm" name="location_id" required style="min-width:11rem">
+                    <option value="">Return to…</option>
+                    {% for loc in inventory_locations %}
+                    <option value="{{ loc.id }}">{{ loc.code or loc.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button class="btn btn-sm btn-outline-warning" type="submit">Return</button>
+                </form>
+                {% else %}
+                <span class="small text-muted">No locations</span>
+                {% endif %}
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{% if can_fleet_transactions %}7{% else %}6{% endif %}" class="text-muted">No serialised kit on this vehicle yet. Assign assets from Asset management (sign-out to this vehicle). Fitted mechanical parts belong under <strong>Vehicle parts</strong>.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="h6">Kit activity (this vehicle)</h3>
+      <p class="small text-muted mb-2">Serial asset sign-outs to this unit and returns recorded from this vehicle.</p>
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Summary</th>
+              <th>Item</th>
+              <th>Tx</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in equipment_activity %}
+            <tr>
+              <td class="text-nowrap small">{{ row.performed_at }}</td>
+              <td class="small text-muted">{% if row.performed_by_user_id %}#{{ row.performed_by_user_id }}{% else %}—{% endif %}</td>
+              <td>{{ row.activity_summary }}</td>
+              <td class="small">
+                {% if row.equipment_asset_id %}
+                <a href="{{ url_for('inventory_control_internal.equipment_asset_detail', asset_id=row.equipment_asset_id) }}">{{ row.serial_number }}</a>
+                <div class="text-muted">{{ row.item_name }}</div>
+                {% else %}—{% endif %}
+              </td>
+              <td><span class="badge bg-light text-dark">{{ row.transaction_type }}</span></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted">No logged movements yet. Future assigns and returns will appear here.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-parts">
+      <p class="small text-muted mb-2">Mechanical and chassis components fitted to this vehicle — compressors, pumps, steering, electrical, body work, and similar. Use this for warranty and repeat-repair traceability. Serialised kit stays under <strong>Kit &amp; serial assets</strong>.
+        {% if industry_visible('medical') %}
+        Clinical consumables and med bag stock stay in <a href="{{ url_for('inventory_control_internal.dashboard') }}">Inventory</a> until issued.
+        {% else %}
+        Bulk consumables stay in <a href="{{ url_for('inventory_control_internal.dashboard') }}">Inventory</a> until issued.
+        {% endif %}
+      </p>
+      {% if can_fleet_transactions %}
+      <div class="card shadow-sm mb-3">
+        <div class="card-header small fw-semibold">Record fitted vehicle part</div>
+        <div class="card-body">
+          <form method="post" action="{{ url_for('fleet_management.vehicle_add_installed_part', vehicle_id=vehicle.id) }}" class="row g-2 align-items-end">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="col-md-4">
+              <label class="form-label small">Inventory item (optional)</label>
+              <select class="form-select form-select-sm" name="inventory_item_id">
+                <option value="">— manual part number only —</option>
+                {% for it in inventory_items_select %}
+                <option value="{{ it.id }}">{{ it.sku }} — {{ it.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2"><label class="form-label small">Part number</label><input class="form-control form-control-sm" name="part_number"></div>
+            <div class="col-md-3"><label class="form-label small">Description</label><input class="form-control form-control-sm" name="part_description" placeholder="e.g. Air compressor, power steering pump"></div>
+            <div class="col-md-1"><label class="form-label small">Qty</label><input class="form-control form-control-sm" name="quantity" type="number" step="0.01" value="1" min="0.01"></div>
+            <div class="col-md-2"><label class="form-label small">Installed</label><input class="form-control form-control-sm" type="date" name="installed_date" required value="{{ now_date }}"></div>
+            <div class="col-md-2"><label class="form-label small">Odometer (mi)</label><input class="form-control form-control-sm" type="number" name="odometer_at_install" min="0"></div>
+            <div class="col-md-2"><label class="form-label small">Warranty until</label><input class="form-control form-control-sm" type="date" name="warranty_expires_date"></div>
+            <div class="col-md-4"><label class="form-label small">Warranty terms</label><input class="form-control form-control-sm" name="warranty_terms" placeholder="e.g. 24 months parts only"></div>
+            <div class="col-md-2"><label class="form-label small">Invoice ref</label><input class="form-control form-control-sm" name="invoice_reference"></div>
+            <div class="col-md-12"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes"></div>
+            <div class="col-12 border-top pt-2 mt-1">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" name="deduct_stock" value="1" id="deduct_ix">
+                <label class="form-check-label small" for="deduct_ix">Deduct from storeroom (inventory <strong>out</strong> assigned to this vehicle)</label>
+              </div>
+              <label class="form-label small">Storeroom (if deducting)</label>
+              <select class="form-select form-select-sm" name="location_id" style="max-width:20rem">
+                <option value="">—</option>
+                {% for loc in inventory_locations %}
+                <option value="{{ loc.id }}">{{ loc.code or loc.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Save install record</button></div>
+          </form>
+        </div>
+      </div>
+      {% endif %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0 align-middle">
+          <thead>
+            <tr><th>Installed</th><th>Part</th><th>Qty</th><th>Odo</th><th>Warranty</th><th>Invoice</th><th>Stock tx</th>{% if can_fleet_transactions %}<th></th>{% endif %}</tr>
+          </thead>
+          <tbody>
+            {% for p in installed_parts %}
+            <tr>
+              <td class="text-nowrap small">{{ p.installed_date }}</td>
+              <td>
+                {% if p.part_number %}<code>{{ p.part_number }}</code><br>{% endif %}
+                {{ p.part_description or '—' }}
+                {% if p.inventory_item_name %}<div class="small text-muted">{{ p.inventory_sku }} · {{ p.inventory_item_name }}</div>{% endif %}
+              </td>
+              <td>{{ p.quantity }}</td>
+              <td>{{ p.odometer_at_install or '—' }}</td>
+              <td>
+                {% if p.warranty_expires_date %}
+                  {% if p.warranty_expires_date|string >= now_date %}
+                  <span class="badge bg-success">Until {{ p.warranty_expires_date }}</span>
+                  {% else %}
+                  <span class="badge bg-secondary">Ended {{ p.warranty_expires_date }}</span>
+                  {% endif %}
+                  {% if p.warranty_terms %}<div class="small text-muted">{{ p.warranty_terms }}</div>{% endif %}
+                {% else %}—{% endif %}
+              </td>
+              <td class="small">{{ p.invoice_reference or '—' }}</td>
+              <td class="small">{% if p.inventory_transaction_id %}#{{ p.inventory_transaction_id }}{% else %}—{% endif %}</td>
+              {% if can_fleet_transactions %}
+              <td>
+                <form method="post" action="{{ url_for('fleet_management.vehicle_delete_installed_part', vehicle_id=vehicle.id, part_id=p.id) }}" class="d-inline" onsubmit="return confirm('Remove this install record?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-danger py-0" type="submit">Remove</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{% if can_fleet_transactions %}8{% else %}7{% endif %}" class="text-muted">No fitted vehicle parts logged yet. Record installs here for chassis and mechanical work — not serial kit (see <strong>Kit &amp; serial assets</strong>){% if industry_visible('medical') %} or clinical stock{% endif %}.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-mileage">
+      {% if can_driver %}
+      <form class="card card-body mb-3" method="post" action="{{ url_for('fleet_management.vehicle_add_mileage', vehicle_id=vehicle.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <p class="small text-muted mb-2">Record start and end odometer for a trip. Entries are checked against the last known reading (manual logs and VDI odometer) to catch typos and wrong vehicles. Fleet editors can remove a mistaken log from the table below or use override when a reading is genuinely unusual (replacement cluster, long relay, etc.).</p>
+        {% if mileage_last_known_mi is not none %}
+        <p class="small mb-2"><strong>Last known reading:</strong> {{ mileage_last_known_mi }} mi (mileage logs, VDI, and safety checks)</p>
+        {% endif %}
+        <div class="row g-2 align-items-end">
+          <div class="col-auto"><label class="form-label small">Start mi.</label><input class="form-control form-control-sm" name="start_mileage" type="number" min="0" required></div>
+          <div class="col-auto"><label class="form-label small">End mi.</label><input class="form-control form-control-sm" name="end_mileage" type="number" min="0" required></div>
+          <div class="col-md-4"><label class="form-label small">Purpose</label><input class="form-control form-control-sm" name="purpose" placeholder="{% if industry_visible('medical') %}e.g. Patient transfer{% else %}e.g. Site run / delivery{% endif %}"></div>
+          <div class="col-auto"><button class="btn btn-sm btn-primary" type="submit">Add log</button></div>
+        </div>
+        {% if can_edit %}
+        <div class="border-top pt-2 mt-3 small">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" value="1" name="mileage_sanity_override" id="mileage_sanity_override">
+            <label class="form-check-label" for="mileage_sanity_override">Override sanity checks (fleet editors only)</label>
+          </div>
+          <label class="form-label small mb-0">Reason required if checks would block this entry</label>
+          <input class="form-control form-control-sm" name="mileage_override_note" placeholder="e.g. New instrument cluster at 5,200 mi">
+        </div>
+        {% endif %}
+      </form>
+      {% endif %}
+      <div class="table-responsive card shadow-sm mt-2">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>When</th><th>Start</th><th>End</th><th>Purpose</th>{% if can_edit %}<th class="text-end">Actions</th>{% endif %}</tr></thead>
+          <tbody>
+            {% for m in mileage_logs %}
+            <tr>
+              <td>{{ m.logged_at }}</td>
+              <td>{{ m.start_mileage }}</td>
+              <td>{{ m.end_mileage }}</td>
+              <td>{{ m.purpose or '—' }}</td>
+              {% if can_edit %}
+              <td class="text-end">
+                <form method="post" action="{{ url_for('fleet_management.vehicle_delete_mileage', vehicle_id=vehicle.id, log_id=m.id) }}" class="d-inline" onsubmit="return confirm('Remove this mileage log?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% else %}
+            <tr><td colspan="{% if can_edit %}5{% else %}4{% endif %}" class="text-muted">No logs.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% if mot_history_enabled %}
+    <div class="tab-pane fade" id="tab-mot-dvsa">
+      <p class="small text-muted mb-2">Official MOT test history for this registration (from DVSA). Refreshes when you open this page.</p>
+      {% if mot_history_no_registration %}
+      <div class="alert alert-light border small mb-0">This unit has no road registration on file. DVSA MOT history is only available when a UK plate is recorded above.</div>
+      {% elif mot_history_dvsa and (mot_history_dvsa.make or mot_history_dvsa.model) %}
+      <p class="small mb-3"><span class="text-muted">DVSA vehicle record:</span> <strong>{{ mot_history_dvsa.make or '—' }}</strong> {{ mot_history_dvsa.model or '' }}</p>
+      {% endif %}
+      {% if not mot_history_no_registration and mot_history_error %}
+      <div class="alert alert-warning small mb-0">Could not load MOT history. {{ mot_history_error_display }}</div>
+      {% elif not mot_history_no_registration and mot_history_tests and mot_history_tests|length > 0 %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Test date</th>
+              <th>Result</th>
+              <th>Expiry</th>
+              <th>Mileage (mi)</th>
+              <th>Test no.</th>
+              <th class="text-center">Fails</th>
+              <th class="text-center">Advisories</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in mot_history_tests %}
+            <tr>
+              <td class="text-nowrap small">{{ t.completed_display }}</td>
+              <td>
+                {% set tr = (t.result or '')|upper %}
+                <span class="badge {% if tr == 'PASSED' %}bg-success{% elif tr == 'FAILED' %}bg-danger{% else %}bg-secondary{% endif %}">{{ t.result }}</span>
+              </td>
+              <td class="small text-nowrap">{{ t.expiry or '—' }}</td>
+              <td>{{ t.odometer_mi if t.odometer_mi is not none else '—' }}</td>
+              <td class="small text-muted font-monospace">{{ t.test_number or '—' }}</td>
+              <td class="text-center">{{ t.fail_count }}</td>
+              <td class="text-center">{{ t.advisory_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif not mot_history_no_registration %}
+      <p class="text-muted small mb-0">No MOT tests returned for this registration (none held yet, or plate not found on the DVSA feed).</p>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div class="tab-pane fade" id="tab-maint">
+      {% if can_edit %}
+      <form class="card card-body mb-3" method="post" action="{{ url_for('fleet_management.vehicle_add_maintenance', vehicle_id=vehicle.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-2">
+          <div class="col-md-2"><label class="form-label small">Date</label><input class="form-control form-control-sm" type="date" name="service_date" required></div>
+          <div class="col-md-2"><label class="form-label small">Type</label><input class="form-control form-control-sm" name="service_type" value="Service"></div>
+          <div class="col-md-2"><label class="form-label small">Cost</label><input class="form-control form-control-sm" name="cost" type="number" step="0.01"></div>
+          <div class="col-md-2"><label class="form-label small">Odometer</label><input class="form-control form-control-sm" name="odometer_at_service" type="number"></div>
+          <div class="col-md-2"><label class="form-label small">Provider</label><input class="form-control form-control-sm" name="provider"></div>
+          <div class="col-md-12"><label class="form-label small">Notes</label><input class="form-control form-control-sm" name="notes"></div>
+          <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Add</button></div>
+        </div>
+      </form>
+      {% endif %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Provider</th></tr></thead>
+          <tbody>
+            {% for x in maintenance_logs %}
+            <tr>
+              <td>{{ x.service_date }}</td>
+              <td>{{ x.service_type }}</td>
+              <td>{{ x.cost or '—' }}</td>
+              <td>{{ x.provider or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">None.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-safety">
+      {% if can_record_safety_check %}
+      <p class="small text-muted mb-2">
+        {% for opt in safety_form_choices %}
+        <a href="{{ url_for('fleet_management.vehicle_safety_check', vehicle_id=vehicle.id, form=opt.form_key) }}">{{ opt.title }}</a>{% if not loop.last %} · {% endif %}
+        {% endfor %}
+        · Workshop safety: <a href="{{ url_for('fleet_management.vehicle_types_list') }}">Vehicle types</a> → <em>Safety form</em>. Contractor-only: <a href="{{ url_for('fleet_management.vdi_schema_editor') }}">Forms</a>.
+      </p>
+      <p class="small text-muted mb-2">Quick submit — <strong>{{ safety_schema.title|default('Workshop check') }}</strong> only (below).</p>
+      <form method="post" enctype="multipart/form-data" action="{{ url_for('fleet_management.vehicle_safety_check', vehicle_id=vehicle.id, form='workshop') }}" class="card card-body shadow-sm mb-3">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="check_form_key" value="workshop">
+        {% with schema=safety_schema %}
+        {% include 'admin/partials/fleet_safety_check_form_fields.html' %}
+        {% endwith %}
+        <button type="submit" class="btn btn-sm btn-primary">Save safety check</button>
+      </form>
+      {% endif %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Date</th><th>Mileage</th><th>Summary</th><th>Recorded</th></tr></thead>
+          <tbody>
+            {% for row in safety_logs %}
+            <tr>
+              <td>{{ row.performed_at }}</td>
+              <td>{{ row.mileage_at_check or '—' }}</td>
+              <td class="small">{{ row.summary_notes or '—' }}</td>
+              <td class="small">{{ row.created_at }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-muted">No safety checks recorded yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-vdi">
+      <p class="small text-muted">Submissions from <a href="{{ url_for('fleet_vdi.vdi_home') }}">/VDIs</a> and the employee portal.</p>
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>When</th><th>Mileage</th><th>Actor</th><th></th></tr></thead>
+          <tbody>
+            {% for row in vdi_logs %}
+            <tr>
+              <td>{{ row.created_at }}</td>
+              <td>{{ row.mileage_reported or '—' }}</td>
+              <td class="small">{{ row.actor_type }} {{ row.actor_id }}</td>
+              <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fleet_vdi.vdi_submission', submission_id=row.id) }}">View</a></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">No inspections yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-issues">
+      <p class="small text-muted mb-2">All vehicle problems go here. New items start in <strong>reported</strong>; use the board to triage. For a quick fix (e.g. bulb replaced on the spot), editors can tick <em>mark done now</em> so it never sits in the queue.</p>
+      {% if can_edit or can_driver %}
+      <form class="card card-body mb-3" method="post" action="{{ url_for('fleet_management.vehicle_add_fleet_issue', vehicle_id=vehicle.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-2">
+          <div class="col-md-4"><label class="form-label small">Title</label><input class="form-control form-control-sm" name="title" required placeholder="e.g. NS headlight out"></div>
+          <div class="col-md-8"><label class="form-label small">Description</label><input class="form-control form-control-sm" name="description" placeholder="What you saw or tried"></div>
+          {% if can_edit %}
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" value="1" name="quick_close" id="issue_quick_close">
+              <label class="form-check-label small" for="issue_quick_close">Already fixed / no workshop follow-up — mark done immediately</label>
+            </div>
+          </div>
+          <div class="col-12"><label class="form-label small">Resolution note (optional, when marking done now)</label><input class="form-control form-control-sm" name="resolution_summary" placeholder="e.g. Replaced bulb"></div>
+          {% endif %}
+          <div class="col-12"><button class="btn btn-sm btn-primary" type="submit">Log issue</button></div>
+        </div>
+      </form>
+      {% endif %}
+      {% if can_edit %}
+      <p class="small mb-3"><a href="{{ url_for('fleet_management.issues_board') }}">Open kanban board</a></p>
+      {% endif %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Created</th><th>Title</th><th>Stage</th><th>Flags</th><th>Service date</th><th>Resolution</th></tr></thead>
+          <tbody>
+            {% for it in fleet_issues %}
+            <tr>
+              <td>{{ it.created_at }}</td>
+              <td>{{ it.title }}{% if it.description %}<div class="text-muted small">{{ it.description }}</div>{% endif %}</td>
+              <td>{{ it.kanban_stage }}{% if it.completed_at %} <span class="text-success">done</span>{% endif %}</td>
+              <td class="small">
+                {% if it.vehicle_marked_vor %}<span class="badge bg-danger">VOR</span>{% endif %}
+                {% if it.vehicle_marked_workshop %}<span class="badge bg-warning text-dark">Workshop</span>{% endif %}
+                {% if not it.vehicle_marked_vor and not it.vehicle_marked_workshop %}—{% endif %}
+              </td>
+              <td>{{ it.scheduled_service_date or '—' }}</td>
+              <td class="small text-muted">{{ it.resolution_summary or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-muted">No issues yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="tab-history">
+      <p class="small text-muted">Combined timeline: inspections, safety checks, issues, maintenance, mileage.</p>
+      <ul class="list-group shadow-sm">
+        {% for ev in vehicle_history %}
+        <li class="list-group-item small">
+          <strong>{{ ev.title }}</strong>
+          <span class="text-muted">· {{ ev.at }}</span>
+          {% if ev.detail %}<div class="text-muted">{{ ev.detail }}</div>{% endif %}
+        </li>
+        {% else %}
+        <li class="list-group-item text-muted">No history entries.</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="tab-pane fade" id="tab-drivers">
+      {% if can_edit %}
+      <form class="card card-body mb-3" method="post" action="{{ url_for('fleet_management.vehicle_add_driver', vehicle_id=vehicle.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4"><label class="form-label small">User ID (UUID)</label><input class="form-control form-control-sm" name="user_id" placeholder="users.id" required></div>
+          <div class="col-md-2"><label class="form-label small">Role</label>
+            <select class="form-select form-select-sm" name="assignment_role">
+              <option value="primary">Primary</option>
+              <option value="temporary">Temporary</option>
+            </select>
+          </div>
+          <div class="col-md-2"><label class="form-label small">From</label><input class="form-control form-control-sm" type="date" name="effective_from"></div>
+          <div class="col-md-2"><label class="form-label small">To</label><input class="form-control form-control-sm" type="date" name="effective_to"></div>
+          <div class="col-auto"><button class="btn btn-sm btn-primary" type="submit">Add</button></div>
+        </div>
+      </form>
+      {% endif %}
+      <div class="table-responsive card shadow-sm">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>User</th><th>Role</th><th>From</th><th>To</th></tr></thead>
+          <tbody>
+            {% for d in driver_assignments %}
+            <tr>
+              <td class="text-break">{{ d.user_id }}</td>
+              <td>{{ d.assignment_role }}</td>
+              <td>{{ d.effective_from }}</td>
+              <td>{{ d.effective_to or '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted">None.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

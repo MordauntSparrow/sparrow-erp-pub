@@ -14,6 +14,13 @@
     "hr_module.document_requests",
     "hr_module.library"
   ],
+  "permission_categories": [
+    {"id": "managers", "label": "Managers", "sort": 10},
+    {"id": "managers_hr", "label": "HR office", "parent": "managers", "sort": 11},
+    {"id": "crew", "label": "Crew & line", "sort": 20},
+    {"id": "crew_limited", "label": "Limited HR access", "parent": "crew", "sort": 21}
+  ],
+  "access_permission_category": "managers_hr",
   "declared_permissions": [
     {
       "id": "hr_module.access",
@@ -21,19 +28,23 @@
     },
     {
       "id": "hr_module.read",
-      "label": "HR — view employees, profiles, files, requests, reports (read-only)"
+      "label": "HR — view employees, profiles, files, requests, reports (read-only)",
+      "category": "crew_limited"
     },
     {
       "id": "hr_module.edit_employees",
-      "label": "HR — create employees and edit staff profiles"
+      "label": "HR — create employees and edit staff profiles",
+      "category": "managers_hr"
     },
     {
       "id": "hr_module.document_requests",
-      "label": "HR — create and approve/reject document requests"
+      "label": "HR — create and approve/reject document requests",
+      "category": "managers_hr"
     },
     {
       "id": "hr_module.library",
-      "label": "HR — upload or delete files in employee document libraries"
+      "label": "HR — upload or delete files in employee document libraries",
+      "category": "managers_hr"
     }
   ],
   "icon": "https://gitlab.com/sparrow-erp/Core/-/raw/main/plugins/hr_module/icon.png",

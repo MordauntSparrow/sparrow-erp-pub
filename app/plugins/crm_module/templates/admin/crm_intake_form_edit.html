@@ -1,0 +1,138 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}{% if form %}Edit intake form{% else %}New intake form{% endif %}{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.intake_forms_list') }}" class="text-decoration-none">Intake forms</a></li>
+<li class="breadcrumb-item active" aria-current="page">{% if form %}Edit{% else %}New{% endif %}</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Lead capture</p>
+        <h1 class="h3 fw-semibold text-dark mb-0">{% if form %}Edit form{% else %}New intake form{% endif %}</h1>
+      </div>
+      <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.intake_forms_list') }}">Back to list</a>
+    </div>
+  </div>
+
+  <form method="post" class="card crm-panel border-0 shadow-sm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6">
+          <label class="form-label" for="title">Title</label>
+          <input class="form-control" id="title" name="title" required maxlength="200" value="{{ (form.title if form else '') or '' }}" placeholder="e.g. Partnership enquiry">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label" for="slug">URL slug</label>
+          <input class="form-control {% if error_slug %}is-invalid{% endif %}" id="slug" name="slug" required maxlength="63" pattern="[a-z0-9][a-z0-9_-]*" value="{{ (form.slug if form else '') or '' }}" placeholder="partnership" {% if form %}title="Changing slug breaks old bookmarks to the public form"{% endif %}>
+          <div class="form-text">Public URL ends with this slug. Lowercase letters, digits, hyphen, underscore.</div>
+        </div>
+        <div class="col-12">
+          <label class="form-label" for="description">Description (optional)</label>
+          <textarea class="form-control" id="description" name="description" rows="2" maxlength="2000" placeholder="Internal note for staff">{{ (form.description if form else '') or '' }}</textarea>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="default_stage">Pipeline stage</label>
+          <select class="form-select" id="default_stage" name="default_stage">
+            {% for val, lab in stages %}
+            <option value="{{ val }}" {% if form and (form.default_stage or 'prospecting') == val %}selected{% elif not form and val == 'prospecting' %}selected{% endif %}>{{ lab }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="company_field">Company field name</label>
+          <input class="form-control" id="company_field" name="company_field" maxlength="64" value="{{ (form.company_field if form else 'company') or 'company' }}">
+          <div class="form-text">Which form field maps to the CRM account name.</div>
+        </div>
+        <div class="col-md-4 d-flex align-items-end gap-3 pb-1">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="is_active" id="is_active" value="1" {% if not form or form.is_active %}checked{% endif %}>
+            <label class="form-check-label" for="is_active">Active</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="is_public" id="is_public" value="1" {% if form and form.is_public %}checked{% endif %}>
+            <label class="form-check-label" for="is_public">Public link</label>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="h6 text-uppercase text-muted mb-2">Fields</h2>
+      <p class="small text-muted mb-2">Machine names become POST keys (use letters, digits, underscore). At least one of <strong>name</strong> or <strong>email</strong> should be collected for a lead to save.</p>
+      <div class="table-responsive border rounded">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:8rem;">Name</th>
+              <th style="min-width:10rem;">Label</th>
+              <th style="width:8rem;">Type</th>
+              <th style="width:5rem;">Req</th>
+              <th style="width:4rem;"></th>
+            </tr>
+          </thead>
+          <tbody id="crm-intake-field-rows">
+            {% for fld in fields %}
+            <tr class="crm-intake-field-row">
+              <td><input class="form-control form-control-sm" name="field_name[]" value="{{ fld.name }}" required pattern="[a-z][a-z0-9_]*" title="Lowercase, start with letter"></td>
+              <td><input class="form-control form-control-sm" name="field_label[]" value="{{ fld.label }}"></td>
+              <td>
+                <select class="form-select form-select-sm" name="field_type[]">
+                  {% for t in ['text','email','tel','textarea','number'] %}
+                  <option value="{{ t }}" {% if fld.type == t %}selected{% endif %}>{{ t }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td class="text-center">
+                <input type="hidden" name="field_required[]" value="{{ '1' if fld.required else '0' }}" class="crm-req-hidden">
+                <input type="checkbox" class="form-check-input mt-0 crm-req-cb" {% if fld.required %}checked{% endif %} aria-label="Required">
+              </td>
+              <td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-remove-field" title="Remove">&times;</button></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary rounded-pill mt-2" id="crm-add-field-row"><i class="bi bi-plus-lg"></i> Add field</button>
+    </div>
+    <div class="card-footer bg-light d-flex gap-2">
+      <button type="submit" class="btn btn-primary rounded-pill px-4">Save</button>
+      <a href="{{ url_for('crm_module.intake_forms_list') }}" class="btn btn-outline-secondary rounded-pill">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(function () {
+  var tbody = document.getElementById('crm-intake-field-rows');
+  if (!tbody) return;
+  function syncReq(tr) {
+    var h = tr.querySelector('.crm-req-hidden');
+    var c = tr.querySelector('.crm-req-cb');
+    if (h && c) h.value = c.checked ? '1' : '0';
+  }
+  tbody.addEventListener('change', function (e) {
+    if (e.target && e.target.classList.contains('crm-req-cb')) syncReq(e.target.closest('tr'));
+  });
+  tbody.querySelectorAll('.crm-intake-field-row').forEach(syncReq);
+  tbody.addEventListener('click', function (e) {
+    if (e.target.closest('.crm-remove-field')) {
+      var tr = e.target.closest('tr');
+      if (tr && tbody.querySelectorAll('.crm-intake-field-row').length > 1) tr.remove();
+    }
+  });
+  document.getElementById('crm-add-field-row').addEventListener('click', function () {
+    var tr = document.createElement('tr');
+    tr.className = 'crm-intake-field-row';
+    tr.innerHTML = '<td><input class="form-control form-control-sm" name="field_name[]" value="" pattern="[a-z][a-z0-9_]*" title="Lowercase, start with letter"></td>' +
+      '<td><input class="form-control form-control-sm" name="field_label[]" value=""></td>' +
+      '<td><select class="form-select form-select-sm" name="field_type[]"><option value="text">text</option><option value="email">email</option><option value="tel">tel</option><option value="textarea">textarea</option><option value="number">number</option></select></td>' +
+      '<td class="text-center"><input type="hidden" name="field_required[]" value="0" class="crm-req-hidden"><input type="checkbox" class="form-check-input mt-0 crm-req-cb" aria-label="Required"></td>' +
+      '<td><button type="button" class="btn btn-sm btn-outline-danger border-0 crm-remove-field" title="Remove">&times;</button></td>';
+    tbody.appendChild(tr);
+  });
+})();
+</script>
+{% endblock %}

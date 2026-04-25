@@ -5,12 +5,22 @@ import json
 from decimal import Decimal, InvalidOperation
 from itertools import zip_longest
 
+from app.core_integrations import get_active_provider
+
 from flask import flash, redirect, render_template, request, url_for
 from flask_login import login_required
 
 from app.objects import get_db_connection
 
-from .crm_common import can_edit, crm_access_required, crm_edit_required, uid
+from .crm_accounting_push import maybe_auto_push_on_quote_accepted, push_quote_draft_invoice
+from .crm_common import (
+    can_edit,
+    crm_access_required,
+    crm_edit_required,
+    crm_medical_surface_available,
+    uid,
+)
+from .crm_pipeline_flow import event_plan_new_url, flow_active, quote_edit_url
 from .crm_event_risk import enrich_lead_meta_with_staffing_breakdown
 from .crm_guide_staffing_costs import estimate_guide_staffing_costs
 from .crm_event_plan_links import fetch_plans_for_quote
@@ -35,6 +45,42 @@ QUOTE_STATUSES = (
 )
 
 STATUS_LABELS = dict(QUOTE_STATUSES)
+
+
+def _pipeline_flow_template_quote(
+    request,
+    quote_prefill: dict | None,
+) -> dict[str, object]:
+    oid = (quote_prefill or {}).get("opportunity_id")
+    try:
+        oi = int(oid) if oid is not None else None
+    except (TypeError, ValueError):
+        oi = None
+    return {
+        "pipeline_flow_enabled": flow_active(request),
+        "pipeline_step": "quote",
+        "pipeline_opp_id": oi,
+        "pipeline_quote_id": None,
+    }
+
+
+def _pipeline_flow_template_from_quote(request, quote: dict) -> dict[str, object]:
+    oid = quote.get("opportunity_id")
+    try:
+        oi = int(oid) if oid is not None else None
+    except (TypeError, ValueError):
+        oi = None
+    qid = quote.get("id")
+    try:
+        qi = int(qid) if qid is not None else None
+    except (TypeError, ValueError):
+        qi = None
+    return {
+        "pipeline_flow_enabled": flow_active(request),
+        "pipeline_step": "quote",
+        "pipeline_opp_id": oi,
+        "pipeline_quote_id": qi,
+    }
 
 
 def _tb_wage_cards_url() -> str | None:
@@ -774,7 +820,20 @@ def register_crm_quote_routes(crm_bp):
                 _append_status_history(conn, qid, None, "draft", None)
                 conn.commit()
                 flash("Quote created.", "success")
-                return redirect(url_for("crm_module.quote_edit", quote_id=qid))
+                nxt = (request.form.get("crm_flow_next") or "stay").strip().lower()
+                keep = (request.form.get("crm_flow_active") or "").strip() == "1"
+                if nxt == "plan" and crm_medical_surface_available():
+                    oid = opportunity_id
+                    if oid:
+                        return redirect(
+                            event_plan_new_url(
+                                quote_id=int(qid),
+                                opportunity_id=int(oid),
+                                flow=True,
+                            )
+                        )
+                    return redirect(event_plan_new_url(quote_id=int(qid), flow=True))
+                return redirect(quote_edit_url(quote_id=int(qid), flow=keep or flow_active(request)))
             finally:
                 cur.close()
                 conn.close()
@@ -814,6 +873,9 @@ def register_crm_quote_routes(crm_bp):
             staffing_sidebar=staffing_sidebar,
             tb_wage_cards_url=_tb_wage_cards_url(),
             can_edit=True,
+            crm_active_accounting=get_active_provider(),
+            core_integrations_url=url_for("routes.core_integrations"),
+            **_pipeline_flow_template_quote(request, quote_prefill),
         )
 
     @crm_bp.route("/quotes/<int:quote_id>/edit", methods=["GET", "POST"])
@@ -935,7 +997,30 @@ def register_crm_quote_routes(crm_bp):
                     )
                 conn.commit()
                 flash("Quote saved.", "success")
-                return redirect(url_for("crm_module.quote_edit", quote_id=quote_id))
+                maybe_auto_push_on_quote_accepted(
+                    quote_id,
+                    prev_status=prev_status,
+                    new_status=new_status,
+                    lines=new_lines,
+                    rule_set_id=rule_set_id,
+                    user_id=uid(),
+                )
+                nxt = (request.form.get("crm_flow_next") or "stay").strip().lower()
+                keep = (request.form.get("crm_flow_active") or "").strip() == "1"
+                if nxt == "plan" and crm_medical_surface_available():
+                    oid = opportunity_id or quote.get("opportunity_id")
+                    if oid:
+                        return redirect(
+                            event_plan_new_url(
+                                quote_id=int(quote_id),
+                                opportunity_id=int(oid),
+                                flow=True,
+                            )
+                        )
+                    return redirect(
+                        event_plan_new_url(quote_id=int(quote_id), flow=True)
+                    )
+                return redirect(quote_edit_url(quote_id=int(quote_id), flow=keep))
             finally:
                 cur.close()
                 conn.close()
@@ -989,7 +1074,47 @@ def register_crm_quote_routes(crm_bp):
             staffing_sidebar=staffing_sidebar,
             tb_wage_cards_url=_tb_wage_cards_url(),
             can_edit=can_edit(),
+            crm_active_accounting=get_active_provider(),
+            core_integrations_url=url_for("routes.core_integrations"),
+            **_pipeline_flow_template_from_quote(request, quote),
         )
+
+    @crm_bp.route("/quotes/<int:quote_id>/push-draft-invoice", methods=["POST"])
+    @login_required
+    @crm_access_required
+    @crm_edit_required
+    def quote_push_draft_invoice(quote_id: int):
+        force = (request.form.get("force") or "").strip() == "1"
+        conn = get_db_connection()
+        try:
+            lines = _load_lines(conn, quote_id)
+            cur = conn.cursor(dictionary=True)
+            try:
+                cur.execute(
+                    "SELECT id, rule_set_id FROM crm_quotes WHERE id=%s", (quote_id,)
+                )
+                row = cur.fetchone()
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+        if not row:
+            flash("Quote not found.", "danger")
+            return redirect(url_for("crm_module.quotes_list"))
+        r = push_quote_draft_invoice(
+            quote_id,
+            lines=lines,
+            rule_set_id=row.get("rule_set_id"),
+            user_id=uid(),
+            force=force,
+        )
+        if r.get("skipped"):
+            flash(r.get("message") or "Already pushed.", "info")
+        elif r.get("ok"):
+            flash("Draft invoice created in your accounting app.", "success")
+        else:
+            flash(r.get("message") or "Could not create draft invoice.", "danger")
+        return redirect(quote_edit_url(quote_id=quote_id, flow=flow_active(request)))
 
     @crm_bp.route("/quotes/<int:quote_id>/accept-for-cura", methods=["POST"])
     @login_required
@@ -1015,7 +1140,7 @@ def register_crm_quote_routes(crm_bp):
             if return_plan_raw.isdigit():
                 return redirect(
                     url_for(
-                        "crm_module.event_plan_edit",
+                        "medical_records_internal.cura_event_planner.event_plan_edit",
                         plan_id=int(return_plan_raw),
                         step=8,
                     )
@@ -1039,6 +1164,29 @@ def register_crm_quote_routes(crm_bp):
         finally:
             cur.close()
             conn.close()
+
+        c2 = get_db_connection()
+        try:
+            lines = _load_lines(c2, quote_id)
+            qc = c2.cursor(dictionary=True)
+            try:
+                qc.execute(
+                    "SELECT rule_set_id FROM crm_quotes WHERE id=%s", (quote_id,)
+                )
+                qr = qc.fetchone()
+            finally:
+                qc.close()
+            maybe_auto_push_on_quote_accepted(
+                quote_id,
+                prev_status=q.get("status"),
+                new_status="accepted",
+                lines=lines,
+                rule_set_id=int(qr["rule_set_id"]) if qr and qr.get("rule_set_id") else None,
+                user_id=uid(),
+            )
+        finally:
+            c2.close()
+
         flash(
             "Quote marked Accepted. You can return to the event plan and use Send to Cura.",
             "success",
@@ -1046,7 +1194,7 @@ def register_crm_quote_routes(crm_bp):
         if return_plan_raw.isdigit():
             return redirect(
                 url_for(
-                    "crm_module.event_plan_edit",
+                    "medical_records_internal.cura_event_planner.event_plan_edit",
                     plan_id=int(return_plan_raw),
                     step=8,
                 )

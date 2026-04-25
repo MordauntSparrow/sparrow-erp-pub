@@ -17,6 +17,20 @@
 
   <p class="small text-muted mb-3">Timesheets and runsheet publish/resync are not tied to HR compliance expiries in code — use the HR module for visibility; enforcement would be a separate rule if your organisation requires it.</p>
 
+  <div class="border rounded p-2 mb-3 small">
+    <div class="fw-semibold mb-1">Bulk issue (all active staff)</div>
+    <div class="row g-2 align-items-end">
+      <div class="col-6 col-md-2">
+        <label class="form-label small text-muted mb-0">From week</label>
+        <input type="week" class="form-control form-control-sm" id="bulkFromWeekPick">
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small text-muted mb-0">To week</label>
+        <input type="week" class="form-control form-control-sm" id="bulkToWeekPick">
+      </div>
+    </div>
+  </div>
+
   <!-- Filters -->
   <form class="row g-2 mb-3" id="filterForm">
     <div class="col-12 col-md-3">
@@ -32,13 +46,22 @@
       </select>
     </div>
     <div class="col-6 col-md-2">
-      <input class="form-control form-control-sm" type="text" name="from_week_id" placeholder="From YYYYWW">
+      <input type="hidden" name="from_week_id" id="tsFiltFromWkHid" value="">
+      <label class="form-label small text-muted mb-0">From week</label>
+      <input type="week" class="form-control form-control-sm" id="tsFiltFromWkPick" title="ISO week">
     </div>
     <div class="col-6 col-md-2">
-      <input class="form-control form-control-sm" type="text" name="to_week_id" placeholder="To YYYYWW">
+      <input type="hidden" name="to_week_id" id="tsFiltToWkHid" value="">
+      <label class="form-label small text-muted mb-0">To week</label>
+      <input type="week" class="form-control form-control-sm" id="tsFiltToWkPick" title="ISO week">
     </div>
     <div class="col-6 col-md-3">
-      <input class="form-control form-control-sm" type="text" name="user_id" placeholder="Filter by User ID (optional)">
+      <input type="hidden" name="user_id" id="tsFiltStaffHid" value="">
+      <label class="form-label small text-muted mb-0">Staff</label>
+      <input type="search" class="form-control form-control-sm mb-1" id="tsFiltStaffQ" autocomplete="off" placeholder="Search contractor name (2+ chars)" data-api-contractors="{{ url_for('internal_time_billing.api_admin_refs_contractors') }}">
+      <ul class="list-group list-group-flush small border rounded d-none mb-1" id="tsFiltStaffUl" style="max-height:9rem;overflow:auto;"></ul>
+      <div class="small text-muted" id="tsFiltStaffPicked">Any staff</div>
+      <button type="button" class="btn btn-link btn-sm p-0 d-none" id="tsFiltStaffClear">Clear staff</button>
     </div>
     <div class="col-6 col-md-1 d-flex gap-2 justify-content-end">
       <button class="btn btn-secondary btn-sm" type="submit">
@@ -99,7 +122,73 @@
 
   let page = 1, pageSize = 25, hasMore = false;
 
+  function yyyymmFromWeekInput(el) {
+    if (!el || !el.value) return '';
+    const m = /^(\d{4})-W(\d{2})$/i.exec(String(el.value).trim());
+    return m ? m[1] + m[2] : '';
+  }
+
+  const fromWkPick = document.getElementById('tsFiltFromWkPick');
+  const fromWkHid = document.getElementById('tsFiltFromWkHid');
+  const toWkPick = document.getElementById('tsFiltToWkPick');
+  const toWkHid = document.getElementById('tsFiltToWkHid');
+  const staffQ = document.getElementById('tsFiltStaffQ');
+  const staffUl = document.getElementById('tsFiltStaffUl');
+  const staffHid = document.getElementById('tsFiltStaffHid');
+  const staffPicked = document.getElementById('tsFiltStaffPicked');
+  const staffClr = document.getElementById('tsFiltStaffClear');
+  let staffT;
+  function hideStaffUl() { if (staffUl) { staffUl.classList.add('d-none'); staffUl.innerHTML = ''; } }
+  if (staffQ && staffUl && staffHid && staffQ.dataset.apiContractors) {
+    staffQ.addEventListener('input', function () {
+      clearTimeout(staffT);
+      const q = (staffQ.value || '').trim();
+      if (q.length < 2) { hideStaffUl(); return; }
+      staffT = setTimeout(function () {
+        fetch(staffQ.dataset.apiContractors + '?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            const items = (data && data.items) ? data.items : [];
+            staffUl.innerHTML = '';
+            if (!items.length) { hideStaffUl(); return; }
+            items.forEach(function (it) {
+              const nm = (it.name || '').trim() || (it.email || '').trim() || '—';
+              const lab = nm + ' · id ' + it.id;
+              const li = document.createElement('li');
+              li.className = 'list-group-item list-group-item-action py-1';
+              li.textContent = lab;
+              li.addEventListener('click', function () {
+                staffHid.value = String(it.id);
+                if (staffPicked) staffPicked.textContent = lab;
+                if (staffClr) staffClr.classList.remove('d-none');
+                staffQ.value = '';
+                hideStaffUl();
+              });
+              staffUl.appendChild(li);
+            });
+            staffUl.classList.remove('d-none');
+          })
+          .catch(function () { hideStaffUl(); });
+      }, 250);
+    });
+    if (staffClr) {
+      staffClr.addEventListener('click', function (e) {
+        e.preventDefault();
+        staffHid.value = '';
+        if (staffPicked) staffPicked.textContent = 'Any staff';
+        staffClr.classList.add('d-none');
+        staffQ.value = '';
+        hideStaffUl();
+      });
+    }
+    document.addEventListener('click', function (e) {
+      if (staffUl && !staffUl.contains(e.target) && e.target !== staffQ) hideStaffUl();
+    });
+  }
+
   function params(){
+    if (fromWkPick && fromWkHid) fromWkHid.value = yyyymmFromWeekInput(fromWkPick);
+    if (toWkPick && toWkHid) toWkHid.value = yyyymmFromWeekInput(toWkPick);
     const p = new URLSearchParams(new FormData(form));
     p.set('page', page);
     p.set('page_size', pageSize);
@@ -143,10 +232,14 @@
         <td>${fmtDateISO(r.week_ending)}</td>
         <td>
           ${
-            r.status==='approved'  ? '<span class="badge bg-success">Approved</span>'  :
-            r.status==='submitted' ? '<span class="badge bg-primary">Submitted</span>' :
-            r.status==='rejected'  ? '<span class="badge bg-danger">Rejected</span>'  :
-                                     '<span class="badge bg-secondary">Draft</span>'
+            (() => {
+              const st = String(r.status || '').toLowerCase();
+              if (st === 'approved') return '<span class="badge bg-success">Approved</span>';
+              if (st === 'submitted') return '<span class="badge bg-primary">Submitted</span>';
+              if (st === 'rejected') return '<span class="badge bg-danger">Rejected</span>';
+              if (st === 'invoiced') return '<span class="badge bg-success">Invoiced</span>';
+              return '<span class="badge bg-secondary">Draft</span>';
+            })()
           }
         </td>
         <td class="text-end">${(r.total_hours ?? 0).toFixed(2)}</td>
@@ -192,6 +285,12 @@
 
   document.getElementById('btnClear').addEventListener('click', ()=>{
     form.reset();
+    if (fromWkPick && fromWkHid) { fromWkPick.value = ''; fromWkHid.value = ''; }
+    if (toWkPick && toWkHid) { toWkPick.value = ''; toWkHid.value = ''; }
+    if (staffHid) staffHid.value = '';
+    if (staffPicked) staffPicked.textContent = 'Any staff';
+    if (staffClr) staffClr.classList.add('d-none');
+    hideStaffUl();
     page = 1;
     load();
   });
@@ -212,11 +311,14 @@
 
   // Bulk issue
   document.getElementById('btnIssueBulk').addEventListener('click', async ()=>{
-    const fromW = prompt('From week (YYYYWW):');
-    if(!fromW) return;
-
-    const toW = prompt('To week (YYYYWW):');
-    if(!toW) return;
+    const bulkFrom = document.getElementById('bulkFromWeekPick');
+    const bulkTo = document.getElementById('bulkToWeekPick');
+    const fromW = yyyymmFromWeekInput(bulkFrom);
+    const toW = yyyymmFromWeekInput(bulkTo);
+    if(!fromW || !toW){
+      alert('Choose from and to weeks using the week fields above.');
+      return;
+    }
 
     if(!confirm(`Issue weeks ${fromW} to ${toW} to all active staff?`)) return;
 

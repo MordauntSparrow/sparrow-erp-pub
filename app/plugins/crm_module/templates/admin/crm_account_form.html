@@ -5,7 +5,7 @@
   <h1 class="h4 mb-3">{% if account %}Edit account{% else %}New account{% endif %}</h1>
   <div class="card border-0 shadow-sm">
     <div class="card-body">
-      <form method="post">
+      <form method="post" id="crmAccountForm">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label" for="name">Name <span class="text-danger">*</span></label>
@@ -22,6 +22,45 @@
           <input class="form-control" id="website" name="website" maxlength="512" placeholder="https://"
             value="{{ account.website if account and account.website else '' }}">
         </div>
+
+        <hr class="my-4">
+        <h2 class="h6 text-uppercase text-muted mb-3">Primary operating base</h2>
+        <p class="small text-muted mb-3">
+          Used with <strong>event venue coordinates</strong> on intake to show indicative distance and drive time for mileage / fuel (straight-line + rough road factor — not sat-nav).
+          This is separate from Ventus standby/HQ defaults; set the depot or station you actually quote from.
+        </p>
+        <div class="mb-3">
+          <label class="form-label" for="operating_base_label">Base label</label>
+          <input class="form-control" id="operating_base_label" name="operating_base_label" maxlength="128"
+            placeholder="e.g. North station, HQ, Exeter hub"
+            value="{{ account.operating_base_label if account and account.operating_base_label else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="operating_base_postcode">Base postcode</label>
+          <input class="form-control" id="operating_base_postcode" name="operating_base_postcode" maxlength="32"
+            value="{{ account.operating_base_postcode if account and account.operating_base_postcode else '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="base_w3w_lookup">Look up what3words (optional)</label>
+          <div class="input-group">
+            <input class="form-control" id="base_w3w_lookup" maxlength="128" placeholder="e.g. filled.count.soap" autocomplete="off">
+            <button type="button" class="btn btn-outline-secondary" id="base_w3w_btn">Look up</button>
+          </div>
+          <div class="small text-muted mt-1" id="base_w3w_status"></div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="form-label" for="operating_base_lat">Latitude</label>
+            <input class="form-control" id="operating_base_lat" name="operating_base_lat" inputmode="decimal"
+              value="{% if account and account.operating_base_lat is not none %}{{ account.operating_base_lat }}{% endif %}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label" for="operating_base_lng">Longitude</label>
+            <input class="form-control" id="operating_base_lng" name="operating_base_lng" inputmode="decimal"
+              value="{% if account and account.operating_base_lng is not none %}{{ account.operating_base_lng }}{% endif %}">
+          </div>
+        </div>
+
         <div class="mb-3">
           <label class="form-label" for="notes">Notes</label>
           <textarea class="form-control" id="notes" name="notes" rows="4">{{ account.notes if account and account.notes else '' }}</textarea>
@@ -34,4 +73,48 @@
     </div>
   </div>
 </div>
+{% endblock %}
+{% block extra_scripts %}
+{% if w3w_resolve_url %}
+<script>
+(function () {
+  var url = {{ w3w_resolve_url|tojson }};
+  var btn = document.getElementById("base_w3w_btn");
+  var inp = document.getElementById("base_w3w_lookup");
+  var latEl = document.getElementById("operating_base_lat");
+  var lngEl = document.getElementById("operating_base_lng");
+  var st = document.getElementById("base_w3w_status");
+  var form = document.getElementById("crmAccountForm");
+  if (!btn || !url || !form) return;
+  btn.addEventListener("click", function () {
+    var w = (inp && inp.value || "").trim();
+    if (!w) { if (st) st.textContent = "Enter three words."; return; }
+    var cs = form.querySelector('input[name="_csrf_token"]');
+    if (!cs || !cs.value) {
+      if (st) st.textContent = "Security token missing — refresh the page.";
+      return;
+    }
+    var fd = new FormData();
+    fd.append("_csrf_token", cs.value);
+    fd.append("words", w);
+    btn.disabled = true;
+    if (st) st.textContent = "Looking up…";
+    fetch(url, { method: "POST", body: fd, credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (p) {
+        var data = p.j;
+        if (!p.ok || !data.ok) {
+          if (st) st.textContent = (data && data.error) ? data.error : "Lookup failed";
+          return;
+        }
+        if (latEl) latEl.value = String(data.lat);
+        if (lngEl) lngEl.value = String(data.lng);
+        if (st) st.textContent = "Coordinates set.";
+      })
+      .catch(function () { if (st) st.textContent = "Request failed"; })
+      .finally(function () { btn.disabled = false; });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

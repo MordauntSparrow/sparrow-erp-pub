@@ -11,6 +11,8 @@ Sections:
       - / (dashboard)
       - /logout
       - /account/personal-pin -> Set or change own 6-digit personal PIN (not manageable by admins)
+      - /account/notifications -> Email notification preferences (recruitment / HR where applicable)
+      - /account/whats-new/ack -> Acknowledge release notes (What's new modal on core dashboard only)
   3. User Management (Admin Only)
       - /users           -> Combined management page (live search + modals for add/edit/delete)
       - /users/search    -> AJAX endpoint for live search
@@ -21,6 +23,8 @@ Sections:
       - /version         -> View/apply updates
   5. Core Module Settings (Admin Only)
       - /core/settings   -> Tabbed: manifest (branding, theme, AI model id) + .env (SMTP, LLM, security)
+  5b. Core Integrations (Admin Only)
+      - /core/integrations -> Xero / FreeAgent OAuth, health, deployment defaults (see PRD core-integrations-accounting-prd.md)
   6. SMTP/Email Configuration (Admin Only)
       - Core settings Email tab persists SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
         SMTP_USE_SSL, SMTP_USE_TLS (via connection mode: STARTTLS / implicit SSL / plain),
@@ -463,7 +467,7 @@ def login():
             username = request.form.get('username', '').strip()
             password = request.form.get('password', '')
 
-            user_data = User.get_user_by_username_raw(username)
+            user_data = User.get_user_for_web_login(username)
             if user_data and AuthManager.verify_password(user_data["password_hash"], password):
                 from app.support_access import support_login_blocked_reason
 
@@ -774,13 +778,17 @@ def dashboard():
         by_cat[p.get('dashboard_category') or 'Modules'].append(p)
     plugin_categories = sorted(by_cat.items(), key=lambda kv: kv[0].lower())
 
+    from app.user_whats_new import build_whats_new_template_context
+
+    _wn_ctx = build_whats_new_template_context()
     return render_template(
         'dashboard.html',
         plugins=plugins,
         plugin_categories=plugin_categories,
         config=core_manifest,
         user=user_info,
-        core_version=core_version
+        core_version=core_version,
+        **_wn_ctx,
     )
 
 
@@ -880,6 +888,107 @@ def account_personal_pin():
     )
 
 
+@routes.route("/account/notifications", methods=["GET", "POST"])
+@login_required
+def account_notification_settings():
+    """Opt in/out of internal recruitment and HR-related emails (requires SMTP; respects module access)."""
+    from app.plugins.recruitment_module.notifications import (
+        user_qualifies_for_recruitment_internal_list,
+    )
+    from app.user_notification_preferences import (
+        HR_CONTRACTOR_EMAIL_KINDS,
+        RECRUITMENT_INTERNAL_EMAIL_KINDS,
+        HR_CONTRACTOR_KIND_LABELS,
+        RECRUITMENT_INTERNAL_KIND_LABELS,
+        get_notification_preferences_for_user,
+        save_notification_preferences_for_user,
+        user_qualifies_for_hr_staff_context,
+    )
+
+    uid = str(getattr(current_user, "id", "") or "")
+    if not uid:
+        flash("Could not determine your account.", "danger")
+        return redirect(url_for("routes.dashboard"))
+
+    show_rec = user_qualifies_for_recruitment_internal_list(current_user)
+    linked_cid = None
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT contractor_id FROM users WHERE id = %s LIMIT 1", (uid,))
+        row = cur.fetchone() or {}
+        linked_cid = row.get("contractor_id")
+    finally:
+        cur.close()
+        conn.close()
+    show_hr_doc = bool(
+        linked_cid and user_qualifies_for_hr_staff_context(current_user))
+
+    if request.method == "POST":
+        prefs = get_notification_preferences_for_user(uid)
+        if show_rec:
+            for k in RECRUITMENT_INTERNAL_EMAIL_KINDS:
+                prefs["email"]["recruitment_internal"][k] = (
+                    request.form.get(f"rec_int_{k}") == "1"
+                )
+        if show_hr_doc:
+            for k in HR_CONTRACTOR_EMAIL_KINDS:
+                prefs["email"]["hr_contractor"][k] = (
+                    request.form.get(f"hr_co_{k}") == "1"
+                )
+        if save_notification_preferences_for_user(uid, prefs):
+            flash("Notification preferences saved.", "success")
+        else:
+            flash("Could not save preferences.", "danger")
+        return redirect(url_for("routes.account_notification_settings"))
+
+    prefs = get_notification_preferences_for_user(uid)
+    return render_template(
+        "account_notification_settings.html",
+        prefs=prefs,
+        show_recruitment=show_rec,
+        show_hr_contractor=show_hr_doc,
+        linked_contractor_id=linked_cid,
+        recruitment_kinds=RECRUITMENT_INTERNAL_EMAIL_KINDS,
+        recruitment_kind_labels=RECRUITMENT_INTERNAL_KIND_LABELS,
+        hr_contractor_kinds=HR_CONTRACTOR_EMAIL_KINDS,
+        hr_contractor_kind_labels=HR_CONTRACTOR_KIND_LABELS,
+    )
+
+
+@routes.route("/account/whats-new/ack", methods=["POST"])
+@login_required
+def account_whats_new_ack():
+    """Record that the signed-in user has seen the current What's new release (server-side version)."""
+    from app.user_whats_new import (
+        load_whats_new_payload,
+        read_core_manifest_for_whats_new,
+        set_last_seen_version,
+    )
+
+    uid = str(getattr(current_user, "id", "") or "")
+    if not uid:
+        flash("Could not determine your account.", "danger")
+        return redirect(url_for("routes.dashboard"))
+    app_root = os.path.dirname(__file__)
+    core_manifest = read_core_manifest_for_whats_new(app_root)
+    payload = load_whats_new_payload(app_root=app_root, core_manifest=core_manifest)
+    version = (payload.get("version") or "").strip()
+    if not version:
+        flash("No release notes are configured to acknowledge.", "warning")
+        return redirect(request.referrer or url_for("routes.dashboard"))
+    if set_last_seen_version(uid, version):
+        log_security_event(
+            "whats_new_acknowledged",
+            user_id=uid,
+            release_version=version[:64],
+        )
+    else:
+        flash("Could not save acknowledgement. Try again after a moment.", "warning")
+    return redirect(request.referrer or url_for("routes.dashboard"))
+
+
 ##############################################################################
 # SECTION 3: User Management (superuser > admin / clinical lead; delegated staff via core.manage_users)
 ##############################################################################
@@ -952,6 +1061,7 @@ def search_users():
 @login_required
 def users():
     from app.permissions_registry import (
+        build_permission_catalog_ui_sections,
         collect_permission_catalog,
         default_permission_ids_for_role,
         management_may_delete_user_row,
@@ -993,6 +1103,9 @@ def users():
 
     try:
         permission_catalog = collect_permission_catalog(plugin_manager)
+        permission_catalog_sections = build_permission_catalog_ui_sections(
+            permission_catalog
+        )
         role_default_permissions = {
             r: default_permission_ids_for_role(r, permission_catalog)
             for r in (
@@ -1008,6 +1121,7 @@ def users():
         print(f"[WARN] permission catalog: {exc}")
         permission_catalog = [
             {"id": p, "label": p, "kind": "module_access", "plugin": ""} for p in available_permissions]
+        permission_catalog_sections = [{"path": [], "rows": permission_catalog}]
         role_default_permissions = {}
 
     return render_template(
@@ -1016,6 +1130,7 @@ def users():
         query="",
         available_permissions=available_permissions,
         permission_catalog=permission_catalog,
+        permission_catalog_sections=permission_catalog_sections,
         role_default_permissions=role_default_permissions,
         config=core_manifest,
         editor_is_superuser=editor_is_superuser,
@@ -1841,7 +1956,7 @@ def core_module_settings():
     if active_tab == "licensing":
         return redirect(url_for("routes.core_module_settings", tab="plan"))
     if active_tab == "integrations":
-        return redirect(url_for("routes.core_module_settings", tab="general"))
+        return redirect(url_for("routes.core_integrations"))
     if active_tab not in (
         "general",
         "email",
@@ -1878,6 +1993,272 @@ def core_module_settings():
         industry_options=INDUSTRY_OPTIONS,
         organization_industries_selected=set(_org_inds),
     )
+
+
+##############################################################################
+# SECTION 5b: Core integrations — Xero & FreeAgent (admin only)
+# PRD: docs/prd/core-integrations-accounting-prd.md
+##############################################################################
+
+
+@routes.route("/core/integrations", methods=["GET"])
+@login_required
+def core_integrations():
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import catalog as _int_catalog
+    from app.core_integrations import consumers as _int_consumers
+    from app.core_integrations import repository as _int_repo
+    from app.core_integrations import service as _int_svc
+    from app.permissions_registry import collect_permission_catalog
+
+    pm = PluginManager(PLUGINS_FOLDER)
+    core_manifest = pm.get_core_manifest() or {}
+    _cfg_view = dict(core_manifest) if core_manifest else {}
+    _cfg_view["site_settings"] = merge_site_settings_defaults(
+        _cfg_view.get("site_settings")
+    )
+    schema_ok = _int_repo.schema_ready()
+    rows = {}
+    if schema_ok:
+        for p in sorted(_int_repo.PROVIDERS):
+            rows[p] = _int_repo.load_connection(p)
+    settings = _int_repo.load_settings() if schema_ok else {}
+    events = _int_repo.recent_events(10) if schema_ok else {}
+    integration_oauth_apps: dict[str, dict] = {}
+    if schema_ok:
+        for _pk in ("xero", "freeagent"):
+            integration_oauth_apps[_pk] = _int_repo.load_oauth_client_display(_pk)
+    integration_client_configured = {
+        "xero": _int_svc.oauth_app_configured("xero") if schema_ok else False,
+        "freeagent": _int_svc.oauth_app_configured("freeagent") if schema_ok else False,
+        "quickbooks": bool(
+            (os.environ.get("QUICKBOOKS_CLIENT_ID") or os.environ.get("INTUIT_CLIENT_ID") or "").strip()
+        ),
+        "sage": bool((os.environ.get("SAGE_CLIENT_ID") or "").strip()),
+        "freshbooks": bool((os.environ.get("FRESHBOOKS_CLIENT_ID") or "").strip()),
+    }
+    plugins_map = pm.load_plugins() or {}
+    perm_cat = collect_permission_catalog(pm)
+    integration_consumer_cards = _int_consumers.collect_accounting_integration_consumer_cards(
+        plugins_map,
+        permission_catalog=perm_cat,
+        int_settings=settings if schema_ok else {},
+        core_manifest=_cfg_view,
+    )
+    return render_template(
+        "core/integrations.html",
+        config=_cfg_view,
+        integration_schema_ready=schema_ok,
+        connections=rows,
+        int_settings=settings,
+        int_events=events,
+        integration_client_configured=integration_client_configured,
+        integration_oauth_apps=integration_oauth_apps,
+        integration_consumer_cards=integration_consumer_cards,
+        integration_catalog_live=_int_catalog.LIVE_PROVIDERS,
+        integration_catalog_roadmap=_int_catalog.ROADMAP_PROVIDERS,
+    )
+
+
+@routes.route("/core/integrations/oauth-client/<provider>", methods=["POST"])
+@login_required
+def core_integrations_oauth_client(provider):
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed. Run database upgrades first.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    p = (provider or "").strip().lower()
+    if p not in ("xero", "freeagent"):
+        flash("OAuth app credentials can only be saved for Xero or FreeAgent on this form.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    cid = (request.form.get("client_id") or "").strip()
+    raw_sec = request.form.get("client_secret")
+    csec = None if raw_sec is None else str(raw_sec).strip() or None
+    try:
+        _int_repo.upsert_oauth_client(p, client_id=cid, client_secret_plain=csec)
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("routes.core_integrations"))
+    _prov_save_label = {"xero": "Xero", "freeagent": "FreeAgent"}.get(p, p.title())
+    flash(f"{_prov_save_label} OAuth app credentials saved.", "success")
+    return redirect(url_for("routes.core_integrations"))
+
+
+@routes.route("/core/integrations/settings", methods=["POST"])
+@login_required
+def core_integrations_settings():
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed. Run database upgrades first.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    dp = (request.form.get("default_provider") or "none").strip().lower()
+    auto = bool(request.form.get("auto_draft_invoice"))
+    trig = (request.form.get("auto_draft_trigger") or "crm_quote_accepted").strip()
+    _int_repo.save_settings(
+        default_provider=dp, auto_draft_invoice=auto, auto_draft_trigger=trig
+    )
+    _int_repo.append_event(
+        event_type="settings_saved",
+        provider=None,
+        message="Integration deployment settings updated.",
+        user_id=getattr(current_user, "id", None),
+        ip=request.remote_addr,
+        user_agent=request.headers.get("User-Agent"),
+    )
+    log_security_event(
+        "core_integrations_settings_saved",
+        actor_username=getattr(current_user, "username", None),
+    )
+    flash("Integration settings saved.", "success")
+    return redirect(url_for("routes.core_integrations"))
+
+
+@routes.route("/core/integrations/disconnect", methods=["POST"])
+@login_required
+def core_integrations_disconnect():
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+    from app.core_integrations import service as _int_svc
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed. Run database upgrades first.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    prov = (request.form.get("provider") or "").strip().lower()
+    if prov not in _int_repo.PROVIDERS:
+        flash("Unknown provider.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    _int_svc.disconnect_provider(
+        provider=prov, user_id=getattr(current_user, "id", None)
+    )
+    log_security_event(
+        "core_integrations_disconnected",
+        actor_username=getattr(current_user, "username", None),
+        provider=prov,
+    )
+    flash(f"{prov.title()} has been disconnected.", "success")
+    return redirect(url_for("routes.core_integrations"))
+
+
+@routes.route("/core/integrations/health", methods=["POST"])
+@login_required
+def core_integrations_health():
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+    from app.core_integrations import service as _int_svc
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    prov = (request.form.get("provider") or "").strip().lower()
+    if prov not in _int_repo.PROVIDERS:
+        flash("Unknown provider.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    res = _int_svc.run_health_probe(prov)
+    if res.get("ok"):
+        flash(f"{prov.title()}: {res.get('message') or 'OK'}", "success")
+    else:
+        flash(f"{prov.title()}: {res.get('message') or 'Check failed'}", "warning")
+    return redirect(url_for("routes.core_integrations"))
+
+
+@routes.route("/core/integrations/oauth/<provider>/start", methods=["GET"])
+@login_required
+def core_integrations_oauth_start(provider):
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+    from app.core_integrations import service as _int_svc
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed. Run database upgrades first.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    p = (provider or "").strip().lower()
+    if p not in _int_repo.PROVIDERS:
+        flash("Unknown provider.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    try:
+        url = _int_svc.start_oauth(p)
+    except Exception as e:
+        flash(str(e), "danger")
+        return redirect(url_for("routes.core_integrations"))
+    return redirect(url)
+
+
+@routes.route("/core/integrations/oauth/<provider>/callback", methods=["GET"])
+@login_required
+def core_integrations_oauth_callback(provider):
+    if not customer_super_admin_only():
+        return redirect(url_for("routes.dashboard"))
+    from app.core_integrations import repository as _int_repo
+    from app.core_integrations import service as _int_svc
+
+    if not _int_repo.schema_ready():
+        flash("Integration tables are not installed.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    p = (provider or "").strip().lower()
+    if p not in _int_repo.PROVIDERS:
+        flash("Unknown provider.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    err = request.args.get("error")
+    if err:
+        flash(
+            f"OAuth was cancelled or denied ({err}).",
+            "warning",
+        )
+        return redirect(url_for("routes.core_integrations"))
+    state = request.args.get("state")
+    if not _int_svc.validate_oauth_state(p, state):
+        flash("Invalid or expired OAuth state. Try Connect again.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    code = request.args.get("code")
+    if not code:
+        flash("Missing authorisation code.", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    uid = getattr(current_user, "id", None)
+    try:
+        if p == "xero":
+            _int_svc.complete_oauth_xero(user_id=str(uid), code=code)
+        elif p == "freeagent":
+            _int_svc.complete_oauth_freeagent(user_id=str(uid), code=code)
+        elif p == "quickbooks":
+            realm = request.args.get("realmId") or request.args.get("realmid")
+            _int_svc.complete_oauth_quickbooks(
+                user_id=str(uid), code=code, realm_id=realm
+            )
+        elif p == "sage":
+            _int_svc.complete_oauth_sage(user_id=str(uid), code=code)
+        elif p == "freshbooks":
+            _int_svc.complete_oauth_freshbooks(user_id=str(uid), code=code)
+        else:
+            flash("This provider is not wired for OAuth yet.", "danger")
+            return redirect(url_for("routes.core_integrations"))
+    except Exception as e:
+        flash(f"Could not complete connection: {e}", "danger")
+        return redirect(url_for("routes.core_integrations"))
+    _int_repo.append_event(
+        event_type="connect",
+        provider=p,
+        message="OAuth connection completed.",
+        user_id=str(uid) if uid else None,
+        ip=request.remote_addr,
+        user_agent=request.headers.get("User-Agent"),
+    )
+    log_security_event(
+        "core_integrations_connected",
+        actor_username=getattr(current_user, "username", None),
+        provider=p,
+    )
+    flash(f"{p.title()} is now connected.", "success")
+    return redirect(url_for("routes.core_integrations"))
 
 
 ##############################################################################

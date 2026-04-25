@@ -47,29 +47,80 @@
 {% endblock %}
 {% block content %}
 <div class="container-fluid py-3" style="max-width: 920px;">
-  <h1 class="h4 mb-3">{% if opportunity %}Edit opportunity{% else %}New opportunity{% endif %}</h1>
+  <h1 class="h4 mb-2">{% if opportunity %}Edit opportunity{% else %}New opportunity{% endif %}</h1>
+  <p class="small text-muted mb-3 d-md-none">Tip: use <strong>Save &amp; next</strong> to move on with fewer taps.</p>
+  {% include 'admin/partials/crm_pipeline_flow_bar.html' %}
   {% if opportunity and lead_meta %}
   {% set r = lead_meta.get('risk') or {} %}
   {% set gq = lead_meta.get('guide_questions') or {} %}
   {% set inp = r.get('inputs') or {} %}
+  {% set ik = lead_meta.get('intake_kind') %}
   <div class="crm-opp-purple-guide p-3 p-md-4 mb-3">
-    <p class="crm-opp-pg-pill mb-1">{% if industry_visible('medical') %}Same questions as the public event risk guide{% else %}From public event enquiry{% endif %}</p>
-    <h2 class="h5 fw-bold text-white mb-3"><i class="bi bi-signpost-2 me-2"></i>Event risk guide — full breakdown</h2>
+    <p class="crm-opp-pg-pill mb-1">
+      {% if ik == 'private_transfer' %}
+      Private transfer intake — nominal “event-style” scores for pipeline only (non-event work)
+      {% elif industry_visible('medical') %}
+      Same questions as the public event risk guide
+      {% else %}
+      From public event enquiry
+      {% endif %}
+    </p>
+    <h2 class="h5 fw-bold text-white mb-3">
+      {% if ik == 'private_transfer' %}
+      <i class="bi bi-truck-front me-2"></i>Patient transfer — intake summary
+      {% else %}
+      <i class="bi bi-signpost-2 me-2"></i>Event risk guide — full breakdown
+      {% endif %}
+    </h2>
     <p class="small text-white-50 mb-3">
+      {% if ik == 'private_transfer' %}
+      Journey and patient details are on file. Use <strong>Scheduling</strong> below to create a shift in roster / job view — this path does not use Cura.
+      {% else %}
       Early pipeline view: risk-led hints from intake / calculator — not operational advice.
       {% if industry_visible('medical') %}
       Binding quotes normally follow medical needs assessment, agreed scope, and event medical plan documentation.
       {% else %}
       Binding quotes follow agreed scope and your quote rules; figures here are indicative only.
       {% endif %}
+      {% endif %}
     </p>
 
+    {% if ik == 'private_transfer' and lead_meta.get('private_transfer') is mapping %}
+    {% set pt = lead_meta.get('private_transfer') %}
+    <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
+      <h3 class="text-uppercase text-muted fw-bold mb-2">Transfer detail</h3>
+      <dl class="row small mb-0">
+        <dt class="col-sm-4">Patient</dt>
+        <dd class="col-sm-8">{{ (pt.get('patient_first') or '') ~ ' ' ~ (pt.get('patient_last') or '') }}</dd>
+        <dt class="col-sm-4">Date / pick-up</dt>
+        <dd class="col-sm-8">{{ pt.get('transfer_date') or '—' }} {% if pt.get('pickup_time') %}· {{ pt.get('pickup_time') }}{% endif %}</dd>
+        <dt class="col-sm-4">Journey</dt>
+        <dd class="col-sm-8">{{ pt.get('journey_type') or '—' }}</dd>
+        <dt class="col-sm-4">Collect</dt>
+        <dd class="col-sm-8 text-break">{{ pt.get('pickup_address') or '—' }}{% if pt.get('pickup_postcode') %} ({{ pt.get('pickup_postcode') }}){% endif %}</dd>
+        <dt class="col-sm-4">Destination</dt>
+        <dd class="col-sm-8 text-break">{{ pt.get('destination_address') or '—' }}{% if pt.get('destination_postcode') %} ({{ pt.get('destination_postcode') }}){% endif %}</dd>
+        {% if pt.get('crew_vehicle') %}
+        <dt class="col-sm-4">Vehicle</dt>
+        <dd class="col-sm-8">{{ pt.get('crew_vehicle') }}</dd>
+        {% endif %}
+        {% if pt.get('clinical_notes') %}
+        <dt class="col-sm-4">Clinical / mobility</dt>
+        <dd class="col-sm-8 text-break" style="white-space:pre-wrap;">{{ pt.get('clinical_notes') }}</dd>
+        {% endif %}
+      </dl>
+    </div>
+    {% endif %}
+
+    {% if ik != 'private_transfer' %}
     <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
       {% with theme='admin' %}
       {% include 'partials/crm_medical_planning_process.html' %}
       {% endwith %}
     </div>
+    {% endif %}
 
+    {% if ik != 'private_transfer' %}
     <div class="crm-opp-pg-inner p-3 p-md-4 mb-3">
       <h3 class="text-uppercase text-muted fw-bold mb-2">Answers captured</h3>
       <dl class="row small mb-0">
@@ -87,6 +138,7 @@
         <dd class="col-sm-8">{% if gq %}{% if gq.get('late_finish') %}Yes{% else %}No{% endif %}{% else %}{% if inp.get('late_finish') %}Yes{% else %}No{% endif %}{% endif %}</dd>
       </dl>
     </div>
+    {% endif %}
 
     <div class="row g-3">
       <div class="col-lg-6">
@@ -230,20 +282,19 @@
         <dd class="col-sm-8 text-break">{{ lead_meta.get('message') }}</dd>
         {% endif %}
       </dl>
-      <a class="btn btn-sm btn-primary rounded-pill mt-3" href="{{ url_for('crm_module.quote_new', opportunity_id=opportunity.id) }}"><i class="bi bi-receipt me-1"></i>New quote (prefill crowd / hours from lead)</a>
+      <a class="btn btn-sm btn-primary rounded-pill mt-3" href="{{ url_for('crm_module.quote_new') }}?opportunity_id={{ opportunity.id }}&amp;flow=1"><i class="bi bi-receipt me-1"></i>New quote (prefill crowd / hours from lead)</a>
     </div>
 
     {% if guide_cost_estimate %}
     <div class="crm-opp-pg-inner p-3 p-md-4 mt-3 crm-opp-cost-panel">
       <h3 class="text-uppercase fw-bold mb-2" style="color:#4c1d95;">Approximate wage cost (Time &amp; Billing)</h3>
       <p class="small text-muted mb-2">
-        Uses indicative headcounts from the guide × hours × <strong>£/h from your wage rate card</strong>
+        Uses guide role headcounts × hours × <strong>£/h from your wage rate card</strong>
         {% if guide_cost_estimate.wage_card_name %}({{ guide_cost_estimate.wage_card_name }}){% endif %}.
-        This is <strong>not</strong> the customer quote: quote totals still come from <strong>quote rule sets</strong> (bill rates, per-head, VAT, etc.)
-        {% if industry_visible('medical') %}, normally after medical needs assessment and agreed scope{% else %}, once scope is agreed{% endif %}.
-        {% if tb_wage_cards_url %}<a href="{{ tb_wage_cards_url }}" class="text-decoration-none">Wage cards</a>{% endif %}
-        · <a href="{{ url_for('crm_module.guide_wage_job_map') }}" class="text-decoration-none">Guide ↔ job type map</a>.
-        Optional: <code class="small">SPARROW_CRM_GUIDE_WAGE_CARD_ID</code> for which card to use.
+        Not the customer quote — quote totals use <strong>quote rule sets</strong>
+        {% if industry_visible('medical') %}after MNA / agreed scope{% else %}once scope is agreed{% endif %}.
+        {% if tb_wage_cards_url %}<a href="{{ tb_wage_cards_url }}" class="text-decoration-none">Wage cards</a> · {% endif %}
+        <a href="{{ url_for('crm_module.guide_wage_job_map') }}" class="text-decoration-none">Map guide roles to job types</a>.
       </p>
       {% if guide_cost_estimate.tb_note %}
       <div class="alert alert-warning small py-2 mb-2">{{ guide_cost_estimate.tb_note }}</div>
@@ -263,7 +314,7 @@
       <p class="mb-0 fw-bold fs-5 text-primary">Estimated wage subtotal: £{{ guide_cost_estimate.total_gbp | float | round(2) }}</p>
       <p class="small text-muted mt-2 mb-0">Excludes on-costs, overtime rules, travel, and billable uplift — compare with quote breakdown when pricing.</p>
       {% elif not guide_cost_estimate.tb_note %}
-      <p class="small text-muted mb-0">No cost lines could be built (check wage card job type names: medic / paramedic / nurse / driver, etc.).</p>
+      <p class="small text-muted mb-0">No cost lines yet — open <a href="{{ url_for('crm_module.guide_wage_job_map') }}">Guide &amp; wage mapping</a> and map each role (or blended clinical + driver). Ensure rates exist on the card for today’s date.</p>
       {% endif %}
     </div>
     {% endif %}
@@ -273,15 +324,106 @@
   <div class="alert alert-light border small mb-3">
     <strong>Medical event plans</strong> for this opportunity (or quotes on it):
     {% for ep in linked_event_plans %}
-    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('crm_module.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
+    <a class="btn btn-sm btn-outline-primary rounded-pill ms-1 mt-1" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_edit', plan_id=ep.id) }}">{{ ep.title or ('Plan #' ~ ep.id) }}</a>
     <span class="text-muted small">({{ ep.status }})</span>
     {% endfor %}
+  </div>
+  {% endif %}
+  {% if opportunity and scheduling_available %}
+  <div class="card border-0 shadow-sm mb-3" id="crm-scheduling-panel">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted fw-bold mb-2"><i class="bi bi-calendar-week me-1"></i>Scheduling (job / roster)</h2>
+      <p class="small text-muted mb-3">
+        Creates or updates a Time &amp; Billing scheduling shift so you can assign staff in shift / job views.
+        Linked with <code class="user-select-all">crm_opportunity:{{ opportunity.id }}</code>. This is separate from Cura.
+      </p>
+      {% if schedule_shift_edit_url %}
+      <p class="mb-3"><a class="btn btn-sm btn-outline-primary rounded-pill" href="{{ schedule_shift_edit_url }}"><i class="bi bi-box-arrow-up-right me-1"></i>Open linked shift #{{ opportunity.schedule_shift_id }}</a></p>
+      {% endif %}
+      {% if not schedule_clients or not schedule_job_types %}
+      <div class="alert alert-warning small mb-0">
+        {% if not schedule_clients %}No active Time &amp; Billing clients found — add clients first.{% endif %}
+        {% if not schedule_job_types %}No job types found — add job types first.{% endif %}
+      </div>
+      {% else %}
+      <form method="post" action="{{ url_for('crm_module.opportunity_schedule_sync', opp_id=opportunity.id) }}" class="row g-3 small">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if request.args.get('flow') == '1' %}
+        <input type="hidden" name="crm_flow_active" value="1">
+        {% endif %}
+        <div class="col-md-6">
+          <label class="form-label">TB client <span class="text-danger">*</span></label>
+          <select name="schedule_client_id" class="form-select form-select-sm" required>
+            <option value="">— Select —</option>
+            {% for c in schedule_clients %}
+            <option value="{{ c.id }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Job type <span class="text-danger">*</span></label>
+          <select name="schedule_job_type_id" class="form-select form-select-sm" required>
+            <option value="">— Select —</option>
+            {% for jt in schedule_job_types %}
+            <option value="{{ jt.id }}">{{ jt.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Work date <span class="text-danger">*</span></label>
+          <input type="date" name="schedule_work_date" class="form-control form-control-sm" required value="{{ schedule_work_date_default }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Start <span class="text-danger">*</span></label>
+          <input type="time" name="schedule_start" class="form-control form-control-sm" required value="{{ schedule_start_default }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">End <span class="text-danger">*</span></label>
+          <input type="time" name="schedule_end" class="form-control form-control-sm" required value="{{ schedule_end_default }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Break (min)</label>
+          <input type="number" name="schedule_break_mins" class="form-control form-control-sm" value="0" min="0">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Headcount</label>
+          <input type="number" name="schedule_required_count" class="form-control form-control-sm" value="1" min="1" title="Required assignees">
+        </div>
+        {% if schedule_sites %}
+        <div class="col-md-6">
+          <label class="form-label">Site (optional)</label>
+          <select name="schedule_site_id" class="form-select form-select-sm">
+            <option value="">— None —</option>
+            {% for s in schedule_sites %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div class="col-md-4">
+          <label class="form-label">Status</label>
+          <select name="schedule_status" class="form-select form-select-sm">
+            <option value="draft">Draft</option>
+            <option value="published" selected>Published</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div class="col-12 d-grid gap-2 d-sm-flex flex-sm-wrap">
+          <button type="submit" name="crm_flow_next" value="stay" class="btn btn-success btn-sm rounded-pill"><i class="bi bi-cloud-upload me-1"></i>Save or update shift</button>
+          <button type="submit" name="crm_flow_next" value="quote" class="btn btn-outline-primary btn-sm rounded-pill">Save shift &amp; open quote</button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
   <div class="card border-0 shadow-sm">
     <div class="card-body">
       <form method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if request.args.get('flow') == '1' %}
+        <input type="hidden" name="crm_flow_active" value="1">
+        {% endif %}
         <div class="mb-3">
           <label class="form-label" for="account_id">Account <span class="text-danger">*</span></label>
           <select class="form-select" id="account_id" name="account_id" required>
@@ -313,16 +455,16 @@
           <label class="form-label" for="notes">Notes</label>
           <textarea class="form-control" id="notes" name="notes" rows="3">{{ opportunity.notes if opportunity and opportunity.notes else '' }}</textarea>
         </div>
-        <div class="d-flex gap-2">
-          <button type="submit" class="btn btn-primary rounded-pill">Save</button>
-          <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.opportunities_list') }}">Cancel</a>
+        <div class="d-grid gap-2 d-md-flex flex-md-row">
+          <button type="submit" name="crm_flow_next" value="quote" class="btn btn-primary btn-lg rounded-pill order-md-2">
+            Save &amp; open quote
+          </button>
+          <button type="submit" name="crm_flow_next" value="stay" class="btn btn-outline-secondary rounded-pill order-md-1">
+            Save only
+          </button>
+          <a class="btn btn-link text-muted order-md-4" href="{{ url_for('crm_module.opportunities_list') }}">Cancel</a>
         </div>
       </form>
-      {% if opportunity and industry_visible('medical') %}
-      <div class="card-footer bg-light border-0 pt-0">
-        <a class="btn btn-outline-info btn-sm rounded-pill" href="{{ url_for('crm_module.event_plan_new', opportunity_id=opportunity.id) }}">Create event plan from this opportunity</a>
-      </div>
-      {% endif %}
     </div>
   </div>
 </div>

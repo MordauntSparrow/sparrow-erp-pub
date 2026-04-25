@@ -1,0 +1,593 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}{{ (incident.reference_code or incident.public_uuid[:8])|e }} · Incident{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_browse') }}" class="text-decoration-none">Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{{ incident.reference_code or incident.public_uuid[:8] }}</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+    <div>
+      <h1 class="h4 fw-semibold mb-1">{{ (incident.title or 'Incident')|e }}</h1>
+      <p class="small text-muted mb-0">
+        <span class="badge bg-secondary">{{ status_labels.get(incident.status, incident.status) }}</span>
+        {% if incident.reference_code %}<span class="ms-2 font-monospace">{{ incident.reference_code }}</span>{% endif %}
+        {% if incident.safeguarding_required %}
+          {% if safeguarding_state == 'linked' %}
+            <span class="badge bg-success ms-2">Safeguarding linked</span>
+            {% if safeguarding_manager_url %}
+            <a class="btn btn-sm btn-outline-success ms-1" href="{{ safeguarding_manager_url }}">Open in Safeguarding manager</a>
+            {% endif %}
+          {% elif safeguarding_state == 'pending' %}
+            <span class="badge bg-warning text-dark ms-2">Safeguarding pending</span>
+          {% else %}
+            <span class="badge bg-danger ms-2">Safeguarding not linked</span>
+          {% endif %}
+        {% endif %}
+        {% if incident.legal_hold %}<span class="badge bg-dark ms-2">Legal hold</span>{% endif %}
+      </p>
+    </div>
+    {% if (can_close or can_triage) and allowed_next_statuses %}
+    <form class="d-flex flex-wrap gap-2 align-items-center" method="post" action="{{ url_for('internal_incident_reporting.admin_status_post', incident_id=incident.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <select class="form-select form-select-sm" name="to_status" style="min-width:12rem;">
+        {% for st in allowed_next_statuses %}
+        <option value="{{ st }}">{{ status_labels.get(st, st) }}</option>
+        {% endfor %}
+      </select>
+      <input class="form-control form-control-sm" name="note" placeholder="Transition note" style="min-width:10rem;">
+      <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <ul class="nav nav-tabs mb-3">
+    {% for t, lab in workspace_tabs %}
+    <li class="nav-item">
+      <a class="nav-link {% if tab == t %}active{% endif %}" href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=incident.id, tab=t) }}">{{ lab }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if tab == 'summary' %}
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_save_core', incident_id=incident.id) }}" class="card shadow-sm p-3 mb-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_tab" value="summary">
+    <div class="row g-2">
+      <div class="col-md-8 mb-2">
+        <label class="form-label">Title</label>
+        <input class="form-control" name="title" value="{{ (incident.title or '')|e }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Mode</label>
+        <select class="form-select" name="incident_mode">
+          {% for slug, label in modes %}<option value="{{ slug }}" {% if incident.incident_mode == slug %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6 mb-2">
+        <label class="form-label">Category</label>
+        <select class="form-select" name="category_slug">
+          {% for c in categories %}<option value="{{ c.slug }}" {% if incident.category_slug == c.slug %}selected{% endif %}>{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 mb-2">
+        <label class="form-label">Org severity</label>
+        <select class="form-select" name="org_severity_code">
+          <option value="">—</option>
+          {% for slug, label in org_severities %}<option value="{{ slug }}" {% if incident.org_severity_code == slug %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      {% if show_clinical_factors %}
+      <div class="col-md-3 mb-2">
+        <label class="form-label">Harm grade</label>
+        <select class="form-select" name="harm_grade_code">
+          <option value="">—</option>
+          {% for slug, label in harm_grades %}<option value="{{ slug }}" {% if incident.harm_grade_code == slug %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div class="col-12 mb-2">
+        <label class="form-label">Narrative</label>
+        <textarea class="form-control" name="narrative" rows="5">{{ incident.narrative or '' }}</textarea>
+      </div>
+      <div class="col-12 mb-2">
+        <label class="form-label">Immediate actions</label>
+        <textarea class="form-control" name="immediate_actions" rows="3">{{ incident.immediate_actions or '' }}</textarea>
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Site label</label>
+        <input class="form-control" name="site_label" value="{{ incident.site_label or '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Shift ref</label>
+        <input class="form-control" name="shift_reference" value="{{ incident.shift_reference or '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">Vehicle ref</label>
+        <input class="form-control" name="vehicle_reference" value="{{ incident.vehicle_reference or '' }}">
+      </div>
+      {% if show_clinical_factors %}
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="safeguarding_required" value="1" id="sga" {% if incident.safeguarding_required %}checked{% endif %}>
+        <label class="form-check-label" for="sga">Safeguarding required (medical)</label>
+      </div>
+      {% endif %}
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Save summary</button>
+  </form>
+  <div class="card shadow-sm p-3 mb-3">
+    <h2 class="h6 fw-semibold mb-2"><i class="bi bi-bell me-1"></i>Subscriptions</h2>
+    <p class="small text-muted mb-2">In-app updates when this incident changes.</p>
+    <form method="post" action="{{ url_for('internal_incident_reporting.admin_subscribe_post', incident_id=incident.id) }}" class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="return_tab" value="summary">
+      {% if user_subscribed %}
+      <input type="hidden" name="subscribe" value="0">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">Unsubscribe me</button>
+      {% else %}
+      <input type="hidden" name="subscribe" value="1">
+      <button type="submit" class="btn btn-sm btn-outline-primary">Subscribe me</button>
+      {% endif %}
+    </form>
+    {% if subscribers %}
+    <ul class="list-group list-group-flush small">
+      {% for s in subscribers %}
+      <li class="list-group-item px-0 py-1"><code>{{ s.user_id[:8] }}…</code> · {{ s.events }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="small text-muted mb-0">No subscribers yet.</p>
+    {% endif %}
+  </div>
+  {% elif tab == 'ir1' %}
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_save_core', incident_id=incident.id) }}" class="card shadow-sm p-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_tab" value="ir1">
+    <div class="row g-2">
+      <div class="col-md-6 mb-2">
+        <label class="form-label">{{ ir1_labels['incident_occurred_at'] }}</label>
+        <input type="datetime-local" class="form-control" name="incident_occurred_at" value="{% if incident.incident_occurred_at %}{{ incident.incident_occurred_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+      </div>
+      <div class="col-md-6 mb-2">
+        <label class="form-label">{{ ir1_labels['incident_discovered_at'] }}</label>
+        <input type="datetime-local" class="form-control" name="incident_discovered_at" value="{% if incident.incident_discovered_at %}{{ incident.incident_discovered_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+      </div>
+      <div class="col-12 mb-2">
+        <label class="form-label">{{ ir1_labels['exact_location_detail'] }}</label>
+        <input class="form-control" name="exact_location_detail" value="{{ incident.exact_location_detail or '' }}">
+      </div>
+      <div class="col-12 mb-2">
+        <label class="form-label">{{ ir1_labels['witnesses_text'] }}</label>
+        <textarea class="form-control" name="witnesses_text" rows="3">{{ incident.witnesses_text or '' }}</textarea>
+      </div>
+      <div class="col-md-8 mb-2">
+        <label class="form-label">{{ ir1_labels['equipment_involved'] }}</label>
+        <input class="form-control" name="equipment_involved" value="{{ incident.equipment_involved or '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">{{ ir1_labels['people_affected_count'] }}</label>
+        <input class="form-control" type="number" name="people_affected_count" min="0" value="{{ incident.people_affected_count if incident.people_affected_count is not none else '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">{{ ir1_labels['reporter_job_title'] }}</label>
+        <input class="form-control" name="reporter_job_title" value="{{ incident.reporter_job_title or '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">{{ ir1_labels['reporter_department'] }}</label>
+        <input class="form-control" name="reporter_department" value="{{ incident.reporter_department or '' }}">
+      </div>
+      <div class="col-md-4 mb-2">
+        <label class="form-label">{{ ir1_labels['reporter_contact_phone'] }}</label>
+        <input class="form-control" name="reporter_contact_phone" value="{{ incident.reporter_contact_phone or '' }}">
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="riddor_notifiable" value="1" id="riddor" {% if incident.riddor_notifiable %}checked{% endif %}>
+        <label class="form-check-label" for="riddor">{{ ir1_labels['riddor_notifiable'] }}</label>
+      </div>
+      <div class="col-12 mb-2">
+        <label class="form-label">{{ ir1_labels['ir1_supplementary_json'] }}</label>
+        <div class="table-responsive border rounded">
+          <table class="table table-sm align-middle mb-0">
+            <thead class="table-light"><tr><th scope="col">Field</th><th scope="col">Value</th></tr></thead>
+            <tbody id="ir1x-tbody">
+              {% for k, v in ir1_supplementary_rows %}
+              <tr>
+                <td><input class="form-control form-control-sm" name="ir1x_key_{{ loop.index0 }}" value="{{ k|e }}" autocomplete="off"></td>
+                <td><input class="form-control form-control-sm" name="ir1x_val_{{ loop.index0 }}" value="{{ v|e }}" autocomplete="off"></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="ir1x-add-row">Add row</button>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Save IR1 / regulatory fields</button>
+  </form>
+  <script>
+  (function () {
+    var btn = document.getElementById("ir1x-add-row");
+    var tb = document.getElementById("ir1x-tbody");
+    if (!btn || !tb) return;
+    btn.addEventListener("click", function () {
+      var i = tb.rows.length;
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><input class="form-control form-control-sm" name="ir1x_key_' +
+        i +
+        '" autocomplete="off"></td><td><input class="form-control form-control-sm" name="ir1x_val_' +
+        i +
+        '" autocomplete="off"></td>';
+      tb.appendChild(tr);
+    });
+  })();
+  </script>
+  {% elif tab == 'people' %}
+  <div class="card shadow-sm p-3 mb-3">
+    <div class="small text-muted mb-3">Reporter contractor <strong>{{ incident.reporter_contractor_id or '—' }}</strong> · user <strong>{{ incident.reporter_user_id or '—' }}</strong></div>
+    <h2 class="h6 fw-semibold mb-2">Linked employees</h2>
+    <div class="mb-3" style="max-width:28rem;">
+      <label class="form-label small text-muted mb-1" for="hrPickSearch">Search HR by name — assigns the next empty slot</label>
+      <input type="search" class="form-control form-control-sm" id="hrPickSearch" autocomplete="off" placeholder="Type at least 2 characters" data-hr-search="{{ url_for('internal_incident_reporting.admin_contractors_search') }}">
+      <ul class="list-group list-group-flush small border rounded mt-1 d-none" id="hrPickResults" style="max-height:11rem;overflow:auto;"></ul>
+    </div>
+    <form method="post" action="{{ url_for('internal_incident_reporting.admin_people_post', incident_id=incident.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-2">
+        {% for i in range(16) %}
+        <div class="col-md-6 col-xl-4 border rounded p-2">
+          <label class="form-label small text-muted mb-1">Slot {{ loop.index }}</label>
+          <input type="hidden" name="hr_cid_{{ i }}" id="hr-cid-hid-{{ i }}" value="{% if hr_involved_ids|length > i %}{{ hr_involved_ids[i] }}{% endif %}">
+          <div class="small border rounded px-2 py-1 bg-light mb-1" id="hr-cid-face-{{ i }}">
+            {% if hr_involved_ids|length > i %}
+              {% set _cid = hr_involved_ids[i] %}
+              {% if _cid in hr_involved_labels %}
+                {% set lb = hr_involved_labels[_cid] %}
+                <span>{{ (lb.name or lb.email or lb.username or '—')|e }}</span><span class="text-muted"> · id {{ _cid }}</span>
+              {% else %}
+                <span class="font-monospace text-muted">Employee id {{ _cid }}</span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">Empty — use search above</span>
+            {% endif %}
+          </div>
+          <button type="button" class="btn btn-link btn-sm p-0" data-hr-slot-clear="{{ i }}">Clear slot</button>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+        <button type="submit" class="btn btn-primary btn-sm">Save people links</button>
+        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_hr.admin_employees') }}" target="_blank" rel="noopener">Open HR directory</a>
+      </div>
+    </form>
+    <script>
+    (function () {
+      var inp = document.getElementById("hrPickSearch");
+      var ul = document.getElementById("hrPickResults");
+      if (!inp || !ul || !inp.dataset.hrSearch) return;
+      var t;
+      function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+      function setFaceEmpty(idx) {
+        var face = document.getElementById("hr-cid-face-" + idx);
+        if (!face) return;
+        face.innerHTML = '<span class="text-muted">Empty — use search above</span>';
+      }
+      function fillNext(id, label) {
+        var nodes = document.querySelectorAll("input[type='hidden'][name^='hr_cid_']");
+        for (var i = 0; i < nodes.length; i++) {
+          if (!String(nodes[i].value || "").trim()) {
+            nodes[i].value = String(id);
+            var hidId = nodes[i].getAttribute("id") || "";
+            var idx = hidId.indexOf("hr-cid-hid-") === 0 ? hidId.slice("hr-cid-hid-".length) : "";
+            var face = document.getElementById("hr-cid-face-" + idx);
+            if (face) {
+              face.textContent = "";
+              face.appendChild(document.createTextNode(label));
+            }
+            return true;
+          }
+        }
+        return false;
+      }
+      inp.addEventListener("input", function () {
+        clearTimeout(t);
+        var q = (inp.value || "").trim();
+        if (q.length < 2) { hide(); return; }
+        t = setTimeout(function () {
+          fetch(inp.dataset.hrSearch + "?q=" + encodeURIComponent(q), { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (rows) {
+              ul.innerHTML = "";
+              if (!rows || !rows.length) { hide(); return; }
+              rows.forEach(function (row) {
+                var li = document.createElement("li");
+                li.className = "list-group-item list-group-item-action py-1";
+                li.textContent = row.label;
+                li.addEventListener("click", function () {
+                  if (fillNext(row.id, row.label)) { inp.value = ""; hide(); }
+                });
+                ul.appendChild(li);
+              });
+              ul.classList.remove("d-none");
+            })
+            .catch(function () { hide(); });
+        }, 250);
+      });
+      document.addEventListener("click", function (e) {
+        var clr = e.target.closest("[data-hr-slot-clear]");
+        if (clr) {
+          e.preventDefault();
+          var idx = clr.getAttribute("data-hr-slot-clear");
+          var hid = document.getElementById("hr-cid-hid-" + idx);
+          if (hid) hid.value = "";
+          setFaceEmpty(idx);
+          return;
+        }
+        if (!ul.contains(e.target) && e.target !== inp) hide();
+      });
+    })();
+    </script>
+  </div>
+  {% elif tab == 'clinical' %}
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_save_core', incident_id=incident.id) }}" class="card shadow-sm p-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_tab" value="clinical">
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="patient_involved" value="1" {% if incident.patient_involved %}checked{% endif %} id="piv">
+      <label class="form-check-label" for="piv">Patient involved</label>
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="deidentified_narrative" value="1" {% if incident.deidentified_narrative %}checked{% endif %} id="dnv">
+      <label class="form-check-label" for="dnv">De-identified narrative default</label>
+    </div>
+    <h3 class="h6 text-muted text-uppercase small mb-2">Medication (MERP)</h3>
+    {% for key, label in merp_labels.items() %}
+    {% if key == 'high_alert' %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="high_alert" value="1" id="mha" {% if merp.get(key) %}checked{% endif %}>
+      <label class="form-check-label" for="mha">{{ label }}</label>
+    </div>
+    {% else %}
+    <div class="mb-2">
+      <label class="form-label small mb-0">{{ label }}</label>
+      <input class="form-control form-control-sm" name="{{ key }}" value="{{ merp.get(key) or '' }}">
+    </div>
+    {% endif %}
+    {% endfor %}
+    <details class="mb-3"><summary class="small text-muted">Advanced JSON (optional)</summary>
+      <label class="form-label small">Overrides structured fields when non-empty</label>
+      <textarea class="form-control font-monospace small" name="medication_json" rows="4" placeholder="{}">{% if incident.medication_json is mapping %}{{ incident.medication_json | tojson }}{% else %}{{ incident.medication_json or '' }}{% endif %}</textarea>
+    </details>
+    <label class="form-label">Barriers</label>
+    <textarea class="form-control mb-2" name="barrier_notes" rows="3">{{ incident.barrier_notes or '' }}</textarea>
+    <label class="form-label">5 Whys</label>
+    <textarea class="form-control mb-2" name="five_whys" rows="3">{{ incident.five_whys or '' }}</textarea>
+    <button type="submit" class="btn btn-primary btn-sm">Save clinical</button>
+  </form>
+  {% elif tab == 'timeline' and can_investigate %}
+  <div class="card shadow-sm p-3 mb-3">
+    <h2 class="h6">Add event</h2>
+    <form method="post" action="{{ url_for('internal_incident_reporting.admin_timeline_post', incident_id=incident.id) }}" class="row g-2">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-3"><input type="datetime-local" class="form-control form-control-sm" name="event_time" required></div>
+      <div class="col-md-3"><input class="form-control form-control-sm" name="label" placeholder="Label" required></div>
+      <div class="col-md-4"><input class="form-control form-control-sm" name="body" placeholder="Detail"></div>
+      <div class="col-md-2"><button class="btn btn-sm btn-primary w-100" type="submit">Add</button></div>
+    </form>
+  </div>
+  <ul class="list-group">
+    {% for e in timeline %}
+    <li class="list-group-item small"><strong>{{ e.label }}</strong> · {{ e.event_time }}<br>{{ e.body or '' }}</li>
+    {% else %}<li class="list-group-item text-muted">No timeline rows.</li>{% endfor %}
+  </ul>
+  {% elif tab == 'factors' and can_investigate %}
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_factors_post', incident_id=incident.id) }}" class="card shadow-sm p-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    {% for pack in ['universal', 'clinical'] %}
+      {% if pack != 'clinical' or show_clinical_factors %}
+      <h3 class="h6 text-capitalize">{{ pack }} factors</h3>
+      <div class="row mb-2">
+        {% for d in factor_defs %}
+          {% if d.pack == pack %}
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="factor_code" value="{{ d.code }}" id="fc{{ d.id }}"
+                {% for sf in selected_factors %}{% if sf.factor_code == d.code %}checked{% endif %}{% endfor %}>
+              <label class="form-check-label small" for="fc{{ d.id }}">{{ d.label }}</label>
+            </div>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+    <button type="submit" class="btn btn-sm btn-primary">Save factors</button>
+  </form>
+  {% elif tab == 'actions' and can_investigate %}
+  <div class="card shadow-sm p-3 mb-3">
+    <h2 class="h6">New CAPA action</h2>
+    <form method="post" action="{{ url_for('internal_incident_reporting.admin_action_post', incident_id=incident.id) }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-2">
+        <div class="col-md-4"><input class="form-control form-control-sm" name="title" placeholder="Title" required></div>
+        <div class="col-md-3"><input class="form-control form-control-sm" name="owner_label" placeholder="Owner"></div>
+        <div class="col-md-2"><input type="date" class="form-control form-control-sm" name="due_date"></div>
+        <div class="col-md-2">
+          <select class="form-select form-select-sm" name="status"><option value="open">open</option><option value="done">done</option></select>
+        </div>
+        <div class="col-md-12"><textarea class="form-control form-control-sm" name="description" rows="2" placeholder="Description"></textarea></div>
+      </div>
+      <button class="btn btn-sm btn-primary mt-2" type="submit">Add</button>
+    </form>
+  </div>
+  <ul class="list-group">
+    {% for a in actions %}
+    <li class="list-group-item small">
+      <strong>{{ a.title }}</strong> ({{ a.status }}) — due {{ a.due_date or '—' }} · {{ a.owner_label or '' }}
+      <details class="mt-1"><summary>Edit</summary>
+        <form method="post" action="{{ url_for('internal_incident_reporting.admin_action_post', incident_id=incident.id) }}" class="mt-2">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action_id" value="{{ a.id }}">
+          <input class="form-control form-control-sm mb-1" name="title" value="{{ a.title|e }}">
+          <input class="form-control form-control-sm mb-1" name="owner_label" value="{{ a.owner_label or '' }}">
+          <input type="date" class="form-control form-control-sm mb-1" name="due_date" value="{{ a.due_date or '' }}">
+          <select class="form-select form-select-sm mb-1" name="status"><option value="open" {% if a.status=='open' %}selected{% endif %}>open</option><option value="done" {% if a.status=='done' %}selected{% endif %}>done</option></select>
+          <textarea class="form-control form-control-sm mb-1" name="description" rows="2">{{ a.description or '' }}</textarea>
+          <textarea class="form-control form-control-sm mb-1" name="effectiveness_review" rows="2" placeholder="Effectiveness review">{{ a.effectiveness_review or '' }}</textarea>
+          <button class="btn btn-sm btn-outline-primary" type="submit">Save</button>
+        </form>
+      </details>
+    </li>
+    {% else %}<li class="list-group-item text-muted">No actions.</li>{% endfor %}
+  </ul>
+  {% elif tab == 'documents' %}
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('internal_incident_reporting.admin_upload', incident_id=incident.id) }}" class="card shadow-sm p-3 mb-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label class="form-label">Upload attachment</label>
+    <input class="form-control form-control-sm" type="file" name="file" required>
+    <button class="btn btn-sm btn-primary mt-2" type="submit">Upload</button>
+  </form>
+  <ul class="list-group">
+    {% for f in attachments %}
+    <li class="list-group-item small"><a href="{{ url_for('static', filename=f.file_path) }}" target="_blank" rel="noopener">{{ f.file_name or f.file_path }}</a></li>
+    {% else %}<li class="list-group-item text-muted">No files.</li>{% endfor %}
+  </ul>
+  {% elif tab == 'discussion' %}
+  <ul class="list-group mb-3">
+    {% for c in comments %}
+    <li class="list-group-item small"><strong>{{ c.author_label }}</strong> · {{ c.created_at }}<br>{{ c.body }}</li>
+    {% else %}<li class="list-group-item text-muted">No comments.</li>{% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_comment_post', incident_id=incident.id) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <textarea class="form-control mb-2" name="body" rows="3" placeholder="Comment" required></textarea>
+    <button class="btn btn-sm btn-primary" type="submit">Post</button>
+  </form>
+  {% elif tab == 'links' %}
+  <div class="card shadow-sm p-3 mb-3">
+    <h2 class="h6 fw-semibold mb-2">Related</h2>
+    <ul class="list-unstyled small mb-0">
+      <li class="mb-2"><a href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=incident.id, tab='people') }}">People</a></li>
+      {% if incident.linked_safeguarding_referral_id and safeguarding_manager_url %}
+      <li class="mb-2"><a href="{{ safeguarding_manager_url }}">Safeguarding</a></li>
+      {% endif %}
+      {% if compliance_policy_admin_url %}
+      <li class="mb-2"><a href="{{ compliance_policy_admin_url }}">Compliance policy (admin)</a></li>
+      {% endif %}
+    </ul>
+  </div>
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_save_core', incident_id=incident.id) }}" class="card shadow-sm p-3">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_tab" value="links">
+    <h2 class="h6 fw-semibold mb-2">Compliance policy</h2>
+    <label class="form-label small text-muted mb-1" for="compliance_policy_id">Link a policy record (optional)</label>
+    <select class="form-select form-select-sm" name="compliance_policy_id" id="compliance_policy_id" style="max-width:28rem;">
+      <option value="">— None —</option>
+      {% for p in compliance_policies %}
+      <option value="{{ p.id }}" {% if incident.compliance_policy_id == p.id %}selected{% endif %}>{{ (p.title or ('Policy ' ~ p.id))|e }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-primary btn-sm mt-2">Save link</button>
+  </form>
+  {% elif tab == 'audit' %}
+  <ul class="list-group">
+    {% for a in audit %}
+    <li class="list-group-item small font-monospace">{{ a.created_at }} · {{ a.action }} · {{ a.actor_label or '' }}<br><span class="text-muted">{{ a.detail_json }}</span></li>
+    {% else %}<li class="list-group-item text-muted">No audit rows.</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if can_legal %}
+  <hr>
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_legal_hold_post', incident_id=incident.id) }}" class="d-inline">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="on" value="{{ 0 if incident.legal_hold else 1 }}">
+    <button type="submit" class="btn btn-sm btn-outline-dark">{% if incident.legal_hold %}Release legal hold{% else %}Apply legal hold{% endif %}</button>
+  </form>
+  {% endif %}
+
+  {% if can_merge %}
+  <form method="post" action="{{ url_for('internal_incident_reporting.admin_merge_post', incident_id=incident.id) }}" class="mt-2" id="mergeIncidentForm" style="max-width:28rem;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <label class="small d-block mb-1">Merge another incident into this one (the other record is marked merged; this incident is kept)</label>
+    <p class="small text-muted mb-2">Search by reference, title, or id — only incidents in your access scope are listed.</p>
+    <input type="hidden" name="merge_incident_id" value="" id="mergeIncHid">
+    <input type="search" class="form-control form-control-sm mb-1" id="mergeIncSearch" autocomplete="off" placeholder="Type at least 2 characters"
+      data-incidents-search="{{ url_for('internal_incident_reporting.admin_incidents_search') }}"
+      data-exclude-incident="{{ incident.id }}">
+    <ul class="list-group list-group-flush small border rounded mb-2 d-none" id="mergeIncUl" style="max-height:11rem;overflow:auto;"></ul>
+    <div class="small text-muted mb-2" id="mergeIncPicked"></div>
+    <button class="btn btn-sm btn-outline-danger" type="submit" id="mergeIncSubmit" disabled>Merge selected incident</button>
+  </form>
+  <script>
+  (function () {
+    var inp = document.getElementById("mergeIncSearch");
+    var ul = document.getElementById("mergeIncUl");
+    var hid = document.getElementById("mergeIncHid");
+    var picked = document.getElementById("mergeIncPicked");
+    var sub = document.getElementById("mergeIncSubmit");
+    if (!inp || !ul || !hid || !inp.dataset.incidentsSearch) return;
+    var t;
+    function hide() { ul.classList.add("d-none"); ul.innerHTML = ""; }
+    function escHtml(s) {
+      var d = document.createElement("div");
+      d.textContent = s == null ? "" : String(s);
+      return d.innerHTML;
+    }
+    function clearPick() {
+      hid.value = "";
+      picked.innerHTML = "";
+      if (sub) sub.disabled = true;
+    }
+    inp.addEventListener("input", function () {
+      clearTimeout(t);
+      var q = (inp.value || "").trim();
+      if (q.length < 2) { hide(); return; }
+      t = setTimeout(function () {
+        var base = inp.dataset.incidentsSearch;
+        var ex = inp.dataset.excludeIncident || "";
+        var url = base + "?q=" + encodeURIComponent(q) + (ex ? "&exclude=" + encodeURIComponent(ex) : "");
+        fetch(url, { credentials: "same-origin" })
+          .then(function (r) { return r.json(); })
+          .then(function (rows) {
+            ul.innerHTML = "";
+            if (!rows || !rows.length) { hide(); return; }
+            rows.forEach(function (row) {
+              var li = document.createElement("li");
+              li.className = "list-group-item list-group-item-action py-1";
+              li.textContent = row.label;
+              li.addEventListener("click", function () {
+                hid.value = String(row.id);
+                picked.innerHTML =
+                  '<span>Will merge in: <strong>' + escHtml(row.label) + '</strong></span> ' +
+                  '<button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-merge-inc-clear>Change</button>';
+                if (sub) sub.disabled = false;
+                inp.value = "";
+                hide();
+              });
+              ul.appendChild(li);
+            });
+            ul.classList.remove("d-none");
+          })
+          .catch(function () { hide(); });
+      }, 250);
+    });
+    document.addEventListener("click", function (e) {
+      if (e.target.closest("[data-merge-inc-clear]")) {
+        e.preventDefault();
+        clearPick();
+        return;
+      }
+      if (!ul.contains(e.target) && e.target !== inp) hide();
+    });
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,236 @@
+{% extends "incident_reporting_module/base_public.html" %}
+{% block content %}
+{% set s = (step or '1')|string %}
+{% set review_step = '5' if medical else '4' %}
+<nav class="mb-3 small text-secondary" aria-label="Wizard progress">
+  <span class="{% if s == '1' %}fw-bold text-body{% endif %}">1. Basics</span> ·
+  <span class="{% if s == '2' %}fw-bold text-body{% endif %}">2. Narrative</span> ·
+  {% if medical %}<span class="{% if s == '3' %}fw-bold text-body{% endif %}">3. Clinical</span> ·{% endif %}
+  {% if medical %}<span class="{% if s == '4' %}fw-bold text-body{% endif %}">4. Safeguarding</span> ·{% endif %}
+  <span class="{% if s == review_step %}fw-bold text-body{% endif %}">Review</span>
+</nav>
+
+<div class="ep-card card shadow-sm p-4">
+  <h1 class="h5 fw-semibold mb-3">Incident draft</h1>
+  <p class="small text-secondary mb-3">UUID <code>{{ incident.public_uuid }}</code> — a reference code is issued on submit.</p>
+
+  {% if safeguarding_state == 'linked' and medical %}
+  <div class="alert alert-success py-2 small"><i class="bi bi-link-45deg me-1"></i>Safeguarding referral linked.</div>
+  {% elif safeguarding_state == 'pending' and medical and incident.safeguarding_required %}
+  <div class="alert alert-warning py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>Safeguarding is required before you can submit.</div>
+  {% endif %}
+
+  {% if s == '1' %}
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next_step" value="2">
+    <div class="mb-3">
+      <label class="form-label">Title</label>
+      <input class="form-control" name="title" value="{{ (incident.title or '')|e }}" required>
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Mode</label>
+        <select class="form-select" name="incident_mode">
+          {% for slug, label in modes %}
+          <option value="{{ slug }}" {% if incident.incident_mode == slug %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Category</label>
+        <select class="form-select" name="category_slug">
+          {% for c in categories %}
+          <option value="{{ c.slug }}" {% if incident.category_slug == c.slug %}selected{% endif %}>{{ c.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Organisational severity</label>
+      <select class="form-select" name="org_severity_code">
+        <option value="">—</option>
+        {% for slug, label in org_severities %}
+        <option value="{{ slug }}" {% if incident.org_severity_code == slug %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if medical %}
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="safeguarding_required" value="1" id="sgreq"
+        {% if incident.safeguarding_required or auto_safeguarding %}checked{% endif %}>
+      <label class="form-check-label" for="sgreq">Safeguarding referral also required (Cura)</label>
+    </div>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Save &amp; continue</button>
+    <a class="btn btn-link" href="{{ url_for('public_incident_reporting.portal_my') }}">Exit</a>
+  </form>
+
+  {% elif s == '2' %}
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next_step" value="{% if medical %}3{% else %}4{% endif %}">
+    <div class="mb-3">
+      <label class="form-label">What happened?</label>
+      <textarea class="form-control" name="narrative" rows="6">{{ incident.narrative or '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Immediate actions taken</label>
+      <textarea class="form-control" name="immediate_actions" rows="3">{{ incident.immediate_actions or '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Environment / location notes</label>
+      <input class="form-control" name="environment_notes" value="{{ incident.environment_notes or '' }}">
+    </div>
+    <div class="row g-2 mb-3">
+      <div class="col-md-4"><label class="form-label">Site / venue label</label><input class="form-control" name="site_label" value="{{ incident.site_label or '' }}"></div>
+      <div class="col-md-4"><label class="form-label">Shift reference</label><input class="form-control" name="shift_reference" value="{{ incident.shift_reference or '' }}"></div>
+      <div class="col-md-4"><label class="form-label">Vehicle reference</label><input class="form-control" name="vehicle_reference" value="{{ incident.vehicle_reference or '' }}"></div>
+    </div>
+    <details class="mb-3 border rounded p-3 bg-light">
+      <summary class="fw-semibold small">IR1-style regulatory details (optional)</summary>
+      <p class="small text-secondary mt-2 mb-2">Aligns with common NHS incident report datasets for time, place, witnesses, and RIDDOR flagging.</p>
+      <div class="row g-2">
+        <div class="col-md-6">
+          <label class="form-label small">When did it occur?</label>
+          <input type="datetime-local" class="form-control form-control-sm" name="incident_occurred_at" value="{% if incident.incident_occurred_at %}{{ incident.incident_occurred_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label small">When discovered / reported?</label>
+          <input type="datetime-local" class="form-control form-control-sm" name="incident_discovered_at" value="{% if incident.incident_discovered_at %}{{ incident.incident_discovered_at.strftime('%Y-%m-%dT%H:%M') }}{% endif %}">
+        </div>
+        <div class="col-12">
+          <label class="form-label small">Exact location (ward / room / area)</label>
+          <input class="form-control form-control-sm" name="exact_location_detail" value="{{ incident.exact_location_detail or '' }}">
+        </div>
+        <div class="col-12">
+          <label class="form-label small">Witnesses</label>
+          <textarea class="form-control form-control-sm" name="witnesses_text" rows="2">{{ incident.witnesses_text or '' }}</textarea>
+        </div>
+        <div class="col-md-8">
+          <label class="form-label small">Equipment involved</label>
+          <input class="form-control form-control-sm" name="equipment_involved" value="{{ incident.equipment_involved or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">People affected (#)</label>
+          <input class="form-control form-control-sm" type="number" name="people_affected_count" min="0" value="{{ incident.people_affected_count if incident.people_affected_count is not none else '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Your job title</label>
+          <input class="form-control form-control-sm" name="reporter_job_title" value="{{ incident.reporter_job_title or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Department</label>
+          <input class="form-control form-control-sm" name="reporter_department" value="{{ incident.reporter_department or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small">Contact phone</label>
+          <input class="form-control form-control-sm" name="reporter_contact_phone" value="{{ incident.reporter_contact_phone or '' }}">
+        </div>
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="riddor_notifiable" value="1" id="riddorp" {% if incident.riddor_notifiable %}checked{% endif %}>
+            <label class="form-check-label small" for="riddorp">May be RIDDOR-notifiable — seek competent health &amp; safety advice</label>
+          </div>
+        </div>
+      </div>
+    </details>
+    <button type="submit" class="btn btn-primary">Save &amp; continue</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step='1') }}">Back</a>
+  </form>
+
+  {% elif medical and s == '3' %}
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next_step" value="4">
+    <input type="hidden" name="merge_merp" value="1">
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="patient_involved" value="1" {% if incident.patient_involved %}checked{% endif %} id="pi">
+      <label class="form-check-label" for="pi">Patient involved</label>
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="deidentified_narrative" value="1" {% if incident.deidentified_narrative %}checked{% endif %} id="dn">
+      <label class="form-check-label" for="dn">Prefer de-identified narrative in exports</label>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Degree of harm (PSIRF-style labels)</label>
+      <select class="form-select" name="harm_grade_code">
+        <option value="">—</option>
+        {% for slug, label in harm_grades %}
+        <option value="{{ slug }}" {% if incident.harm_grade_code == slug %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <h3 class="h6 text-muted text-uppercase small mb-2">Medication (MERP)</h3>
+    {% for key, label in merp_labels.items() %}
+    {% if key == 'high_alert' %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" name="high_alert" value="1" id="pm{{ key }}" {% if merp.get(key) %}checked{% endif %}>
+      <label class="form-check-label" for="pm{{ key }}">{{ label }}</label>
+    </div>
+    {% else %}
+    <div class="mb-2">
+      <label class="form-label small mb-0">{{ label }}</label>
+      <input class="form-control form-control-sm" name="{{ key }}" value="{{ merp.get(key) or '' }}">
+    </div>
+    {% endif %}
+    {% endfor %}
+    <details class="mb-3"><summary class="small text-muted">Advanced JSON (optional)</summary>
+      <textarea class="form-control font-monospace small" name="medication_json" rows="3" placeholder="Overrides structured fields when non-empty"></textarea>
+    </details>
+    <div class="mb-3">
+      <label class="form-label">Barriers / defences</label>
+      <textarea class="form-control" name="barrier_notes" rows="3">{{ incident.barrier_notes or '' }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">5 Whys (optional)</label>
+      <textarea class="form-control" name="five_whys" rows="3">{{ incident.five_whys or '' }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save &amp; continue</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step='2') }}">Back</a>
+  </form>
+
+  {% elif medical and s == '4' %}
+  <p class="small">Create a draft safeguarding referral (authoritative in Cura / medical records) and link it to this incident.</p>
+  {% if safeguarding_state != 'linked' %}
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard_safeguarding', public_uuid=incident.public_uuid) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-2">
+      <label class="form-label small">Summary for referral</label>
+      <input class="form-control form-control-sm" name="sg_summary" value="{{ (incident.title or '')|e }}">
+    </div>
+    <div class="mb-2">
+      <label class="form-label small">Notes</label>
+      <textarea class="form-control form-control-sm" name="sg_notes" rows="3"></textarea>
+    </div>
+    <p class="small text-muted mb-2">Linking this referral to a live operational event is done by staff in the clinical console when applicable — it cannot be set by typing an id here.</p>
+    <button type="submit" class="btn btn-primary btn-sm">Create safeguarding draft &amp; link</button>
+  </form>
+  {% endif %}
+  <div class="mt-3">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step='3') }}">Back</a>
+    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step='5') }}">Skip to review</a>
+  </div>
+
+  {% elif s == review_step %}
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid) }}">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next_step" value="{{ review_step }}">
+    <p class="small text-secondary mb-2">Save any last edits before submit.</p>
+    <div class="mb-2"><label class="form-label small">Title</label><input class="form-control form-control-sm" name="title" value="{{ (incident.title or '')|e }}"></div>
+    <div class="mb-2"><label class="form-label small">Narrative</label><textarea class="form-control form-control-sm" name="narrative" rows="4">{{ incident.narrative or '' }}</textarea></div>
+    <button type="submit" class="btn btn-outline-secondary btn-sm">Save</button>
+  </form>
+  <hr>
+  <form method="post" action="{{ url_for('public_incident_reporting.portal_wizard_submit', public_uuid=incident.public_uuid) }}" onsubmit="return confirm('Submit this incident to governance?');">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-success">Submit incident</button>
+  </form>
+  <a class="btn btn-link btn-sm mt-2" href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step=('4' if medical else '2')) }}">Back</a>
+
+  {% else %}
+  <p class="text-secondary">Unknown step.</p>
+  <a href="{{ url_for('public_incident_reporting.portal_wizard', public_uuid=incident.public_uuid, step='1') }}">Restart wizard</a>
+  {% endif %}
+</div>
+{% endblock %}

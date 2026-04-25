@@ -1,0 +1,112 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}Incidents · Safety{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Incidents</li>
+    </ol>
+  </nav>
+
+  {% if can_set_site_filter %}
+  <div class="card shadow-sm p-3 mb-3 small">
+    <form class="row g-2 align-items-end" method="post" action="{{ url_for('internal_incident_reporting.admin_browse_site_scope') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <div class="col-md-6">
+        <label class="form-label small mb-0">Site / division label filter (session)</label>
+        <input class="form-control form-control-sm" name="site_scope" value="{{ site_scope_session|e }}" placeholder="e.g. North hub, A&amp;E reception">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+      </div>
+    </form>
+    <p class="text-muted mb-0 mt-2">Used with <strong>view site</strong> permission to narrow the incident list to matching <code>site_label</code> or <code>division_label</code>.</p>
+  </div>
+  {% endif %}
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <h1 class="h4 fw-semibold mb-0">Incidents</h1>
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post" action="{{ url_for('internal_incident_reporting.admin_incident_new_draft') }}" class="d-inline">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-plus-circle me-1"></i>New incident / IR1</button>
+      </form>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('internal_incident_reporting.admin_export_csv', **filters) }}">Export CSV</a>
+    </div>
+  </div>
+
+  <form class="row g-2 align-items-end mb-3" method="get">
+    <div class="col-md-2">
+      <label class="form-label small mb-0">Status</label>
+      <select class="form-select form-select-sm" name="status">
+        <option value="">Any</option>
+        {% for k, lab in status_labels.items() %}
+        <option value="{{ k }}" {% if filters.status == k %}selected{% endif %}>{{ lab }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-0">Mode</label>
+      <select class="form-select form-select-sm" name="mode">
+        <option value="">Any</option>
+        {% for slug, label in modes %}
+        <option value="{{ slug }}" {% if filters.mode == slug %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-0">Category</label>
+      <select class="form-select form-select-sm" name="category">
+        <option value="">Any</option>
+        {% for c in categories %}
+        <option value="{{ c.slug }}" {% if filters.category == c.slug %}selected{% endif %}>{{ c.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small mb-0">Search</label>
+      <input class="form-control form-control-sm" name="q" value="{{ filters.q|e }}" placeholder="Title, ref, narrative">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label small mb-0">Review</label>
+      <select class="form-select form-select-sm" name="review">
+        <option value="">—</option>
+        <option value="sla" {% if filters.review == 'sla' %}selected{% endif %}>SLA breach</option>
+      </select>
+    </div>
+    <div class="col-md-1">
+      <button class="btn btn-sm btn-primary w-100" type="submit">Filter</button>
+    </div>
+  </form>
+
+  <div class="table-responsive card shadow-sm">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light"><tr>
+        <th>Ref</th><th>Status</th><th>Mode</th><th>Category</th><th>Title</th><th>Safeguarding</th><th>Updated</th>
+      </tr></thead>
+      <tbody>
+        {% for r in incidents %}
+        <tr>
+          <td class="text-nowrap small"><a href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=r.id) }}">{{ r.reference_code or r.public_uuid[:8] }}</a></td>
+          <td><span class="badge bg-secondary">{{ status_labels.get(r.status, r.status) }}</span></td>
+          <td class="small">{{ r.incident_mode }}</td>
+          <td class="small">{{ r.category_slug }}</td>
+          <td>{{ (r.title or '')|e }}</td>
+          <td class="small">
+            {% if r.safeguarding_required %}
+              {% if r.linked_safeguarding_referral_id %}<span class="text-success">Linked</span>{% else %}<span class="text-warning">Pending</span>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="small text-nowrap">{{ r.created_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted p-4">No rows.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

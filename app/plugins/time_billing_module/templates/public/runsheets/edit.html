@@ -144,11 +144,45 @@
         <thead class="table-light">
           <tr>
             <th>Contractor</th>
+            <th>Role</th>
             <th>Vehicle</th>
             <th>Scheduled</th>
             <th>Actual</th>
             <th>Notes</th>
             <th class="text-end">Payroll</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3" id="journeyRolesCard">
+  <div class="card-header py-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <div>
+      <strong>Journey roles</strong>
+      <span class="text-muted small">(drivers, lead, client contact — optional)</span>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAddSeg" style="display:none;">Add leg</button>
+  </div>
+  <div class="card-body">
+    <p class="small text-muted mb-2">
+      Record <strong>who was in each role between which times</strong> (you can add several rows, including the same contractor twice for a handover).
+      <strong>Pay rule</strong> is saved for future payroll automation; <em>Audit only</em> does not change published timesheets today.
+      Use template <strong>Form</strong> fields above for leg timings (leave base / arrive client / etc.) when you need structured journey clocks.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0" id="segTbl">
+        <thead class="table-light">
+          <tr>
+            <th>Contractor</th>
+            <th>Role</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Pay rule</th>
+            <th>Notes</th>
+            <th class="text-end"></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -177,11 +211,27 @@
   const URL_SCHEMA_TMPL = "{{ url_for('public_time_billing.api_my_runsheet_template_schema', tpl_id=999999) }}";
   const URL_CLIENTS = "{{ url_for('public_time_billing.api_refs_clients') }}";
   const URL_SITES = "{{ url_for('public_time_billing.api_refs_sites') }}";
-  const URL_JOB_TYPES = "{{ url_for('public_time_billing.api_refs_job_types') }}";
+  const URL_JOB_TYPES = "{{ url_for('public_time_billing.api_public_refs_job_types') }}";
   const URL_ROLES = "{{ url_for('public_time_billing.api_refs_roles') }}";
   const WITHDRAW_TMPL = "{{ url_for('public_time_billing.api_my_runsheets_assignment_withdraw', rs_id=999001, ra_id=999002) }}";
   const REACT_TMPL = "{{ url_for('public_time_billing.api_my_runsheets_assignment_reactivate', rs_id=999001, ra_id=999002) }}";
   const SHOW_CURA = {{ industry_visible('medical')|tojson }};
+
+  const CREW_ROLE_OPTIONS = [
+    { value: '', label: '—' },
+    { value: 'driver', label: 'Driver' },
+    { value: 'lead', label: 'Lead' },
+    { value: 'client_contact', label: 'Client contact' },
+    { value: 'attendant', label: 'Attendant' },
+    { value: 'crew', label: 'Crew' },
+    { value: 'other', label: 'Other' },
+  ];
+  const SEG_PAY_OPTIONS = [
+    { value: 'audit', label: 'Audit only (no payroll rule yet)' },
+    { value: 'full_shift', label: 'Pay full crew line (default-style)' },
+    { value: 'journey', label: 'Journey legs (base↔client — future)' },
+    { value: 'on_site', label: 'On-site / at client only (future)' },
+  ];
 
   let rsId = RS_ID_INITIAL;
   let rsData = null;
@@ -479,6 +529,139 @@
     setDirty(true);
   }
 
+  function closeSegDd(except) {
+    document.querySelectorAll('.seg-crew-dd').forEach(dd => {
+      if (!except || !except.contains(dd)) { dd.classList.add('d-none'); dd.innerHTML = ''; }
+    });
+  }
+
+  function pickSegCrew(tr, id, name) {
+    const hid = tr.querySelector('[data-field="contractor_id"]');
+    if (hid) hid.value = String(id);
+    const lab = tr.querySelector('.seg-crew-label');
+    if (lab) lab.textContent = '#' + id + (name ? ' — ' + name : '');
+    const inp = tr.querySelector('.seg-crew-search');
+    if (inp) inp.value = '';
+    closeSegDd();
+    setDirty(true);
+  }
+
+  async function runSegSearch(tr) {
+    const inp = tr.querySelector('.seg-crew-search');
+    const qv = (inp && inp.value || '').trim();
+    if (qv.length < 2) { toast('Type at least 2 characters.', 'warning'); return; }
+    const u = new URL(URL_CONTRACTORS, window.location.origin);
+    u.searchParams.set('q', qv);
+    const rrEl = document.getElementById('f_required_role_id');
+    if (rrEl && rrEl.value) u.searchParams.set('required_role_id', rrEl.value);
+    const r = await fetch(u.pathname + u.search, { headers: { 'Accept': 'application/json' } });
+    if (!r.ok) return;
+    const d = await r.json();
+    const dd = tr.querySelector('.seg-crew-dd');
+    if (!dd) return;
+    dd.innerHTML = '';
+    (d.items || []).forEach(it => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'list-group-item list-group-item-action py-1 px-2 text-start';
+      b.textContent = '#' + it.id + ' — ' + (it.name || '') + (it.email ? ' (' + it.email + ')' : '');
+      b.addEventListener('click', () => pickSegCrew(tr, it.id, it.name || ''));
+      dd.appendChild(b);
+    });
+    if (!(d.items || []).length) {
+      const z = document.createElement('div');
+      z.className = 'list-group-item small text-muted';
+      z.textContent = 'No matches';
+      dd.appendChild(z);
+    }
+    dd.classList.remove('d-none');
+  }
+
+  function wireSegRow(tr, lead) {
+    if (!lead) return;
+    const btn = tr.querySelector('.seg-crew-search-btn');
+    const sInp = tr.querySelector('.seg-crew-search');
+    if (btn) btn.addEventListener('click', () => runSegSearch(tr));
+    if (sInp) sInp.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); runSegSearch(tr); }
+    });
+    const del = tr.querySelector('.js-seg-del');
+    if (del) del.addEventListener('click', () => { tr.remove(); setDirty(true); });
+    tr.querySelectorAll('.js-seg').forEach(el => {
+      el.addEventListener('change', () => setDirty(true));
+      el.addEventListener('input', () => setDirty(true));
+    });
+  }
+
+  function addSegRow(seg, lead) {
+    const tbody = document.querySelector('#segTbl tbody');
+    if (!tbody) return null;
+    const tr = document.createElement('tr');
+    const cid = seg.contractor_id || seg.user_id || '';
+    const roleOpts = CREW_ROLE_OPTIONS.map(o =>
+      `<option value="${o.value}"${String(seg.role_code || '') === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+    ).join('');
+    const payOpts = SEG_PAY_OPTIONS.map(o =>
+      `<option value="${o.value}"${String(seg.pay_mode || 'audit') === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+    ).join('');
+    const dis = lead ? '' : 'disabled';
+    const hidSearch = lead ? '' : 'display:none;';
+    const ts = seg.time_start != null ? String(seg.time_start).slice(0, 5) : '';
+    const te = seg.time_end != null ? String(seg.time_end).slice(0, 5) : '';
+    tr.innerHTML = `
+      <td class="align-top position-relative">
+        <input type="hidden" class="js-seg" data-field="contractor_id" value="${cid}">
+        <div class="input-group input-group-sm mb-1" style="${hidSearch}">
+          <input type="text" class="form-control seg-crew-search" placeholder="Search…" autocomplete="off" ${dis}>
+          <button type="button" class="btn btn-outline-secondary seg-crew-search-btn" ${dis}><i class="bi bi-search"></i></button>
+        </div>
+        <div class="small seg-crew-label text-muted"></div>
+        <div class="list-group position-absolute shadow-sm seg-crew-dd d-none border rounded" style="z-index:25;max-height:180px;overflow-y:auto;left:0;right:0;"></div>
+      </td>
+      <td><select class="form-select form-select-sm js-seg" data-field="role_code" ${dis}>${roleOpts}</select></td>
+      <td><input type="time" class="form-control form-control-sm js-seg" data-field="time_start" value="${ts}" ${dis}></td>
+      <td><input type="time" class="form-control form-control-sm js-seg" data-field="time_end" value="${te}" ${dis}></td>
+      <td><select class="form-select form-select-sm js-seg" data-field="pay_mode" ${dis}>${payOpts}</select></td>
+      <td><input class="form-control form-control-sm js-seg" data-field="notes" value="" ${dis}></td>
+      <td class="text-end">${lead ? '<button type="button" class="btn btn-outline-danger btn-sm js-seg-del"><i class="bi bi-trash"></i></button>' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+    const lab = tr.querySelector('.seg-crew-label');
+    if (cid && lab) {
+      lab.textContent = '#' + cid + (seg.user_name ? ' — ' + seg.user_name : '');
+    }
+    const notesEl = tr.querySelector('[data-field="notes"]');
+    if (notesEl && seg.notes) notesEl.value = seg.notes;
+    wireSegRow(tr, lead);
+    return tr;
+  }
+
+  function collectCrewSegments() {
+    const rows = [];
+    let i = 0;
+    document.querySelectorAll('#segTbl tbody tr').forEach(tr => {
+      const get = f => {
+        const el = tr.querySelector('[data-field="' + f + '"]');
+        return el ? el.value : '';
+      };
+      const contractor_id = get('contractor_id') ? parseInt(get('contractor_id'), 10) : null;
+      if (!contractor_id) return;
+      const roleSel = tr.querySelector('[data-field="role_code"]');
+      const role_code = (roleSel && roleSel.value) ? roleSel.value : null;
+      rows.push({
+        contractor_id,
+        role_code: role_code || null,
+        time_start: get('time_start') || null,
+        time_end: get('time_end') || null,
+        pay_mode: get('pay_mode') || 'audit',
+        notes: (get('notes') || '').trim() || null,
+        sort_order: i,
+      });
+      i++;
+    });
+    return rows;
+  }
+
   async function runCrewSearch(tr) {
     const inp = tr.querySelector('.crew-search');
     const qv = (inp && inp.value || '').trim();
@@ -524,6 +707,10 @@
     const inc = payrollActive(a);
     const rowCls = inc ? '' : 'table-secondary';
     tr.className = rowCls;
+    const cr = (a.crew_role != null && String(a.crew_role)) ? String(a.crew_role) : '';
+    const roleOpts = CREW_ROLE_OPTIONS.map(o =>
+      `<option value="${o.value}"${cr === o.value ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+    ).join('');
     tr.innerHTML = `
       <td class="align-top position-relative">
         <input type="hidden" class="js" data-field="assignment_id" value="${raId}">
@@ -535,6 +722,9 @@
         <div class="small crew-label text-muted"></div>
         <div class="list-group position-absolute shadow-sm crew-dd d-none border rounded" style="z-index:20;max-height:180px;overflow-y:auto;left:0;right:0;"></div>
         <input type="hidden" class="js" data-field="fleet_vehicle_id" value="">
+      </td>
+      <td class="align-top">
+        <select class="form-select form-select-sm js" data-field="crew_role" ${lead ? '' : 'disabled'}>${roleOpts}</select>
       </td>
       <td class="align-top small text-muted js-veh-cell"></td>
       <td>
@@ -626,8 +816,11 @@
       if (!contractor_id) return;
       const fvRaw = (get('fleet_vehicle_id') || '').trim();
       const fvParsed = fvRaw ? parseInt(fvRaw, 10) : NaN;
+      const crEl = tr.querySelector('[data-field="crew_role"]');
+      const crew_role = (crEl && crEl.value) ? crEl.value : null;
       rows.push({
         contractor_id,
+        crew_role: crew_role || null,
         fleet_vehicle_id: Number.isFinite(fvParsed) ? fvParsed : null,
         scheduled_start: get('scheduled_start') || null,
         scheduled_end: get('scheduled_end') || null,
@@ -637,6 +830,13 @@
       });
     });
     return rows;
+  }
+
+  function renderCrewSegments(segments, lead) {
+    const segBody = document.querySelector('#segTbl tbody');
+    if (!segBody) return;
+    segBody.innerHTML = '';
+    (segments || []).forEach(s => addSegRow(s, lead));
   }
 
   function setFormEnabled(lead, isNew) {
@@ -652,6 +852,8 @@
     });
     document.getElementById('btnSave').disabled = false;
     document.getElementById('btnAddCrew').style.display = lead ? 'inline-block' : 'none';
+    const btnSeg = document.getElementById('btnAddSeg');
+    if (btnSeg) btnSeg.style.display = lead ? 'inline-block' : 'none';
     document.getElementById('btnPublish').disabled = !lead;
     document.getElementById('leadHint').textContent = lead
       ? 'You are the lead — you can edit job details, crew, and publish.'
@@ -720,6 +922,7 @@
       template_version: rsData && rsData.template_version != null ? rsData.template_version : null,
       payload: collectPayload(),
       assignments: collectAssignments(),
+      crew_segments: collectCrewSegments(),
     };
     const selTpl = document.getElementById('tplPick');
     if (!rsId && selTpl.value) {
@@ -811,6 +1014,7 @@
     const tbody = document.querySelector('#crewTbl tbody');
     tbody.innerHTML = '';
     (rsData.assignments || []).forEach(a => addCrewRow(a, lead));
+    renderCrewSegments(rsData.crew_segments, lead);
 
     document.getElementById('btnPublish').disabled = !lead;
 
@@ -885,7 +1089,16 @@
 
   document.addEventListener('click', ev => {
     if (!ev.target.closest('#crewTbl')) closeCrewDd();
+    if (!ev.target.closest('#segTbl')) closeSegDd();
   });
+
+  const btnAddSeg = document.getElementById('btnAddSeg');
+  if (btnAddSeg) {
+    btnAddSeg.addEventListener('click', () => {
+      addSegRow({}, true);
+      setDirty(true);
+    });
+  }
 
   (async function init() {
     await loadRefs();

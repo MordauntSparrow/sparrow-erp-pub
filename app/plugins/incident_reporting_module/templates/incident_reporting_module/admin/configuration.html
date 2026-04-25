@@ -1,0 +1,186 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}Safety module settings{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Settings</li>
+    </ol>
+  </nav>
+
+  <h1 class="h4 fw-semibold mb-3">Safety module settings</h1>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100 border-0">
+        <div class="card-body d-flex flex-column">
+          <h2 class="h6 card-title mb-3"><i class="bi bi-kanban me-1 text-primary"></i> IR1 &amp; stages</h2>
+          <div class="mt-auto text-end">
+            <a href="{{ url_for('internal_incident_reporting.admin_pipeline') }}" class="btn btn-primary btn-sm">Open</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if incident_nav_can_configure and incident_show_hse_form %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100 border-0">
+        <div class="card-body d-flex flex-column">
+          <h2 class="h6 card-title mb-2"><i class="bi bi-clipboard-check me-1 text-success"></i> HSE walkarounds</h2>
+          <p class="small text-muted flex-grow-1">Tour definitions, checklists, and repeat interval.</p>
+          <div class="mt-auto text-end d-flex gap-2 justify-content-end flex-wrap">
+            <a href="{{ url_for('internal_incident_reporting.admin_configuration_walkarounds') }}" class="btn btn-primary btn-sm">Definitions</a>
+            <a href="{{ url_for('internal_incident_reporting.admin_walkarounds') }}" class="btn btn-outline-secondary btn-sm">Due &amp; complete</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100 border-0">
+        <div class="card-body d-flex flex-column">
+          <h2 class="h6 card-title mb-3"><i class="bi bi-graph-up-arrow me-1 text-info"></i> Analytics &amp; export</h2>
+          <div class="mt-auto text-end d-flex gap-2 justify-content-end flex-wrap">
+            <a href="{{ url_for('internal_incident_reporting.admin_analytics') }}" class="btn btn-outline-primary btn-sm">Analytics</a>
+            {% if incident_nav_can_export %}
+            <a href="{{ url_for('internal_incident_reporting.admin_export_csv') }}" class="btn btn-outline-secondary btn-sm">CSV</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100 border-0">
+        <div class="card-body d-flex flex-column">
+          <h2 class="h6 card-title mb-3"><i class="bi bi-people me-1 text-secondary"></i> HR</h2>
+          <div class="mt-auto text-end">
+            <a href="{{ url_for('internal_hr.admin_employees') }}" class="btn btn-outline-secondary btn-sm">Employees</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h6 fw-semibold mb-2 text-uppercase small text-secondary" id="routing-sla">Routing &amp; SLA</h2>
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold">Rules</div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            On first <strong>submit</strong>, Sparrow picks the first <strong>active</strong> rule (lowest <strong>priority</strong> number first) that matches <strong>category</strong> or, failing that, <strong>org severity</strong> (comma-separated codes), and sets the SLA due time that many <strong>hours</strong> later. With no rules, no SLA clock is applied.
+          </p>
+          <div class="mb-3 small">
+            {% for r in rules %}
+            <details class="border rounded mb-2 p-2 bg-light">
+              <summary class="fw-semibold user-select-none">{{ r.name|e }} · SLA {{ r.sla_hours or '—' }}h · {{ r.category_slug or '*' }}</summary>
+              <div class="pt-2">
+                <form method="post" action="{{ url_for('internal_incident_reporting.admin_routing_post') }}">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="id" value="{{ r.id }}">
+                  <div class="mb-1"><label class="form-label small text-muted mb-0">Rule name</label><input class="form-control form-control-sm" name="name" value="{{ r.name|e }}" required></div>
+                  <div class="mb-1"><label class="form-label small text-muted mb-0">Match category (optional)</label><input class="form-control form-control-sm" name="category_slug" value="{{ r.category_slug or '' }}" placeholder="e.g. slip_trip_fall" title="Exact category slug from the incident form"></div>
+                  <div class="mb-1"><label class="form-label small text-muted mb-0">Match org severity (optional)</label><input class="form-control form-control-sm" name="org_severity_codes" value="{{ r.org_severity_codes or '' }}" placeholder="e.g. minor,moderate" title="Comma-separated; matched to incident org severity"></div>
+                  <div class="mb-1"><label class="form-label small text-muted mb-0">SLA hours after submit</label><input class="form-control form-control-sm" name="sla_hours" type="number" value="{{ r.sla_hours or '' }}" min="0" placeholder="Hours"></div>
+                  <div class="mb-1"><label class="form-label small text-muted mb-0">Priority</label><input class="form-control form-control-sm" name="priority_order" type="number" value="{{ r.priority_order or 0 }}" title="Lower runs first"></div>
+                  <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="active" value="1" id="ra{{ r.id }}" {% if r.active %}checked{% endif %}><label class="form-check-label" for="ra{{ r.id }}">Active</label></div>
+                  <button class="btn btn-sm btn-primary" type="submit">Update</button>
+                </form>
+                <form method="post" action="{{ url_for('internal_incident_reporting.admin_routing_delete') }}" class="mt-2 d-inline" onsubmit="return confirm('Remove this rule?');">
+                  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="id" value="{{ r.id }}">
+                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                </form>
+              </div>
+            </details>
+            {% else %}
+            <p class="text-muted small mb-0">No rules yet.</p>
+            {% endfor %}
+          </div>
+          <p class="small fw-semibold text-secondary mb-2">Add rule</p>
+          <form method="post" action="{{ url_for('internal_incident_reporting.admin_routing_post') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="id" value="">
+            <div class="mb-1"><label class="form-label small text-muted mb-0">Rule name</label><input class="form-control form-control-sm" name="name" placeholder="e.g. Falls — 72h triage" required></div>
+            <div class="mb-1"><label class="form-label small text-muted mb-0">Match category (optional)</label><input class="form-control form-control-sm" name="category_slug" placeholder="e.g. slip_trip_fall"></div>
+            <div class="mb-1"><label class="form-label small text-muted mb-0">Match org severity (optional)</label><input class="form-control form-control-sm" name="org_severity_codes" placeholder="e.g. minor,moderate"></div>
+            <div class="mb-1"><label class="form-label small text-muted mb-0">SLA hours after submit</label><input class="form-control form-control-sm" name="sla_hours" type="number" min="0" placeholder="e.g. 72"></div>
+            <div class="mb-1"><label class="form-label small text-muted mb-0">Priority</label><input class="form-control form-control-sm" name="priority_order" type="number" value="0" title="Lower runs first"></div>
+            <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="active" value="1" id="raNew" checked><label class="form-check-label" for="raNew">Active</label></div>
+            <button class="btn btn-sm btn-primary" type="submit">Save rule</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if incident_may_edit_form_role_visibility %}
+  <h2 class="h6 fw-semibold mb-2 mt-4 text-uppercase small text-secondary" id="form-role-visibility">Form visibility by role</h2>
+  <div class="row g-4 mb-4">
+    <div class="col-lg-10">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            Limit who sees certain Safety &amp; Incidents workspaces in the <strong>admin console</strong> (Sparrow <code>users.role</code>).
+            Users still need their usual module permissions. Tick <strong>role groups</strong> from the manifest (parents include every child group’s roles) and/or individual roles.
+            Leave <strong>all</strong> group and role boxes unticked for a form to allow <strong>everyone</strong> who can already open the module.
+          </p>
+          <form method="post" action="{{ url_for('internal_incident_reporting.admin_configuration_form_role_visibility_post') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="row g-4">
+              <div class="col-md-6">
+                <h3 class="h6 fw-semibold mb-2">IR1 / Regulatory tab</h3>
+                <p class="small text-muted mb-2">Incident workspace tab for regulatory-style fields.</p>
+                {% if form_visibility_category_rows %}
+                <p class="small fw-semibold text-secondary mb-1">Role groups</p>
+                {% for cat in form_visibility_category_rows %}
+                <div class="form-check" style="margin-left: {{ (cat.depth * 1.1)|round(2) }}rem">
+                  <input class="form-check-input" type="checkbox" name="ir1_categories" value="{{ cat.id|e }}" id="ir1c-{{ cat.id|e }}"
+                    {% if form_role_visibility.ir1_categories and cat.id in form_role_visibility.ir1_categories %}checked{% endif %}>
+                  <label class="form-check-label" for="ir1c-{{ cat.id|e }}">{{ cat.label|e }}</label>
+                </div>
+                {% endfor %}
+                <p class="small fw-semibold text-secondary mb-1 mt-3">Individual roles</p>
+                {% endif %}
+                {% for slug, label in form_visibility_role_choices %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="ir1_roles" value="{{ slug|e }}" id="ir1r-{{ slug|e }}"
+                    {% if form_role_visibility.ir1_roles and slug in form_role_visibility.ir1_roles %}checked{% endif %}>
+                  <label class="form-check-label" for="ir1r-{{ slug|e }}">{{ label|e }}</label>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="col-md-6">
+                <h3 class="h6 fw-semibold mb-2">HSE walkarounds</h3>
+                <p class="small text-muted mb-2">Walkaround due list, completion, definitions, and printable pack.</p>
+                {% if form_visibility_category_rows %}
+                <p class="small fw-semibold text-secondary mb-1">Role groups</p>
+                {% for cat in form_visibility_category_rows %}
+                <div class="form-check" style="margin-left: {{ (cat.depth * 1.1)|round(2) }}rem">
+                  <input class="form-check-input" type="checkbox" name="hse_categories" value="{{ cat.id|e }}" id="hsec-{{ cat.id|e }}"
+                    {% if form_role_visibility.hse_categories and cat.id in form_role_visibility.hse_categories %}checked{% endif %}>
+                  <label class="form-check-label" for="hsec-{{ cat.id|e }}">{{ cat.label|e }}</label>
+                </div>
+                {% endfor %}
+                <p class="small fw-semibold text-secondary mb-1 mt-3">Individual roles</p>
+                {% endif %}
+                {% for slug, label in form_visibility_role_choices %}
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="hse_roles" value="{{ slug|e }}" id="hser-{{ slug|e }}"
+                    {% if form_role_visibility.hse_roles and slug in form_role_visibility.hse_roles %}checked{% endif %}>
+                  <label class="form-check-label" for="hser-{{ slug|e }}">{{ label|e }}</label>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm mt-3">Save visibility</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

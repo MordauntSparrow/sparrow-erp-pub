@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Portal modules – {{ role.name }} – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <nav aria-label="Breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_index') }}">Employee Portal</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_employee_portal.admin_module_access_roles') }}">Portal modules by role</a></li>
+      <li class="breadcrumb-item active" aria-current="page">{{ role.name }}</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Role: {{ role.name }}</h1>
+  <p class="text-muted">When enabled, only the checked tiles appear for contractors whose primary role is this one (unless a per-person list is tighter).</p>
+
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_module_access_role_save', rid=role.id) }}" class="card card-body mb-4" style="max-width: 720px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="apply_restriction" value="1" id="apply_restriction" {% if restrict %}checked{% endif %}>
+      <label class="form-check-label" for="apply_restriction"><strong>Limit modules for this role</strong></label>
+      <p class="small text-muted mb-0">Untick and save to remove the role rule entirely.</p>
+    </div>
+    <fieldset class="mb-3" id="module-picks">
+      <legend class="h6">Tiles</legend>
+      <div class="row row-cols-1 row-cols-md-2 g-2">
+        {% for key, label in choices %}
+        <div class="col">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="module_key" value="{{ key }}" id="mk-{{ loop.index0 }}"
+              {% if key in selected %}checked{% endif %}>
+            <label class="form-check-label" for="mk-{{ loop.index0 }}">{{ label }}</label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <a href="{{ url_for('internal_employee_portal.admin_module_access_roles') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

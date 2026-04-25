@@ -3,10 +3,11 @@ Employee Portal services: dashboard data, module links, and safe helpers.
 Production-ready: defensive loading, logging, no raw secrets in logs.
 Admin: contractor search, message/todo list and CRUD.
 """
+import json
 import logging
 import re
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from app.objects import get_db_connection
 from app.organization_profile import (
@@ -47,7 +48,227 @@ MODULE_LINKS_CONFIG = [
         "launch_slug": None,
         "industry_slugs": ("medical", "security", "cleaning"),
     },
+    {
+        "name": "Safety & Incidents",
+        "url": "/incidents/",
+        "icon": "bi-shield-exclamation",
+        "system_name": "incident_reporting_module",
+        "launch_slug": None,
+    },
 ]
+
+# Dashboard tiles that are not a plugin ``system_name`` but can be restricted like modules.
+PORTAL_KEY_MY_EQUIPMENT = "portal_my_equipment"
+PORTAL_KEY_INVENTORY_REQUESTS = "portal_inventory_requests"
+PORTAL_KEY_ASSISTANT = "portal_assistant"
+
+PORTAL_ACCESS_KEYS: FrozenSet[str] = frozenset(
+    m["system_name"] for m in MODULE_LINKS_CONFIG
+) | frozenset(
+    (PORTAL_KEY_MY_EQUIPMENT, PORTAL_KEY_INVENTORY_REQUESTS, PORTAL_KEY_ASSISTANT)
+)
+
+
+def portal_access_key_choices() -> List[Tuple[str, str]]:
+    """(access_key, label) for admin checkboxes — same order as module tiles + extras."""
+    rows: List[Tuple[str, str]] = [
+        (m["system_name"], m["name"]) for m in MODULE_LINKS_CONFIG
+    ]
+    rows.extend(
+        [
+            (PORTAL_KEY_MY_EQUIPMENT, "My equipment & kit"),
+            (PORTAL_KEY_INVENTORY_REQUESTS, "Request stock / equipment & my requests"),
+            (PORTAL_KEY_ASSISTANT, "Portal assistant (AI)"),
+        ]
+    )
+    return rows
+
+
+def _parse_allowed_modules_json(raw: Any) -> Optional[Set[str]]:
+    """Parse stored JSON list into a set of keys, or None if unset/invalid."""
+    if raw is None:
+        return None
+    if isinstance(raw, (bytes, str)):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+    if not isinstance(raw, list):
+        return None
+    return {str(x).strip() for x in raw if str(x).strip()}
+
+
+def _sanitize_portal_access_keys(keys: Any) -> Set[str]:
+    if not isinstance(keys, (list, tuple, set)):
+        return set()
+    out: Set[str] = set()
+    for x in keys:
+        s = str(x).strip()
+        if s in PORTAL_ACCESS_KEYS:
+            out.add(s)
+    return out
+
+
+def get_contractor_portal_module_allow_set(contractor_id: int) -> Optional[Set[str]]:
+    """
+    If None: no DB-based restriction (tiles follow industry + plugin enablement only).
+    If a set: contractor may only see these access keys (intersection applied after
+    industry + enabled checks). Role and contractor rows combine by intersection.
+    """
+    if not contractor_id:
+        return None
+    cid = int(contractor_id)
+    role_keys: Optional[Set[str]] = None
+    contractor_keys: Optional[Set[str]] = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                "SELECT role_id FROM tb_contractors WHERE id = %s", (cid,)
+            )
+            crow = cur.fetchone()
+            role_id = crow.get("role_id") if crow else None
+            if role_id is not None:
+                cur.execute(
+                    """
+                    SELECT allowed_modules_json FROM ep_portal_role_module_access
+                    WHERE role_id = %s
+                    """,
+                    (int(role_id),),
+                )
+                rrow = cur.fetchone()
+                if rrow is not None:
+                    role_keys = _parse_allowed_modules_json(
+                        rrow.get("allowed_modules_json")
+                    )
+                    if role_keys is None:
+                        role_keys = set()
+            cur.execute(
+                """
+                SELECT allowed_modules_json FROM ep_portal_contractor_module_access
+                WHERE contractor_id = %s
+                """,
+                (cid,),
+            )
+            krow = cur.fetchone()
+            if krow is not None:
+                contractor_keys = _parse_allowed_modules_json(
+                    krow.get("allowed_modules_json")
+                )
+                if contractor_keys is None:
+                    contractor_keys = set()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning(
+            "Employee portal: could not load module access for contractor %s: %s",
+            cid,
+            e,
+        )
+        return None
+    if role_keys is None and contractor_keys is None:
+        return None
+    universe = PORTAL_ACCESS_KEYS
+    r = universe if role_keys is None else (set(role_keys) & universe)
+    c = universe if contractor_keys is None else (set(contractor_keys) & universe)
+    return r & c
+
+
+def get_module_links(
+    plugin_manager,
+    contractor_id: Optional[int] = None,
+    allow_set: Optional[Set[str]] = None,
+):
+    """
+    Return list of module link dicts with 'enabled' set from plugin manifest.
+    Each item: name, url, icon, system_name, launch_slug, enabled.
+
+    Optional ``industry_slugs`` on a config row (OR semantics): link is omitted unless the
+    tenant matches at least one slug (see Core → organization_profile.industries).
+
+    If ``allow_set`` is provided, only rows whose ``system_name`` is in ``allow_set`` remain.
+    If ``contractor_id`` is provided (and ``allow_set`` is not), allow_set is loaded from DB
+    (role ∩ contractor intersection).
+    """
+    if allow_set is None and contractor_id is not None:
+        allow_set = get_contractor_portal_module_allow_set(int(contractor_id))
+
+    tenant_ids = None
+    try:
+        from flask import has_app_context, current_app
+
+        if has_app_context():
+            tenant_ids = current_app.config.get("organization_industries")
+    except Exception:
+        pass
+    norm_tenant = normalize_organization_industries(tenant_ids)
+
+    result = []
+    for mod in MODULE_LINKS_CONFIG:
+        req = mod.get("industry_slugs")
+        if req:
+            if not tenant_matches_industry(norm_tenant, *req):
+                continue
+        item = {k: v for k, v in mod.items() if k != "industry_slugs"}
+        try:
+            item["enabled"] = bool(
+                plugin_manager.is_plugin_enabled(mod["system_name"]))
+        except Exception:
+            item["enabled"] = False
+        if allow_set is not None and mod.get("system_name") not in allow_set:
+            continue
+        result.append(item)
+    return result
+
+
+def get_portal_module_tiles_for_contractor(
+    contractor_id: int, plugin_manager
+) -> Dict[str, Any]:
+    """
+    Module link rows plus flags for dashboard-only tiles (equipment, inventory requests, AI)
+    and for **Quick actions** / **At a glance** rows (same allow-list keys as module tiles).
+    """
+    allow = get_contractor_portal_module_allow_set(int(contractor_id))
+
+    def _visible(key: str) -> bool:
+        return allow is None or key in allow
+
+    module_links = get_module_links(
+        plugin_manager, contractor_id=None, allow_set=allow
+    )
+    show_equipment = bool(
+        equipment_portal_enabled(plugin_manager)
+        and _visible(PORTAL_KEY_MY_EQUIPMENT)
+    )
+    show_inventory = bool(
+        inventory_contractor_requests_portal_enabled(plugin_manager)
+        and _visible(PORTAL_KEY_INVENTORY_REQUESTS)
+    )
+    try:
+        from .portal_ai import is_ai_available
+    except ImportError:
+
+        def is_ai_available():
+            return False
+
+    show_assistant = bool(is_ai_available() and _visible(PORTAL_KEY_ASSISTANT))
+    sched_on = bool(is_scheduling_enabled(plugin_manager))
+    show_scheduling = bool(sched_on and _visible("scheduling_module"))
+    show_compliance = bool(_visible("compliance_module"))
+    show_hr = bool(_visible("hr_module"))
+    show_training = bool(_visible("training_module"))
+    return {
+        "module_links": module_links,
+        "portal_show_equipment_tile": show_equipment,
+        "portal_show_inventory_tiles": show_inventory,
+        "portal_show_assistant_tile": show_assistant,
+        "portal_show_scheduling_actions": show_scheduling,
+        "portal_show_compliance_actions": show_compliance,
+        "portal_show_hr_actions": show_hr,
+        "portal_show_training_actions": show_training,
+    }
 
 
 def safe_profile_picture_path(path):
@@ -183,40 +404,6 @@ def get_todos(contractor_id, filter_completed=None, limit=None):
         logger.warning(
             "Employee portal: todos unavailable for contractor %s (run install if needed): %s", contractor_id, e)
         return []
-
-
-def get_module_links(plugin_manager):
-    """
-    Return list of module link dicts with 'enabled' set from plugin manifest.
-    Each item: name, url, icon, system_name, launch_slug, enabled.
-
-    Optional ``industry_slugs`` on a config row (OR semantics): link is omitted unless the
-    tenant matches at least one slug (see Core → organization_profile.industries).
-    """
-    tenant_ids = None
-    try:
-        from flask import has_app_context, current_app
-
-        if has_app_context():
-            tenant_ids = current_app.config.get("organization_industries")
-    except Exception:
-        pass
-    norm_tenant = normalize_organization_industries(tenant_ids)
-
-    result = []
-    for mod in MODULE_LINKS_CONFIG:
-        req = mod.get("industry_slugs")
-        if req:
-            if not tenant_matches_industry(norm_tenant, *req):
-                continue
-        item = {k: v for k, v in mod.items() if k != "industry_slugs"}
-        try:
-            item["enabled"] = bool(
-                plugin_manager.is_plugin_enabled(mod["system_name"]))
-        except Exception:
-            item["enabled"] = False
-        result.append(item)
-    return result
 
 
 def get_pending_counts(contractor_id):
@@ -362,6 +549,203 @@ def admin_search_contractors(
     finally:
         cur.close()
         conn.close()
+
+
+# -----------------------------------------------------------------------------
+# Admin: portal module access (role + per-contractor)
+# -----------------------------------------------------------------------------
+
+
+def admin_list_roles_for_portal_access() -> List[Dict[str, Any]]:
+    """Active Time & Billing roles with flag whether a portal allow-list row exists."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT r.id, r.name, r.code,
+                       (SELECT 1 FROM ep_portal_role_module_access e
+                        WHERE e.role_id = r.id LIMIT 1) AS has_portal_rule
+                FROM roles r
+                WHERE r.active = 1
+                ORDER BY r.name ASC
+                """
+            )
+            return cur.fetchall() or []
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning("admin_list_roles_for_portal_access: %s", e)
+        return []
+
+
+def admin_get_role_portal_module_keys(role_id: int) -> Optional[Set[str]]:
+    """None = no role-level row (unrestricted at role layer). Set = allowed keys (may be empty)."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT allowed_modules_json FROM ep_portal_role_module_access
+                WHERE role_id = %s
+                """,
+                (int(role_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            parsed = _parse_allowed_modules_json(row.get("allowed_modules_json"))
+            return set() if parsed is None else (parsed & PORTAL_ACCESS_KEYS)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning("admin_get_role_portal_module_keys: %s", e)
+        return None
+
+
+def admin_delete_role_portal_module_access(role_id: int) -> bool:
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "DELETE FROM ep_portal_role_module_access WHERE role_id = %s",
+                (int(role_id),),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.exception("admin_delete_role_portal_module_access: %s", e)
+        return False
+
+
+def admin_upsert_role_portal_module_access(role_id: int, keys: Set[str]) -> bool:
+    keys = _sanitize_portal_access_keys(keys)
+    if not keys:
+        return admin_delete_role_portal_module_access(role_id)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            payload = json.dumps(sorted(keys))
+            cur.execute(
+                """
+                INSERT INTO ep_portal_role_module_access (role_id, allowed_modules_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE allowed_modules_json = VALUES(allowed_modules_json)
+                """,
+                (int(role_id), payload),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.exception("admin_upsert_role_portal_module_access: %s", e)
+        return False
+
+
+def admin_get_contractor_portal_module_keys(contractor_id: int) -> Optional[Set[str]]:
+    """None = no contractor-level row."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT allowed_modules_json FROM ep_portal_contractor_module_access
+                WHERE contractor_id = %s
+                """,
+                (int(contractor_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            parsed = _parse_allowed_modules_json(row.get("allowed_modules_json"))
+            return set() if parsed is None else (parsed & PORTAL_ACCESS_KEYS)
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning("admin_get_contractor_portal_module_keys: %s", e)
+        return None
+
+
+def admin_delete_contractor_portal_module_access(contractor_id: int) -> bool:
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "DELETE FROM ep_portal_contractor_module_access WHERE contractor_id = %s",
+                (int(contractor_id),),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.exception("admin_delete_contractor_portal_module_access: %s", e)
+        return False
+
+
+def admin_upsert_contractor_portal_module_access(contractor_id: int, keys: Set[str]) -> bool:
+    keys = _sanitize_portal_access_keys(keys)
+    if not keys:
+        return admin_delete_contractor_portal_module_access(contractor_id)
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        try:
+            payload = json.dumps(sorted(keys))
+            cur.execute(
+                """
+                INSERT INTO ep_portal_contractor_module_access (contractor_id, allowed_modules_json)
+                VALUES (%s, %s)
+                ON DUPLICATE KEY UPDATE allowed_modules_json = VALUES(allowed_modules_json)
+                """,
+                (int(contractor_id), payload),
+            )
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.exception("admin_upsert_contractor_portal_module_access: %s", e)
+        return False
+
+
+def admin_get_contractor_for_portal_access(contractor_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        try:
+            cur.execute(
+                """
+                SELECT c.id, c.name, c.email, c.role_id, r.name AS role_name
+                FROM tb_contractors c
+                LEFT JOIN roles r ON r.id = c.role_id
+                WHERE c.id = %s
+                """,
+                (int(contractor_id),),
+            )
+            return cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.warning("admin_get_contractor_for_portal_access: %s", e)
+        return None
 
 
 # -----------------------------------------------------------------------------
@@ -982,7 +1366,8 @@ def get_dashboard_data_for_contractor(
     pending_todo_count = count_pending_todos(contractor_id)
     pending_policies, pending_hr_requests = get_pending_counts(contractor_id)
     pending_training = get_pending_training_count(contractor_id)
-    module_links = get_module_links(plugin_manager)
+    tiles = get_portal_module_tiles_for_contractor(contractor_id, plugin_manager)
+    module_links = tiles["module_links"]
     scheduling_enabled = is_scheduling_enabled(plugin_manager)
     welcome_message = get_ep_setting("welcome_message")
     return {
@@ -997,4 +1382,11 @@ def get_dashboard_data_for_contractor(
         "module_links": module_links,
         "scheduling_enabled": scheduling_enabled,
         "welcome_message": welcome_message,
+        "portal_show_equipment_tile": tiles["portal_show_equipment_tile"],
+        "portal_show_inventory_tiles": tiles["portal_show_inventory_tiles"],
+        "portal_show_assistant_tile": tiles["portal_show_assistant_tile"],
+        "portal_show_scheduling_actions": tiles["portal_show_scheduling_actions"],
+        "portal_show_compliance_actions": tiles["portal_show_compliance_actions"],
+        "portal_show_hr_actions": tiles["portal_show_hr_actions"],
+        "portal_show_training_actions": tiles["portal_show_training_actions"],
     }

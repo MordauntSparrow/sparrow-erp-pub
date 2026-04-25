@@ -1,0 +1,50 @@
+{% extends "medical_records_shell.html" %}
+{% block title %}Pre-alert templates — Sparrow{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Pre-alert templates</li>
+  </ol>
+</nav>
+<div class="container-fluid px-0 pb-3">
+  <div class="crm-page-toolbar mb-3">
+    <div>
+      <p class="text-muted crm-upper-tight fw-semibold mb-1">Medical planning</p>
+      <h1 class="h3 fw-semibold text-dark mb-0">Pre-alert templates</h1>
+      <p class="small text-muted mb-0 mt-2">Saved <strong>ASHICE</strong>, <strong>ATMIST</strong>, or <strong>Custom</strong> pre-alert blocks. Create them from an event plan using <strong>Save current as template</strong> in the Pre-Alert Policy section, then use <strong>Insert template</strong> on another plan.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3 pt-3 border-top border-light">
+      <a href="{{ url_for('medical_records_internal.cura_ops_hub') }}" class="btn btn-sm btn-outline-secondary rounded-pill">Event manager</a>
+      <a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}" class="btn btn-sm btn-outline-secondary rounded-pill">All plans</a>
+    </div>
+  </div>
+
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <h2 class="h6 text-uppercase text-muted mb-3">Saved templates</h2>
+      {% if not templates %}
+      <p class="text-muted small mb-0">No templates yet — open a plan, fill ASHICE / ATMIST / Custom, then choose <strong>Save current as template</strong>.</p>
+      {% else %}
+      <div class="vstack gap-3">
+        {% for t in templates %}
+        <div class="border rounded p-3">
+          <p class="fw-semibold mb-1">{{ t.title }} <span class="badge text-bg-secondary text-uppercase small">{{ t.policy }}</span></p>
+          <pre class="small text-body mb-3 mb-md-0" style="white-space:pre-wrap;font-family:ui-monospace,monospace;">{{ t.payload_json | tojson }}</pre>
+          {% if can_edit %}
+          <form method="post" class="d-inline mt-2" onsubmit="return confirm('Delete this pre-alert template?');">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="template_id" value="{{ t.id }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill">Delete</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

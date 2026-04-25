@@ -842,6 +842,24 @@ def create_app():
     except Exception as _ca_sched_err:
         print(f"[WARN] Compliance audit scheduler not started: {_ca_sched_err}")
 
+    try:
+        from app.plugins.time_billing_module.timesheet_rota_sync_scheduler import (
+            init_timesheet_rota_sync_scheduler,
+        )
+
+        init_timesheet_rota_sync_scheduler(app)
+    except Exception as _tb_rota_sched_err:
+        print(f"[WARN] Time Billing rota sync scheduler not started: {_tb_rota_sched_err}")
+
+    try:
+        from app.plugins.scheduling_module.shift_portal_push_scheduler import (
+            init_shift_portal_push_scheduler,
+        )
+
+        init_shift_portal_push_scheduler(app)
+    except Exception as _sched_push_err:
+        print(f"[WARN] Scheduling shift reminder push scheduler not started: {_sched_push_err}")
+
     _PLUGIN_URL_ACCESS_EXEMPT = frozenset(
         {"settings", "enable", "disable", "install", "uninstall", "install-remote"}
     )
@@ -919,6 +937,8 @@ def create_app():
         "Authorization",
         "Accept",
         "X-Requested-With",
+        # Ventus MDT: per-device session after sign-on (duplicate-login prevention).
+        "X-MDT-Session-Id",
         # SeaSurf / sparrow_csrf_head.html: credentialed or cross-origin preflights may need these.
         "X-CSRFToken",
         "X-CSRF-Token",
@@ -1203,6 +1223,16 @@ def create_app():
             _v_core_set = app.view_functions.get("routes.core_module_settings")
             if _v_core_set and _core_set_lim:
                 limiter.limit(_core_set_lim, methods=["POST"])(_v_core_set)
+            for _ep in (
+                "routes.core_integrations_settings",
+                "routes.core_integrations_oauth_client",
+                "routes.core_integrations_disconnect",
+                "routes.core_integrations_health",
+                "routes.account_whats_new_ack",
+            ):
+                _v_int = app.view_functions.get(_ep)
+                if _v_int and _core_set_lim:
+                    limiter.limit(_core_set_lim, methods=["POST"])(_v_int)
         except Exception as e:
             print(f"[WARN] Limiter init failed: {e}")
 
@@ -1791,5 +1821,19 @@ def create_app():
         ensure_support_access_schema()
     except Exception as _sa_exc:
         print(f"[WARN] support_access schema ensure failed (will retry on use): {_sa_exc}")
+
+    try:
+        from app.user_notification_preferences import ensure_notification_preferences_schema
+
+        ensure_notification_preferences_schema()
+    except Exception as _np_exc:
+        print(f"[WARN] notification_preferences schema ensure failed: {_np_exc}")
+
+    try:
+        from app.user_whats_new import ensure_whats_new_schema
+
+        ensure_whats_new_schema()
+    except Exception as _wn_exc:
+        print(f"[WARN] whats_new schema ensure failed: {_wn_exc}")
 
     return app

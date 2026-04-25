@@ -1,128 +1,101 @@
 """
-Purple Guide–style tiering and indicative conversion table (educational / planning only).
+Purple Guide tier framework for event medical planning.
 
-Not a licensed medical needs assessment. Copy is aligned with common UK event-safety framing
-(HSE Purple Guide themes, CQC registration for patient transport ambulances). Tables are
-indicative — always follow your MNA, insurer, venue, and regulator.
+The Events Industry Forum’s *Purple Guide* (The Purple Guide to Health, Safety and Welfare at
+Music and Other Events) describes medical cover through a **five-tier**, risk-led approach
+(crowd, duration, activities, alcohol/drugs, environment, transfers) — not a single attendance
+formula. Resource rows in this module summarise **typical themes for each tier** in the same
+dimensions the industry uses when applying the Guide; **exact posts and rotas** are always set
+in the organiser’s **medical needs assessment (MNA)** and with the **Safety Advisory Group (SAG)**.
+
+This is not a licensed MNA and does not replace the current Purple Guide text, your medical
+director, insurer, or regulator.
 """
 from __future__ import annotations
 
 from typing import Any
 
-# (lo, hi inclusive for purple_score), staffing hints from public industry calculator examples.
-# NHS ambulance manager column may be numeric count or "VISIT".
-_PURPLE_CONVERSION: list[tuple[tuple[int, int], dict[str, Any]]] = [
-    ((0, 20), {
-        "first_responder": 4,
-        "ambulances": 0,
-        "ambulance_crew": 0,
-        "doctor": 0,
-        "nurse": 0,
-        "nhs_ambulance_manager": 0,
-        "support_unit": 0,
-    }),
-    ((21, 25), {
-        "first_responder": 6,
-        "ambulances": 1,
-        "ambulance_crew": 2,
-        "doctor": 0,
-        "nurse": 0,
-        "nhs_ambulance_manager": "VISIT",
-        "support_unit": 0,
-    }),
-    ((26, 30), {
-        "first_responder": 8,
-        "ambulances": 1,
-        "ambulance_crew": 2,
-        "doctor": 0,
-        "nurse": 0,
-        "nhs_ambulance_manager": "VISIT",
-        "support_unit": 0,
-    }),
-    ((31, 35), {
-        "first_responder": 12,
-        "ambulances": 2,
-        "ambulance_crew": 8,
-        "doctor": 1,
-        "nurse": 2,
-        "nhs_ambulance_manager": 1,
-        "support_unit": 0,
-    }),
-    ((36, 40), {
-        "first_responder": 20,
-        "ambulances": 3,
-        "ambulance_crew": 10,
-        "doctor": 2,
-        "nurse": 4,
-        "nhs_ambulance_manager": 1,
-        "support_unit": 0,
-    }),
-    ((41, 50), {
-        "first_responder": 40,
-        "ambulances": 4,
-        "ambulance_crew": 12,
-        "doctor": 3,
-        "nurse": 6,
-        "nhs_ambulance_manager": 2,
-        "support_unit": 1,
-    }),
-    ((51, 60), {
-        "first_responder": 60,
-        "ambulances": 4,
-        "ambulance_crew": 12,
-        "doctor": 4,
-        "nurse": 8,
-        "nhs_ambulance_manager": 2,
-        "support_unit": 1,
-    }),
-    ((61, 65), {
-        "first_responder": 80,
-        "ambulances": 5,
-        "ambulance_crew": 14,
-        "doctor": 5,
-        "nurse": 10,
-        "nhs_ambulance_manager": 3,
-        "support_unit": 1,
-    }),
-    ((66, 70), {
-        "first_responder": 100,
-        "ambulances": 6,
-        "ambulance_crew": 16,
-        "doctor": 6,
-        "nurse": 12,
-        "nhs_ambulance_manager": 4,
-        "support_unit": 2,
-    }),
-    ((71, 75), {
-        "first_responder": 150,
-        "ambulances": 10,
-        "ambulance_crew": 24,
-        "doctor": 9,
-        "nurse": 18,
-        "nhs_ambulance_manager": 6,
-        "support_unit": 3,
-    }),
-    ((76, 999), {
-        "first_responder": "200+",
-        "ambulances": "15+",
-        "ambulance_crew": "35+",
-        "doctor": "12+",
-        "nurse": "24+",
-        "nhs_ambulance_manager": "8+",
-        "support_unit": 3,
-    }),
-]
+# Typical resource themes by tier — aligned with published descriptions of Tiers 1–5 (professional
+# event medical roles, ambulance use for transfer, clinical leadership as scale increases).
+# Wording is summary-level; organisers must follow the current Guide and their MNA/SAG.
+TIER_RESOURCE_MATRIX: dict[int, dict[str, Any]] = {
+    1: {
+        "first_responder": (
+            "Smallest / simplest profile: proportionate professional event medical cover "
+            "(the Guide emphasises suitably trained event medical staff — e.g. ECA/UCA-style roles — "
+            "rather than relying on workplace first-aid ratios alone)."
+        ),
+        "ambulances": "Usually none stationed on site",
+        "ambulance_crew": "—",
+        "doctor": "Not generally indicated for a straightforward Tier 1 profile",
+        "nurse": "Not generally indicated for a straightforward Tier 1 profile",
+        "nhs_ambulance_manager": "Agree access / call routes with local NHS ambulance service if needed",
+        "support_unit": "Light, site-appropriate",
+    },
+    2: {
+        "first_responder": (
+            "Professional event medical team with an ECA/UCA-style core and a nominated on-site "
+            "medical lead, as described for medium-sized lower-risk profiles in the Guide."
+        ),
+        "ambulances": "Consider a crewed ambulance if a hospital transfer is plausible",
+        "ambulance_crew": "When an ambulance is deployed",
+        "doctor": "Scale up if the risk profile is higher than a simple Tier 2",
+        "nurse": "Paramedic / nurse cover often proportionate as presentations increase",
+        "nhs_ambulance_manager": "Engage early if ambulance cover will be on site",
+        "support_unit": "Match to footprint of the medical post",
+    },
+    3: {
+        "first_responder": (
+            "Broader mix of posts (technicians, ECAs/UCAs, responders) under a registered "
+            "clinical lead with pre-hospital experience — the Guide’s Tier 3-style expectation."
+        ),
+        "ambulances": "Crewed ambulance capacity for timely transfers without stripping on-site cover",
+        "ambulance_crew": "Sized to rota and concurrent incidents",
+        "doctor": "Often part of the team as acuity and crowd size increase",
+        "nurse": "Nursing / paramedic establishment scaled to duration and audience",
+        "nhs_ambulance_manager": "Structured liaison with NHS ambulance service",
+        "support_unit": "Medical facility / equipment scaled to expected presentations",
+    },
+    4: {
+        "first_responder": (
+            "Substantial multidisciplinary footprint (technicians through to advanced roles), "
+            "coordinated under a senior clinical lead, per large complex event guidance."
+        ),
+        "ambulances": "Multiple crewed ambulances so transfers do not remove on-site resilience",
+        "ambulance_crew": "Rota allows concurrent transfer and on-site cover",
+        "doctor": "Doctors within the team as complexity requires",
+        "nurse": "Major nursing / paramedic capacity alongside responders",
+        "nhs_ambulance_manager": "Close coordination; command-and-control aligned with major-event practice",
+        "support_unit": "Substantial medical posts; welfare / support as appropriate",
+    },
+    5: {
+        "first_responder": (
+            "Largest-scale temporary healthcare footprint: wide skill mix with dedicated "
+            "coordination — consistent with mass-gathering / highest-complexity tier framing."
+        ),
+        "ambulances": "Fleet sized for mass-gathering transfer load while preserving on-site care",
+        "ambulance_crew": "Major rota; resilience for concurrent major incidents",
+        "doctor": "Senior clinical lead (often emergency / pre-hospital experience) as the Guide describes",
+        "nurse": "Large nursing / paramedic establishment",
+        "nhs_ambulance_manager": "Joint working with NHS ambulance, police, and local authority as standard",
+        "support_unit": "Medical control / coordination hub; major-incident planning embedded",
+    },
+}
+
+# Planning hints for headcount math (separate from the narrative matrix above).
+TIER_MEDIC_BASE: dict[int, int] = {1: 2, 2: 4, 3: 8, 4: 14, 5: 22}
+TIER_VEHICLE_BASE: dict[int, int] = {1: 1, 2: 1, 3: 2, 4: 3, 5: 4}
 
 TIER_GUIDANCE: dict[int, dict[str, Any]] = {
     1: {
         "title": "Tier 1 — smallest / simplest",
         "summary": (
             "Often short duration, minimal injury risk, little or no alcohol or drugs, "
-            "typically under 500 attendees, hospital referrals very unlikely."
+            "typically smaller crowds, hospital referrals very unlikely — the Guide’s lowest tier."
         ),
         "cover": [
-            "May be appropriate with first aid kit, trained volunteers, and clear access to emergency help.",
-            "Know nearest AED (e.g. defibfinder) and how to call emergency services.",
+            "Proportionate professional event medical cover (Guide: suitably trained event medical staff).",
+            "Clear access, escalation routes, and AED awareness.",
         ],
     },
     2: {
@@ -183,15 +156,20 @@ CQC_COMPLIANCE_LINES = (
 )
 
 
-def conversion_row_for_purple_score(purple_score: int) -> dict[str, Any]:
-    ps = max(0, int(purple_score))
-    for (lo, hi), row in _PURPLE_CONVERSION:
-        if lo <= ps <= hi:
-            return {
-                "score_range": f"{lo}–{hi}" if hi < 999 else f"{lo}+",
-                **row,
-            }
-    return {**_PURPLE_CONVERSION[-1][1], "score_range": "76+"}
+def conversion_row_for_tier(tier: int) -> dict[str, Any]:
+    """Narrative resource row for Purple Guide tier 1–5 (keys match legacy conversion_row shape)."""
+    t = max(1, min(5, int(tier)))
+    row = TIER_RESOURCE_MATRIX.get(t, TIER_RESOURCE_MATRIX[3])
+    return {
+        "score_range": f"Tier {t}",
+        "tier": t,
+        **dict(row),
+    }
+
+
+def public_tier_resource_rows() -> list[dict[str, Any]]:
+    """Tiers 1–5 for the public calculator (tojson) — same structure as conversion_row_for_tier."""
+    return [conversion_row_for_tier(t) for t in range(1, 6)]
 
 
 def infer_tier_from_signals(
@@ -203,6 +181,8 @@ def infer_tier_from_signals(
     drug_risk: str,
     alcohol_level: str,
     hospital_referrals: str,
+    hospital_drive_band: str | None = None,
+    disorder_risk: str | None = None,
 ) -> int:
     """Derive indicative tier 1–5 from score and headline factors (Purple Guide style)."""
     n = max(0, int(expected_attendees))
@@ -211,25 +191,41 @@ def infer_tier_from_signals(
     dr = (drug_risk or "none").strip().lower()
     al = (alcohol_level or "none").strip().lower()
     hr = (hospital_referrals or "unlikely").strip().lower()
+    hdrv = (hospital_drive_band or "unknown").strip().lower()
+    if hdrv not in ("unknown", "under_15", "15_30", "over_30"):
+        hdrv = "unknown"
+    dis = (disorder_risk or "none").strip().lower()
+    if dis not in ("none", "low", "medium", "high", "opposing_factions"):
+        dis = "none"
 
-    # Strong upward drivers
     if n > 10000 or purple_score >= 72:
-        return 5
-    if n > 5000 or purple_score >= 58:
-        return 4
-    if (
+        t = 5
+    elif n > 5000 or purple_score >= 58:
+        t = 4
+    elif (
         n > 2000
         or purple_score >= 44
         or (d == "multi_day" and (al in ("likely", "expected") or dr in ("likely", "expected")))
         or hr == "likely"
+        or (hdrv == "over_30" and hr in ("possible", "likely") and n >= 800)
     ):
-        return 3
-    if n > 500 or purple_score >= 28 or al in ("social", "likely", "expected") or ar in (
+        t = 3
+    elif n > 500 or purple_score >= 28 or al in ("social", "likely", "expected") or ar in (
         "significant",
         "high",
     ):
-        return 2
-    return 1
+        t = 2
+    else:
+        t = 1
+
+    if dis == "opposing_factions" and n >= 100:
+        t = max(t, 3)
+    elif dis == "high" and n >= 250:
+        t = max(t, 3)
+    elif dis == "medium" and n >= 800:
+        t = max(t, 2)
+
+    return min(5, t)
 
 
 def compute_purple_score(
@@ -245,6 +241,15 @@ def compute_purple_score(
     duration_span: str,
     hospital_referrals: str,
     alcohol_level: str | None,
+    hospital_drive_band: str | None = None,
+    audience_posture: str | None = None,
+    disorder_risk: str | None = None,
+    casualty_history: str | None = None,
+    audience_dwell: str | None = None,
+    season: str | None = None,
+    definitive_care: str | None = None,
+    additional_hazards: list[str] | None = None,
+    on_site_facilities: list[str] | None = None,
 ) -> tuple[int, list[str]]:
     """
     Return (purple_score 0–100+, factor strings for UI).
@@ -347,6 +352,168 @@ def compute_purple_score(
         factors.append("Some hospital transfers possible")
     else:
         factors.append("Hospital referrals assessed as unlikely at this stage")
+
+    hdrv = (hospital_drive_band or "unknown").strip().lower()
+    if hdrv not in ("unknown", "under_15", "15_30", "over_30"):
+        hdrv = "unknown"
+    if hdrv == "over_30":
+        score += 10
+        if hr in ("possible", "likely"):
+            score += 8
+        factors.append(
+            "Long drive to A&E / hospital (~30+ min) — allow extra transfer time and ambulance resilience"
+        )
+    elif hdrv == "15_30":
+        score += 6
+        if hr == "likely":
+            score += 4
+        factors.append(
+            "Moderate drive to A&E (~15–30 min) — factor journey time into transfer planning"
+        )
+    elif hdrv == "under_15":
+        factors.append("Shorter drive to A&E (under ~15 min) — still plan concurrent on-site cover")
+    else:
+        factors.append(
+            "Drive time to A&E not specified — your medical provider will confirm with local hospitals"
+        )
+
+    # Optional questionnaire-style factors (crowd posture, civil disorder, history, dwell, season, A&E profile)
+    post = (audience_posture or "unknown").strip().lower()
+    if post not in ("unknown", "seated", "mixed", "standing"):
+        post = "unknown"
+    if post == "standing":
+        score += 8
+        factors.append("Predominantly standing audience — higher density / fatigue / crush dynamics")
+    elif post == "mixed":
+        score += 4
+        factors.append("Mixed seated and standing audience")
+
+    dis = (disorder_risk or "none").strip().lower()
+    if dis not in ("none", "low", "medium", "high", "opposing_factions"):
+        dis = "none"
+    if dis == "opposing_factions":
+        score += 22
+        factors.append("Opposing factions / high tension — multi-agency medical and police planning typical")
+    elif dis == "high":
+        score += 16
+        factors.append("Elevated disorder or march risk — plan for surge presentations and egress")
+    elif dis == "medium":
+        score += 10
+        factors.append("Moderate disorder or protest profile possible")
+    elif dis == "low":
+        score += 3
+        factors.append("Low-level public-order risk noted")
+
+    ch = (casualty_history or "unknown").strip().lower()
+    if ch not in ("unknown", "low_rate", "medium_rate", "high_rate", "first_event"):
+        ch = "unknown"
+    if ch == "first_event":
+        score += 8
+        factors.append("First event / no prior casualty data — baseline demand uncertain; plan conservatively")
+    elif ch == "high_rate":
+        score += 12
+        factors.append("Historically high on-site casualty rate — align resourcing with past learning")
+    elif ch == "medium_rate":
+        score += 5
+        factors.append("Prior events showed moderate casualty rates")
+    elif ch == "low_rate":
+        factors.append("Prior events showed low casualty rates (still validate for this programme)")
+
+    dwell = (audience_dwell or "unknown").strip().lower()
+    if dwell not in ("unknown", "under_4h", "over_4h", "over_12h"):
+        dwell = "unknown"
+    # Avoid double-counting with "hours on site": dwell only adds when it signals more than the cover window.
+    if dwell == "over_12h":
+        if h < 11:
+            score += 12
+            factors.append(
+                "Long audience dwell (12h+ typical stay) vs shorter posted cover — welfare / throughput load"
+            )
+        elif h < 20:
+            score += 5
+            factors.append(
+                "Long dwell partly overlaps your cover hours — modest extra factor for fatigue / welfare density"
+            )
+    elif dwell == "over_4h":
+        if h < 8:
+            score += 6
+            factors.append("Extended audience stay (4h+) vs shorter cover window — clarify rota vs gate times")
+        elif h < 12:
+            score += 3
+            factors.append("Moderate dwell signal alongside mid-length cover hours")
+
+    seas = (season or "unknown").strip().lower()
+    if seas not in ("unknown", "spring", "summer", "autumn", "winter"):
+        seas = "unknown"
+    if seas == "winter" and venue_outdoor:
+        score += 8
+        factors.append("Winter outdoor — cold injury, slips, longer transfer exposure")
+    elif seas == "winter":
+        score += 3
+        factors.append("Winter programme — seasonal illness / cold stress possible")
+    elif seas == "summer" and venue_outdoor:
+        score += 6
+        factors.append("Summer outdoor — heat, sun, dehydration demand on medical footprint")
+    elif seas == "summer":
+        score += 2
+        factors.append("Summer timing — heat load if crowds are dense or unshaded")
+
+    dc = (definitive_care or "unknown").strip().lower()
+    if dc not in ("unknown", "choice_ae", "large_ae", "small_ae"):
+        dc = "unknown"
+    if dc == "small_ae":
+        score += 8
+        factors.append("Smaller / rural A&E — longer offload or transfer to definitive care may apply")
+    elif dc == "large_ae":
+        factors.append("Large A&E department nearby — confirm ambulance handover routes")
+    elif dc == "choice_ae":
+        factors.append("Multiple A&E options — agree preferred receiving hospitals in the plan")
+
+    # K/L-style extras (common on provider calculators — CTC, Beyond First Aid, etc.)
+    _hz_allowed = frozenset(
+        {"carnival", "parachute_display", "helicopters", "street_theatre", "motor_sport"}
+    )
+    _fc_allowed = frozenset(
+        {"suturing", "plastering", "xray", "psych_gp", "minor_surgery"}
+    )
+    hz_list = [x for x in (additional_hazards or []) if x in _hz_allowed]
+    fc_list = [x for x in (on_site_facilities or []) if x in _fc_allowed]
+    hz_purple = {
+        "carnival": 4,
+        "parachute_display": 6,
+        "helicopters": 6,
+        "street_theatre": 3,
+        "motor_sport": 5,
+    }
+    hz_cap = 16
+    hz_sum = 0
+    for hx in hz_list:
+        w = hz_purple.get(hx, 0)
+        if hx == "motor_sport" and ar in ("high", "significant"):
+            w = min(w, 2)
+        hz_sum += w
+    hz_sum = min(hz_sum, hz_cap)
+    if hz_sum:
+        score += hz_sum
+        factors.append(
+            "Additional hazards (organiser): "
+            + ", ".join(hx.replace("_", " ") for hx in hz_list)
+        )
+    fc_purple = {
+        "suturing": 5,
+        "plastering": 4,
+        "xray": 9,
+        "psych_gp": 6,
+        "minor_surgery": 9,
+    }
+    fc_cap = 22
+    fc_sum = min(sum(fc_purple.get(fx, 0) for fx in fc_list), fc_cap)
+    if fc_sum:
+        score += fc_sum
+        factors.append(
+            "On-site clinical capabilities flagged (organiser): "
+            + ", ".join(fx.replace("_", " ") for fx in fc_list)
+        )
 
     purple = int(round(score))
     purple = max(0, min(purple, 120))

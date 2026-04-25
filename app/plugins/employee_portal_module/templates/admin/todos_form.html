@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit todo' if todo else 'New todo' }} – Employee Portal Admin{% endblock %}
+{% block content %}
+<div class="container mt-4">
+  <h1 class="mb-3">{{ 'Edit todo' if todo else 'New todo' }}</h1>
+
+  <form method="post" action="{{ url_for('internal_employee_portal.admin_todo_edit', tid=todo.id) if todo else url_for('internal_employee_portal.admin_todos_new') }}" class="card card-body" style="max-width: 640px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+    {% if todo %}
+    <p class="text-muted small">Assigned to: <strong>{{ todo.contractor_name or todo.contractor_email }}</strong> (#{{ todo.contractor_id }}). To change assignment, create a new todo.</p>
+    {% else %}
+    <div class="mb-3">
+      <label class="form-label">Recipients</label>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="all_contractors" id="all_contractors" value="on">
+        <label class="form-check-label" for="all_contractors">All staff</label>
+      </div>
+      <select class="form-select" id="contractor_select" name="contractor_ids" multiple size="8">
+        {% for c in contractors %}
+        <option value="{{ c.id }}">{{ c.name or c.email }} ({{ c.email }})</option>
+        {% endfor %}
+      </select>
+      <p class="small text-muted mt-1">Hold Ctrl/Cmd to select multiple. Or check "All staff".</p>
+    </div>
+    {% endif %}
+
+    <div class="mb-3">
+      <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+      <input type="text" class="form-control" id="title" name="title" required maxlength="255" value="{{ todo.title if todo else '' }}" placeholder="e.g. Sign the new policy">
+    </div>
+    <div class="mb-3">
+      <label for="link_url" class="form-label">Link URL (optional)</label>
+      <input type="url" class="form-control" id="link_url" name="link_url" value="{{ todo.link_url if todo else '' }}" placeholder="https://...">
+    </div>
+    <div class="mb-3">
+      <label for="due_date" class="form-label">Due date (optional)</label>
+      <input type="date" class="form-control" id="due_date" name="due_date" value="{{ todo.due_date.strftime('%Y-%m-%d') if todo and todo.due_date else '' }}">
+    </div>
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">{{ 'Update' if todo else 'Create' }}</button>
+      <a href="{{ url_for('internal_employee_portal.admin_todos') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+
+  {% if not todo and contractors %}
+  <script>
+  document.querySelector('form').addEventListener('submit', function(e) {
+    if (!document.getElementById('all_contractors').checked) {
+      var sel = document.getElementById('contractor_select');
+      var n = 0;
+      for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].selected) n++; }
+      if (n === 0) {
+        e.preventDefault();
+        alert('Select at least one recipient or check "All staff".');
+      }
+    }
+  });
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

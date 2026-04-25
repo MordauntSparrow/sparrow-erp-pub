@@ -54,6 +54,27 @@ CREATE TABLE IF NOT EXISTS ep_notification_prefs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 """
 
+# Optional allow-lists: intersection(role, contractor) ∩ known keys. No row = no restriction at that layer.
+SQL_CREATE_EP_PORTAL_ROLE_MODULE_ACCESS = """
+CREATE TABLE IF NOT EXISTS ep_portal_role_module_access (
+  role_id INT NOT NULL PRIMARY KEY,
+  allowed_modules_json JSON NOT NULL,
+  updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ep_prma_role FOREIGN KEY (role_id)
+    REFERENCES roles(id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
+SQL_CREATE_EP_PORTAL_CONTRACTOR_MODULE_ACCESS = """
+CREATE TABLE IF NOT EXISTS ep_portal_contractor_module_access (
+  contractor_id INT NOT NULL PRIMARY KEY,
+  allowed_modules_json JSON NOT NULL,
+  updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ep_pcma_contractor FOREIGN KEY (contractor_id)
+    REFERENCES tb_contractors(id) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+"""
+
 MODULE_TABLES = [
     MIGRATIONS_TABLE,
     "ep_messages",
@@ -61,6 +82,8 @@ MODULE_TABLES = [
     "ep_settings",
     "ep_push_subscriptions",
     "ep_notification_prefs",
+    "ep_portal_contractor_module_access",
+    "ep_portal_role_module_access",
 ]
 
 # Full CREATE TABLE statements (all in this file)
@@ -115,6 +138,8 @@ CREATES = [
     SQL_CREATE_EP_SETTINGS,
     SQL_CREATE_EP_PUSH_SUBSCRIPTIONS,
     SQL_CREATE_EP_NOTIFICATION_PREFS,
+    SQL_CREATE_EP_PORTAL_ROLE_MODULE_ACCESS,
+    SQL_CREATE_EP_PORTAL_CONTRACTOR_MODULE_ACCESS,
 ]
 
 

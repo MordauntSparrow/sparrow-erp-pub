@@ -1,0 +1,79 @@
+<style>
+/* Safety & Incidents admin dashboard — scoped surface (mirrors HR quick tiles) */
+.ir-dash-surface {
+  --ir-radius: 14px;
+  --ir-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --ir-shadow-lg: 0 4px 24px rgba(15, 23, 42, 0.08);
+  background: #eef0f4;
+  min-height: 100%;
+  padding: 1.25rem clamp(0.75rem, 2vw, 2rem) 2.5rem;
+}
+@media (min-width: 992px) {
+  .ir-dash-surface { padding-left: 2rem; padding-right: 2rem; }
+}
+.ir-dash-hero {
+  border-radius: var(--ir-radius);
+  background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+  box-shadow: var(--ir-shadow-lg);
+}
+.ir-upper-tight {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+.ir-metric-card {
+  border: none;
+  border-radius: var(--ir-radius);
+  box-shadow: var(--ir-shadow);
+  transition: transform .18s ease, box-shadow .18s ease;
+  background: #fff;
+}
+.ir-metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--ir-shadow-lg);
+}
+.ir-panel {
+  border: none;
+  border-radius: var(--ir-radius);
+  box-shadow: var(--ir-shadow);
+  background: #fff;
+}
+.ir-panel .card-header {
+  background: transparent;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  font-weight: 600;
+  padding: 1rem 1.25rem;
+}
+.ir-quick-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  margin: 0 auto 0.35rem;
+  transition: transform .15s ease;
+}
+a.ir-quick-tile:hover .ir-quick-icon,
+button.ir-quick-tile:hover .ir-quick-icon { transform: scale(1.06); }
+.ir-quick-tile {
+  text-decoration: none;
+  color: inherit;
+  text-align: center;
+  padding: 0.75rem 0.5rem;
+  border-radius: 12px;
+  transition: background .15s ease;
+}
+.ir-quick-tile:hover {
+  background: rgba(45, 90, 135, 0.1);
+  color: inherit;
+}
+button.ir-quick-tile {
+  border: none;
+  background: transparent;
+  width: 100%;
+  cursor: pointer;
+}
+.ir-quick-tile span { font-size: 0.75rem; font-weight: 500; color: #475569; }
+</style>

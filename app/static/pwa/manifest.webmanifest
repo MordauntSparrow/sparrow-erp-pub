@@ -1,0 +1,25 @@
+{
+  "name": "Employee Portal",
+  "short_name": "Portal",
+  "description": "Time & Billing, Work, scheduling and more. Add to home screen for app-like access.",
+  "start_url": "/employee-portal/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#1e90ff",
+  "background_color": "#121212",
+  "icons": [
+    {
+      "src": "/static/plugins-icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/plugins-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

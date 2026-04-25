@@ -1,102 +1,907 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
 {% block content %}
-<div class="container py-3">
-
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-diagram-3 me-2"></i> Policies
-        </h4>
-        <button id="btnNew" class="btn btn-primary btn-sm">
-            <i class="bi bi-plus-lg me-1"></i> New policy
-        </button>
+<div class="container py-4" style="max-width: 1200px;">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+    <div>
+      <h4 class="mb-1 d-flex align-items-center fw-semibold">
+        <i class="bi bi-diagram-3 me-2 text-primary"></i> Calendar &amp; pay policies
+      </h4>
+      <p class="text-muted small mb-0">
+        Set <strong>weekend</strong>, <strong>bank holiday</strong>, <strong>night (unsocial)</strong>, <strong>overtime</strong>, and <strong>minimum paid hours</strong> (per shift or daily) for timesheets and runsheets.
+        Bank holidays are dates only — link them to a <strong>Bank holiday</strong> policy to change pay.
+      </p>
     </div>
+    <div class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-primary btn-sm" id="btnPolicyWizardNew">
+        <i class="bi bi-magic me-1"></i> New policy (wizard)
+      </button>
+      <button type="button" class="btn btn-outline-primary btn-sm" id="btnBhModal">
+        <i class="bi bi-calendar-plus me-1"></i> Add bank holiday
+      </button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.config_page') }}">Configuration</a>
+    </div>
+  </div>
 
-    <!-- Policies Table -->
-    <div class="card">
+  <ul class="nav nav-pills mb-3 gap-2" id="polMainTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-policies" data-bs-toggle="pill" data-bs-target="#pane-policies" type="button" role="tab">Calendar policies</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-holidays" data-bs-toggle="pill" data-bs-target="#pane-holidays" type="button" role="tab">Bank holidays</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="polMainTabContent">
+    <div class="tab-pane fade show active" id="pane-policies" role="tabpanel">
+      <div class="card border-0 shadow-sm">
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-sm align-middle">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>Scope</th>
-                            <th>Version</th>
-                            <th>Active</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="polBody"></tbody>
-                </table>
-            </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Scope</th>
+                  <th>Mode</th>
+                  <th>Min h</th>
+                  <th>Effective</th>
+                  <th>Active</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="polBody"></tbody>
+            </table>
+          </div>
         </div>
+      </div>
+      <p class="small text-muted mt-2 mb-0">
+        <i class="bi bi-info-circle me-1"></i>
+        Prefer the full-page editor?
+        <a href="{{ url_for('internal_time_billing.policies_edit_page') }}">Open legacy policy page</a>
+        (use <code>#edit-&lt;id&gt;</code> in the URL).
+      </p>
     </div>
-
+    <div class="tab-pane fade" id="pane-holidays" role="tabpanel">
+      <div class="card border-0 shadow-sm">
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Date</th>
+                  <th>Region</th>
+                  <th>Name</th>
+                  <th class="text-end">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="bhBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <p class="small text-muted mt-2 mb-0">Empty region = UK-wide (or default). Multiple rows can share a date with different regions.</p>
+    </div>
+  </div>
 </div>
 
-<script>
-    (async function () {
-        const body = document.getElementById('polBody');
-        const btnNew = document.getElementById('btnNew');
+<!-- Policy wizard modal -->
+<div class="modal fade" id="policyWizardModal" tabindex="-1" aria-labelledby="policyWizardModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h5 class="modal-title mb-0" id="policyWizardModalLabel">New calendar policy</h5>
+          <div class="small text-muted" id="pwmStepLabel">Step 1 of 4 · What &amp; who</div>
+        </div>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="progress mb-3" style="height:6px">
+          <div class="progress-bar" id="pwmProgress" role="progressbar" style="width:25%"></div>
+        </div>
+        <div id="pwmErr" class="alert alert-danger small py-2 d-none"></div>
 
-        async function load() {
-            const r = await fetch('{{ url_for("internal_time_billing.get_policies") }}');
-            const list = await r.json();
+        <div class="pwm-step" data-step="1">
+          <h6 class="fw-semibold mb-3">1. Name, type &amp; scope</h6>
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label">Policy name <span class="text-danger">*</span></label>
+              <input class="form-control form-control-sm" id="pol_name" placeholder="e.g. Weekend uplift – global">
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">Policy type <span class="text-danger">*</span></label>
+              <select class="form-select form-select-sm" id="pol_type">
+                <option value="WEEKEND">Weekend (Sat–Sun)</option>
+                <option value="BANK_HOLIDAY">Bank holiday</option>
+                <option value="NIGHT">Night / unsocial hours</option>
+                <option value="TIME_BANDS">Time bands (clock overlap)</option>
+                <option value="OVERTIME_SHIFT">Overtime (per shift hours)</option>
+                <option value="OVERTIME_DAILY">Overtime (daily) — reserved</option>
+                <option value="OVERTIME_WEEKLY">Overtime (weekly) — reserved</option>
+                <option value="MINIMUM_HOURS_PER_SHIFT">Minimum paid hours (per shift / line)</option>
+                <option value="MINIMUM_HOURS_DAILY_GLOBAL">Minimum paid hours (daily total — whole day)</option>
+                <option value="MINIMUM_HOURS_DAILY_CLIENT">Minimum paid hours (daily total — per client)</option>
+                <option value="MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT">Minimum paid hours (daily — contractor + client)</option>
+              </select>
+              <div class="form-text" id="pol_type_hint"></div>
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">Scope <span class="text-danger">*</span></label>
+              <select class="form-select form-select-sm" id="pol_scope">
+                <option value="GLOBAL">Everyone (global)</option>
+                <option value="ROLE">Specific staff role</option>
+                <option value="JOB_TYPE">Specific job type</option>
+                <option value="CLIENT">Specific client</option>
+                <option value="CONTRACTOR_CLIENT">Contractor + client</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_role">
+              <label class="form-label">Staff role</label>
+              <select class="form-select form-select-sm" id="pol_role_id"><option value="">— Select —</option></select>
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_job">
+              <label class="form-label">Job type</label>
+              <select class="form-select form-select-sm" id="pol_job_type_id"><option value="">— Select —</option></select>
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_client">
+              <label class="form-label">Client</label>
+              <select class="form-select form-select-sm" id="pol_client_id"><option value="">— Select —</option></select>
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_contractor">
+              <label class="form-label">Contractor</label>
+              <select class="form-select form-select-sm" id="pol_contractor_id"><option value="">— Select —</option></select>
+            </div>
+          </div>
+        </div>
 
-            body.innerHTML = '';
-            if (!list || !list.length) {
-                body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No policies yet.</td></tr>';
-                return;
-            }
+        <div class="pwm-step d-none" data-step="2">
+          <h6 class="fw-semibold mb-3">2. Pay rule</h6>
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Mode</label>
+              <select class="form-select form-select-sm" id="pol_mode">
+                <option value="OFF">Off (no effect)</option>
+                <option value="MULTIPLIER">Multiply base wage rate</option>
+                <option value="ABSOLUTE">Fixed £/hour</option>
+                <option value="PRORATA">Night: pay by clock overlap (split)</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-4" id="wrap_mult">
+              <label class="form-label">Multiplier</label>
+              <input class="form-control form-control-sm" id="pol_multiplier" type="number" step="0.01" min="0" placeholder="e.g. 1.25">
+            </div>
+            <div class="col-6 col-md-4" id="wrap_abs">
+              <label class="form-label">Absolute £/hour</label>
+              <input class="form-control form-control-sm" id="pol_absolute_rate" type="number" step="0.01" min="0" placeholder="e.g. 18.50">
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_night_win">
+              <label class="form-label">Night window start</label>
+              <input class="form-control form-control-sm" id="pol_window_start" type="time">
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_night_win2">
+              <label class="form-label">Night window end</label>
+              <input class="form-control form-control-sm" id="pol_window_end" type="time">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Applies to</label>
+              <select class="form-select form-select-sm" id="pol_applies_to">
+                <option value="WAGE">Wage (timesheet pay)</option>
+                <option value="BILL">Bill rate only</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">Stacking with overtime</label>
+              <select class="form-select form-select-sm" id="pol_stacking">
+                <option value="OT_ON_TOP">Overtime on top (default)</option>
+                <option value="NONE">None</option>
+                <option value="FULL">Full (advanced)</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-4 d-none" id="wrap_minimum_hours">
+              <label class="form-label">Minimum hours <span class="text-danger">*</span></label>
+              <input class="form-control form-control-sm" id="pol_minimum_hours" type="number" step="0.01" min="0" placeholder="e.g. 4">
+              <div class="form-text small">
+                <strong>Per shift:</strong> if actual time is below this, pay uses this many hours (each line separately).
+                <strong>Daily:</strong> if the <em>sum</em> of actual hours in the bucket is below this, pay is scaled up once for that day.
+              </div>
+            </div>
+            <div class="col-12 d-none" id="wrap_time_bands_json">
+              <label class="form-label mb-2">Time bands</label>
+              <div class="form-text small mb-2">
+                End before start on one row = crosses midnight. Uncheck all day letters for every day.
+              </div>
+              <div class="table-responsive border rounded">
+                <table class="table table-sm align-middle mb-0" id="timeBandsTbl">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Days</th>
+                      <th>From</th>
+                      <th>To</th>
+                      <th>× mult</th>
+                      <th>£/h abs</th>
+                      <th>+£/h</th>
+                      <th>£/shift</th>
+                      <th>Label</th>
+                      <th class="text-end"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="timeBandsTbody"></tbody>
+                </table>
+              </div>
+              <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnAddTimeBand">Add band</button>
+            </div>
+          </div>
+        </div>
 
-            for (const p of list) {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-        <td>${p.id}</td>
-        <td>${p.name || ''}</td>
-        <td>${p.scope || 'global'}</td>
-        <td>${p.version || 1}</td>
+        <div class="pwm-step d-none" data-step="3">
+          <h6 class="fw-semibold mb-3">3. Overtime thresholds (shift overtime)</h6>
+          <div class="alert alert-light border small mb-3">
+            For <strong>Overtime (per shift)</strong>, hours beyond the first threshold use the tier multiplier on the rate.
+            Other policy types can leave these blank.
+          </div>
+          <div class="row g-3" id="ot_fields">
+            <div class="col-6 col-md-3">
+              <label class="form-label">First threshold (h)</label>
+              <input class="form-control form-control-sm" id="pol_ot_th" type="number" step="0.01" min="0" placeholder="8">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Tier 1 mult.</label>
+              <input class="form-control form-control-sm" id="pol_ot_m1" type="number" step="0.01" min="0" placeholder="1.5">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Second threshold (h)</label>
+              <input class="form-control form-control-sm" id="pol_ot_th2" type="number" step="0.01" min="0" placeholder="12">
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label">Tier 2 mult.</label>
+              <input class="form-control form-control-sm" id="pol_ot_m2" type="number" step="0.01" min="0" placeholder="2">
+            </div>
+          </div>
+          <p class="text-muted small mb-0 mt-2" id="ot_nonshift_note"></p>
+        </div>
+
+        <div class="pwm-step d-none" data-step="4">
+          <h6 class="fw-semibold mb-3">4. Effective dates &amp; status</h6>
+          <div class="row g-3">
+            <div class="col-6 col-md-4">
+              <label class="form-label">Effective from <span class="text-danger">*</span></label>
+              <input class="form-control form-control-sm" id="pol_eff_from" type="date">
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label">Effective to (optional)</label>
+              <input class="form-control form-control-sm" id="pol_eff_to" type="date">
+            </div>
+            <div class="col-12 col-md-4 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="pol_active" checked>
+                <label class="form-check-label" for="pol_active">Active</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer flex-wrap gap-2">
+        <button type="button" class="btn btn-light" data-mdb-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-secondary" id="pwmBack" disabled>Back</button>
+        <button type="button" class="btn btn-primary" id="pwmNext">Next</button>
+        <button type="button" class="btn btn-success d-none" id="pwmSave">Save policy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bank holiday modal -->
+<div class="modal fade" id="bankHolidayModal" tabindex="-1" aria-labelledby="bankHolidayModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="bankHolidayModalLabel">Bank holiday</h5>
+        <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="bhErr" class="alert alert-danger small py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label">Date <span class="text-danger">*</span></label>
+          <input type="date" class="form-control" id="bh_date" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Region (optional)</label>
+          <input type="text" class="form-control form-control-sm" id="bh_region" placeholder="e.g. England, Scotland — leave blank for all">
+        </div>
+        <div class="mb-0">
+          <label class="form-label">Name</label>
+          <input type="text" class="form-control form-control-sm" id="bh_name" placeholder="e.g. Spring bank holiday">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-mdb-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="bhSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script data-cfasync="false">
+(function () {
+  const URL_POLICIES = "{{ url_for('internal_time_billing.get_policies') }}";
+  const URL_SAVE_POLICY = "{{ url_for('internal_time_billing.create_policy') }}";
+  const URL_BANK_H = "{{ url_for('internal_time_billing.api_list_bank_holidays') }}";
+  const URL_SAVE_BANK_H = "{{ url_for('internal_time_billing.api_save_bank_holiday') }}";
+  const URL_DEL_BANK_H = "{{ url_for('internal_time_billing.api_delete_bank_holiday') }}";
+  const URL_ROLES = "{{ url_for('internal_time_billing.api_list_roles') }}";
+  const URL_JT = "{{ url_for('internal_time_billing.api_internal_refs_job_types') }}";
+  const URL_CL = "{{ url_for('internal_time_billing.api_admin_refs_clients') }}";
+  const URL_CT = "{{ url_for('internal_time_billing.api_admin_refs_contractors') }}";
+
+  const polBody = document.getElementById("polBody");
+  const bhBody = document.getElementById("bhBody");
+  const pwmModalEl = document.getElementById("policyWizardModal");
+  const bhModalEl = document.getElementById("bankHolidayModal");
+  const $ = (s) => document.querySelector(s);
+
+  function tbModal(el) {
+    if (!el || typeof window.mdb === "undefined" || !mdb.Modal) return null;
+    return mdb.Modal.getOrCreateInstance(el);
+  }
+
+  function pwmShowErr(msg) {
+    const e = document.getElementById("pwmErr");
+    if (!e) return;
+    if (msg) { e.textContent = msg; e.classList.remove("d-none"); }
+    else { e.textContent = ""; e.classList.add("d-none"); }
+  }
+  function bhShowErr(msg) {
+    const e = document.getElementById("bhErr");
+    if (!e) return;
+    if (msg) { e.textContent = msg; e.classList.remove("d-none"); }
+    else { e.textContent = ""; e.classList.add("d-none"); }
+  }
+
+  let pwmStep = 1;
+  let pwmEditingId = null;
+  const PWM_LABELS = [
+    "",
+    "Step 1 of 4 · What & who",
+    "Step 2 of 4 · Pay rule",
+    "Step 3 of 4 · Overtime",
+    "Step 4 of 4 · Dates & status",
+  ];
+
+  function pwmSetStep(n) {
+    pwmStep = Math.max(1, Math.min(4, n));
+    document.querySelectorAll(".pwm-step").forEach((el) => {
+      const s = parseInt(el.getAttribute("data-step"), 10);
+      el.classList.toggle("d-none", s !== pwmStep);
+    });
+    const pct = pwmStep * 25;
+    const bar = document.getElementById("pwmProgress");
+    if (bar) bar.style.width = pct + "%";
+    const lab = document.getElementById("pwmStepLabel");
+    if (lab) lab.textContent = PWM_LABELS[pwmStep] || "";
+    document.getElementById("pwmBack").disabled = pwmStep <= 1;
+    document.getElementById("pwmNext").classList.toggle("d-none", pwmStep >= 4);
+    document.getElementById("pwmSave").classList.toggle("d-none", pwmStep < 4);
+  }
+
+  function syncScopeUI() {
+    const sc = $("#pol_scope").value;
+    ["wrap_role", "wrap_job", "wrap_client", "wrap_contractor"].forEach((w) => {
+      document.getElementById(w).classList.add("d-none");
+    });
+    if (sc === "ROLE") document.getElementById("wrap_role").classList.remove("d-none");
+    if (sc === "JOB_TYPE") document.getElementById("wrap_job").classList.remove("d-none");
+    if (sc === "CLIENT") document.getElementById("wrap_client").classList.remove("d-none");
+    if (sc === "CONTRACTOR_CLIENT") {
+      document.getElementById("wrap_client").classList.remove("d-none");
+      document.getElementById("wrap_contractor").classList.remove("d-none");
+    }
+  }
+
+  function syncTypeHints() {
+    const t = $("#pol_type").value;
+    const hint = $("#pol_type_hint");
+    const night = t === "NIGHT";
+    const timeB = t === "TIME_BANDS";
+    const minT = t.startsWith("MINIMUM_HOURS");
+    document.getElementById("wrap_night_win").classList.toggle("d-none", !night || timeB);
+    document.getElementById("wrap_night_win2").classList.toggle("d-none", !night || timeB);
+    const wtb = document.getElementById("wrap_time_bands_json");
+    if (wtb) wtb.classList.toggle("d-none", !timeB);
+    const wmh = document.getElementById("wrap_minimum_hours");
+    if (wmh) wmh.classList.toggle("d-none", !minT);
+    document.getElementById("ot_fields").style.opacity = t.startsWith("OVERTIME") ? "1" : "0.45";
+    const note = document.getElementById("ot_nonshift_note");
+    if (note) {
+      note.textContent = t === "OVERTIME_SHIFT" ? "" : (t.startsWith("OVERTIME")
+        ? "Daily / weekly overtime types are reserved for future engine support."
+        : "");
+    }
+    if (t === "WEEKEND") hint.textContent = "Saturday or Sunday work dates.";
+    else if (t === "BANK_HOLIDAY") hint.textContent = "Matches dates in the Bank holidays tab.";
+    else if (t === "NIGHT") hint.textContent = "Legacy: whole line at max(day, night). Use mode “Night: pay by clock overlap” for split pay.";
+    else if (t === "TIME_BANDS") {
+      hint.textContent = "Use the table below — saved as structured data (no raw JSON).";
+      const tbody = document.getElementById("timeBandsTbody");
+      if (tbody && !tbody.querySelector("tr.tb-band-row")) addTimeBandRow(null);
+    }
+    else if (t.startsWith("OVERTIME")) hint.textContent = "Configure thresholds in step 3.";
+    else if (t === "MINIMUM_HOURS_PER_SHIFT") hint.textContent = "Each timesheet line / shift: pay at least N hours when any time is worked.";
+    else if (t === "MINIMUM_HOURS_DAILY_GLOBAL") hint.textContent = "Once per calendar day (all clients): if total actual hours are under N, pay scales up.";
+    else if (t === "MINIMUM_HOURS_DAILY_CLIENT") hint.textContent = "Per client per day: sum hours on lines for that client; if under N, pay scales up.";
+    else if (t === "MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT") hint.textContent = "Per contractor+client per day: same as client daily but scoped to one contractor.";
+    else hint.textContent = "";
+  }
+
+  function syncModeUI() {
+    const m = $("#pol_mode").value;
+    const pr = m === "PRORATA";
+    document.getElementById("wrap_mult").style.display =
+      m === "MULTIPLIER" || pr ? "" : "none";
+    document.getElementById("wrap_abs").style.display =
+      m === "ABSOLUTE" || pr ? "" : "none";
+  }
+
+  function numOrNull(id) {
+    const v = ($(id).value || "").trim();
+    if (v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const TB_WD_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+  function tbWdCellHtml() {
+    let h = '<div class="d-flex flex-wrap gap-1 small">';
+    for (let d = 0; d < 7; d++) {
+      h += `<label class="form-check form-check-inline mb-0"><input type="checkbox" class="form-check-input tb-wd" data-wd="${d}"><span class="form-check-label">${TB_WD_LABELS[d]}</span></label>`;
+    }
+    h += "</div>";
+    return h;
+  }
+  function addTimeBandRow(prefill) {
+    const tb = document.getElementById("timeBandsTbody");
+    if (!tb) return;
+    const tr = document.createElement("tr");
+    tr.className = "tb-band-row";
+    tr.innerHTML = `
+      <td class="align-top">${tbWdCellHtml()}</td>
+      <td><input type="time" class="form-control form-control-sm tb-ws" step="60"></td>
+      <td><input type="time" class="form-control form-control-sm tb-we" step="60"></td>
+      <td><input type="number" class="form-control form-control-sm tb-mult" step="0.01" min="0" placeholder="×"></td>
+      <td><input type="number" class="form-control form-control-sm tb-abs" step="0.01" min="0" placeholder="£/h"></td>
+      <td><input type="number" class="form-control form-control-sm tb-upl" step="0.01" placeholder="+£/h"></td>
+      <td><input type="number" class="form-control form-control-sm tb-flat" step="0.01" min="0" placeholder="once"></td>
+      <td><input type="text" class="form-control form-control-sm tb-lab" placeholder="Optional"></td>
+      <td class="text-end align-middle"><button type="button" class="btn btn-outline-danger btn-sm tb-del" title="Remove">&times;</button></td>`;
+    tb.appendChild(tr);
+    tr.querySelector(".tb-del").addEventListener("click", () => { tr.remove(); });
+    if (prefill && typeof prefill === "object") {
+      const ws = (prefill.window_start || "").toString().slice(0, 5);
+      const we = (prefill.window_end || "").toString().slice(0, 5);
+      if (ws) tr.querySelector(".tb-ws").value = ws;
+      if (we) tr.querySelector(".tb-we").value = we;
+      if (prefill.multiplier != null && prefill.multiplier !== "") tr.querySelector(".tb-mult").value = String(prefill.multiplier);
+      if (prefill.absolute_rate != null && prefill.absolute_rate !== "") tr.querySelector(".tb-abs").value = String(prefill.absolute_rate);
+      const upl = prefill.uplift_per_hour != null ? prefill.uplift_per_hour : prefill.bonus_per_hour;
+      if (upl != null && upl !== "") tr.querySelector(".tb-upl").value = String(upl);
+      const bf = prefill.bonus_flat != null ? prefill.bonus_flat : prefill.flat_bonus_per_shift;
+      if (bf != null && bf !== "") tr.querySelector(".tb-flat").value = String(bf);
+      if (prefill.label) tr.querySelector(".tb-lab").value = prefill.label;
+      if (Array.isArray(prefill.weekdays)) {
+        prefill.weekdays.forEach((d) => {
+          const c = tr.querySelector(`.tb-wd[data-wd="${parseInt(d, 10)}"]`);
+          if (c) c.checked = true;
+        });
+      }
+    }
+  }
+  function clearTimeBandsTable() {
+    const tb = document.getElementById("timeBandsTbody");
+    if (tb) tb.innerHTML = "";
+  }
+  function renderTimeBandsFromPolicy(obj) {
+    clearTimeBandsTable();
+    let bands = [];
+    if (Array.isArray(obj)) bands = obj;
+    else if (obj && typeof obj === "string") {
+      try { bands = JSON.parse(obj); } catch (e) { bands = []; }
+    }
+    if (!bands.length) { addTimeBandRow(null); return; }
+    bands.forEach((b) => addTimeBandRow(b));
+  }
+  function collectTimeBandRows() {
+    const tb = document.getElementById("timeBandsTbody");
+    if (!tb) return [];
+    const out = [];
+    tb.querySelectorAll("tr.tb-band-row").forEach((tr) => {
+      const ws = (tr.querySelector(".tb-ws") && tr.querySelector(".tb-ws").value || "").trim();
+      const we = (tr.querySelector(".tb-we") && tr.querySelector(".tb-we").value || "").trim();
+      if (!ws || !we) return;
+      const o = { window_start: ws, window_end: we };
+      const wds = [];
+      tr.querySelectorAll(".tb-wd:checked").forEach((c) => {
+        const d = parseInt(c.getAttribute("data-wd"), 10);
+        if (Number.isFinite(d)) wds.push(d);
+      });
+      if (wds.length) o.weekdays = wds.sort((a, b) => a - b);
+      const mult = (tr.querySelector(".tb-mult") && tr.querySelector(".tb-mult").value || "").trim();
+      const abs = (tr.querySelector(".tb-abs") && tr.querySelector(".tb-abs").value || "").trim();
+      const upl = (tr.querySelector(".tb-upl") && tr.querySelector(".tb-upl").value || "").trim();
+      const lab = (tr.querySelector(".tb-lab") && tr.querySelector(".tb-lab").value || "").trim();
+      if (mult !== "") o.multiplier = parseFloat(mult);
+      if (abs !== "") o.absolute_rate = parseFloat(abs);
+      if (upl !== "") o.uplift_per_hour = parseFloat(upl);
+      const flat = (tr.querySelector(".tb-flat") && tr.querySelector(".tb-flat").value || "").trim();
+      if (flat !== "") o.bonus_flat = parseFloat(flat);
+      if (lab) o.label = lab;
+      out.push(o);
+    });
+    return out;
+  }
+
+  function clearPolicyForm() {
+    pwmEditingId = null;
+    $("#pol_name").value = "";
+    $("#pol_type").value = "WEEKEND";
+    $("#pol_scope").value = "GLOBAL";
+    $("#pol_mode").value = "OFF";
+    ["#pol_multiplier", "#pol_absolute_rate", "#pol_window_start", "#pol_window_end",
+      "#pol_ot_th", "#pol_ot_th2", "#pol_ot_m1", "#pol_ot_m2", "#pol_eff_to", "#pol_minimum_hours"].forEach((s) => { $(s).value = ""; });
+    clearTimeBandsTable();
+    $("#pol_applies_to").value = "WAGE";
+    $("#pol_stacking").value = "OT_ON_TOP";
+    $("#pol_eff_from").value = new Date().toISOString().slice(0, 10);
+    $("#pol_active").checked = true;
+    ["#pol_role_id", "#pol_job_type_id", "#pol_client_id", "#pol_contractor_id"].forEach((s) => { $(s).value = ""; });
+    syncScopeUI();
+    syncTypeHints();
+    syncModeUI();
+  }
+
+  function fillPolicyForm(p) {
+    pwmEditingId = p.id;
+    $("#pol_name").value = p.name || "";
+    $("#pol_type").value = (p.type || "WEEKEND").toUpperCase();
+    $("#pol_scope").value = (p.scope || "GLOBAL").toUpperCase();
+    $("#pol_mode").value = (p.mode || "OFF").toUpperCase();
+    $("#pol_multiplier").value = p.multiplier != null ? String(p.multiplier) : "";
+    $("#pol_absolute_rate").value = p.absolute_rate != null ? String(p.absolute_rate) : "";
+    $("#pol_window_start").value = (p.window_start || "").toString().slice(0, 5);
+    $("#pol_window_end").value = (p.window_end || "").toString().slice(0, 5);
+    $("#pol_ot_th").value = p.ot_threshold_hours != null ? String(p.ot_threshold_hours) : "";
+    $("#pol_ot_th2").value = p.ot_tier2_threshold_hours != null ? String(p.ot_tier2_threshold_hours) : "";
+    $("#pol_ot_m1").value = p.ot_tier1_mult != null ? String(p.ot_tier1_mult) : "";
+    $("#pol_ot_m2").value = p.ot_tier2_mult != null ? String(p.ot_tier2_mult) : "";
+    $("#pol_applies_to").value = (p.applies_to || "WAGE").toUpperCase();
+    $("#pol_stacking").value = (p.stacking || "OT_ON_TOP").toUpperCase();
+    $("#pol_eff_from").value = (p.effective_from || "").toString().slice(0, 10);
+    $("#pol_eff_to").value = (p.effective_to || "").toString().slice(0, 10);
+    $("#pol_active").checked = !!p.active;
+    if (p.role_id) $("#pol_role_id").value = String(p.role_id);
+    if (p.job_type_id) $("#pol_job_type_id").value = String(p.job_type_id);
+    if (p.client_id) $("#pol_client_id").value = String(p.client_id);
+    if (p.contractor_id) $("#pol_contractor_id").value = String(p.contractor_id);
+    $("#pol_minimum_hours").value = p.minimum_hours != null ? String(p.minimum_hours) : "";
+    renderTimeBandsFromPolicy(p.time_bands_json);
+    syncScopeUI();
+    syncTypeHints();
+    syncModeUI();
+  }
+
+  function buildPayload() {
+    const payload = {
+      name: ($("#pol_name").value || "").trim(),
+      type: $("#pol_type").value,
+      scope: $("#pol_scope").value,
+      role_id: $("#pol_role_id").value ? parseInt($("#pol_role_id").value, 10) : null,
+      job_type_id: $("#pol_job_type_id").value ? parseInt($("#pol_job_type_id").value, 10) : null,
+      client_id: $("#pol_client_id").value ? parseInt($("#pol_client_id").value, 10) : null,
+      contractor_id: $("#pol_contractor_id").value ? parseInt($("#pol_contractor_id").value, 10) : null,
+      mode: $("#pol_mode").value,
+      multiplier: numOrNull("#pol_multiplier"),
+      absolute_rate: numOrNull("#pol_absolute_rate"),
+      window_start: ($("#pol_window_start").value || "") || null,
+      window_end: ($("#pol_window_end").value || "") || null,
+      ot_threshold_hours: numOrNull("#pol_ot_th"),
+      ot_tier2_threshold_hours: numOrNull("#pol_ot_th2"),
+      ot_tier1_mult: numOrNull("#pol_ot_m1"),
+      ot_tier2_mult: numOrNull("#pol_ot_m2"),
+      minimum_hours: numOrNull("#pol_minimum_hours"),
+      time_band_rows: $("#pol_type").value === "TIME_BANDS" ? collectTimeBandRows() : undefined,
+      applies_to: $("#pol_applies_to").value,
+      stacking: $("#pol_stacking").value,
+      effective_from: $("#pol_eff_from").value,
+      effective_to: ($("#pol_eff_to").value || "").trim() || null,
+      active: $("#pol_active").checked ? 1 : 0,
+    };
+    if (pwmEditingId) payload.id = parseInt(String(pwmEditingId), 10);
+    return payload;
+  }
+
+  function validateStep1() {
+    if (!(($("#pol_name").value || "").trim())) return "Name is required.";
+    return "";
+  }
+  function validateStep4() {
+    if (!(($("#pol_eff_from").value || "").trim())) return "Effective from is required.";
+    return "";
+  }
+
+  function validateTimeBandsPolicy() {
+    if ($("#pol_type").value !== "TIME_BANDS") return "";
+    const rows = collectTimeBandRows();
+    if (!rows.length) return "Add at least one band with From and To times.";
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.multiplier == null && r.absolute_rate == null && r.uplift_per_hour == null && r.bonus_flat == null) {
+        return `Band ${i + 1}: set × mult, absolute £/h, +£/h, and/or £/shift flat.`;
+      }
+    }
+    return "";
+  }
+
+  function validateMinimumPolicy() {
+    const t = $("#pol_type").value;
+    if (!t.startsWith("MINIMUM_HOURS")) return "";
+    const mh = parseFloat(($("#pol_minimum_hours").value || "").trim());
+    if (!Number.isFinite(mh) || mh <= 0) return "Minimum hours must be a positive number.";
+    const sc = $("#pol_scope").value;
+    if (t === "MINIMUM_HOURS_DAILY_GLOBAL" && sc !== "GLOBAL") {
+      return "Daily whole-day minimum must use scope “Everyone (global)”.";
+    }
+    if (t === "MINIMUM_HOURS_DAILY_CLIENT" && sc !== "CLIENT") {
+      return "Daily per-client minimum must use scope “Specific client”.";
+    }
+    if (t === "MINIMUM_HOURS_DAILY_CONTRACTOR_CLIENT" && sc !== "CONTRACTOR_CLIENT") {
+      return "Daily contractor+client minimum must use that scope.";
+    }
+    return "";
+  }
+
+  async function loadRefsIntoWizard() {
+    async function fillSelect(url, selId, mapFn) {
+      const sel = document.getElementById(selId);
+      if (!sel) return;
+      sel.innerHTML = "";
+      const o0 = document.createElement("option");
+      o0.value = "";
+      o0.textContent = "— Select —";
+      sel.appendChild(o0);
+      try {
+        const r = await fetch(url, { headers: { Accept: "application/json" } });
+        const d = r.ok ? await r.json() : {};
+        const items = Array.isArray(d.items) ? d.items : Array.isArray(d) ? d : [];
+        items.forEach((x) => mapFn(x, sel));
+      } catch (e) { console.error(e); }
+    }
+    await fillSelect(URL_ROLES, "pol_role_id", (x, sel) => {
+      const o = document.createElement("option");
+      o.value = x.id;
+      o.textContent = x.name || ("Role #" + x.id);
+      sel.appendChild(o);
+    });
+    await fillSelect(URL_JT, "pol_job_type_id", (x, sel) => {
+      const o = document.createElement("option");
+      o.value = x.id;
+      o.textContent = x.name || ("Job #" + x.id);
+      sel.appendChild(o);
+    });
+    await fillSelect(URL_CL, "pol_client_id", (x, sel) => {
+      const o = document.createElement("option");
+      o.value = x.id;
+      o.textContent = x.name || ("Client #" + x.id);
+      sel.appendChild(o);
+    });
+    await fillSelect(URL_CT, "pol_contractor_id", (x, sel) => {
+      const o = document.createElement("option");
+      o.value = x.id;
+      o.textContent = (x.name || x.email || ("#" + x.id));
+      sel.appendChild(o);
+    });
+  }
+
+  async function loadPoliciesTable() {
+    const r = await fetch(URL_POLICIES);
+    const list = await r.json();
+    polBody.innerHTML = "";
+    if (!list || !list.length) {
+      polBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No policies yet. Use the wizard to add one.</td></tr>';
+      return;
+    }
+    for (const p of list) {
+      const eff = (p.effective_from || "").toString().slice(0, 10)
+        + (p.effective_to ? " → " + String(p.effective_to).slice(0, 10) : " → …");
+      const mode = (p.mode || "OFF").toUpperCase();
+      const mh = p.minimum_hours != null && String(p.type || "").startsWith("MINIMUM_HOURS")
+        ? escapeHtml(String(p.minimum_hours)) : "—";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="font-monospace">${p.id}</td>
+        <td class="fw-semibold">${escapeHtml(p.name || "")}</td>
+        <td><span class="badge bg-secondary">${escapeHtml(p.type || "")}</span></td>
+        <td>${escapeHtml(p.scope || "")}</td>
+        <td><span class="badge bg-light text-dark border">${escapeHtml(mode)}</span></td>
+        <td class="small">${mh}</td>
+        <td class="small text-muted">${escapeHtml(eff)}</td>
         <td>${p.active ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>'}</td>
         <td class="text-end">
-          <div class="btn-group btn-group-sm">
-            <a class="btn btn-outline-primary" href="{{ url_for('internal_time_billing.policies_edit_page') or '#' }}#edit-${p.id}">Edit</a>
-          </div>
-        </td>
-      `;
-                body.appendChild(tr);
-            }
-        }
+          <button type="button" class="btn btn-sm btn-outline-primary pwm-open-edit" data-id="${p.id}">Edit</button>
+        </td>`;
+      polBody.appendChild(tr);
+    }
+    polBody.querySelectorAll(".pwm-open-edit").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        const row = (list || []).find((x) => String(x.id) === String(id));
+        if (!row) return;
+        document.getElementById("policyWizardModalLabel").textContent = "Edit calendar policy";
+        await loadRefsIntoWizard();
+        fillPolicyForm(row);
+        pwmShowErr("");
+        pwmSetStep(1);
+        tbModal(pwmModalEl).show();
+      });
+    });
+  }
 
-        btnNew.addEventListener('click', async () => {
-            const name = prompt('Policy name:');
-            if (!name) return;
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
+  }
 
-            const r = await fetch('{{ url_for("internal_time_billing.create_policy") }}', {
-                method: 'POST',
-                headers: window.tbMergeCsrfHeaders({ 'Content-Type': 'application/json' }, 'POST'),
-                body: JSON.stringify({
-                    name,
-                    active: true,
-                    scope: 'global',
-                    type: 'WEEKEND',
-                    mode: 'OFF',
-                    effective_from: new Date().toISOString().slice(0, 10),
-                    version: 1,
-                    rules: []
-                })
-            });
-
-            if (!r.ok) {
-                alert('Create failed');
-                return;
-            }
-
-            load();
+  async function loadBankHolidaysTable() {
+    const r = await fetch(URL_BANK_H);
+    const list = await r.json();
+    bhBody.innerHTML = "";
+    if (!list || !list.length) {
+      bhBody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No bank holidays yet.</td></tr>';
+      return;
+    }
+    for (const h of list) {
+      const tr = document.createElement("tr");
+      const reg = h.region != null && String(h.region) !== "" ? String(h.region) : "";
+      const regAttr = encodeURIComponent(reg);
+      tr.innerHTML = `
+        <td>${escapeHtml((h.date || "").toString().slice(0, 10))}</td>
+        <td>${reg ? escapeHtml(reg) : '<span class="text-muted">—</span>'}</td>
+        <td>${escapeHtml(h.name || "")}</td>
+        <td class="text-end">
+          <button type="button" class="btn btn-sm btn-outline-danger bh-del"
+            data-date="${escapeHtml((h.date || "").toString().slice(0, 10))}" data-region="${regAttr}">Remove</button>
+        </td>`;
+      bhBody.appendChild(tr);
+    }
+    bhBody.querySelectorAll(".bh-del").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Remove this bank holiday row?")) return;
+        const ds = btn.getAttribute("data-date");
+        const regEnc = btn.getAttribute("data-region") || "";
+        const reg = regEnc ? decodeURIComponent(regEnc) : "";
+        const qs = new URLSearchParams({ date: ds });
+        if (reg) qs.set("region", reg);
+        const url = URL_DEL_BANK_H + "?" + qs.toString();
+        const res = await fetch(url, {
+          method: "DELETE",
+          headers: (typeof window.tbMergeCsrfHeaders === "function")
+            ? window.tbMergeCsrfHeaders({}, "DELETE") : {},
         });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(j.error || "Delete failed"); return; }
+        loadBankHolidaysTable();
+      });
+    });
+  }
 
-        // Initial load
-        load();
-    })();
+  $("#pol_scope").addEventListener("change", syncScopeUI);
+  $("#pol_type").addEventListener("change", () => { syncTypeHints(); syncModeUI(); });
+  $("#pol_mode").addEventListener("change", syncModeUI);
+  const btnAddTimeBand = document.getElementById("btnAddTimeBand");
+  if (btnAddTimeBand) btnAddTimeBand.addEventListener("click", () => addTimeBandRow(null));
+
+  document.getElementById("pwmNext").addEventListener("click", () => {
+    pwmShowErr("");
+    if (pwmStep === 1) {
+      const e = validateStep1();
+      if (e) { pwmShowErr(e); return; }
+    }
+    if (pwmStep === 2) {
+      const em = validateMinimumPolicy() || validateTimeBandsPolicy();
+      if (em) { pwmShowErr(em); return; }
+    }
+    if (pwmStep < 4) pwmSetStep(pwmStep + 1);
+  });
+  document.getElementById("pwmBack").addEventListener("click", () => {
+    pwmShowErr("");
+    if (pwmStep > 1) pwmSetStep(pwmStep - 1);
+  });
+
+  document.getElementById("pwmSave").addEventListener("click", async () => {
+    pwmShowErr("");
+    const e = validateStep1() || validateStep4() || validateMinimumPolicy() || validateTimeBandsPolicy();
+    if (e) { pwmShowErr(e); pwmSetStep(1); return; }
+    const payload = buildPayload();
+    const res = await fetch(URL_SAVE_POLICY, {
+      method: "POST",
+      headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "POST"),
+      body: JSON.stringify(payload),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      pwmShowErr(j.error || "Save failed");
+      return;
+    }
+    tbModal(pwmModalEl).hide();
+    loadPoliciesTable();
+  });
+
+  function onModalHidden(el, fn) {
+    if (!el) return;
+    ["hidden.mdb.modal", "hidden.bs.modal"].forEach((ev) => { el.addEventListener(ev, fn); });
+  }
+  onModalHidden(pwmModalEl, () => { pwmShowErr(""); });
+  onModalHidden(bhModalEl, () => { bhShowErr(""); });
+
+  document.getElementById("btnPolicyWizardNew").addEventListener("click", async () => {
+    document.getElementById("policyWizardModalLabel").textContent = "New calendar policy";
+    await loadRefsIntoWizard();
+    clearPolicyForm();
+    pwmShowErr("");
+    pwmSetStep(1);
+    tbModal(pwmModalEl).show();
+  });
+
+  document.getElementById("btnBhModal").addEventListener("click", () => {
+    bhShowErr("");
+    $("#bh_date").value = "";
+    $("#bh_region").value = "";
+    $("#bh_name").value = "";
+    tbModal(bhModalEl).show();
+  });
+
+  document.getElementById("bhSave").addEventListener("click", async () => {
+    bhShowErr("");
+    const d = ($("#bh_date").value || "").trim();
+    if (!d) { bhShowErr("Date is required."); return; }
+    const body = {
+      date: d,
+      name: ($("#bh_name").value || "").trim() || "Bank holiday",
+      region: ($("#bh_region").value || "").trim() || null,
+    };
+    const res = await fetch(URL_SAVE_BANK_H, {
+      method: "POST",
+      headers: window.tbMergeCsrfHeaders({ "Content-Type": "application/json" }, "POST"),
+      body: JSON.stringify(body),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { bhShowErr(j.error || "Save failed"); return; }
+    tbModal(bhModalEl).hide();
+    loadBankHolidaysTable();
+  });
+
+  document.getElementById("tab-holidays").addEventListener("shown.bs.tab", () => {
+    loadBankHolidaysTable();
+  });
+
+  const hashEdit = (location.hash || "").match(/edit-(\d+)/);
+  (async function init() {
+    await loadPoliciesTable();
+    if (hashEdit) {
+      const id = hashEdit[1];
+      const r = await fetch(URL_POLICIES);
+      const list = await r.json();
+      const row = (list || []).find((x) => String(x.id) === String(id));
+      if (row) {
+        document.getElementById("policyWizardModalLabel").textContent = "Edit calendar policy";
+        await loadRefsIntoWizard();
+        fillPolicyForm(row);
+        pwmSetStep(1);
+        tbModal(pwmModalEl).show();
+      }
+    }
+  })();
+})();
 </script>
 {% endblock %}

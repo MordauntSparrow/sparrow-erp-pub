@@ -1,0 +1,19 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Enrol compliance PIN{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Enrol compliance PIN</h1>
+<p class="text-muted small">6–12 digits. Used only for export step-up in this module. Stored as a bcrypt hash.</p>
+<form method="post" class="card shadow-sm p-4" style="max-width:420px">
+  <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+  <div class="mb-3">
+    <label class="form-label">PIN</label>
+    <input class="form-control" type="password" name="pin" inputmode="numeric" required minlength="6" maxlength="12">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Confirm PIN</label>
+    <input class="form-control" type="password" name="pin_confirm" inputmode="numeric" required minlength="6" maxlength="12">
+  </div>
+  <button type="submit" class="btn btn-primary">Save PIN</button>
+  <a class="btn btn-link" href="{{ url_for('compliance_audit_internal.export_wizard') }}">Back to export</a>
+</form>
+{% endblock %}

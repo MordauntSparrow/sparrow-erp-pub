@@ -52,11 +52,19 @@
       max-width: 100%;
       text-align: center;
     }
-    .cover-band .co {
-      font-size: 11pt;
-      font-weight: 700;
-      margin-bottom: 3mm;
-      opacity: 0.95;
+    .cover-event-image {
+      margin: 5mm auto 0;
+      max-width: 100%;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+    .cover-event-image img {
+      max-width: 100%;
+      height: auto;
+      max-height: 62mm;
+      object-fit: contain;
+      border: 1px solid #CFD8DC;
+      border-radius: 3px;
     }
     .cover-band h1 {
       font-size: 17pt;
@@ -138,26 +146,47 @@
       color: #37474F;
       border-color: #BDBDBD;
     }
-    table.roster, table.risk {
+    table.roster, table.risk, table.hosp {
       width: 100%;
       border-collapse: collapse;
       font-size: 8.5pt;
       margin: 3mm 0 5mm;
     }
-    table.roster th, table.roster td, table.risk th, table.risk td {
+    table.roster th, table.roster td, table.risk th, table.risk td, table.hosp th, table.hosp td {
       border: 1px solid #BDBDBD;
       padding: 2.2mm 3mm;
       vertical-align: top;
     }
-    table.roster th, table.risk th {
+    table.roster th, table.risk th, table.hosp th {
       background: #2E7D32;
       color: #fff;
       font-weight: 700;
       text-align: left;
       border: 1px solid #1B5E20;
     }
-    table.roster tr:nth-child(even) td, table.risk tr:nth-child(even) td { background: #F1F8F4; }
-    table.roster tr:nth-child(odd) td, table.risk tr:nth-child(odd) td { background: #fff; }
+    table.roster tr:nth-child(even) td, table.risk tr:nth-child(even) td, table.hosp tr:nth-child(even) td { background: #F1F8F4; }
+    table.roster tr:nth-child(odd) td, table.risk tr:nth-child(odd) td, table.hosp tr:nth-child(odd) td { background: #fff; }
+    /* Document-style grids (access / RVP — light header like formal plan annex) */
+    table.doc-plan {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+      margin: 3mm 0 5mm;
+    }
+    table.doc-plan th, table.doc-plan td {
+      border: 1px solid #263238;
+      padding: 2.5mm 3mm;
+      vertical-align: top;
+      text-align: left;
+    }
+    table.doc-plan th {
+      background: #bfdbf7;
+      color: #000;
+      font-weight: 700;
+    }
+    table.doc-plan tbody td {
+      background: #fff;
+    }
     .count-pill {
       display: inline-block;
       margin: 1mm 2mm 0 0;
@@ -182,7 +211,6 @@
     }
     .chk { margin: 0 0 3mm; padding: 2mm 0; border-bottom: 1px solid #ECEFF1; page-break-inside: avoid; }
     .muted, .text-muted { color: #78909C; font-size: 8.5pt; }
-    ul.hosp { margin: 2mm 0 4mm; padding-left: 5mm; }
     .disclaimer {
       margin-top: 8mm;
       padding: 4mm 5mm;
@@ -223,23 +251,29 @@
   {# ——— Cover (SAG-style control sheet) ——— #}
   <div class="cover">
     <div class="logo-wrap">
-      {% if branding.logo_pdf_src %}
+      {% if pdf_tenant_logo_src %}
+      <img src="{{ pdf_tenant_logo_src }}" alt="">
+      {% elif branding.logo_pdf_src %}
       <img src="{{ branding.logo_pdf_src }}" alt="{{ branding.company_name }}">
       {% elif branding.logo_file_uri %}
       <img src="{{ branding.logo_file_uri }}" alt="{{ branding.company_name }}">
       {% endif %}
     </div>
     <div class="cover-band">
-      <div class="co">{{ branding.company_name }}</div>
       <h1>{{ plan.title or 'Event medical plan' }}</h1>
       {% if crm_pdf.get('event_plan_pdf_tagline') %}
       <p class="tagline">{{ crm_pdf.get('event_plan_pdf_tagline') }}</p>
       {% endif %}
     </div>
+    {% if plan_cover_image_pdf_src %}
+    <div class="cover-event-image">
+      <img src="{{ plan_cover_image_pdf_src }}" alt="">
+    </div>
+    {% endif %}
     <div class="meta-block">
       <table>
         {% if doc_version_label %}
-        <tr><td class="k">Document version</td><td>v{{ doc_version_label }} <span class="muted">(auto — bumps each PDF generation)</span></td></tr>
+        <tr><td class="k">Document version</td><td>v{{ doc_version_label }}</td></tr>
         {% endif %}
         {% if plan.plan_document_release_date %}
         <tr><td class="k">Date of release</td><td>{{ plan.plan_document_release_date }}</td></tr>
@@ -257,15 +291,8 @@
         {% if pdf_labels.pdf_account_name %}
         <tr><td class="k">Client / account</td><td>{{ pdf_labels.pdf_account_name }}</td></tr>
         {% endif %}
-        {% if pdf_labels.pdf_opportunity_name %}
-        <tr><td class="k">Opportunity</td><td>{{ pdf_labels.pdf_opportunity_name }}</td></tr>
-        {% endif %}
-        {% if pdf_labels.pdf_quote_label %}
-        <tr><td class="k">Linked quote</td><td>{{ pdf_labels.pdf_quote_label }}</td></tr>
-        {% endif %}
         <tr><td class="k">Event type</td><td>{{ plan.event_type or '—' }}</td></tr>
-        <tr><td class="k">Start</td><td>{{ plan.start_datetime or '—' }}</td></tr>
-        <tr><td class="k">End</td><td>{{ plan.end_datetime or '—' }}</td></tr>
+        <tr><td class="k">Event dates (summary)</td><td>{% if plan.start_datetime or plan.end_datetime %}{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%d %b %Y') }}{% else %}—{% endif %} — {% if plan.end_datetime %}{{ plan.end_datetime.strftime('%d %b %Y') }}{% else %}—{% endif %}{% else %}—{% endif %}</td></tr>
         <tr><td class="k">Expected attendance</td><td>{{ plan.expected_attendance if plan.expected_attendance is not none else '—' }}</td></tr>
         {% if plan.attendance_by_day_text %}
         <tr><td class="k">Attendance by day</td><td style="white-space:pre-wrap">{{ plan.attendance_by_day_text | e }}</td></tr>
@@ -280,28 +307,26 @@
   <div class="toc-page">
     <h2 class="sec">Contents</h2>
     <ul class="toc">
-      {% if crm_pdf.get('event_plan_pdf_about_us') %}<li><a href="#sec-about">Information about the provider</a></li>{% endif %}
+      {% if crm_pdf.get('event_plan_pdf_about_us') %}<li><a href="#sec-about">Information about us</a></li>{% endif %}
       {% if plan.plan_purpose %}<li><a href="#sec-purpose">Purpose</a></li>{% endif %}
       <li><a href="#sec-summary">Event summary</a></li>
+      {% if event_days_pdf_rows %}<li><a href="#sec-daily-timings">Daily event timings</a></li>{% endif %}
       <li><a href="#sec-location">Site &amp; access</a></li>
       {% if event_map_pdf_src %}<li><a href="#sec-event-map">Site map</a></li>{% endif %}
-      {% if plan.access_egress_text %}<li><a href="#sec-access">Access &amp; egress</a></li>{% endif %}
-      {% if plan.rendezvous_text %}<li><a href="#sec-rvp">Rendezvous points</a></li>{% endif %}
+      {% if access_egress_pdf_rows or plan.access_egress_text %}<li><a href="#sec-access">Access &amp; egress</a></li>{% endif %}
+      {% if rendezvous_pdf_rows or plan.rendezvous_text %}<li><a href="#sec-rvp">Rendezvous points</a></li>{% endif %}
       <li><a href="#sec-risk">Risk factors</a></li>
       {% if plan.health_safety_work_text %}<li><a href="#sec-hsw">Health &amp; safety at work</a></li>{% endif %}
       <li><a href="#sec-roster">Resources &amp; staffing (roster)</a></li>
-      <li><a href="#sec-resources-meta">Resources summary</a></li>
-      {% if plan.staff_transport_text %}<li><a href="#sec-transport">Staff transportation</a></li>{% endif %}
-      {% if plan.command_control_text %}<li><a href="#sec-command">Command, control &amp; support</a></li>{% endif %}
-      {% if plan.uniform_ppe_text %}<li><a href="#sec-uniform">Uniform &amp; PPE</a></li>{% endif %}
+      {% if staff_transport_pdf_rows or plan.staff_transport_text %}<li><a href="#sec-transport">Staff transportation</a></li>{% endif %}
+      {% if uniform_ppe_pdf_rows or plan.uniform_ppe_text %}<li><a href="#sec-uniform">Uniform &amp; PPE</a></li>{% endif %}
+      {% if accommodation_pdf_visible %}<li><a href="#sec-accommodation">Accommodation</a></li>{% endif %}
       {% if plan.privacy_ipc_text %}<li><a href="#sec-privacy">Privacy, dignity &amp; IPC</a></li>{% endif %}
       {% if plan.incident_reporting_text %}<li><a href="#sec-incident">Incident reporting</a></li>{% endif %}
       {% if equipment_kit_url %}<li><a href="#sec-kit-manifest">Equipment manifest (live list)</a></li>{% endif %}
-      {% if plan.equipment_detail_text %}<li><a href="#sec-equipment">Equipment narrative</a></li>{% endif %}
       {% if diagram_pdf_rows %}<li><a href="#sec-diagrams">Diagrams</a></li>{% endif %}
-      {% if plan.resources_comms %}<li><a href="#sec-comms">Communications</a></li>{% endif %}
       <li><a href="#sec-hospitals">Receiving hospitals &amp; clinical handover</a></li>
-      {% if plan.major_incident_text %}<li><a href="#sec-major">Major incidents</a></li>{% endif %}
+      {% if major_incident_pdf_visible %}<li><a href="#sec-major">METHANE (staff briefing)</a></li>{% endif %}
       {% if questions %}<li><a href="#sec-checklist">Planning checklist</a></li>{% endif %}
       {% if plan.welfare_text %}<li><a href="#sec-welfare">Welfare arrangements</a></li>{% endif %}
       {% if plan.safeguarding_text %}<li><a href="#sec-safeguard">Safeguarding</a></li>{% endif %}
@@ -312,7 +337,7 @@
   </div>
 
   {% if crm_pdf.get('event_plan_pdf_about_us') %}
-  <h2 class="sec" id="sec-about">Information about the provider</h2>
+  <h2 class="sec" id="sec-about">Information about us</h2>
   <div class="about-box">{{ crm_pdf.get('event_plan_pdf_about_us') }}</div>
   {% endif %}
 
@@ -324,8 +349,9 @@
   <h2 class="sec" id="sec-summary">Event summary</h2>
   <table class="meta">
     <tr><td>Type</td><td>{{ plan.event_type or '—' }}</td></tr>
-    <tr><td>Start / end</td><td>{{ plan.start_datetime or '—' }} — {{ plan.end_datetime or '—' }}</td></tr>
+    <tr><td>Event dates (summary)</td><td>{% if plan.start_datetime or plan.end_datetime %}{% if plan.start_datetime %}{{ plan.start_datetime.strftime('%d %b %Y') }}{% else %}—{% endif %} — {% if plan.end_datetime %}{{ plan.end_datetime.strftime('%d %b %Y') }}{% else %}—{% endif %}{% else %}—{% endif %}</td></tr>
     {% if plan.event_organiser %}<tr><td>Organiser(s)</td><td>{{ plan.event_organiser }}</td></tr>{% endif %}
+    {% if plan.event_organiser_phone %}<tr><td>Organiser contact</td><td>{{ plan.event_organiser_phone }}</td></tr>{% endif %}
     <tr><td>Location (address)</td><td>{{ plan.address_line1 or '—' }}{% if plan.postcode %} · {{ plan.postcode }}{% endif %}</td></tr>
     {% if plan.event_content_summary %}<tr><td>Event content / programme</td><td>{{ plan.event_content_summary | e | replace('\n', '<br>') | safe }}</td></tr>{% endif %}
     <tr><td>Expected attendance</td><td>{{ plan.expected_attendance if plan.expected_attendance is not none else '—' }}</td></tr>
@@ -339,6 +365,27 @@
     <tr><td>Key timings</td><td>{{ plan.operational_timings | e | replace('\n', '<br>') | safe }}</td></tr>
     {% endif %}
   </table>
+  {% if event_days_pdf_rows %}
+  <h3 class="sub" id="sec-daily-timings">Daily event timings</h3>
+  <table class="roster hosp">
+    <thead>
+      <tr>
+        <th style="width:18%">Day</th>
+        <th style="width:41%">Start</th>
+        <th style="width:41%">End</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in event_days_pdf_rows %}
+      <tr>
+        <td>{{ d.label | e }}</td>
+        <td>{{ d.start | e }}</td>
+        <td>{{ d.end | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   <h2 class="sec" id="sec-location">Site &amp; access</h2>
   <table class="meta">
@@ -356,14 +403,56 @@
   </div>
   {% endif %}
 
-  {% if plan.access_egress_text %}
+  {% if access_egress_pdf_rows or plan.access_egress_text %}
   <h2 class="sec" id="sec-access">Access &amp; egress</h2>
+  {% if access_egress_pdf_rows %}
+  <table class="doc-plan">
+    <thead>
+      <tr>
+        <th style="width:22%">Access point name</th>
+        <th style="width:48%">Address</th>
+        <th style="width:30%">What3Words</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in access_egress_pdf_rows %}
+      <tr>
+        <td style="white-space:pre-wrap">{{ r.name | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.address | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.what3words | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif plan.access_egress_text %}
   {{ pdf_nl(plan.access_egress_text) }}
   {% endif %}
+  {% endif %}
 
-  {% if plan.rendezvous_text %}
+  {% if rendezvous_pdf_rows or plan.rendezvous_text %}
   <h2 class="sec" id="sec-rvp">Rendezvous points</h2>
+  {% if rendezvous_pdf_rows %}
+  <table class="doc-plan">
+    <thead>
+      <tr>
+        <th style="width:22%">RVP name</th>
+        <th style="width:48%">Address</th>
+        <th style="width:30%">What3Words</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rendezvous_pdf_rows %}
+      <tr>
+        <td style="white-space:pre-wrap">{{ r.name | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.address | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.what3words | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif plan.rendezvous_text %}
   {{ pdf_nl(plan.rendezvous_text) }}
+  {% endif %}
   {% endif %}
 
   <h2 class="sec" id="sec-risk">Risk factors</h2>
@@ -416,7 +505,8 @@
         <th style="width:9%">Callsign</th>
         <th style="width:12%">Name</th>
         <th style="width:14%">Role / grade</th>
-        <th style="width:16%">Post</th>
+        <th style="width:14%">Post / assignment</th>
+        <th style="width:14%">Vehicle</th>
         <th style="width:12%">Shift</th>
         <th style="width:11%">Phone</th>
         <th>Notes</th>
@@ -429,6 +519,7 @@
         <td>{{ row.get('name') or '—' }}</td>
         <td>{{ row.get('role_grade') or '—' }}</td>
         <td>{{ row.get('post_assignment') or '—' }}</td>
+        <td>{{ row.get('fleet_vehicle_display') or row.get('fleet_vehicle') or '—' }}</td>
         <td>{{ row.get('shift') or '—' }}</td>
         <td>{{ row.get('phone') or '—' }}</td>
         <td>{{ row.get('notes') or '—' }}</td>
@@ -440,25 +531,125 @@
   <p class="muted">No structured roster rows — use the Resources step in the plan editor.</p>
   {% endif %}
 
-  <h2 class="sec" id="sec-resources-meta">Resources — vehicles, escalation</h2>
-  <table class="meta">
-    <tr><td>Vehicles / major assets</td><td>{% if plan.resources_vehicles %}{{ plan.resources_vehicles | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td></tr>
-    <tr><td>Escalation</td><td>{% if plan.escalation_notes %}{{ plan.escalation_notes | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td></tr>
+  {% if management_support_roster %}
+  <h3 class="sub" style="margin-top:5mm;">Management &amp; support roles</h3>
+  <p class="muted" style="margin-bottom:2mm;">Command, coordination, and non-deployed posts (separate from field deployment).</p>
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:26%">Role / function</th>
+        <th style="width:22%">Name</th>
+        <th style="width:14%">Phone</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in management_support_roster %}
+      <tr>
+        <td>{{ row.get('role') or '—' }}</td>
+        <td>{{ row.get('name') or '—' }}</td>
+        <td>{{ row.get('phone') or '—' }}</td>
+        <td>{{ row.get('notes') or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
+  {% endif %}
 
-  {% if plan.staff_transport_text %}
+  {% if staff_transport_pdf_rows or plan.staff_transport_text %}
   <h2 class="sec" id="sec-transport">Staff transportation</h2>
+  {% if staff_transport_pdf_rows %}
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:16%">Date</th>
+        <th style="width:32%">Vehicle</th>
+        <th>Staff</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in staff_transport_pdf_rows %}
+      <tr>
+        <td>{{ r.date_disp | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.vehicle | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.staff | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif plan.staff_transport_text %}
   {{ pdf_nl(plan.staff_transport_text) }}
   {% endif %}
-
-  {% if plan.command_control_text %}
-  <h2 class="sec" id="sec-command">Command, control &amp; support</h2>
-  {{ pdf_nl(plan.command_control_text) }}
   {% endif %}
 
-  {% if plan.uniform_ppe_text %}
+  {% if uniform_ppe_pdf_rows or plan.uniform_ppe_text %}
   <h2 class="sec" id="sec-uniform">Uniform &amp; PPE</h2>
+  {% if uniform_ppe_pdf_rows %}
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:32%">Uniform / PPE type</th>
+        <th style="width:12%">Yes / No</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in uniform_ppe_pdf_rows %}
+      <tr>
+        <td>{{ r.ppe_type | e }}</td>
+        <td>{{ r.yes_no | e }}</td>
+        <td style="white-space:pre-wrap">{{ r.notes | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif plan.uniform_ppe_text %}
   {{ pdf_nl(plan.uniform_ppe_text) }}
+  {% endif %}
+  {% endif %}
+
+  {% if accommodation_pdf_visible %}
+  <h2 class="sec" id="sec-accommodation">Accommodation</h2>
+  {% if accommodation_venue_pdf_rows %}
+  <h3 class="sub">Accommodation addresses</h3>
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:32%">Name</th>
+        <th>Address</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for nm, addr in accommodation_venue_pdf_rows %}
+      <tr>
+        <td style="white-space:pre-wrap">{{ nm | e }}</td>
+        <td style="white-space:pre-wrap">{{ addr | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if accommodation_room_pdf_rows %}
+  <h3 class="sub">Hotel room allocation</h3>
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:28%">Hotel</th>
+        <th style="width:14%">Room</th>
+        <th>Staff</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for hotel, room, staff in accommodation_room_pdf_rows %}
+      <tr>
+        <td style="white-space:pre-wrap">{{ hotel | e }}</td>
+        <td style="white-space:pre-wrap">{{ room | e }}</td>
+        <td style="white-space:pre-wrap">{{ staff | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% endif %}
 
   {% if plan.privacy_ipc_text %}
@@ -476,11 +667,6 @@
   <p class="pdf-block">Serialised kit linked to this plan is listed for staff in the employee portal (updates when allocations change):<br><span class="muted" style="word-break:break-all;">{{ equipment_kit_url | e }}</span></p>
   {% endif %}
 
-  {% if plan.equipment_detail_text %}
-  <h2 class="sec" id="sec-equipment">Equipment — narrative / load lists</h2>
-  {{ pdf_nl(plan.equipment_detail_text) }}
-  {% endif %}
-
   {% if diagram_pdf_rows %}
   <h2 class="sec" id="sec-diagrams">Diagrams</h2>
   {% for d in diagram_pdf_rows %}
@@ -491,37 +677,93 @@
   {% endfor %}
   {% endif %}
 
-  {% if plan.resources_comms %}
-  <h2 class="sec" id="sec-comms">Communications</h2>
-  {{ pdf_nl(plan.resources_comms) }}
-  {% endif %}
-
   <h2 class="sec" id="sec-hospitals">Receiving hospitals &amp; clinical handover</h2>
-  {% if hospital_facilities %}
-  <ul class="hosp">
-    {% for h in hospital_facilities %}
-    <li>{{ h }}</li>
-    {% endfor %}
-  </ul>
+  {% if hospital_table_rows %}
+  <table class="roster hosp">
+    <thead>
+      <tr>
+        <th style="width:26%">Hospital</th>
+        <th style="width:18%">Type / facilities</th>
+        <th style="width:32%">Address</th>
+        <th style="width:24%">Contact</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in hospital_table_rows %}
+      <tr>
+        <td>{{ h.name | e }}</td>
+        <td>{% if h.facility_lines %}
+          {% for fl in h.facility_lines %}
+          <div class="{% if not loop.first %}mt-1{% endif %}">{{ fl | e }}</div>
+          {% endfor %}
+          {% elif h.facilities %}{{ h.facilities | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td>
+        <td>{{ h.address | e }}</td>
+        <td>{% if h.contact_lines %}
+          {% for c in h.contact_lines %}
+          <div class="{% if not loop.first %}mt-1{% endif %}">{% if c.title %}<strong>{{ c.title | e }}</strong>{% if c.detail %} — {% endif %}{% endif %}{{ c.detail | e }}</div>
+          {% endfor %}
+          {% elif h.contact %}{{ h.contact | e | replace('\n', '<br>') | safe }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No receiving hospitals listed — add rows in the plan editor (Hospitals step).</p>
   {% endif %}
-  {{ pdf_nl(plan.hospitals_notes) }}
+  {% if (clinical_handover.medical_control or '')|trim %}
   <h3 class="sub">Medical control / comms</h3>
   <table class="meta">
-    <tr><td>Medical control</td><td>{{ clinical_handover.medical_control or '—' }}</td></tr>
+    <tr><td>Medical control</td><td>{{ clinical_handover.medical_control | e }}</td></tr>
   </table>
-  <h3 class="sub">ASHICE (pre-alert)</h3>
+  {% endif %}
+  {% if clinical_pre_alert_has_display %}
+  <h3 class="sub">Pre-Alert Policy{% if pre_alert_policy == 'ashice' %} (ASHICE){% elif pre_alert_policy == 'atmist' %} (ATMIST){% else %} (Custom){% endif %}</h3>
+  {% if pre_alert_policy == 'custom' %}
   <table class="meta">
-    <tr><td>A — Age</td><td>{{ clinical_handover.ashice.age or '—' }}</td></tr>
-    <tr><td>S — Sex</td><td>{{ clinical_handover.ashice.sex or '—' }}</td></tr>
-    <tr><td>H — History</td><td>{{ clinical_handover.ashice.history or '—' }}</td></tr>
-    <tr><td>I — Injuries / illness</td><td>{{ clinical_handover.ashice.injuries or '—' }}</td></tr>
-    <tr><td>C — Condition</td><td>{{ clinical_handover.ashice.current or '—' }}</td></tr>
-    <tr><td>E — Expected / ETA</td><td>{{ clinical_handover.ashice.expected or '—' }}</td></tr>
+    {% for letter, detail in pre_alert_custom_rows %}
+    <tr><td style="width:12%">{{ letter | e }}</td><td style="white-space:pre-wrap">{{ detail | e }}</td></tr>
+    {% endfor %}
   </table>
+  {% else %}
+  <table class="meta">
+    {% if pre_alert_policy == 'atmist' %}
+      {% for label, val in pre_alert_atmist_rows %}
+      <tr><td>{{ label | e }}</td><td style="white-space:pre-wrap">{{ val | e }}</td></tr>
+      {% endfor %}
+    {% else %}
+      {% for label, val in pre_alert_ashice_rows %}
+      <tr><td>{{ label | e }}</td><td style="white-space:pre-wrap">{{ val | e }}</td></tr>
+      {% endfor %}
+    {% endif %}
+  </table>
+  {% endif %}
+  {% endif %}
 
+  {% if major_incident_pdf_visible %}
+  <h2 class="sec" id="sec-major">METHANE — staff briefing</h2>
+  <p class="muted small">Planning reference for the event: reiterates METHANE for staff on the issued plan. Not a live major-incident declaration.</p>
+  {% if major_incident_methane_pdf_rows %}
+  <h3 class="sub">METHANE prompts</h3>
+  <table class="meta">
+    {% for label, val in major_incident_methane_pdf_rows %}
+    <tr><td style="width:28%;white-space:normal">{{ label | e }}</td><td style="white-space:pre-wrap">{{ val | e }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% if major_incident_extra_pdf_rows %}
+  {% for label, val in major_incident_extra_pdf_rows %}
+  <h3 class="sub">{{ label | e }}</h3>
+  <p style="white-space:pre-wrap">{{ val | e }}</p>
+  {% endfor %}
+  {% endif %}
   {% if plan.major_incident_text %}
-  <h2 class="sec" id="sec-major">Major incidents</h2>
+  {% if not major_incident_methane_pdf_rows and not major_incident_extra_pdf_rows %}
   {{ pdf_nl(plan.major_incident_text) }}
+  {% else %}
+  <h3 class="sub">Additional notes for staff</h3>
+  {{ pdf_nl(plan.major_incident_text) }}
+  {% endif %}
+  {% endif %}
   {% endif %}
 
   {% if questions %}
@@ -559,10 +801,23 @@
   {% endif %}
 
   <h2 class="sec" id="sec-signoff">Sign-off</h2>
-  <table class="meta">
-    <tr><td>Name</td><td>{{ plan.signoff_name or '—' }}</td></tr>
-    <tr><td>Role</td><td>{{ plan.signoff_role or '—' }}</td></tr>
-    <tr><td>Date / time</td><td>{{ plan.signoff_at or '—' }}</td></tr>
+  <table class="roster">
+    <thead>
+      <tr>
+        <th style="width:32%">Name</th>
+        <th style="width:32%">Role</th>
+        <th>Date / time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in clinical_signoff_pdf_rows %}
+      <tr>
+        <td>{{ s.name | e }}</td>
+        <td>{{ s.role | e }}</td>
+        <td>{{ s.at_disp | e }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
   </table>
 
   <p class="muted" style="margin-top:6mm;text-align:center;font-size:9pt;"><strong>End of document</strong></p>

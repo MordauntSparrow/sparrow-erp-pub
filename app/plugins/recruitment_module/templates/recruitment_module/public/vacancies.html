@@ -10,7 +10,11 @@
     <div>
       <div class="fw-semibold">{{ v.title }}</div>
       {% if v.summary %}<div class="small text-muted mt-1">{{ v.summary[:200] }}{% if v.summary|length > 200 %}…{% endif %}</div>{% endif %}
-      <div class="small text-secondary mt-1"><span class="badge bg-secondary-subtle text-secondary border">{{ v.role_title }}</span></div>
+      <div class="small text-secondary mt-1">
+        <span class="badge bg-secondary-subtle text-secondary border">{{ v.role_title }}</span>
+        {% if v.capacity_at_limit %}<span class="badge bg-warning text-dark ms-1">At capacity</span>{% endif %}
+        {% if v.listing_pay_display %}<div class="mt-2 text-dark fw-semibold">{{ v.listing_pay_display }}</div>{% endif %}
+      </div>
     </div>
     <i class="bi bi-chevron-right text-muted"></i>
   </a>

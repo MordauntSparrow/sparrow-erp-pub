@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EPCR case access</title>
+  <!-- Include Material Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.0.0/mdb.min.css">
+</head>
+<body class="bg-light" style="min-height: 100vh;">
+
+  <!-- Centered container for the access card -->
+  <div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-3-strong" style="max-width: 420px; width: 100%;">
+      <div class="card-body p-4">
+        <!-- Title / Logo area -->
+        <h2 class="text-center mb-4">EPCR case access</h2>
+        <p class="text-center text-muted mb-4">Enter the case reference, patient date of birth, and access PIN you were given.</p>
+        {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+        {% endif %}
+        <!-- Case Access Form -->
+        <form method="post">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <div class="form-outline mb-4">
+            <input type="text" name="case_ref" id="case_ref" class="form-control" required pattern="\d{10}" />
+            <label class="form-label" for="case_ref">Case Reference Number (10 digits)</label>
+          </div>
+          <div class="form-outline mb-4">
+            <input type="date" name="dob" id="dob" class="form-control" required />
+            <label class="form-label" for="dob">Patient's Date of Birth</label>
+          </div>
+          <div class="form-outline mb-4">
+            <input type="password" name="access_pin" id="access_pin" class="form-control" required />
+            <label class="form-label" for="access_pin">Case Access Pin</label>
+          </div>
+          
+          <!-- Submit Button -->
+          <button type="submit" class="btn btn-primary btn-block w-100">
+            Submit
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Include Material Bootstrap JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.0.0/mdb.min.js"></script>
+</body>
+</html>

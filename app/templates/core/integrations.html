@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}Integrations · {{ (config.site_settings or {}).get('company_name') or 'Sparrow ERP' }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-4">
+    <h1 class="h3 mb-0">Integrations</h1>
+    <a href="{{ url_for('routes.dashboard') }}" class="btn btn-outline-secondary btn-sm">Back to dashboard</a>
+  </div>
+
+  {% if not integration_schema_ready %}
+  <div class="alert alert-warning" role="status">
+    <strong>Database:</strong> integration tables are missing. Run <strong>Updates → Run upgrades</strong> (or your Railway <strong>preDeployCommand</strong>) so <code>app/core/install.py</code> can create them.
+  </div>
+  {% endif %}
+
+  <h2 class="h5 mb-3">Accounting connections</h2>
+  <div class="row g-4 mb-4">
+    {% for p in integration_catalog_live %}
+    {% set key = p.id %}
+    {% set title = p.title %}
+    {% set blurb = p.blurb %}
+    {% set ext = p.vendor_url %}
+    {% set row = connections.get(key) %}
+    {% set st = 'disconnected' %}
+    {% if row and row.status == 'connected' %}{% set st = 'connected' %}
+    {% elif row and row.status == 'error' %}{% set st = 'action_required' %}{% endif %}
+    {% set client_ok = integration_client_configured.get(key, False) %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <h3 class="h6 mb-0">{{ title }}</h3>
+            {% if st == 'connected' %}
+            <span class="badge bg-success">Connected</span>
+            {% elif st == 'action_required' %}
+            <span class="badge bg-warning text-dark">Action required</span>
+            {% else %}
+            <span class="badge bg-secondary">Not connected</span>
+            {% endif %}
+          </div>
+          <p class="text-muted small flex-grow-1">{{ blurb }}</p>
+          <p class="small mb-2"><a href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">OAuth / API documentation</a></p>
+          {% if integration_schema_ready and key in integration_oauth_apps %}
+          {% set oa = integration_oauth_apps[key] %}
+          <form method="post" action="{{ url_for('routes.core_integrations_oauth_client', provider=key) }}" class="border rounded p-2 mb-3 bg-body-secondary bg-opacity-25">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <div class="fw-semibold small mb-2">OAuth app (developer portal)</div>
+            <label class="form-label small mb-0" for="oauth-cid-{{ key }}">Client ID</label>
+            <input class="form-control form-control-sm mb-2" id="oauth-cid-{{ key }}" name="client_id" type="text" value="{{ oa.client_id }}" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <label class="form-label small mb-0" for="oauth-csec-{{ key }}">Client secret</label>
+            <input class="form-control form-control-sm mb-2" id="oauth-csec-{{ key }}" name="client_secret" type="password" autocomplete="new-password" placeholder="{% if oa.has_secret %}Leave blank to keep existing{% else %}Required{% endif %}">
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Save credentials</button>
+            <p class="small text-muted mb-0 mt-2">Alternatively set environment variables (see docs). Env values take precedence when <em>both</em> id and secret are set there.</p>
+          </form>
+          {% endif %}
+          {% if row and row.provider_org_label %}
+          <p class="small mb-1"><strong>Organisation:</strong> {{ row.provider_org_label }}</p>
+          {% endif %}
+          {% if row and row.provider_org_id %}
+          <p class="small text-muted mb-2"><strong>ID:</strong> {{ row.provider_org_id }}</p>
+          {% endif %}
+          {% if row and row.last_api_success_at %}
+          <p class="small mb-1"><strong>Last successful API call:</strong> {{ row.last_api_success_at }}</p>
+          {% endif %}
+          {% if row and row.last_error %}
+          <p class="small text-danger mb-2"><strong>Last error:</strong> {{ row.last_error }}</p>
+          {% endif %}
+          {% if row and row.refresh_token_expires_at %}
+          <p class="small text-muted mb-3"><strong>Refresh token expiry (if known):</strong> {{ row.refresh_token_expires_at }}</p>
+          {% else %}
+          <div class="mb-3"></div>
+          {% endif %}
+          <div class="d-flex flex-wrap gap-2 mt-auto">
+            {% if not client_ok %}
+            <button class="btn btn-primary btn-sm" type="button" disabled title="Save OAuth client ID and secret on this card, or set both in the environment (see provider docs).">Connect</button>
+            {% elif integration_schema_ready %}
+            <a class="btn btn-primary btn-sm" href="{{ url_for('routes.core_integrations_oauth_start', provider=key) }}">{% if st == 'connected' %}Reconnect{% else %}Connect{% endif %}</a>
+            {% else %}
+            <button class="btn btn-primary btn-sm" type="button" disabled>Connect</button>
+            {% endif %}
+            {% if st == 'connected' and integration_schema_ready %}
+            <form method="post" action="{{ url_for('routes.core_integrations_health') }}" class="d-inline">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="provider" value="{{ key }}">
+              <button type="submit" class="btn btn-outline-secondary btn-sm">Check health</button>
+            </form>
+            <form method="post" action="{{ url_for('routes.core_integrations_disconnect') }}" class="d-inline" onsubmit="return confirm('Disconnect {{ title }}? Local tokens will be removed.');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="provider" value="{{ key }}">
+              <button type="submit" class="btn btn-outline-danger btn-sm">Disconnect</button>
+            </form>
+            <a class="btn btn-link btn-sm px-0" href="{{ ext }}" rel="noopener noreferrer" target="_blank">Open {{ title }}</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if integration_catalog_roadmap %}
+  <h2 class="h5 mb-3">More platforms <span class="badge bg-secondary align-middle">Roadmap</span></h2>
+  <div class="row g-3 mb-4">
+    {% for p in integration_catalog_roadmap %}
+    <div class="col-md-6 col-lg-4">
+      <div class="card h-100 border shadow-sm">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <h3 class="h6 mb-0">{{ p.title }}</h3>
+            <span class="badge bg-light text-dark border">Coming soon</span>
+          </div>
+          <p class="text-muted small flex-grow-1">{{ p.blurb }}</p>
+          <div class="d-flex flex-wrap gap-2 mt-auto">
+            <a class="btn btn-outline-primary btn-sm" href="{{ p.docs_url }}" rel="noopener noreferrer" target="_blank">Developer / OAuth docs</a>
+            {% if p.vendor_url %}
+            <a class="btn btn-link btn-sm px-0" href="{{ p.vendor_url }}" rel="noopener noreferrer" target="_blank">Vendor site</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header">
+      <strong>Deployment settings</strong>
+    </div>
+    <div class="card-body">
+      {% if not integration_schema_ready %}
+      <p class="text-muted mb-0">Run upgrades to enable settings persistence.</p>
+      {% else %}
+      <form method="post" action="{{ url_for('routes.core_integrations_settings') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="form-label" for="default_provider">Default accounting provider</label>
+            <select class="form-select" id="default_provider" name="default_provider">
+              <option value="none" {% if (int_settings.default_provider or 'none') == 'none' %}selected{% endif %}>None</option>
+              <option value="xero" {% if int_settings.default_provider == 'xero' %}selected{% endif %}>Xero</option>
+              <option value="freeagent" {% if int_settings.default_provider == 'freeagent' %}selected{% endif %}>FreeAgent</option>
+              <option value="quickbooks" {% if int_settings.default_provider == 'quickbooks' %}selected{% endif %}>QuickBooks Online</option>
+              <option value="sage" {% if int_settings.default_provider == 'sage' %}selected{% endif %}>Sage</option>
+              <option value="freshbooks" {% if int_settings.default_provider == 'freshbooks' %}selected{% endif %}>FreshBooks</option>
+            </select>
+            <div class="form-text">Used when CRM or other modules create draft invoices (future). Must match a connected provider.</div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label d-block">Automatically create draft invoice</label>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="auto_draft_invoice" id="auto_draft_invoice" value="1" {% if int_settings.auto_draft_invoice %}checked{% endif %}>
+              <label class="form-check-label" for="auto_draft_invoice">Enable (when invoice automation ships)</label>
+            </div>
+            <label class="form-label" for="auto_draft_trigger">Trigger (v1)</label>
+            <select class="form-select" id="auto_draft_trigger" name="auto_draft_trigger">
+              <option value="crm_quote_accepted" {% if (int_settings.auto_draft_trigger or 'crm_quote_accepted') == 'crm_quote_accepted' %}selected{% endif %}>CRM quote accepted (hook TBD)</option>
+              <option value="manual_only" {% if int_settings.auto_draft_trigger == 'manual_only' %}selected{% endif %}>Manual only (no automatic draft)</option>
+            </select>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Save settings</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if integration_consumer_cards %}
+  <h2 class="h5 mb-3">Modules using accounting integrations</h2>
+  <div class="row g-3 mb-4">
+    {% for card in integration_consumer_cards %}
+    <div class="col-md-6 col-xl-4">
+      <div class="card h-100 shadow-sm border">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+            <h3 class="h6 mb-0">{{ card.module_title }}</h3>
+            <span class="badge bg-light text-dark border text-truncate" style="max-width:9rem" title="{{ card.plugin }}">{{ card.plugin }}</span>
+          </div>
+          {% if card.summary %}
+          <p class="text-muted small">{{ card.summary }}</p>
+          {% endif %}
+          {% if card.provider_labels %}
+          <p class="small mb-2"><span class="text-muted">Providers:</span> {{ card.provider_labels | join(', ') }}</p>
+          {% endif %}
+          {% if card.permissions %}
+          <p class="small fw-semibold mb-1">Permissions</p>
+          <ul class="small mb-2 ps-3">
+            {% for pr in card.permissions %}
+            <li><span class="text-muted font-monospace small">{{ pr.id }}</span> — {{ pr.label }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          {% if card.options %}
+          <p class="small fw-semibold mb-1">Options</p>
+          <ul class="small mb-0 ps-3">
+            {% for opt in card.options %}
+            <li><span class="text-muted">{{ opt.label }}:</span> {{ opt.value }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="accordion" id="intDiag">
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="intDiagH">
+        <button class="accordion-button collapsed" type="button" data-mdb-toggle="collapse" data-mdb-target="#intDiagC" aria-expanded="false" aria-controls="intDiagC">
+          Activity &amp; diagnostics (last events)
+        </button>
+      </h2>
+      <div id="intDiagC" class="accordion-collapse collapse" aria-labelledby="intDiagH" data-mdb-parent="#intDiag">
+        <div class="accordion-body p-0">
+          {% if not integration_schema_ready %}
+          <p class="p-3 text-muted mb-0">No event log until tables exist.</p>
+          {% elif not int_events %}
+          <p class="p-3 text-muted mb-0">No events yet.</p>
+          {% else %}
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead><tr><th>When</th><th>Type</th><th>Provider</th><th>Message</th><th>User</th></tr></thead>
+              <tbody>
+                {% for ev in int_events %}
+                <tr>
+                  <td class="text-nowrap small">{{ ev.created_at }}</td>
+                  <td class="small">{{ ev.event_type }}</td>
+                  <td class="small">{{ ev.provider or '—' }}</td>
+                  <td class="small">{{ ev.message or '—' }}</td>
+                  <td class="small text-muted">{{ ev.user_id or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

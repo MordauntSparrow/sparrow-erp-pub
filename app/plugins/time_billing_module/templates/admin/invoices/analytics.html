@@ -17,7 +17,7 @@
   </div>
 
   <p class="text-muted small mb-4">
-    <strong>Sent</strong> = contractor marked invoice sent (non-void). <strong>Draft</strong> = submitted with timesheet, not yet finalized.
+    <strong>Paid</strong> = contractor finalized the invoice (non-void). <strong>Current</strong> = on file with timesheet, not yet finalized to paid.
     Amounts are grouped by the <strong>timesheet week ending date</strong> calendar year ({{ selected_year }}).
   </p>
 
@@ -25,27 +25,27 @@
     <div class="col-md-4">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
-          <div class="text-muted small">This calendar month (sent)</div>
-          <div class="fs-4 fw-semibold">£{{ '%.2f' % analytics.current_month_sent.total }}</div>
-          <div class="small">{{ analytics.current_month_sent.count }} invoice(s)</div>
+          <div class="text-muted small">This calendar month (paid)</div>
+          <div class="fs-4 fw-semibold">£{{ '%.2f' % analytics.current_month_paid.total }}</div>
+          <div class="small">{{ analytics.current_month_paid.count }} invoice(s)</div>
         </div>
       </div>
     </div>
     <div class="col-md-4">
       <div class="card h-100 shadow-sm border-primary">
         <div class="card-body">
-          <div class="text-muted small">{{ selected_year }} year-to-date (sent)</div>
-          <div class="fs-4 fw-semibold text-primary">£{{ '%.2f' % analytics.ytd_sent.total }}</div>
-          <div class="small">{{ analytics.ytd_sent.count }} invoice(s)</div>
+          <div class="text-muted small">{{ selected_year }} year-to-date (paid)</div>
+          <div class="fs-4 fw-semibold text-primary">£{{ '%.2f' % analytics.ytd_paid.total }}</div>
+          <div class="small">{{ analytics.ytd_paid.count }} invoice(s)</div>
         </div>
       </div>
     </div>
     <div class="col-md-4">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
-          <div class="text-muted small">{{ selected_year }} drafts (pipeline)</div>
-          <div class="fs-4 fw-semibold">£{{ '%.2f' % analytics.ytd_draft.total }}</div>
-          <div class="small">{{ analytics.ytd_draft.count }} invoice(s)</div>
+          <div class="text-muted small">{{ selected_year }} current (pipeline)</div>
+          <div class="fs-4 fw-semibold">£{{ '%.2f' % analytics.ytd_current.total }}</div>
+          <div class="small">{{ analytics.ytd_current.count }} invoice(s)</div>
         </div>
       </div>
     </div>
@@ -54,7 +54,7 @@
   <div class="row g-4">
     <div class="col-lg-6">
       <div class="card shadow-sm">
-        <div class="card-header py-2"><strong>By timesheet ISO week</strong> <span class="text-muted small">(sent, {{ selected_year }})</span></div>
+        <div class="card-header py-2"><strong>By timesheet ISO week</strong> <span class="text-muted small">(paid, {{ selected_year }})</span></div>
         <div class="table-responsive">
           <table class="table table-sm mb-0">
             <thead><tr><th>ISO week</th><th>Week ending</th><th class="text-end">Invoices</th><th class="text-end">Total</th></tr></thead>
@@ -64,10 +64,10 @@
                 <td class="font-monospace">{{ r.iso_week }}</td>
                 <td>{{ r.week_ending }}</td>
                 <td class="text-end">{{ r.inv_count }}</td>
-                <td class="text-end">£{{ '%.2f' % r.total_sent }}</td>
+                <td class="text-end">£{{ '%.2f' % r.total_paid }}</td>
               </tr>
               {% else %}
-              <tr><td colspan="4" class="text-muted">No sent invoices for this year.</td></tr>
+              <tr><td colspan="4" class="text-muted">No paid invoices for this year.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -76,7 +76,7 @@
     </div>
     <div class="col-lg-6">
       <div class="card shadow-sm">
-        <div class="card-header py-2"><strong>By month</strong> <span class="text-muted small">(sent, week ending in {{ selected_year }})</span></div>
+        <div class="card-header py-2"><strong>By month</strong> <span class="text-muted small">(paid, week ending in {{ selected_year }})</span></div>
         <div class="table-responsive">
           <table class="table table-sm mb-0">
             <thead><tr><th>Month</th><th class="text-end">Invoices</th><th class="text-end">Total</th></tr></thead>
@@ -85,7 +85,7 @@
               <tr>
                 <td>{{ r.ymonth }}</td>
                 <td class="text-end">{{ r.inv_count }}</td>
-                <td class="text-end">£{{ '%.2f' % r.total_sent }}</td>
+                <td class="text-end">£{{ '%.2f' % r.total_paid }}</td>
               </tr>
               {% else %}
               <tr><td colspan="3" class="text-muted">No data.</td></tr>
@@ -105,8 +105,8 @@
           <tr>
             <th>Contractor</th>
             <th class="text-end">Invoices</th>
-            <th class="text-end">Sent total</th>
-            <th class="text-end">Draft total</th>
+            <th class="text-end">Paid total</th>
+            <th class="text-end">Current total</th>
             <th></th>
           </tr>
         </thead>
@@ -115,8 +115,8 @@
           <tr>
             <td>{{ r.contractor_name or r.contractor_email }} <span class="text-muted">({{ r.contractor_id }})</span></td>
             <td class="text-end">{{ r.invoice_count }}</td>
-            <td class="text-end fw-semibold">£{{ '%.2f' % r.total_sent }}</td>
-            <td class="text-end text-muted">£{{ '%.2f' % r.total_draft }}</td>
+            <td class="text-end fw-semibold">£{{ '%.2f' % r.total_paid }}</td>
+            <td class="text-end text-muted">£{{ '%.2f' % r.total_current }}</td>
             <td class="text-nowrap">
               <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_time_billing.admin_invoices_list_page', contractor_id=r.contractor_id) }}">Invoices</a>
             </td>

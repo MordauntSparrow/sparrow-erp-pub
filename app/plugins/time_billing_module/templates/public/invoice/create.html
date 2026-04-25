@@ -92,8 +92,8 @@
       });
       const data = await r.json();
       if (data.ok) {
-        const isDraft = (data.invoice || {}).status === 'draft';
-        window.location.href = '/time-billing/weeks/' + weekId + (isDraft ? '' : '?invoiced=1');
+        const isCurrent = (data.invoice || {}).status === 'current';
+        window.location.href = '/time-billing/weeks/' + weekId + (isCurrent ? '' : '?invoiced=1');
       } else {
         alert(data.message || 'Failed to create invoice');
         btn.disabled = false;

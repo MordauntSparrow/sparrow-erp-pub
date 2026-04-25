@@ -1,0 +1,122 @@
+{# Tour definitions & checklist editor — used on Settings › Walkaround definitions only. #}
+<div class="card shadow-sm">
+  <div class="card-header fw-semibold small">Tour definitions &amp; checklists</div>
+  <div class="card-body small">
+    {% if can_configure %}
+    <form method="post" action="{{ url_for('internal_incident_reporting.admin_walkaround_template_post') }}" class="mb-4 pb-3 border-bottom">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <h2 class="h6">New walkaround</h2>
+      <div class="mb-2">
+        <label class="form-label">Name</label>
+        <input class="form-control form-control-sm" name="name" required placeholder="e.g. Ward A weekly safety tour">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Site / area label (optional)</label>
+        <input class="form-control form-control-sm" name="site_label" placeholder="e.g. Ward A, Northern depot">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Repeat every (days)</label>
+        <input class="form-control form-control-sm" type="number" name="interval_days" value="7" min="1" max="365">
+      </div>
+      {% set prefix = 'nwl_' %}
+      {% set rows = new_checklist_form_rows %}
+      {% set tbody_id = 'cltb_new' %}
+      {% include 'incident_reporting_module/admin/_walkaround_checklist_editor.html' %}
+      <div class="mb-2">
+        <label class="form-label">Description</label>
+        <textarea class="form-control form-control-sm" name="description" rows="2"></textarea>
+      </div>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="active" value="1" id="wact" checked>
+        <label class="form-check-label" for="wact">Active (schedules next due)</label>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save definition</button>
+    </form>
+    {% endif %}
+
+    <ul class="list-group list-group-flush">
+      {% for t in templates %}
+      <li class="list-group-item px-0">
+        <div class="d-flex justify-content-between gap-2">
+          <div>
+            <strong>{{ t.name|e }}</strong>
+            {% if t.active %}<span class="badge bg-success ms-1">active</span>{% else %}<span class="badge bg-secondary ms-1">off</span>{% endif %}
+            <div class="text-muted">Every {{ t.interval_days }} day(s){% if t.site_label %} · {{ t.site_label|e }}{% endif %}</div>
+          </div>
+          {% if can_configure %}
+          <form method="post" action="{{ url_for('internal_incident_reporting.admin_walkaround_template_delete') }}" onsubmit="return confirm('Delete this walkaround definition and its history?');">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="id" value="{{ t.id }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+          {% endif %}
+        </div>
+        {% if can_configure %}
+        <details class="mt-2"><summary class="text-muted small">Edit checklist &amp; schedule</summary>
+          <form method="post" action="{{ url_for('internal_incident_reporting.admin_walkaround_template_post') }}" class="mt-2">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="id" value="{{ t.id }}">
+            <input class="form-control form-control-sm mb-1" name="name" value="{{ t.name|e }}" required>
+            <input class="form-control form-control-sm mb-1" name="site_label" value="{{ t.site_label or '' }}" placeholder="Site or area">
+            <input class="form-control form-control-sm mb-1" type="number" name="interval_days" value="{{ t.interval_days }}" min="1" max="365">
+            {% set prefix = 'tw' ~ t.id ~ '_' %}
+            {% set rows = t._checklist_form_rows %}
+            {% set tbody_id = 'cltb_tw' ~ t.id %}
+            {% include 'incident_reporting_module/admin/_walkaround_checklist_editor.html' %}
+            <textarea class="form-control form-control-sm mb-1" name="description" rows="2">{{ t.description or '' }}</textarea>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox" name="active" value="1" id="ta{{ t.id }}" {% if t.active %}checked{% endif %}>
+              <label class="form-check-label" for="ta{{ t.id }}">Active</label>
+            </div>
+            <button type="submit" class="btn btn-sm btn-outline-primary">Update</button>
+          </form>
+        </details>
+        {% endif %}
+      </li>
+      {% else %}
+      <li class="list-group-item text-muted">No definitions yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+<script>
+(function () {
+  function rowHtml(prefix, i, tbodyId) {
+    var p = prefix.replace(/"/g, "");
+    var id = String(tbodyId).replace(/"/g, "");
+    return (
+      '<tr class="walkaround-cl-row">' +
+      '<td><input type="hidden" name="' + p + "id_" + i + '" value="">' +
+      '<input type="text" class="form-control form-control-sm" name="' + p + "label_" + i + '" value="" maxlength="512" placeholder="Question or prompt" autocomplete="off"></td>' +
+      '<td><select class="form-select form-select-sm" name="' + p + "type_" + i + '">' +
+      '<option value="bool" selected>Yes / No</option><option value="text">Short text</option></select></td>' +
+      '<td class="text-center align-middle"><input class="form-check-input" type="checkbox" name="' + p + "required_" + i + '" value="1" id="' + id + "_req_" + i + '" aria-label="Required for this row"></td>' +
+      '<td class="text-center align-middle"><button type="button" class="btn btn-sm btn-outline-danger walkaround-cl-del py-0 px-2" title="Remove this row" aria-label="Remove checklist row">×</button></td>' +
+      "</tr>"
+    );
+  }
+  document.addEventListener("click", function (ev) {
+    var addBtn = ev.target.closest("[data-walkaround-cl-add]");
+    if (addBtn) {
+      ev.preventDefault();
+      var tid = addBtn.getAttribute("data-target");
+      var prefix = addBtn.getAttribute("data-prefix") || "";
+      var tb = document.getElementById(tid);
+      if (!tb) return;
+      var i = parseInt(tb.getAttribute("data-next-index") || "0", 10);
+      tb.insertAdjacentHTML("beforeend", rowHtml(prefix, i, tid));
+      tb.setAttribute("data-next-index", String(i + 1));
+      return;
+    }
+    var delBtn = ev.target.closest(".walkaround-cl-del");
+    if (!delBtn) return;
+    ev.preventDefault();
+    var tr = delBtn.closest("tr");
+    var tb = tr && tr.parentElement;
+    if (!tb || !tb.classList.contains("walkaround-cl-tbody")) return;
+    var rows = tb.querySelectorAll(".walkaround-cl-row");
+    if (rows.length <= 1) return;
+    tr.remove();
+  });
+})();
+</script>

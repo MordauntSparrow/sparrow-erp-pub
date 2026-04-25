@@ -1,0 +1,74 @@
+{
+  "repository": "official",
+  "system_name": "compliance_audit_module",
+  "name": "Compliance & audit",
+  "current_version": "1.2.3",
+  "compatible_with": ">=1.1.0",
+  "force_update": false,
+  "dashboard_category": "Governance & assurance",
+  "access_permission": "compliance_audit_module.access",
+  "alternate_access_permissions": ["compliance_audit_module.inspection"],
+  "declared_permissions": [
+    {
+      "id": "compliance_audit_module.inspection",
+      "label": "Compliance audit — inspection read-only"
+    },
+    {
+      "id": "compliance_audit_module.export",
+      "label": "Compliance audit — export bundles (PIN)"
+    }
+  ],
+  "description": "CQC-oriented governance layer: merged audit timeline across CAD, clinical records, and admin activity; PIN-gated exports with immutable export log.",
+  "icon": "",
+  "download_url": "",
+  "dependencies": ["website_module"],
+  "settings": {},
+  "changelog": [
+    {
+      "version": "1.2.3",
+      "date": "2026-04-09",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "compliance_policies domain: timeline and exports include comp_policy_lifecycle_audit (policy lifecycle, issue, retire, unpublish) with policy title."
+      ]
+    },
+    {
+      "version": "1.2.2",
+      "date": "2026-04-04",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "Domain selection: ca_filter_applied distinguishes default-all vs explicit no-sources; merge_timeline uses None vs empty set; export scope serializes domains for audit trail.",
+        "Governance export log events use domain key governance_exports; PDF summary shows human domain labels; timeline text search includes detail_ref / action / entity_type.",
+        "Hardening: export format allow-list, scheduled job toggle/delete job_id validation, export log insert try/except, scheduled domain JSON sanitized to known keys, warn on zero-row scheduled run."
+      ]
+    },
+    {
+      "version": "1.2.1",
+      "date": "2026-04-04",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "Assurance timeline and exports: epcr_clinical_audit (audit_logs) and epcr_access (access request workflow), aligned with Medical Records clinical audit sources."
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-04-04",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": [
+        "eDiscovery: compliance_evidence_matters, timeline/export by matter_id, optional matter_reference on exports.",
+        "SIEM bridge: dashboard, GET /api/siem-snapshot and /api/audit-events with session or COMPLIANCE_AUDIT_SIEM_TOKEN."
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-04-04",
+      "artifact_type": "complete",
+      "artifact_url": "",
+      "changes": ["Initial release per PRD_COMPLIANCE_AUDIT_SUITE_CQC."]
+    }
+  ]
+}

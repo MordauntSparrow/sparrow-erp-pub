@@ -1,0 +1,131 @@
+{% extends "response/call_centre_base.html" %}
+{% block page_title %}Response Centre Stack{% endblock %}
+{% set nav_section = 'call_centre' %}
+{% block cc_content %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <h1 class="panel-title">Response Centre CAD Stack</h1>
+      <div class="muted">Live queue for call takers and controllers.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <a class="btn" href="{{ url_for('medical_response_internal.call_centre_wallboard') }}" target="_blank"><i class="bi bi-tv"></i> Wallboard</a>
+    </div>
+  </div>
+  <div class="panel-body" style="padding:0;">
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>CAD</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Elapsed</th>
+            <th>Reason</th>
+            <th>Location</th>
+            <th>Assigned Units</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="stackBody">
+          <tr><td colspan="8" class="muted" style="text-align:center;padding:20px;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function esc(v) {
+  return String(v ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function fmtDate(v) {
+  if (!v) return '-';
+  return sparrowFormatDateTime(v);
+}
+
+function fmtElapsed(startValue) {
+  if (!startValue) return '-';
+  const d = new Date(startValue);
+  if (Number.isNaN(d.getTime())) return '-';
+  const ms = Date.now() - d.getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '-';
+  const totalSeconds = Math.floor(ms / 1000);
+  const hrs = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  if (hrs > 0) return `${hrs}h ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
+  return `${mins}m ${String(secs).padStart(2, '0')}s`;
+}
+
+function prettyStatus(status) {
+  const raw = String(status || '').trim();
+  if (!raw) return 'Unknown';
+  return raw
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function tickElapsedCells() {
+  const nodes = document.querySelectorAll('.elapsed-live[data-start]');
+  nodes.forEach((el) => {
+    const start = el.getAttribute('data-start');
+    el.textContent = fmtElapsed(start);
+  });
+}
+
+function statusBadge(status) {
+  const s = String(status || '').toLowerCase().trim();
+  const cls = (s === 'queued') ? 'secondary'
+    : (s === 'assigned' || s === 'claimed') ? 'primary'
+    : (s === 'mobile' || s === 'on_scene' || s === 'leave_scene' || s === 'at_hospital') ? 'warning'
+    : (s === 'cleared' ? 'success' : 'danger');
+  return `<span class="badge ${cls}">${esc(prettyStatus(status || 'unknown'))}</span>`;
+}
+
+async function refreshStack() {
+  const body = document.getElementById('stackBody');
+  try {
+    const res = await fetch('/plugin/ventus_response_module/call-centre/stack');
+    const rows = await res.json();
+    if (!Array.isArray(rows) || !rows.length) {
+      body.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:20px;">No active jobs.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map((j) => {
+      const loc = [j.address, j.postcode, j.what3words].filter(Boolean).join(' | ');
+      const units = Array.isArray(j.assigned_units) ? j.assigned_units.join(', ') : '';
+      const elapsed = fmtElapsed(j.created_at || j.updated_at);
+      return `
+        <tr style="cursor:pointer;" onclick="window.location.href='/plugin/ventus_response_module/call-centre/job/${j.cad}'">
+          <td style="font-weight:700;">#${esc(j.cad)}</td>
+          <td>${statusBadge(j.status)}</td>
+          <td>${esc(j.priority || '-')}</td>
+          <td class="elapsed-live" data-start="${esc(j.created_at || j.updated_at || '')}" style="font-weight:700;">${esc(elapsed)}</td>
+          <td>${esc(j.reason_for_call || '-')}</td>
+          <td class="muted">${esc(loc || '-')}</td>
+          <td>${esc(units || 'Unassigned')}</td>
+          <td class="muted">${esc(fmtDate(j.updated_at || j.created_at))}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#ef4444;padding:20px;">Failed to load stack.</td></tr>';
+  }
+}
+
+refreshStack();
+setInterval(refreshStack, 10000);
+setInterval(tickElapsedCells, 1000);
+</script>
+{% endblock %}

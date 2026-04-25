@@ -68,9 +68,12 @@ def risk_register_json_from_form() -> str | None:
 
 
 def pad_risk_register(
-    plan: dict[str, Any], size: int = 16
+    plan: dict[str, Any], *, max_size: int = 40
 ) -> list[dict[str, str] | None]:
+    """Three blank rows when empty; otherwise one slot per saved row (capped)."""
     rows = [r for r in risk_register_list_from_plan(plan) if risk_row_nonempty(r)]
+    n = len(rows)
+    size = max(3, min(max_size, n))
     out: list[dict[str, str] | None] = [None] * size
     for i, r in enumerate(rows[:size]):
         out[i] = r

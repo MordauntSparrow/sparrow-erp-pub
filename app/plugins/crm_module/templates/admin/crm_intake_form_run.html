@@ -1,0 +1,46 @@
+{% extends "admin/crm_admin_base.html" %}
+{% block page_title %}Run: {{ form.title }}{% endblock %}
+{% block crm_breadcrumb_current %}
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.dashboard') }}" class="text-decoration-none">CRM</a></li>
+<li class="breadcrumb-item"><a href="{{ url_for('crm_module.intake_forms_list') }}" class="text-decoration-none">Intake forms</a></li>
+<li class="breadcrumb-item active" aria-current="page">{{ form.title }}</li>
+{% endblock %}
+{% block content %}
+<div class="container-fluid px-0 pb-3" style="max-width: 40rem;">
+  <div class="crm-page-toolbar mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+      <div>
+        <p class="text-muted crm-upper-tight fw-semibold mb-1">Desk intake</p>
+        <h1 class="h4 fw-semibold text-dark mb-0">{{ form.title }}</h1>
+        {% if form.description %}<p class="small text-muted mb-0 mt-1">{{ form.description }}</p>{% endif %}
+      </div>
+      <a class="btn btn-sm btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.intake_forms_list') }}">All forms</a>
+    </div>
+    {% if public_url %}
+    <p class="small mb-0 mt-2">Public link (share or embed): <a href="{{ public_url }}" target="_blank" rel="noopener noreferrer">{{ public_url }}</a></p>
+    {% endif %}
+  </div>
+
+  <form method="post" class="card crm-panel border-0 shadow-sm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+      {% for fld in form.fields %}
+      <div class="mb-3">
+        <label class="form-label" for="fld_{{ fld.name }}">{{ fld.label }}{% if fld.required %} <span class="text-danger">*</span>{% endif %}</label>
+        {% if fld.type == 'textarea' %}
+        <textarea class="form-control" id="fld_{{ fld.name }}" name="{{ fld.name }}" rows="3" {% if fld.required %}required{% endif %}></textarea>
+        {% else %}
+        <input class="form-control" id="fld_{{ fld.name }}" name="{{ fld.name }}" type="{{ 'number' if fld.type == 'number' else ('email' if fld.type == 'email' else ('tel' if fld.type == 'tel' else 'text')) }}" {% if fld.required %}required{% endif %}>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card-footer bg-light">
+      <button type="submit" class="btn btn-primary rounded-pill px-4">Save to CRM</button>
+      {% if can_edit %}
+      <a class="btn btn-outline-secondary rounded-pill ms-1" href="{{ url_for('crm_module.intake_form_edit', form_id=form.id) }}">Edit form</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

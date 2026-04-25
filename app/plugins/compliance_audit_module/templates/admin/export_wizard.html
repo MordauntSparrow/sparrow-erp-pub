@@ -1,0 +1,147 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}Export{% endblock %}
+{% block content %}
+<h1 class="h3 mb-3">Export wizard</h1>
+{% if matter_row %}
+<div class="alert alert-info py-2 small mb-3">
+  Filters from matter <strong>{{ matter_row.reference_code }}</strong> — {{ matter_row.title }}.
+  <a href="{{ url_for('compliance_audit_internal.export_wizard') }}">Clear</a>
+</div>
+{% endif %}
+{% if need_pin_enrol %}
+<div class="alert alert-warning">Set a <strong>compliance PIN</strong> before exporting.
+  <a href="{{ url_for('compliance_audit_internal.pin_enrol') }}" class="alert-link">Enrol PIN</a>
+</div>
+{% endif %}
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-header">Filters (same as timeline)</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('compliance_audit_internal.export_download') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="ca_filter_applied" value="1">
+          {% if matter_row %}
+          <input type="hidden" name="matter_id" value="{{ matter_row.id }}">
+          {% endif %}
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label small">From</label>
+              <input class="form-control form-control-sm" type="date" name="date_from" value="{{ request.values.get('date_from','') or (filt.date_from.strftime('%Y-%m-%d') if filt.date_from else '') }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">To</label>
+              <input class="form-control form-control-sm" type="date" name="date_to" value="{{ request.values.get('date_to','') or (filt.date_to.strftime('%Y-%m-%d') if filt.date_to else '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">CAD</label>
+              <input class="form-control form-control-sm" name="cad" value="{{ request.values.get('cad','') or (filt.cad or '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Case ID</label>
+              <input class="form-control form-control-sm" name="case_id" value="{{ request.values.get('case_id','') or (filt.case_id or '') }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Search text</label>
+              <input class="form-control form-control-sm" name="q" value="{{ request.values.get('q','') or (filt.q or '') }}">
+            </div>
+            <div class="col-12">
+              <details class="border rounded px-3 py-2">
+                <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Advanced filters</summary>
+                <div class="row g-2 mt-2">
+                  <div class="col-md-4">
+                    <label class="form-label small">Path contains</label>
+                    <input class="form-control form-control-sm" name="path_like" value="{{ request.values.get('path_like','') or (filt.path_like or '') }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Actor contains</label>
+                    <input class="form-control form-control-sm" name="actor" value="{{ request.values.get('actor','') or (filt.actor_sub or '') }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Entity type contains</label>
+                    <input class="form-control form-control-sm" name="entity_type" value="{{ request.values.get('entity_type','') or (filt.entity_type_sub or '') }}">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Action contains</label>
+                    <input class="form-control form-control-sm" name="action" value="{{ request.values.get('action','') or (filt.action_sub or '') }}">
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Matter / reference label (stored in export log)</label>
+              <input class="form-control form-control-sm" name="matter_reference" value="{{ request.values.get('matter_reference','') or (matter_row.reference_code if matter_row else '') }}" maxlength="128" placeholder="Optional — e.g. same as matter ref or external exhibit ID">
+            </div>
+          </div>
+          <div class="mb-3">
+            <details class="border rounded px-3 py-2" open>
+              <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Data sources</summary>
+              <div class="row row-cols-1 row-cols-md-2 g-2 mt-2">
+                {% for opt in domain_options %}
+                <div class="col">
+                  <label class="small mb-0 d-block text-truncate" title="{{ opt.label }}">
+                    <input type="checkbox" name="dom_{{ opt.key }}" value="1" class="form-check-input me-1"
+                      {% if not filt.domains or opt.key in filt.domains %}checked{% endif %}>
+                    {{ opt.label }}
+                  </label>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small">Format</label>
+            <select class="form-select form-select-sm" name="format">
+              <option value="csv">CSV</option>
+              <option value="json">JSON + manifest</option>
+              <option value="pdf">PDF summary</option>
+              <option value="zip">Evidence pack (ZIP: manifest.json, timeline.csv, timeline.json, index.pdf)</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small">Redaction profile</label>
+            <select class="form-select form-select-sm" name="redaction_profile">
+              <option value="minimal">Minimal (no redaction)</option>
+              <option value="standard" selected>Standard (NHS-style numbers, email, phone)</option>
+              <option value="strict">Strict (+ UK postcodes in text)</option>
+            </select>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="redact" value="1" id="redact">
+            <label class="form-check-label small" for="redact">Legacy: if profile is “minimal”, treat as standard redaction when checked</label>
+          </div>
+          {% if step_up_ok %}
+          <button type="submit" class="btn btn-primary" {% if need_pin_enrol %}disabled{% endif %}>Download</button>
+          <span class="text-success small ms-2"><i class="bi bi-check-circle"></i> Step-up active</span>
+          {% else %}
+          <button type="button" class="btn btn-secondary" disabled>Download (confirm PIN first)</button>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h2 class="h6">Preview</h2>
+        <p class="small text-muted mb-0">~{{ preview_count }} rows loaded for preview (full export uses your row cap).</p>
+      </div>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-header">Step-up (compliance PIN)</div>
+      <div class="card-body">
+        {% if need_pin_enrol %}
+        <p class="small text-muted">Enrol a PIN first.</p>
+        {% else %}
+        <form method="post" action="{{ url_for('compliance_audit_internal.step_up') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <label class="form-label small">PIN</label>
+          <input class="form-control form-control-sm mb-2" type="password" name="pin" inputmode="numeric" autocomplete="one-time-code" required>
+          <button type="submit" class="btn btn-primary btn-sm">Confirm for export session</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

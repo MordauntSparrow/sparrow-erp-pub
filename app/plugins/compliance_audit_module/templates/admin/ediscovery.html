@@ -1,0 +1,160 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}eDiscovery & evidence matters{% endblock %}
+{% block content %}
+
+<div class="alert alert-warning mb-3">
+  <strong>Not full legal eDiscovery.</strong>
+  Sparrow does not replace Relativity-style review platforms, legal hold on mail or cloud custodians, predictive coding, or court-ordered production workflows. Use this area only for <strong>internal governance</strong>, inspection support, and proportionate review; use your legal and IG process for formal disclosure.
+</div>
+
+<h1 class="h3 mb-2">eDiscovery (governance)</h1>
+<p class="text-muted small mb-4">
+  Sparrow provides <strong>saved search scopes</strong> (“matters”), the merged audit <strong>timeline</strong>, <strong>ZIP evidence packs</strong>, and an <strong>immutable export log</strong> with hashes — suitable for the uses above, not for substituting external counsel or disclosure orders.
+</p>
+
+{% if not table_ok %}
+<div class="alert alert-warning">The evidence-matters table is missing. Run <code>python app/plugins/compliance_audit_module/install.py upgrade</code>.</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-header">Saved matters</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Ref</th>
+                <th>Title</th>
+                <th>When</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in matters %}
+              <tr>
+                <td class="small font-monospace">{{ m.reference_code }}</td>
+                <td class="small">{{ m.title }}</td>
+                <td class="small text-nowrap">{{ m.created_at }}</td>
+                <td class="small text-nowrap">
+                  <a class="btn btn-outline-primary btn-sm py-0" href="{{ url_for('compliance_audit_internal.timeline', matter_id=m.id) }}">Timeline</a>
+                  {% if can_export %}
+                  <a class="btn btn-outline-secondary btn-sm py-0" href="{{ url_for('compliance_audit_internal.export_wizard', matter_id=m.id) }}">Export</a>
+                  {% endif %}
+                  {% if matter_admin %}
+                  <form method="post" action="{{ url_for('compliance_audit_internal.ediscovery_matter_delete') }}" class="d-inline" onsubmit="return confirm('Delete this matter?');">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="matter_id" value="{{ m.id }}">
+                    <button type="submit" class="btn btn-outline-danger btn-sm py-0">Delete</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-muted p-4">No saved matters yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    {% if inspection_mode or not matter_admin %}
+    <div class="alert alert-info small">Read-only: you can open timelines from matters{% if not matter_admin %} (full access required to create or delete){% endif %}.</div>
+    {% else %}
+    <div class="card shadow-sm">
+      <div class="card-header">Save current scope as a matter</div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('compliance_audit_internal.ediscovery') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="ca_filter_applied" value="1">
+          <input type="hidden" name="action" value="create">
+          <div class="mb-2">
+            <label class="form-label small">Reference code <span class="text-danger">*</span></label>
+            <input class="form-control form-control-sm" name="reference_code" required maxlength="64" placeholder="e.g. CQC-2026-014">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Title <span class="text-danger">*</span></label>
+            <input class="form-control form-control-sm" name="title" required maxlength="255" placeholder="Short label">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Note</label>
+            <textarea class="form-control form-control-sm" name="note" rows="2" maxlength="4000" placeholder="Optional context (not shown on timeline)"></textarea>
+          </div>
+          <hr class="my-3">
+          <p class="small text-muted mb-2">Filter snapshot (same as timeline)</p>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label small">From</label>
+              <input class="form-control form-control-sm" type="date" name="date_from">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">To</label>
+              <input class="form-control form-control-sm" type="date" name="date_to">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">CAD</label>
+              <input class="form-control form-control-sm" name="cad">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Case ID</label>
+              <input class="form-control form-control-sm" name="case_id">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Search text</label>
+              <input class="form-control form-control-sm" name="q" placeholder="summary / actor / domain">
+            </div>
+            <div class="col-12">
+              <details class="border rounded px-3 py-2">
+                <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Advanced filters</summary>
+                <div class="row g-2 mt-2">
+                  <div class="col-md-4">
+                    <label class="form-label small">Path contains</label>
+                    <input class="form-control form-control-sm" name="path_like">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Actor contains</label>
+                    <input class="form-control form-control-sm" name="actor">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Entity type contains</label>
+                    <input class="form-control form-control-sm" name="entity_type">
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label small">Action contains</label>
+                    <input class="form-control form-control-sm" name="action">
+                  </div>
+                </div>
+              </details>
+            </div>
+          </div>
+          <div class="mb-3">
+            <details class="border rounded px-3 py-2" open>
+              <summary class="small text-muted fw-semibold user-select-none" style="cursor:pointer;">Data sources</summary>
+              <div class="row row-cols-1 row-cols-md-2 g-2 mt-2">
+                {% for opt in domain_options %}
+                <div class="col">
+                  <label class="small mb-0 d-block text-truncate" title="{{ opt.label }}">
+                    <input type="checkbox" name="dom_{{ opt.key }}" value="1" class="form-check-input me-1" checked>
+                    {{ opt.label }}
+                  </label>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">Save matter</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<p class="mt-4 mb-0 small text-muted">
+  <a href="{{ url_for('compliance_audit_internal.timeline') }}">Open timeline</a>
+  · <a href="{{ url_for('compliance_audit_internal.siem_dashboard') }}">Monitoring &amp; SIEM APIs</a> (optional, IT/security)
+</p>
+{% endblock %}

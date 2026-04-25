@@ -58,6 +58,7 @@ LOCATION_TYPE_LABELS = {
     "warehouse": "Warehouse",
     "vehicle": "Vehicle",
     "site": "Site",
+    "training": "Training pool (non-patient-facing stock)",
 }
 
 

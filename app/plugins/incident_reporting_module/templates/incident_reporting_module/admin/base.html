@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+{% include 'partials/sparrow_admin_nav_styles.html' %}
+@media print {
+  .nav-module.erp-module-subnav,
+  .sparrow-admin-nav-wrap { display: none !important; }
+}
+</style>
+{% include 'incident_reporting_module/admin/_module_subnav.html' %}
+{% block incident_admin_inner %}{% endblock %}
+{% endblock %}

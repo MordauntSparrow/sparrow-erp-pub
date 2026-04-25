@@ -1,0 +1,111 @@
+{% extends "response/call_centre_base.html" %}
+{% block page_title %}Triage History{% endblock %}
+{% set nav_section = 'intake' %}
+{% block cc_content %}
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <h1 class="panel-title">Triage History</h1>
+      <div class="muted">Recent incident intake records and decisions.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <a class="btn" href="{{ url_for('medical_response_internal.response_dashboard') }}"><i class="bi bi-plus-circle"></i> New Triage</a>
+    </div>
+  </div>
+  <div class="panel-body" style="padding:0;">
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Created By</th>
+            <th>Created At</th>
+            <th>Postcode</th>
+            <th>Decision</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for triage in triage_list %}
+            {% set decision = (triage.decision or 'PENDING') %}
+            <tr>
+              <td style="font-weight:700;">#{{ triage.id }}</td>
+              <td>{{ triage.created_by }}</td>
+              <td class="muted">{{ triage.created_at }}</td>
+              <td>{{ triage.postcode }}</td>
+              <td>
+                {% if decision == "ACCEPT" %}
+                  <span class="badge success">Accept</span>
+                {% elif decision == "ACCEPT_WITH_EXCLUSION" %}
+                  <span class="badge warning">Accept w/ Exclusion</span>
+                {% elif decision == "REJECT" %}
+                  <span class="badge danger">Reject</span>
+                {% else %}
+                  <span class="badge secondary">{{ decision }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <button class="btn" type="button" onclick='openReasonPanel({{ triage|tojson }})'>View Details</button>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">No triage records found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="detailsPanel" style="display:none;">
+  <div class="panel-head">
+    <h2 class="panel-title">Triage Details</h2>
+    <button class="btn" type="button" onclick="closeReasonPanel()"><i class="bi bi-x-lg"></i> Close</button>
+  </div>
+  <div class="panel-body">
+    <pre id="reasonText" style="white-space:pre-wrap;margin:0 0 10px 0;"></pre>
+    <div id="exclusionsSection" style="display:none;">
+      <h3 style="margin:0 0 6px 0;font-size:14px;">Flagged Exclusions</h3>
+      <ul id="exclusionsList" style="margin:0;padding-left:18px;"></ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function openReasonPanel(record) {
+    document.getElementById("reasonText").textContent = record.reason_for_call || "No reason provided.";
+    const ul = document.getElementById("exclusionsList");
+    ul.innerHTML = "";
+    const section = document.getElementById("exclusionsSection");
+    section.style.display = "none";
+
+    if (record.decision === "ACCEPT_WITH_EXCLUSION" && record.exclusion_data) {
+      let exclusions = record.exclusion_data;
+      if (typeof exclusions === "string") {
+        try { exclusions = JSON.parse(exclusions); } catch (e) { exclusions = {}; }
+      }
+      const flagged = [];
+      for (const key in exclusions) {
+        if (String(exclusions[key]).toLowerCase() === "yes") {
+          flagged.push(key.replace("exclusion_", "").replaceAll("_", " "));
+        }
+      }
+      if (flagged.length) {
+        flagged.forEach((x) => {
+          const li = document.createElement("li");
+          li.textContent = x;
+          ul.appendChild(li);
+        });
+        section.style.display = "block";
+      }
+    }
+    document.getElementById("detailsPanel").style.display = "block";
+  }
+
+  function closeReasonPanel() {
+    document.getElementById("detailsPanel").style.display = "none";
+  }
+</script>
+{% endblock %}

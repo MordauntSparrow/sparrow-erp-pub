@@ -195,7 +195,7 @@ def try_start_website():
                 f"[WARN] Website module import failed: {ie}. Skipping WebsiteServer startup.")
             return
 
-        web_port = int(os.environ.get("WEB_PORT", "8080"))
+        web_port = int(os.environ.get("WEB_PORT", "80"))
         ws = WebsiteServer(port=web_port)
 
         def _run_website():
@@ -228,7 +228,7 @@ if __name__ == "__main__":
         target=run_admin_app, name="AdminFlaskThread", daemon=True)
     admin_thread.start()
 
-    # Start website module (port 80/8080) if installed and enabled; set WEB_PORT=80 to use port 80.
+    # Start website module (default port 80; nginx/Railway PORT is separate). Override with WEB_PORT.
     # Pre-deployment (e.g. Railway): re-comment the line below so the website server is not started
     # from this script (deployment typically runs the admin app only, or starts the website separately).
     # try_start_website()

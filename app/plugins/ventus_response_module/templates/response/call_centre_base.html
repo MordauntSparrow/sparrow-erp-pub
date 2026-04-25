@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block page_title %}Response Centre{% endblock %} - Ventus Response</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    :root {
+      --bg0: #0b1222;
+      --bg1: #101a31;
+      --panel: rgba(16, 26, 49, 0.88);
+      --panel-strong: rgba(10, 18, 34, 0.9);
+      --line: rgba(148, 163, 184, 0.28);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #22d3ee;
+      --primary: #3b82f6;
+      --success: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --shadow: 0 20px 50px rgba(2, 6, 23, 0.45);
+      --focus: 0 0 0 3px rgba(34, 211, 238, 0.22);
+      --topbar-bg: rgba(2, 6, 23, 0.35);
+      --soft-btn-bg: rgba(148, 163, 184, 0.08);
+      --soft-btn-hover: rgba(56, 189, 248, 0.10);
+      --input-bg: rgba(148, 163, 184, 0.08);
+      --table-row-hover: rgba(56, 189, 248, 0.08);
+    }
+    :root[data-theme="light"] {
+      --bg0: #f1f5f9;
+      --bg1: #e2e8f0;
+      --panel: rgba(255, 255, 255, 0.9);
+      --panel-strong: rgba(248, 250, 252, 0.94);
+      --line: rgba(71, 85, 105, 0.25);
+      --text: #0f172a;
+      --muted: #475569;
+      --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+      --focus: 0 0 0 3px rgba(37, 99, 235, 0.18);
+      --topbar-bg: rgba(255,255,255,0.62);
+      --soft-btn-bg: rgba(15, 23, 42, 0.06);
+      --soft-btn-hover: rgba(8, 145, 178, 0.12);
+      --input-bg: rgba(255,255,255,0.92);
+      --table-row-hover: rgba(8, 145, 178, 0.10);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+      background:
+        radial-gradient(1200px 700px at 15% -10%, rgba(56, 189, 248, 0.14), transparent 40%),
+        radial-gradient(900px 600px at 110% 20%, rgba(34, 197, 94, 0.10), transparent 45%),
+        linear-gradient(145deg, var(--bg0), var(--bg1));
+      color: var(--text);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .topbar {
+      min-height: 64px;
+      height: auto;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px 12px;
+      padding: 12px 18px;
+      backdrop-filter: blur(8px);
+      background: var(--topbar-bg);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: inherit;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+    }
+    .brand img { height: 34px; flex-shrink: 0; }
+    .brand span {
+      min-width: 0;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .nav-actions {
+      margin-left: auto;
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      align-content: center;
+      max-width: 100%;
+    }
+    .nav-actions .nav-label {
+      white-space: nowrap;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--soft-btn-bg);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      line-height: 1;
+      transition: transform .12s ease, border-color .2s ease, background .2s ease;
+    }
+    .btn.active {
+      border-color: rgba(56, 189, 248, 0.75);
+      background: rgba(56, 189, 248, 0.18);
+      box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.22);
+    }
+    .btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(56, 189, 248, 0.65);
+      background: var(--soft-btn-hover);
+    }
+    .btn.primary {
+      border-color: rgba(59, 130, 246, 0.5);
+      background: linear-gradient(135deg, rgba(59,130,246,0.26), rgba(34,211,238,0.18));
+    }
+    .btn.warn {
+      border-color: rgba(245, 158, 11, 0.5);
+      background: linear-gradient(135deg, rgba(245,158,11,0.22), rgba(251,191,36,0.16));
+    }
+    .btn.danger {
+      border-color: rgba(239, 68, 68, 0.5);
+      background: linear-gradient(135deg, rgba(239,68,68,0.2), rgba(220,38,38,0.14));
+    }
+    .theme-btn {
+      border: 1px solid var(--line);
+      background: var(--soft-btn-bg);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .shell {
+      padding: 16px;
+      min-height: 0;
+      overflow: auto;
+    }
+    .page {
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(8px);
+    }
+    .panel-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-strong);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: .2px;
+    }
+    .panel-body {
+      padding: 14px;
+    }
+    .muted { color: var(--muted); }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: rgba(148, 163, 184, 0.14);
+      color: var(--text);
+    }
+    .badge.secondary { background: rgba(100,116,139,.25); color: #cbd5e1; }
+    .badge.primary { background: rgba(59,130,246,.25); color: #bfdbfe; }
+    .badge.warning { background: rgba(245,158,11,.22); color: #fde68a; }
+    .badge.success { background: rgba(34,197,94,.22); color: #bbf7d0; }
+    .badge.danger { background: rgba(239,68,68,.2); color: #fecaca; }
+    :root[data-theme="light"] .badge.secondary { color: #334155; }
+    :root[data-theme="light"] .badge.primary { color: #1e40af; }
+    :root[data-theme="light"] .badge.warning { color: #92400e; }
+    :root[data-theme="light"] .badge.success { color: #166534; }
+    :root[data-theme="light"] .badge.danger { color: #991b1b; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--input-bg);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font: inherit;
+    }
+    textarea { resize: vertical; }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      box-shadow: var(--focus);
+      border-color: rgba(56, 189, 248, 0.7);
+    }
+    /* Browser dropdown menus can ignore theme vars; force readable option colors. */
+    select option {
+      background: #ffffff;
+      color: #0f172a;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      color: var(--muted);
+      background: var(--panel-strong);
+    }
+    tr:hover td { background: var(--table-row-hover); }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 1100px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+    /* Narrow: give the bar more vertical room when nav buttons wrap to two rows */
+    @media (max-width: 1050px) {
+      .topbar {
+        padding-top: 14px;
+        padding-bottom: 14px;
+      }
+    }
+    /* Icon-only when JS detects nav would wrap to 2+ rows (.nav-icons-only on .topbar) */
+    .topbar.nav-icons-only .nav-actions {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+    .topbar.nav-icons-only .nav-actions .nav-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .topbar.nav-icons-only .nav-actions .btn,
+    .topbar.nav-icons-only .nav-actions .theme-btn {
+      padding: 9px 11px;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .topbar.nav-icons-only {
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+    @media (max-width: 480px) {
+      .topbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .nav-actions {
+        margin-left: 0;
+        justify-content: flex-start;
+      }
+      .brand span {
+        font-size: 14px;
+        line-height: 1.2;
+      }
+    }
+  </style>
+  {% include 'partials/sparrow_csrf_head.html' %}
+  {% include 'partials/sparrow_date_locale.html' %}
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <img src="/static/uploads/logo-whitebg.png" alt="Logo">
+      <span>Ventus Response Centre</span>
+    </a>
+    <div class="nav-actions">
+      {% set nav_section = nav_section|default('') %}
+      <a class="btn {% if nav_section == 'router' %}active{% endif %}" href="/plugin/ventus_response_module/" aria-label="Router"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span class="nav-label">Router</span></a>
+      <a class="btn {% if nav_section == 'intake' %}active{% endif %}" href="{{ url_for('medical_response_internal.response_dashboard') }}" aria-label="Intake"><i class="bi bi-clipboard2-plus" aria-hidden="true"></i><span class="nav-label">Intake</span></a>
+      <a class="btn {% if nav_section == 'call_centre' %}active{% endif %}" href="{{ url_for('medical_response_internal.call_centre_dashboard') }}" aria-label="Response Centre"><i class="bi bi-headset" aria-hidden="true"></i><span class="nav-label">Response Centre</span></a>
+      <a class="btn {% if nav_section == 'dispatch' %}primary active{% endif %}" href="{{ url_for('medical_response_internal.cad_dashboard') }}" aria-label="Dispatch"><i class="bi bi-broadcast-pin" aria-hidden="true"></i><span class="nav-label">Dispatch</span></a>
+      <a class="btn {% if nav_section == 'admin' %}active{% endif %}" href="/plugin/ventus_response_module/admin" aria-label="Admin"><i class="bi bi-shield-check" aria-hidden="true"></i><span class="nav-label">Admin</span></a>
+      <a class="btn" href="/logout" aria-label="Logout"><i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="nav-label">Logout</span></a>
+      <button type="button" id="themeToggle" class="theme-btn" aria-label="Theme: Auto"><i class="bi bi-circle-half" aria-hidden="true"></i><span class="nav-label">Auto</span></button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="page">
+      {% block cc_content %}{% endblock %}
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const topbar = document.querySelector(".topbar");
+      const nav = document.querySelector(".nav-actions");
+      if (!topbar || !nav) return;
+      let ro = null;
+      function syncNavIconTooltips() {
+        const controls = nav.querySelectorAll("a.btn, button.theme-btn");
+        if (topbar.classList.contains("nav-icons-only")) {
+          controls.forEach(function (el) {
+            const t = el.getAttribute("aria-label");
+            if (t) el.setAttribute("title", t);
+          });
+        } else {
+          controls.forEach(function (el) {
+            el.removeAttribute("title");
+          });
+        }
+      }
+      function updateNavIconOnlyMode() {
+        const first = nav.querySelector(".btn, .theme-btn");
+        if (!first) return;
+        try {
+          if (ro) {
+            ro.disconnect();
+          }
+          topbar.classList.remove("nav-icons-only");
+          void nav.offsetHeight;
+          const unitH = Math.ceil(first.getBoundingClientRect().height);
+          const wrapped = nav.offsetHeight > unitH + 8;
+          if (wrapped) topbar.classList.add("nav-icons-only");
+          syncNavIconTooltips();
+        } finally {
+          if (ro) {
+            ro.observe(nav);
+            ro.observe(topbar);
+          }
+        }
+      }
+      function scheduleNavUpdate() {
+        requestAnimationFrame(function () {
+          requestAnimationFrame(updateNavIconOnlyMode);
+        });
+      }
+      window.__ventuTopbarNavUpdate = scheduleNavUpdate;
+      scheduleNavUpdate();
+      if (typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(scheduleNavUpdate);
+        ro.observe(nav);
+        ro.observe(topbar);
+      }
+      window.addEventListener("resize", scheduleNavUpdate, { passive: true });
+    })();
+    (function(){
+      const KEY = 'cad_theme_pref';
+      const root = document.documentElement;
+      const btn = document.getElementById('themeToggle');
+      function resolve(pref){
+        if(pref === 'light' || pref === 'dark') return pref;
+        const h = new Date().getHours();
+        return (h >= 19 || h < 7) ? 'dark' : 'light';
+      }
+      function getPref(){
+        const p = (localStorage.getItem(KEY) || 'auto').toLowerCase();
+        return (p === 'light' || p === 'dark' || p === 'auto') ? p : 'auto';
+      }
+      function setPref(pref){
+        const p = (pref || 'auto').toLowerCase();
+        localStorage.setItem(KEY, (p === 'light' || p === 'dark' || p === 'auto') ? p : 'auto');
+        apply();
+      }
+      function apply(){
+        const pref = getPref();
+        root.setAttribute('data-theme', resolve(pref));
+        if(btn){
+          const icon = pref === 'light' ? 'bi-sun' : (pref === 'dark' ? 'bi-moon-stars' : 'bi-circle-half');
+          const label = pref.charAt(0).toUpperCase() + pref.slice(1);
+          btn.setAttribute('aria-label', 'Theme: ' + label);
+          btn.innerHTML = '<i class="bi ' + icon + '" aria-hidden="true"></i><span class="nav-label">' + label + '</span>';
+        }
+        if (typeof window.__ventuTopbarNavUpdate === 'function') window.__ventuTopbarNavUpdate();
+      }
+      apply();
+      if(btn){
+        btn.addEventListener('click', function(){
+          const p = getPref();
+          setPref(p === 'auto' ? 'dark' : (p === 'dark' ? 'light' : 'auto'));
+        });
+      }
+      setInterval(function(){ if(getPref() === 'auto') apply(); }, 60000);
+    })();
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

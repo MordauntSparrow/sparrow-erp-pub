@@ -5,9 +5,9 @@ from datetime import datetime
 from functools import wraps
 from io import StringIO
 from itertools import zip_longest
-from typing import Optional
+from typing import Optional, Tuple
 
-from flask import Blueprint, abort, current_app, flash, make_response, redirect, render_template, request, send_file, session, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, make_response, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app.objects import PluginManager
@@ -236,6 +236,55 @@ _HR_PROFILE_LINKED_FILE_FIELDS = {
     "contract": "contract_document_path",
     "profile_picture": "profile_picture_path",
 }
+
+_ALLOWED_HR_COMPLIANCE_DOC_EXT = frozenset(
+    {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif"})
+
+
+def _save_staff_compliance_document_upload(
+    contractor_id: int,
+    file_storage,
+    *,
+    doc_category: str,
+    doc_title: str,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Persist an uploaded compliance file under uploads/hr_employee/<cid>/.
+    Returns (relative_path, flash_error). No file chosen -> (None, None).
+    """
+    if not file_storage or not file_storage.filename or not str(file_storage.filename).strip():
+        return None, None
+    ext = os.path.splitext(file_storage.filename)[1].lower() or ""
+    if ext not in _ALLOWED_HR_COMPLIANCE_DOC_EXT:
+        return None, f"{doc_title}: use PDF or an image (JPG, PNG, WebP, GIF)."
+    cid = int(contractor_id)
+    orig = secure_filename(file_storage.filename) or "document"
+    safe = f"{uuid.uuid4().hex[:12]}{ext}"
+    rel_path = f"uploads/hr_employee/{cid}/{safe}"
+    upload_dir = os.path.join(_app_static_dir(), "uploads", "hr_employee", str(cid))
+    os.makedirs(upload_dir, exist_ok=True)
+    full_path = os.path.join(_app_static_dir(), rel_path.replace("/", os.sep))
+    try:
+        file_storage.save(full_path)
+    except OSError:
+        return None, f"{doc_title}: could not save file to disk."
+    doc_id = hr_services.add_employee_document(
+        cid,
+        doc_category,
+        doc_title,
+        rel_path,
+        file_name=orig,
+        notes="Uploaded from HR admin edit profile",
+        uploaded_by_user_id=_core_user_id_for_db(),
+    )
+    if not doc_id:
+        try:
+            if os.path.isfile(full_path):
+                os.remove(full_path)
+        except OSError:
+            pass
+        return None, f"{doc_title}: document library unavailable (run HR install)."
+    return rel_path, None
 
 
 # Granular HR permissions (manifest declared_permissions + alternate_access_permissions).
@@ -546,12 +595,31 @@ def admin_employee_new():
                 roles=roles,
                 config=_core_manifest,
             )
+        credential_mode = (
+            request.form.get("credential_mode") or "manual"
+        ).strip().lower()
+        if credential_mode not in ("manual", "email_generated"):
+            credential_mode = "manual"
+        if credential_mode == "email_generated":
+            pwd_plain = hr_services.generate_hr_portal_password()
+        else:
+            pwd_plain = (request.form.get("password") or "").strip()
+            if len(pwd_plain) < 8:
+                flash(
+                    "Password must be at least 8 characters, or choose “Generate password and email”.",
+                    "error",
+                )
+                return render_template(
+                    "hr_module/admin/employee_new.html",
+                    roles=roles,
+                    config=_core_manifest,
+                )
         ok, msg, cid = hr_services.admin_create_contractor_employee(
             request.form.get("name") or "",
             request.form.get("email") or "",
             role_id=role_id,
             role_name=None,
-            password=(request.form.get("password") or "").strip(),
+            password=pwd_plain,
             phone=request.form.get("phone"),
             status=request.form.get("status") or "active",
             employment_type=request.form.get("employment_type"),
@@ -559,8 +627,21 @@ def admin_employee_new():
         if ok and cid:
             prof = hr_services.admin_get_staff_profile(int(cid))
             un = (prof or {}).get("username") or "—"
+            extra = ""
+            if credential_mode == "email_generated":
+                sent, smsg = hr_services.send_hr_import_portal_credentials_email(
+                    (request.form.get("email") or "").strip().lower(),
+                    (request.form.get("name") or "").strip(),
+                    pwd_plain,
+                )
+                extra = (
+                    " A welcome email with the temporary password was sent."
+                    if sent
+                    else f" Welcome email was not sent: {smsg}"
+                )
             flash(
-                f"Employee created — portal login username: {un}. Complete their HR profile or send document requests as needed.",
+                f"Employee created — portal login username: {un}. Complete their HR profile or send document requests as needed."
+                + extra,
                 "success",
             )
             return redirect(url_for("internal_hr.admin_contractor_profile", cid=cid))
@@ -757,6 +838,26 @@ def admin_employee_import_csv_commit():
 # -----------------------------------------------------------------------------
 
 
+@internal_bp.get("/contractors-search")
+@login_required
+@_hr_require_view
+def admin_contractors_search_json():
+    """JSON autocomplete for staff (tb_contractors) — filters and pickers outside HR pages."""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    rows = hr_services.admin_search_contractors(q, limit=25)
+    out = []
+    for r in rows or []:
+        try:
+            cid = int(r.get("id"))
+        except (TypeError, ValueError):
+            continue
+        nm = (r.get("name") or "").strip() or "—"
+        out.append({"id": cid, "label": f"{nm} · id {cid}"})
+    return jsonify(out)
+
+
 @internal_bp.get("/contractors")
 @login_required
 @_hr_require_view
@@ -844,6 +945,18 @@ def admin_contractor_profile(cid):
         if appraisal_tables_ready()
         else []
     )
+    safety_incidents = []
+    safety_incident_status_labels = {}
+    try:
+        from app.plugins.incident_reporting_module import services as inc_ir_svc
+        from app.plugins.incident_reporting_module.constants import (
+            STATUS_LABELS as INCIDENT_STATUS_LABELS,
+        )
+
+        safety_incidents = inc_ir_svc.list_incidents_linked_to_contractor(int(cid), limit=30)
+        safety_incident_status_labels = INCIDENT_STATUS_LABELS
+    except Exception:
+        safety_incidents = []
     return render_template(
         "hr_module/admin/contractor_profile.html",
         profile=profile,
@@ -875,6 +988,8 @@ def admin_contractor_profile(cid):
         hcpc_schedule_interval=hcpc_scheduled_check_interval_label(),
         appraisal_tables_ready=appraisal_tables_ready(),
         contractor_appraisals=contractor_appraisals,
+        safety_incidents=safety_incidents,
+        safety_incident_status_labels=safety_incident_status_labels,
         config=_core_manifest,
     )
 
@@ -976,6 +1091,9 @@ def admin_contractor_edit_form(cid):
         profile.get("tb_role_name"),
         tb_roles,
     )
+    hr_superuser = (
+        getattr(current_user, "role", None) or ""
+    ).lower() == "superuser"
     return render_template(
         "hr_module/admin/contractor_edit.html",
         profile=profile,
@@ -984,11 +1102,30 @@ def admin_contractor_edit_form(cid):
         staff_role_display_names=staff_role_display_names,
         job_title_preset_value=job_title_preset_value,
         wage_cards=wage_cards,
+        hr_superuser=hr_superuser,
         request_types=hr_services.REQUEST_TYPES,
         dbs_update_service_enabled=is_dbs_update_service_enabled(),
         hcpc_register_api_enabled=is_hcpc_register_api_enabled(),
         config=_core_manifest,
     )
+
+
+@internal_bp.post("/contractors/<int:cid>/promote-core-admin")
+@login_required
+@_hr_require(HR_EDIT)
+def admin_contractor_promote_core_admin(cid):
+    """Superuser only: create or link a core ``users`` row (Admin) for this contractor."""
+    if (getattr(current_user, "role", None) or "").lower() != "superuser":
+        flash("Only a superuser can grant a core Admin login from HR.", "danger")
+        return redirect(url_for("internal_hr.admin_contractor_edit_form", cid=cid))
+    ok, msg, uid = hr_services.promote_contractor_to_core_admin_user(int(cid))
+    flash(msg, "success" if ok else "danger")
+    if ok and uid:
+        flash(
+            "You can review permissions under Users & access when ready.",
+            "info",
+        )
+    return redirect(url_for("internal_hr.admin_contractor_edit_form", cid=cid))
 
 
 @internal_bp.post("/contractors/<int:cid>/edit")
@@ -1114,6 +1251,19 @@ def admin_contractor_edit_save(cid):
     if not dbs_sub:
         data["dbs_update_consent_at"] = None
         data["dbs_update_service_subscribed"] = False
+    for file_key, path_key, cat, ttl in (
+        ("driving_licence_file", "driving_licence_document_path", "driving_licence", "Driving licence"),
+        ("right_to_work_file", "right_to_work_document_path", "right_to_work", "Right to work"),
+        ("dbs_file", "dbs_document_path", "dbs", "DBS disclosure"),
+        ("contract_file", "contract_document_path", "contract", "Contract"),
+    ):
+        rel, err = _save_staff_compliance_document_upload(
+            cid, request.files.get(file_key), doc_category=cat, doc_title=ttl
+        )
+        if err:
+            flash(err, "warning")
+        elif rel:
+            data[path_key] = rel
     _hr_preserve_regulated_profile_fields_when_not_medical(data, profile)
     if hr_services.admin_update_staff_profile(cid, data):
         flash("Profile saved.", "success")
@@ -1736,6 +1886,11 @@ def admin_requests():
         offset=(page - 1) * per_page,
     )
     total_pages = (total + per_page - 1) // per_page if total else 1
+    contractor_filter_label = (
+        hr_services.admin_contractor_display_line(int(contractor_id))
+        if contractor_id
+        else None
+    )
     return render_template(
         "hr_module/admin/requests.html",
         requests_list=rows,
@@ -1743,6 +1898,7 @@ def admin_requests():
         page=page,
         total_pages=total_pages,
         contractor_id=contractor_id,
+        contractor_filter_label=contractor_filter_label,
         status=status,
         date_from=date_from_s,
         date_to=date_to_s,

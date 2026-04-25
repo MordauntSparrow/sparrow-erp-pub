@@ -38,6 +38,17 @@ RUN pip install --upgrade pip setuptools wheel \
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY . .
 
+# Snapshot of website Jinja public pages for admin "push → volume". After boot,
+# templates/public is often a symlink to the volume; push uses this real directory.
+RUN rm -rf /app/app/plugins/website_module/templates/public_bundled \
+    && cp -a /app/app/plugins/website_module/templates/public \
+          /app/app/plugins/website_module/templates/public_bundled
+
+# Snapshot of website_module/static for admin "push → volume" (same pattern as public_bundled).
+RUN rm -rf /app/app/plugins/website_module/static_bundled \
+    && cp -a /app/app/plugins/website_module/static \
+          /app/app/plugins/website_module/static_bundled
+
 RUN mkdir -p /var/www/letsencrypt /app/app/logs \
     && rm -f /etc/nginx/sites-enabled/default \
     && chmod +x /app/docker-entrypoint.sh \

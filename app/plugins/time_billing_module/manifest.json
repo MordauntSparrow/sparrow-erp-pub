@@ -2,8 +2,8 @@
     "system_name": "time_billing_module",
     "name": "Shift Timesheets",
     "description": "Captures weekly contractor timesheets with auto rates, travel, and billing variance rollups.",
-    "version": "0.0.21",
-    "changelog": "Depends on HR: enable Time Billing only with HR enabled. Contractor create/update/password/status APIs removed — use HR → Employees / Edit profile. Staff role APIs unchanged.",
+    "version": "0.0.22",
+    "changelog": "Rota→timesheet: optional background sync (current + next ISO weeks); issue-week APIs merge rota; week_ending fix on single issue. Depends on HR.",
     "icon": "icon.png",
     "dependencies": [
         "hr_module"
@@ -21,6 +21,11 @@
             "value": "false",
             "editable": true,
             "tooltip": "If false, staff cannot edit scheduled_start/end on scheduler-prefilled entries (they can still override actual times)."
+        },
+        "scheduler_week_background_sync_enabled": {
+            "value": "true",
+            "editable": true,
+            "tooltip": "When enabled (and rota prefill is on), the app periodically ensures draft timesheets exist and pulls scheduled shifts for the current and next two ISO weeks, without staff opening each week."
         }
     }
 }

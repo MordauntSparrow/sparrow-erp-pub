@@ -1,0 +1,223 @@
+<style>
+/* Time Billing — Run sheets admin (list / edit / staffing) */
+.tb-rs-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0.35rem 1rem 2.5rem;
+  background: linear-gradient(180deg, rgba(238, 242, 255, 0.9) 0%, rgba(248, 250, 252, 0.4) 14rem, transparent 22rem);
+  border-radius: 0;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-page {
+  background: linear-gradient(180deg, rgba(30, 27, 75, 0.35) 0%, transparent 18rem);
+}
+{% endif %}
+.tb-rs-breadcrumb .breadcrumb {
+  margin-bottom: 0;
+  font-size: 0.875rem;
+}
+.tb-rs-breadcrumb a {
+  color: #4338ca;
+  text-decoration: none;
+}
+.tb-rs-breadcrumb a:hover {
+  text-decoration: underline;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-breadcrumb a { color: #a5b4fc; }
+{% elif config.theme_settings.theme == 'modern' %}
+.tb-rs-breadcrumb a { color: #4f46e5; }
+{% endif %}
+
+.tb-rs-hero {
+  border-radius: 14px;
+  background: linear-gradient(135deg, #312e81 0%, #4338ca 45%, #6366f1 100%);
+  box-shadow: 0 4px 24px rgba(67, 56, 202, 0.28);
+  color: #fff;
+  padding: 1.35rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+.tb-rs-hero .tb-rs-hero-kicker {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.88;
+  margin-bottom: 0.25rem;
+}
+.tb-rs-hero h1 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+  color: #fff;
+}
+.tb-rs-hero .tb-rs-hero-lead {
+  font-size: 0.875rem;
+  opacity: 0.92;
+  margin: 0;
+  max-width: 52rem;
+}
+
+.tb-rs-panel {
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.06);
+  background: #fff;
+  overflow: hidden;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-panel {
+  background: #1e1e1e;
+  color: #f1f5f9;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.35);
+}
+.tb-rs-panel .card-header {
+  background: #252525 !important;
+  color: #e2e8f0 !important;
+  border-color: #444 !important;
+}
+.tb-rs-panel .table {
+  color: #e2e8f0;
+}
+.tb-rs-panel .table-light {
+  --bs-table-bg: #2a2a2a;
+  color: #e2e8f0;
+}
+.tb-rs-panel .alert-info {
+  background: rgba(99, 102, 241, 0.15);
+  color: #e2e8f0;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+{% endif %}
+
+.tb-rs-panel .card-header {
+  font-weight: 600;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: transparent;
+}
+.tb-rs-panel .card-body {
+  padding: 1rem 1.1rem;
+}
+
+.tb-rs-view-toggle .btn {
+  border-radius: 0.4rem;
+  font-weight: 500;
+  padding: 0.4rem 0.85rem;
+}
+.tb-rs-view-toggle .btn-check:checked + .btn,
+.tb-rs-view-toggle .btn.active {
+  background: #4338ca;
+  border-color: #4338ca;
+  color: #fff;
+}
+
+.tb-rs-filter-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+/* Staffing board (list page) */
+.tb-rs-board-root {
+  min-height: 120px;
+}
+.tb-rs-day {
+  border-left: 4px solid #6366f1;
+  padding-left: 0.85rem;
+  margin-bottom: 1.75rem;
+}
+.tb-rs-day > h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.65rem;
+  color: #334155;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-day > h2 { color: #cbd5e1; }
+{% endif %}
+
+.tb-rs-event {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-event {
+  background: #262626;
+  border-color: #404040;
+}
+{% endif %}
+
+.tb-rs-event-hd {
+  padding: 0.65rem 1rem;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.06) 0%, rgba(248, 250, 252, 0.95) 100%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-event-hd {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, #2d2d2d 100%);
+  border-color: #404040;
+}
+{% endif %}
+
+.tb-rs-slot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(99, 102, 241, 0.07);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  font-size: 0.875rem;
+}
+.tb-rs-slot:last-child {
+  border-bottom: none;
+}
+.tb-rs-slot .tb-rs-slot-time {
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+}
+{% if config.theme_settings.theme == 'dark' %}
+.tb-rs-slot {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: #3f3f3f;
+}
+.tb-rs-slot .tb-rs-slot-time { color: #94a3b8; }
+{% endif %}
+
+/* Edit page: section titles */
+.tb-rs-section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin-bottom: 0.75rem;
+}
+
+/* Table list polish */
+.tb-rs-table-wrap .table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom-width: 1px;
+}
+.tb-rs-table-wrap .table tbody td {
+  vertical-align: middle;
+}
+</style>

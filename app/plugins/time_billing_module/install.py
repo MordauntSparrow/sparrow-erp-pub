@@ -319,6 +319,71 @@ def _ensure_job_types_colour_hex(conn):
     finally:
         cur.close()
 
+
+def _ensure_timesheet_entry_location_text(conn):
+    """
+    Core installs used ``client_id`` / ``site_id`` only. Contractor week UI sends
+    ``client_name`` / ``site_name`` for free-text locations; ``batch_upsert`` only
+    persists those when the columns exist — add them so ad-hoc labels survive submit.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE 'tb_timesheet_entries'")
+        if not cur.fetchone():
+            return
+        if not _column_exists(conn, "tb_timesheet_entries", "client_id"):
+            return
+        if not _column_exists(conn, "tb_timesheet_entries", "client_name"):
+            after = (
+                "site_id"
+                if _column_exists(conn, "tb_timesheet_entries", "site_id")
+                else "user_id"
+            )
+            cur.execute(
+                f"ALTER TABLE tb_timesheet_entries "
+                f"ADD COLUMN client_name VARCHAR(255) NULL DEFAULT NULL AFTER {after}"
+            )
+            conn.commit()
+        if not _column_exists(conn, "tb_timesheet_entries", "site_name"):
+            cur.execute(
+                "ALTER TABLE tb_timesheet_entries "
+                "ADD COLUMN site_name VARCHAR(255) NULL DEFAULT NULL AFTER client_name"
+            )
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+
+
+def _ensure_job_types_legacy(conn):
+    """
+    Soft-delete / archive: job_types.legacy + active=0 keeps FKs valid for history.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SHOW TABLES LIKE 'job_types'")
+        if not cur.fetchone():
+            return
+        if _column_exists(conn, "job_types", "legacy"):
+            return
+        cur.execute(
+            """
+            ALTER TABLE job_types
+              ADD COLUMN legacy TINYINT(1) NOT NULL DEFAULT 0
+              COMMENT '1 when retired while still referenced; UI shows (Legacy)'
+              AFTER active
+            """
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+
+
 # =============================================================================
 # Public Migration Functions
 # =============================================================================
@@ -347,7 +412,7 @@ def install(seed_demo: bool = False):
                 _run_sql_file_then_hooks(conn, fname)
                 _record_applied(conn, fname)
 
-        # Optional demo seed
+        # Optional demo seed (only if a matching SQL file is present in db/; not part of init_db).
         if seed_demo:
             demo_file = "008_seed_demo_contractors.sql"
             demo_path = os.path.join(SQL_DIR, demo_file)
@@ -355,16 +420,12 @@ def install(seed_demo: bool = False):
                 _run_sql_file(conn, demo_path)
                 _record_applied(conn, demo_file)
 
-        try:
-            from app.plugins.time_billing_module.industry_seeds import (
-                apply_time_billing_industry_seed_packs,
-            )
-
-            apply_time_billing_industry_seed_packs(conn)
-        except Exception as e:
-            print(f"[WARN] time_billing industry seed packs: {e}")
+        # Industry starter packs removed from automatic install/upgrade — opt-in only via
+        # `python -m app.plugins.time_billing_module.industry_seeds` or env-driven tooling if reintroduced.
 
         _ensure_job_types_colour_hex(conn)
+        _ensure_job_types_legacy(conn)
+        _ensure_timesheet_entry_location_text(conn)
         _invalidate_timesheet_entry_schema_cache()
     finally:
         conn.close()
@@ -383,16 +444,12 @@ def upgrade():
                 _run_sql_file_then_hooks(conn, fname)
                 _record_applied(conn, fname)
 
-        try:
-            from app.plugins.time_billing_module.industry_seeds import (
-                apply_time_billing_industry_seed_packs,
-            )
-
-            apply_time_billing_industry_seed_packs(conn)
-        except Exception as e:
-            print(f"[WARN] time_billing industry seed packs: {e}")
+        # Industry starter packs removed from automatic install/upgrade — opt-in only via
+        # `python -m app.plugins.time_billing_module.industry_seeds` or env-driven tooling if reintroduced.
 
         _ensure_job_types_colour_hex(conn)
+        _ensure_job_types_legacy(conn)
+        _ensure_timesheet_entry_location_text(conn)
         _invalidate_timesheet_entry_schema_cache()
     finally:
         conn.close()

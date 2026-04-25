@@ -557,6 +557,29 @@ def admin_dashboard_page():
         """)
         active_runsheets = (cur.fetchone() or {}).get("c", 0)
 
+        runsheet_stats = {
+            "draft_from_today": 0,
+            "published_from_today": 0,
+            "draft_published_this_iso_week": 0,
+        }
+        try:
+            cur.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN status = 'draft' AND work_date >= CURDATE() THEN 1 ELSE 0 END), 0) AS d0,
+                  COALESCE(SUM(CASE WHEN status = 'published' AND work_date >= CURDATE() THEN 1 ELSE 0 END), 0) AS p0,
+                  COALESCE(SUM(CASE WHEN status IN ('draft','published')
+                    AND YEARWEEK(work_date, 3) = YEARWEEK(CURDATE(), 3) THEN 1 ELSE 0 END), 0) AS wk
+                FROM runsheets
+                """
+            )
+            rsrow = cur.fetchone() or {}
+            runsheet_stats["draft_from_today"] = int(rsrow.get("d0") or 0)
+            runsheet_stats["published_from_today"] = int(rsrow.get("p0") or 0)
+            runsheet_stats["draft_published_this_iso_week"] = int(rsrow.get("wk") or 0)
+        except Exception:
+            pass
+
         cur.execute("""
             SELECT COALESCE(SUM(e.pay),0) AS tp
             FROM tb_timesheet_entries e
@@ -573,9 +596,18 @@ def admin_dashboard_page():
         "approved_this_week": approved_this_week,
         "active_runsheets": active_runsheets,
         "total_pay_week": total_pay_week,
+        "runsheet_stats": runsheet_stats,
     }
 
-    return render_template("admin/dashboard/index.html", kpis=kpis, now=datetime.utcnow(), config=core_manifest)
+    invoice_dash = InvoiceService.admin_dashboard_invoice_summary()
+
+    return render_template(
+        "admin/dashboard/index.html",
+        kpis=kpis,
+        invoice_dash=invoice_dash,
+        now=datetime.utcnow(),
+        config=core_manifest,
+    )
 
 # =============================================================================
 # Admin week page (HTML)
@@ -715,38 +747,65 @@ def api_issue_timesheet():
     if not user_id or not week_id:
         return jsonify({"ok": False, "error": "user_id and week_id required"}), 400
 
+    week_id = str(week_id).strip()
+    user_id = int(user_id)
+    week_ending = TimesheetService.week_ending_date_from_week_id(week_id)
+
     conn = get_db_connection()
     cur = conn.cursor()
+    created = False
     try:
         cur.execute(
             "SELECT id FROM tb_timesheet_weeks WHERE user_id=%s AND week_id=%s LIMIT 1",
-            (user_id, week_id)
+            (user_id, week_id),
         )
         if cur.fetchone():
-            return jsonify({"ok": True, "skipped": True, "reason": "exists"}), 200
+            skipped = True
+        else:
+            skipped = False
+            cur.execute(
+                """
+                INSERT INTO tb_timesheet_weeks
+                  (user_id, week_id, week_ending, status, total_hours, total_pay)
+                VALUES (%s, %s, %s, 'draft', 0, 0)
+                """,
+                (user_id, week_id, week_ending),
+            )
+            conn.commit()
+            created = True
 
-        cur.execute("""
-            INSERT INTO tb_timesheet_weeks (user_id, week_id, status, total_hours, total_pay)
-            VALUES (%s, %s, 'draft', 0, 0)
-        """, (user_id, week_id))
-        conn.commit()
-
-        # Training: auto-assign by role change (v1).
-        try:
-            if role_id is not None:
-                from app.plugins.training_module.services import TrainingService
-
-                TrainingService.apply_role_assignment_rules(
-                    contractor_id=int(user_id),
-                    role_id=int(role_id),
-                    assigned_by_user_id=getattr(current_user, "id", None),
+        role_id = None
+        if created:
+            try:
+                cur.execute(
+                    "SELECT role_id FROM tb_contractors WHERE id=%s LIMIT 1",
+                    (user_id,),
                 )
-        except Exception:
-            pass
-        return jsonify({"ok": True})
+                rr = cur.fetchone()
+                if rr and rr[0] is not None:
+                    role_id = int(rr[0])
+            except Exception:
+                role_id = None
+
+            try:
+                if role_id is not None:
+                    from app.plugins.training_module.services import TrainingService
+
+                    TrainingService.apply_role_assignment_rules(
+                        contractor_id=user_id,
+                        role_id=role_id,
+                        assigned_by_user_id=getattr(current_user, "id", None),
+                    )
+            except Exception:
+                pass
     finally:
         cur.close()
         conn.close()
+
+    TimesheetService.sync_scheduler_shifts_into_week(user_id, week_id)
+    if skipped:
+        return jsonify({"ok": True, "skipped": True, "reason": "exists"}), 200
+    return jsonify({"ok": True, "created": created})
 
 
 # API: issue bulk
@@ -832,10 +891,14 @@ def api_issue_timesheet_bulk():
 
         conn.commit()
         ins.close()
-        return jsonify({"ok": True, "issued_for_users": len(user_ids)})
     finally:
         cur.close()
         conn.close()
+
+    for uid in user_ids:
+        for wid in week_iter(from_week, to_week):
+            TimesheetService.sync_scheduler_shifts_into_week(int(uid), str(wid))
+    return jsonify({"ok": True, "issued_for_users": len(user_ids)})
 
 
 # =============================================================================
@@ -909,7 +972,7 @@ def admin_mark_week_paid_closed(user_id, week_id):
 @internal_bp.post("/timesheets/<int:user_id>/<week_id>/reopen-paid-closure")
 @admin_required_tb
 def admin_reopen_week_paid_closure(user_id, week_id):
-    """Reopen invoiced week to approved when there is no draft/sent portal invoice."""
+    """Reopen invoiced week to approved when there is no current/paid portal invoice."""
     wk = TimesheetService._ensure_week(user_id, week_id)
     try:
         out = InvoiceService.admin_reopen_week_after_external_payment_closure(int(wk["id"]))
@@ -1176,8 +1239,8 @@ def api_update_job_type(jid):
 @admin_required_tb
 def api_delete_job_type(jid):
     try:
-        TemplateService.delete_job_type(jid)
-        return jsonify({"ok": True})
+        result = TemplateService.delete_job_type(jid)
+        return jsonify({"ok": True, **result})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -1411,9 +1474,43 @@ def get_policies():
 @internal_bp.post("/api/policies")
 @admin_required_tb
 def create_policy():
+    """Create or update a calendar policy (body may include ``id`` for updates)."""
     data = request.get_json(force=True) or {}
     try:
-        return jsonify({"id": TemplateService.create_policy(data)})
+        return jsonify({"id": TemplateService.save_calendar_policy(data)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.get("/api/bank-holidays")
+@admin_required_tb
+def api_list_bank_holidays():
+    return jsonify(TemplateService.list_bank_holidays())
+
+
+@internal_bp.post("/api/bank-holidays")
+@admin_required_tb
+def api_save_bank_holiday():
+    data = request.get_json(force=True) or {}
+    try:
+        TemplateService.save_bank_holiday(data)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@internal_bp.delete("/api/bank-holidays")
+@admin_required_tb
+def api_delete_bank_holiday():
+    ds = (request.args.get("date") or "").strip()
+    if not ds:
+        return jsonify({"error": "date query parameter is required"}), 400
+    reg = request.args.get("region")
+    if reg is not None:
+        reg = str(reg).strip()
+    try:
+        ok = TemplateService.delete_bank_holiday(ds, reg)
+        return jsonify({"ok": True, "deleted": ok})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -1547,6 +1644,10 @@ def contractors_edit_page():
 def admin_invoices_list_page():
     cid = request.args.get("contractor_id", type=int)
     st = (request.args.get("status") or "").strip().lower() or None
+    if st == "draft":
+        st = "current"
+    elif st == "sent":
+        st = "paid"
     rows = InvoiceService.list_invoices_admin(
         contractor_id=cid, status=st, limit=400)
     conn = get_db_connection()
@@ -1748,6 +1849,10 @@ def public_dashboard_page():
                 r["week_ending"] = we.isoformat()
             r["total_hours"] = round(float(r.get("total_hours") or 0), 2)
             r["total_pay"] = float(r.get("total_pay") or 0)
+            st = r.get("status")
+            if isinstance(st, bytes):
+                st = st.decode("utf-8", errors="replace")
+            r["status"] = (str(st or "").strip().lower() or "draft")
 
         # Latest available week for buttons (fallback to current if none)
         cur.execute("""
@@ -1764,11 +1869,20 @@ def public_dashboard_page():
         cur.close()
         conn.close()
 
+    _st = week.get("status", "draft")
+    if isinstance(_st, bytes):
+        _st = _st.decode("utf-8", errors="replace")
     kpis = {
         "hours_year": hours_ytd,
         "pay_year": pay_ytd,
-        "submission_status": week.get("status", "draft"),
+        "submission_status": (str(_st or "").strip().lower() or "draft"),
     }
+
+    invoice_kpis = None
+    try:
+        invoice_kpis = InvoiceService.contractor_portal_invoice_kpis(uid)
+    except Exception:
+        invoice_kpis = None
 
     return render_template(
         "public/dashboard/index.html",
@@ -1776,6 +1890,7 @@ def public_dashboard_page():
         example_week_id=current_week_id,
         latest_week_id=latest_week_id,     # new: use for “Open Latest Week” buttons
         kpis=kpis,
+        invoice_kpis=invoice_kpis,
         recent_weeks=recent_weeks,
         config=core_manifest,
     )
@@ -1942,7 +2057,9 @@ def api_public_upsert(week_id):
 @staff_required_tb
 def api_public_submit(week_id):
     uid = current_tb_user_id()
-    TimesheetService.submit_week(uid, week_id)
+    res = TimesheetService.submit_week(uid, week_id)
+    if not res.get("ok"):
+        return jsonify(res), 400
     return jsonify({"ok": True})
 
 
@@ -1956,9 +2073,11 @@ def api_public_submit(week_id):
 def public_week_invoice_page(week_id):
     """Mobile-first page to create an invoice with the timesheet (submitted or approved). Self-employed only."""
     uid = current_tb_user_id()
-    if InvoiceService.get_contractor_invoice_billing_frequency(uid) == "monthly":
+    if InvoiceService.is_combined_invoice_billing(
+        InvoiceService.get_contractor_invoice_billing_frequency(uid)
+    ):
         flash(
-            "You are on monthly billing — create invoices from My invoices (combine approved weeks there).",
+            "You are on bi-weekly or monthly billing — create invoices from My invoices (combine approved weeks there).",
             "info",
         )
         return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
@@ -2005,11 +2124,13 @@ def public_week_invoice_page(week_id):
 def api_public_create_invoice(week_id):
     """Create invoice with timesheet: draft when week submitted, sent when week already approved."""
     uid = current_tb_user_id()
-    if InvoiceService.get_contractor_invoice_billing_frequency(uid) == "monthly":
+    if InvoiceService.is_combined_invoice_billing(
+        InvoiceService.get_contractor_invoice_billing_frequency(uid)
+    ):
         return jsonify(
             {
                 "ok": False,
-                "message": "Monthly billing: use My invoices → Create invoice to combine weeks.",
+                "message": "Bi-weekly or monthly billing: use My invoices → Create invoice to combine weeks.",
             }
         ), 400
     wk = TimesheetService._ensure_week(uid, week_id)
@@ -2028,10 +2149,10 @@ def api_public_create_invoice(week_id):
     data = request.get_json() or {}
     invoice_number = (data.get("invoice_number") or "").strip(
     ) or InvoiceService.get_next_invoice_number(uid)
-    mark_sent = status == "approved"
+    mark_paid = status == "approved"
     try:
         inv = InvoiceService.create_invoice(
-            uid, wk["id"], invoice_number, mark_sent=mark_sent)
+            uid, wk["id"], invoice_number, mark_paid=mark_paid)
         return jsonify({"ok": True, "invoice": inv})
     except ValueError as e:
         return jsonify({"ok": False, "message": str(e)}), 400
@@ -2041,21 +2162,21 @@ def api_public_create_invoice(week_id):
 @staff_required_tb
 def public_week_invoice_finalize(week_id):
     """
-    Promote draft → sent when the week is already approved (submitted-then-approved invoice flow).
+    Promote current → paid when the week is already approved (submitted-then-approved invoice flow).
     """
     uid = current_tb_user_id()
     wk = TimesheetService._ensure_week(uid, week_id)
     try:
-        out = InvoiceService.finalize_draft_invoice_for_week(
+        out = InvoiceService.finalize_current_invoice_for_week(
             uid, int(wk["id"]))
         if out:
             flash(
-                "Invoice #%s finalized and marked sent. This week is now marked invoiced."
+                "Invoice #%s finalized and marked paid. This week is now marked invoiced."
                 % (out.get("invoice_number") or out.get("id")),
                 "success",
             )
         else:
-            flash("No draft invoice was found for this week to finalize.", "warning")
+            flash("No current invoice was found for this week to finalize.", "warning")
     except ValueError as e:
         flash(str(e), "error")
     return redirect(url_for("public_time_billing.public_week_page", week_id=week_id))
@@ -2069,10 +2190,12 @@ def public_invoices_list_page():
     bf = InvoiceService.get_contractor_invoice_billing_frequency(uid)
     et = InvoiceService.get_contractor_employment_type(uid)
     suggested = InvoiceService.get_next_invoice_number(uid)
+    combined = InvoiceService.is_combined_invoice_billing(bf)
     return render_template(
         "public/invoice/list.html",
         invoices=rows,
         invoice_billing_frequency=bf,
+        combined_invoice_billing=combined,
         employment_type=et,
         suggested_next_invoice_number=suggested,
         config=core_manifest,
@@ -2104,7 +2227,7 @@ def api_public_create_combined_invoice():
     invoice_number = (data.get("invoice_number") or "").strip() or InvoiceService.get_next_invoice_number(uid)
     try:
         inv = InvoiceService.create_combined_invoice(
-            uid, pks, invoice_number, mark_sent=True
+            uid, pks, invoice_number, mark_paid=True
         )
         return jsonify({"ok": True, "invoice": inv})
     except ValueError as e:
@@ -2371,22 +2494,29 @@ def api_admin_refs_sites():
 @admin_required_tb
 def api_admin_refs_contractors():
     q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
-        return jsonify({"items": []})
-    like = f"%{q}%"
     conn = get_db_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("""
-            SELECT id, name, email, initials
-            FROM tb_contractors
-            WHERE status = 'active'
-              AND (
-                name LIKE %s OR email LIKE %s OR initials LIKE %s OR CAST(id AS CHAR) LIKE %s
-              )
-            ORDER BY name ASC
-            LIMIT 30
-        """, (like, like, like, like))
+        if len(q) < 2:
+            cur.execute("""
+                SELECT id, name, email, initials
+                FROM tb_contractors
+                WHERE status = 'active'
+                ORDER BY name ASC
+                LIMIT 200
+            """)
+        else:
+            like = f"%{q}%"
+            cur.execute("""
+                SELECT id, name, email, initials
+                FROM tb_contractors
+                WHERE status = 'active'
+                  AND (
+                    name LIKE %s OR email LIKE %s OR initials LIKE %s OR CAST(id AS CHAR) LIKE %s
+                  )
+                ORDER BY name ASC
+                LIMIT 30
+            """, (like, like, like, like))
         items = cur.fetchall() or []
     finally:
         cur.close()

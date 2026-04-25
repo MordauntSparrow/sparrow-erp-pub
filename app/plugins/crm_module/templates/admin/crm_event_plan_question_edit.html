@@ -1,6 +1,14 @@
-{% extends "admin/crm_admin_base.html" %}
-{% block page_title %}Edit question{% endblock %}
+{% extends "medical_records_shell.html" %}
+{% block title %}Edit checklist question — Sparrow{% endblock %}
 {% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Cura event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plans_list') }}">Medical event plans</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_questions_list') }}">Questions</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Edit</li>
+  </ol>
+</nav>
 <div class="container-fluid py-3" style="max-width: 720px;">
   <h1 class="h4 mb-3">Edit checklist question</h1>
   <p class="small text-muted">Type is fixed at <code>{{ question.answer_type }}</code>. Text changes are audited.</p>
@@ -27,7 +35,7 @@
         {% if can_edit %}
         <button type="submit" class="btn btn-primary rounded-pill">Save</button>
         {% endif %}
-        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('crm_module.event_plan_questions_list') }}">Back</a>
+        <a class="btn btn-outline-secondary rounded-pill" href="{{ url_for('medical_records_internal.cura_event_planner.event_plan_questions_list') }}">Back</a>
       </form>
     </div>
   </div>

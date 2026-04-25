@@ -19,6 +19,17 @@ Central hub for staff (contractors): sign in once, then access Time & Billing, H
 - After login, they see the dashboard: profile picture/initials, name, module links, messages, and todos. The to-do list defaults to **pending only** (completed are under **Completed** / **All**) with capped row counts so mobile loads stay fast.
 - Session uses `tb_user` (same as time_billing), so they are logged in to Time & Billing when they open it from the portal.
 
+## Portal module tiles (optional limits)
+
+Admins can restrict which **dashboard module tiles** a contractor sees (plugins such as Work, Fleet, HR, plus **My equipment & kit**, **inventory request** tiles, and **Portal assistant**). Rules:
+
+- **By job role** (`tb_contractors.role_id` → `roles`): Employee Portal admin → **Portal modules by role**. Stored in `ep_portal_role_module_access`.
+- **By person**: search a contractor → **Portal modules**. Stored in `ep_portal_contractor_module_access`.
+
+If either row exists, its JSON list is an **allow-list**. The effective set is **role ∩ contractor** (each missing layer means “no extra restriction” at that layer), then intersected with plugin enablement and tenant industry rules. Run `python app/plugins/employee_portal_module/install.py upgrade` to create the tables.
+
+The same keys drive **module tiles**, **Quick actions**, and **At a glance** rows for scheduling, compliance, HR, and training (so staff do not see a wall of shortcuts to modules they cannot open).
+
 ## Adding messages and todos from other modules
 
 Other modules (HR, Compliance, Training, etc.) can push items to the portal by inserting into:

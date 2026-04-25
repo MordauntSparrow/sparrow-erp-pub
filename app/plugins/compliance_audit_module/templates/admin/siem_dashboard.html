@@ -1,0 +1,111 @@
+{% extends "admin/base_compliance_audit.html" %}
+{% block page_title %}SIEM-style monitoring{% endblock %}
+{% block content %}
+<h1 class="h3 mb-2">Monitoring &amp; SIEM APIs</h1>
+<p class="text-muted small mb-1">
+  <span class="badge bg-secondary bg-opacity-25 text-dark border">Optional — IT / security</span>
+  Most assurance work uses the <a href="{{ url_for('compliance_audit_internal.timeline') }}">timeline</a> and <a href="{{ url_for('compliance_audit_internal.export_wizard') }}">exports</a> instead of this screen.
+</p>
+<p class="text-muted small mb-4">
+  This does <strong>not</strong> replace Splunk, Sentinel, or Elastic for fleet-wide security analytics.
+  It surfaces compliance-relevant signals already in Sparrow (logins, PIN step-up, exports, sampled timeline volume by domain) and exposes <strong>JSON APIs</strong> so an external SIEM can pull the same aggregates on a schedule.
+</p>
+
+<form method="get" class="row g-2 align-items-end mb-4">
+  {% if inspection_mode %}<input type="hidden" name="mode" value="inspection">{% endif %}
+  <div class="col-auto">
+    <label class="form-label small mb-0">Window (hours)</label>
+    <select class="form-select form-select-sm" name="hours" onchange="this.form.submit()">
+      {% for h in [24, 48, 72, 168] %}
+      <option value="{{ h }}" {% if hours == h %}selected{% endif %}>{{ h }}h</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+{% set st = snapshot.stats %}
+{% set ts = snapshot.timeline_sample %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-muted">Web/API logins succeeded</div>
+        <div class="h4 mb-0">{{ st.login_audit.ok }}</div>
+        {% if st.login_audit.error %}<div class="small text-warning">{{ st.login_audit.error }}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-muted">Web/API logins failed</div>
+        <div class="h4 mb-0 text-danger">{{ st.login_audit.fail }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-muted">PIN step-up OK / fail</div>
+        <div class="h4 mb-0">{{ st.pin_step_up.ok }} <span class="text-muted">/</span> {{ st.pin_step_up.fail }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <div class="small text-muted">Exports in window</div>
+        <div class="h4 mb-0">{{ st.exports.count }}</div>
+        <div class="small text-muted">manual {{ st.exports.manual }} · scheduled {{ st.exports.scheduled }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header">Timeline sample — rows per domain (capped sample)</div>
+  <div class="card-body p-0">
+    <p class="small text-muted px-3 pt-3 mb-2">Based on up to {{ ts.row_cap }} merged rows from {{ ts.window_hours }}h window. Use for trend hints, not absolute counts.</p>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-light">
+          <tr><th>Domain</th><th>Rows in sample</th></tr>
+        </thead>
+        <tbody>
+          {% for domain, cnt in (ts.counts_by_domain or {}).items() %}
+          <tr>
+            <td><span class="badge bg-secondary">{{ domain }}</span></td>
+            <td>{{ cnt }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="text-muted p-3">No sample rows (or sources empty).</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header">API integration (external SIEM / SOAR)</div>
+  <div class="card-body small">
+    <p class="mb-2">Endpoints (same permission as the console <strong>or</strong> bearer token):</p>
+    <ul class="mb-2">
+      <li><code>GET {{ request.url_root.rstrip('/') }}{{ url_for('compliance_audit_internal.api_siem_snapshot') }}?hours={{ hours }}</code></li>
+      <li><code>GET {{ request.url_root.rstrip('/') }}{{ url_for('compliance_audit_internal.api_audit_events') }}?limit=500&amp;since=YYYY-MM-DD</code> — optional <code>until</code>, <code>domains=cad,epcr</code></li>
+    </ul>
+    <p class="mb-2">Set environment variable <code>COMPLIANCE_AUDIT_SIEM_TOKEN</code> and send header <code>X-Compliance-Audit-Token: …</code> (or query <code>token=</code>) for unattended collectors when no browser session exists.</p>
+    {% if token_configured %}
+    <p class="text-success mb-0"><i class="bi bi-check-circle"></i> Token is configured on this server.</p>
+    {% else %}
+    <p class="text-warning mb-0"><i class="bi bi-exclamation-triangle"></i> Token not set — only logged-in compliance users can call the APIs.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="mt-3">
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('compliance_audit_internal.ediscovery') }}">eDiscovery</a>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('compliance_audit_internal.export_log') }}">Export log</a>
+</div>
+{% endblock %}

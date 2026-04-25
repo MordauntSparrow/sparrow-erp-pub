@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import secrets
+import uuid
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -74,16 +75,15 @@ def send_hr_import_portal_credentials_email(
     password_plain: str,
 ) -> Tuple[bool, str]:
     """
-    Email a one-time welcome with portal URL + temporary password (CSV import path).
-    Set HR_IMPORT_WELCOME_EMAIL_DISABLED=1 to skip. Requires core SMTP_* env vars.
+    Email a one-time welcome with portal URL + temporary password (CSV import and
+    optional “generate & email” on manual add-employee).
+
+    Set HR_IMPORT_WELCOME_EMAIL_DISABLED=1 or HR_PORTAL_WELCOME_EMAIL_DISABLED=1 to skip.
+    Requires core SMTP_* env vars.
     """
-    if (os.environ.get("HR_IMPORT_WELCOME_EMAIL_DISABLED") or "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    ):
-        return False, "Welcome emails disabled (HR_IMPORT_WELCOME_EMAIL_DISABLED)."
+    for key in ("HR_IMPORT_WELCOME_EMAIL_DISABLED", "HR_PORTAL_WELCOME_EMAIL_DISABLED"):
+        if (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on"):
+            return False, f"Welcome emails disabled ({key})."
     try:
         from app.objects import EmailManager
 
@@ -109,8 +109,15 @@ def send_hr_import_portal_credentials_email(
         "If you were not expecting this message, contact your manager or HR.\n"
     )
     try:
-        em.send_email(subject=subject, body=body,
-                      recipients=[to_email.strip().lower()])
+        from app.email_branding import send_branded_email
+
+        send_branded_email(
+            em,
+            subject,
+            body,
+            [to_email.strip().lower()],
+            preheader=subject,
+        )
         return True, "ok"
     except Exception as e:
         logger.warning("HR import welcome email send failed: %s", e)
@@ -1063,7 +1070,7 @@ def admin_hr_update_contractor_core(
                     pass
 
             ibf = (invoice_billing_frequency or "weekly").strip().lower()
-            if ibf not in ("weekly", "monthly"):
+            if ibf not in ("weekly", "biweekly", "monthly"):
                 ibf = "weekly"
             try:
                 cur2.execute(
@@ -1474,6 +1481,25 @@ def admin_search_contractors(q: str, limit: int = 50) -> List[Dict[str, Any]]:
             LIMIT %s
         """, (term, term, limit))
         return cur.fetchall() or []
+    finally:
+        cur.close()
+        conn.close()
+
+
+def admin_contractor_display_line(contractor_id: int) -> Optional[str]:
+    """Short label for filters (name · id N)."""
+    conn = get_db_connection()
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute(
+            "SELECT id, name, email FROM tb_contractors WHERE id = %s LIMIT 1",
+            (int(contractor_id),),
+        )
+        r = cur.fetchone()
+        if not r:
+            return None
+        nm = (str(r.get("name") or "").strip() or str(r.get("email") or "").strip() or "—")
+        return f"{nm} · id {int(r['id'])}"
     finally:
         cur.close()
         conn.close()
@@ -1946,10 +1972,361 @@ def admin_get_staff_profile(contractor_id: int) -> Optional[Dict[str, Any]]:
                     row[_k] = _v
             except Exception:
                 pass
+        row["linked_core_user"] = None
+        try:
+            cur.execute(
+                """
+                SELECT id, username, email, role, COALESCE(billable_exempt,0) AS billable_exempt
+                FROM users WHERE contractor_id = %s LIMIT 1
+                """,
+                (contractor_id,),
+            )
+            lu = cur.fetchone()
+            if lu:
+                row["linked_core_user"] = lu
+        except Exception:
+            pass
         return row
     finally:
         cur.close()
         conn.close()
+
+
+def _allocate_unique_core_username(
+    cur: Any, base: str, exclude_user_id: Optional[str] = None
+) -> str:
+    """Pick a ``users.username`` not yet taken (case-insensitive), max 50 chars."""
+    raw = (base or "").strip().lower() or "user"
+    raw = re.sub(r"[^a-z0-9._-]+", "", raw) or "user"
+    raw = raw[:50]
+    candidate = raw[:50]
+    n = 0
+    while True:
+        cur.execute(
+            "SELECT id FROM users WHERE LOWER(TRIM(username)) = LOWER(TRIM(%s)) LIMIT 1",
+            (candidate,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return candidate[:50]
+        uid = row[0] if not isinstance(row, dict) else row.get("id")
+        if exclude_user_id and str(uid) == str(exclude_user_id):
+            return candidate[:50]
+        n += 1
+        suffix = f"_{n}"
+        candidate = (raw[: 50 - len(suffix)] + suffix)[:50]
+
+
+def _core_user_fields_from_contractor(
+    cur: Any,
+    c: dict[str, Any],
+    contractor_id: int,
+    *,
+    exclude_user_id: Optional[str] = None,
+) -> tuple[str, str, Optional[str], Optional[str]]:
+    """
+    Map ``tb_contractors`` identity → ``users.email``, ``users.username``, ``first_name``, ``last_name``.
+
+    Mirrors the admin-user ↔ portal-contractor pattern: core row carries the same login name and
+    display split as the contractor profile (``name`` → first/last; ``username`` preferred for
+    ``users.username`` when unique).
+    """
+    norm_email = (c.get("email") or "").strip().lower()
+    try:
+        from app.support_access import shadow_username as _shadow_uname
+
+        shadow = _shadow_uname().lower()
+    except Exception:
+        shadow = ""
+    base_un = (c.get("username") or "").strip() or (
+        norm_email.split("@", 1)[0] if "@" in norm_email else "user"
+    )
+    if base_un.lower() == shadow:
+        base_un = f"staff_{contractor_id}"
+    core_un = _allocate_unique_core_username(cur, base_un, exclude_user_id)
+    if core_un.lower() == shadow:
+        core_un = _allocate_unique_core_username(cur, f"staff_{contractor_id}", exclude_user_id)
+
+    raw_name = (c.get("name") or "").strip() or norm_email
+    parts = raw_name.split(None, 1)
+    fn = (parts[0][:45] if parts else None) or None
+    ln = (parts[1][:45] if len(parts) > 1 else None) or None
+    return norm_email, core_un[:50], fn, ln
+
+
+def promote_contractor_to_core_admin_user(
+    contractor_id: int,
+) -> Tuple[bool, str, Optional[str]]:
+    """
+    Create or update a ``users`` row so this contractor can log into the ERP as admin, with
+    ``users.contractor_id`` pointing at this ``tb_contractors`` row (reverse of an admin user
+    who already has a linked contractor for portal access).
+
+    Copies portal identity: ``tb_contractors.username`` → ``users.username`` (unique),
+    ``tb_contractors.email`` → ``users.email``, and ``tb_contractors.name`` split into
+    ``users.first_name`` / ``users.last_name`` (first token / remainder), matching how core
+    users sync back to the portal.
+
+    Superuser-only at the route layer. Requires a work email and a stored portal password hash.
+
+    Returns ``(ok, message, user_id_or_none)``.
+    """
+    import mysql.connector
+
+    from app.seat_limits import seat_check_error_for_new_email
+
+    cid = int(contractor_id)
+    conn = get_db_connection()
+    dcur = conn.cursor(dictionary=True)
+    xcur = conn.cursor()
+    try:
+        try:
+            dcur.execute(
+                """
+                SELECT id, email, username, password_hash, name
+                FROM tb_contractors WHERE id = %s LIMIT 1
+                """,
+                (cid,),
+            )
+        except mysql.connector.Error as e:
+            if getattr(e, "errno", None) == 1054:
+                return False, "Database schema is missing expected contractor columns.", None
+            raise
+        c = dcur.fetchone()
+        if not c:
+            return False, "Contractor not found.", None
+        norm_email = (c.get("email") or "").strip().lower()
+        if not norm_email or "@" not in norm_email:
+            return False, "A valid work email is required before creating a core login.", None
+        pwd = (c.get("password_hash") or "").strip()
+        if not pwd:
+            return (
+                False,
+                "No portal password on file — set one from the profile (portal password) "
+                "before creating a core admin login.",
+                None,
+            )
+
+        dcur.execute(
+            """
+            SELECT id, username, email, role, contractor_id,
+                   COALESCE(billable_exempt,0) AS billable_exempt
+            FROM users WHERE contractor_id = %s LIMIT 1
+            """,
+            (cid,),
+        )
+        by_cid = dcur.fetchone()
+        if by_cid:
+            if int(by_cid.get("billable_exempt") or 0):
+                return (
+                    False,
+                    "This contractor is linked to a vendor support account — "
+                    "it cannot be changed here.",
+                    str(by_cid["id"]),
+                )
+            r = (by_cid.get("role") or "").strip().lower()
+            if r == "superuser":
+                return (
+                    False,
+                    "The linked core user is a superuser — role cannot be changed from HR.",
+                    str(by_cid["id"]),
+                )
+            if r == "support_break_glass":
+                return False, "The linked account is reserved for vendor support access.", str(
+                    by_cid["id"]
+                )
+            if r == "admin":
+                return (
+                    True,
+                    "This contractor already has a core Admin login linked "
+                    f"({by_cid.get('username') or by_cid.get('email')}).",
+                    str(by_cid["id"]),
+                )
+            _, core_un, fn, ln = _core_user_fields_from_contractor(
+                xcur, c, cid, exclude_user_id=str(by_cid["id"])
+            )
+            xcur.execute(
+                """
+                UPDATE users SET role = %s, password_hash = %s, billable_exempt = 0,
+                    contractor_id = %s, email = %s, username = %s,
+                    first_name = %s, last_name = %s
+                WHERE id = %s
+                """,
+                ("admin", pwd, cid, norm_email, core_un, fn, ln, str(by_cid["id"])),
+            )
+            conn.commit()
+            try:
+                from app.objects import sync_core_user_to_portal_contractor
+
+                sync_core_user_to_portal_contractor(str(by_cid["id"]))
+            except Exception:
+                pass
+            return (
+                True,
+                "Linked core user updated to Admin; they can sign in at /login using their "
+                "username or work email and the same password as the employee portal.",
+                str(by_cid["id"]),
+            )
+
+        dcur.execute(
+            """
+            SELECT id, username, email, role, contractor_id,
+                   COALESCE(billable_exempt,0) AS billable_exempt
+            FROM users WHERE LOWER(TRIM(email)) = %s LIMIT 1
+            """,
+            (norm_email,),
+        )
+        by_email = dcur.fetchone()
+        if by_email:
+            if int(by_email.get("billable_exempt") or 0):
+                return (
+                    False,
+                    "A core account with this email is reserved for vendor support.",
+                    str(by_email["id"]),
+                )
+            er = (by_email.get("role") or "").strip().lower()
+            if er == "superuser":
+                return (
+                    False,
+                    "A superuser already uses this email — cannot attach this contractor.",
+                    str(by_email["id"]),
+                )
+            oc = by_email.get("contractor_id")
+            if oc is not None and int(oc) != cid:
+                return (
+                    False,
+                    "This email is already linked to a different contractor in users.",
+                    str(by_email["id"]),
+                )
+            dcur.execute(
+                "SELECT id FROM users WHERE contractor_id = %s AND id <> %s LIMIT 1",
+                (cid, str(by_email["id"])),
+            )
+            if dcur.fetchone():
+                return (
+                    False,
+                    "Another core user is already linked to this contractor ID.",
+                    str(by_email["id"]),
+                )
+            try:
+                from app.support_access import shadow_username as _shadow_uname
+
+                if (
+                    (by_email.get("username") or "").strip().lower()
+                    == _shadow_uname().lower()
+                ):
+                    return False, "This username is reserved for vendor support access.", str(
+                        by_email["id"]
+                    )
+            except Exception:
+                pass
+            _, core_un, fn, ln = _core_user_fields_from_contractor(
+                xcur, c, cid, exclude_user_id=str(by_email["id"])
+            )
+            xcur.execute(
+                """
+                UPDATE users
+                SET contractor_id = %s, role = %s, password_hash = %s,
+                    email = %s, username = %s, first_name = %s, last_name = %s,
+                    billable_exempt = 0
+                WHERE id = %s
+                """,
+                (cid, "admin", pwd, norm_email, core_un, fn, ln, str(by_email["id"])),
+            )
+            conn.commit()
+            try:
+                from app.objects import sync_core_user_to_portal_contractor
+
+                sync_core_user_to_portal_contractor(str(by_email["id"]))
+            except Exception:
+                pass
+            return (
+                True,
+                "Existing core user linked to this contractor and set to Admin "
+                "(password aligned with the employee portal; adjust in Users if needed).",
+                str(by_email["id"]),
+            )
+
+        seat_err = seat_check_error_for_new_email(norm_email, db_cursor=xcur)
+        if seat_err:
+            return False, seat_err, None
+
+        _, new_un, fn, ln = _core_user_fields_from_contractor(
+            xcur, c, cid, exclude_user_id=None
+        )
+        new_id = str(uuid.uuid4())
+        perms = json.dumps([])
+        try:
+            xcur.execute(
+                """
+                INSERT INTO users (
+                    id, username, email, password_hash, role, permissions,
+                    first_name, last_name, personal_pin_hash, contractor_id,
+                    billable_exempt
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NULL, %s, 0)
+                """,
+                (
+                    new_id,
+                    new_un[:50],
+                    norm_email,
+                    pwd,
+                    "admin",
+                    perms,
+                    fn,
+                    ln,
+                    cid,
+                ),
+            )
+            conn.commit()
+        except mysql.connector.Error as e:
+            conn.rollback()
+            if getattr(e, "errno", None) == 1062:
+                return (
+                    False,
+                    "Could not create the account (username or email conflict). "
+                    "Try changing the contractor username or email, then retry.",
+                    None,
+                )
+            raise
+        try:
+            from app.objects import sync_core_user_to_portal_contractor
+
+            sync_core_user_to_portal_contractor(new_id)
+        except Exception:
+            pass
+        return (
+            True,
+            f"Core Admin user created (linked to contractor #{cid}; sign in at /login as "
+            f"{new_un!r} or the work email, same password as the employee portal.",
+            new_id,
+        )
+    except mysql.connector.Error as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("promote_contractor_to_core_admin_user: %s", e)
+        return False, "Database error while creating the core user.", None
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception("promote_contractor_to_core_admin_user: %s", e)
+        return False, str(e) or "Unexpected error.", None
+    finally:
+        try:
+            dcur.close()
+        except Exception:
+            pass
+        try:
+            xcur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def admin_update_staff_profile(contractor_id: int, data: Dict[str, Any]) -> bool:
@@ -2481,6 +2858,15 @@ def admin_create_document_request(
         for cid, rid in created:
             _hr_ep_upsert_request_todo(
                 cid, rid, ttl, rejected=False, due_date=required_by_date)
+        try:
+            from . import notifications as hr_notifications
+
+            for cid, rid in created:
+                hr_notifications.notify_contractor_document_request_created(
+                    int(cid), int(rid), ttl
+                )
+        except Exception as e:
+            logger.debug("HR document request notify skipped: %s", e)
         return count
     finally:
         cur.close()

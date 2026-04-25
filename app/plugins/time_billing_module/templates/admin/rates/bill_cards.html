@@ -67,19 +67,15 @@
                      name="new_card_name"
                      placeholder="e.g., Acme Commercial 2025" />
 
-              <label class="form-label">Client ID (optional)</label>
-              <input class="form-control mb-2"
-                     name="new_card_client_name"
-                     type="number"
-                     min="1"
-                     placeholder="clients.id" />
+              <label class="form-label">Client (optional)</label>
+              <select class="form-select mb-2" name="new_card_client_name" id="newCardClientSel">
+                <option value="">— None —</option>
+              </select>
 
-              <label class="form-label">Site ID (optional)</label>
-              <input class="form-control"
-                     name="new_card_site_name"
-                     type="number"
-                     min="1"
-                     placeholder="sites.id" />
+              <label class="form-label">Site (optional)</label>
+              <select class="form-select" name="new_card_site_name" id="newCardSiteSel">
+                <option value="">— None —</option>
+              </select>
               <div class="form-text">
                 Stored as client/site scope on the bill rate card (matches DB columns).
               </div>
@@ -149,12 +145,16 @@
           <input type="text" class="form-control form-control-sm" id="ecName" required>
         </div>
         <div class="mb-2">
-          <label class="form-label">Client ID (optional)</label>
-          <input type="number" class="form-control form-control-sm" id="ecClientId" min="1" placeholder="clients.id">
+          <label class="form-label">Client (optional)</label>
+          <select class="form-select form-control-sm" id="ecClientSelect">
+            <option value="">— None —</option>
+          </select>
         </div>
         <div class="mb-2">
-          <label class="form-label">Site ID (optional)</label>
-          <input type="number" class="form-control form-control-sm" id="ecSiteId" min="1" placeholder="sites.id">
+          <label class="form-label">Site (optional)</label>
+          <select class="form-select form-control-sm" id="ecSiteSelect">
+            <option value="">— None —</option>
+          </select>
         </div>
         <div class="form-check">
           <input class="form-check-input" type="checkbox" id="ecActive" checked>
@@ -237,9 +237,76 @@
   });
 
   // Load job types + cards whenever modal opens (re-apply card from per-card "Add rate" after options refresh).
+  const API_CLIENTS = '/plugin/time_billing_module/api/refs/clients';
+  const API_SITES_BASE = '/plugin/time_billing_module/api/refs/sites';
+  let billClientsLoaded = false;
+
+  async function ensureBillCardClientOptions() {
+    if (billClientsLoaded) return;
+    const r = await fetch(API_CLIENTS, { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('clients');
+    const data = await r.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const ncc = document.getElementById('newCardClientSel');
+    const ecc = document.getElementById('ecClientSelect');
+    const mkOpts = (list) => {
+      let h = '<option value="">— None —</option>';
+      for (const c of list) {
+        const id = String(c.id);
+        const nm = String(c.name == null ? '' : c.name);
+        h += '<option value="' + id.replace(/"/g, '') + '">' + nm.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</option>';
+      }
+      return h;
+    };
+    const html = mkOpts(items);
+    if (ncc) ncc.innerHTML = html;
+    if (ecc) ecc.innerHTML = html;
+    billClientsLoaded = true;
+  }
+
+  async function fillBillCardSiteSelect(sel, clientId) {
+    if (!sel) return;
+    if (!clientId) { sel.innerHTML = '<option value="">— None —</option>'; return; }
+    const r = await fetch(API_SITES_BASE + '?client_id=' + encodeURIComponent(String(clientId)), { headers: { Accept: 'application/json' } });
+    if (!r.ok) { sel.innerHTML = '<option value="">— None —</option>'; return; }
+    const data = await r.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    let h = '<option value="">— None —</option>';
+    for (const s of items) {
+      const id = String(s.id);
+      const nm = String(s.name == null ? '' : s.name);
+      h += '<option value="' + id.replace(/"/g, '') + '">' + nm.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</option>';
+    }
+    sel.innerHTML = h;
+  }
+
+  const newCardClientSel = document.getElementById('newCardClientSel');
+  const newCardSiteSel = document.getElementById('newCardSiteSel');
+  const ecClientSelect = document.getElementById('ecClientSelect');
+  const ecSiteSelect = document.getElementById('ecSiteSelect');
+  if (newCardClientSel && newCardSiteSel) {
+    newCardClientSel.addEventListener('change', async () => {
+      await fillBillCardSiteSelect(newCardSiteSel, newCardClientSel.value);
+    });
+  }
+  if (ecClientSelect && ecSiteSelect) {
+    ecClientSelect.addEventListener('change', async () => {
+      await fillBillCardSiteSelect(ecSiteSelect, ecClientSelect.value);
+    });
+  }
+
   createModalEl.addEventListener('show.mdb.modal', async () => {
     const preselectCard = (createModalEl.dataset.preselectCardId || '').trim();
     delete createModalEl.dataset.preselectCardId;
+
+    try {
+      await ensureBillCardClientOptions();
+      if (newCardClientSel && newCardSiteSel && newCardClientSel.value) {
+        await fillBillCardSiteSelect(newCardSiteSel, newCardClientSel.value);
+      } else if (newCardSiteSel) {
+        newCardSiteSel.innerHTML = '<option value="">— None —</option>';
+      }
+    } catch (e) { console.warn(e); }
 
     await Promise.all([loadJobTypes(), loadCardsForSelect()]);
 
@@ -426,13 +493,19 @@
       });
 
       cardsBody.querySelectorAll('.js-edit-card').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
           document.getElementById('ecCardId').value = btn.getAttribute('data-id') || '';
           document.getElementById('ecName').value = btn.getAttribute('data-name') || '';
           const cr = btn.getAttribute('data-client-ref');
           const sr = btn.getAttribute('data-site-ref');
-          document.getElementById('ecClientId').value = cr && cr !== 'null' ? cr : '';
-          document.getElementById('ecSiteId').value = sr && sr !== 'null' ? sr : '';
+          try {
+            await ensureBillCardClientOptions();
+            const ecC = document.getElementById('ecClientSelect');
+            const ecS = document.getElementById('ecSiteSelect');
+            if (ecC) ecC.value = cr && cr !== 'null' ? String(cr) : '';
+            if (ecC && ecS) await fillBillCardSiteSelect(ecS, ecC.value);
+            if (ecS) ecS.value = sr && sr !== 'null' ? String(sr) : '';
+          } catch (e) { console.warn(e); }
           document.getElementById('ecActive').checked = (btn.getAttribute('data-active') || '1') !== '0';
           const m = mdb.Modal.getOrCreateInstance(editCardModalEl);
           m.show();
@@ -620,8 +693,8 @@
     const id = parseInt(document.getElementById('ecCardId').value, 10);
     const name = document.getElementById('ecName').value.trim();
     if (!id || !name) { alert('Name required'); return; }
-    const cidRaw = document.getElementById('ecClientId').value.trim();
-    const sidRaw = document.getElementById('ecSiteId').value.trim();
+    const cidRaw = (document.getElementById('ecClientSelect') && document.getElementById('ecClientSelect').value) || '';
+    const sidRaw = (document.getElementById('ecSiteSelect') && document.getElementById('ecSiteSelect').value) || '';
     const payload = {
       name,
       client_name: cidRaw ? parseInt(cidRaw, 10) : null,

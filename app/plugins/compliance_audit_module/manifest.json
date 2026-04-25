@@ -1,0 +1,44 @@
+{
+  "system_name": "compliance_audit_module",
+  "name": "Compliance & audit",
+  "description": "Unified assurance console: merged CAD, ePCR, comms, and admin audit timelines; governed exports with PIN step-up and export audit log.",
+  "version": "1.2.3",
+  "icon": "",
+  "settings": {
+    "export_row_cap": {
+      "value": 8000,
+      "editable": true
+    },
+    "step_up_ttl_minutes": {
+      "value": 15,
+      "editable": true
+    },
+    "pin_lockout_minutes": {
+      "value": 15,
+      "editable": true
+    }
+  },
+  "enabled": true,
+  "dependencies": ["website_module"],
+  "repository": "official",
+  "download_url": "",
+  "changelog": "1.2.3: compliance_policies domain (comp_policy_lifecycle_audit timeline + export). 1.2.2: domain filter semantics, governance export key, export resilience. 1.2.1: Clinical audit + EPCR access. 1.2: eDiscovery + SIEM.",
+  "repository_token": "",
+  "update_available": false,
+  "permission_required": null,
+  "access_permission": "compliance_audit_module.access",
+  "alternate_access_permissions": ["compliance_audit_module.inspection"],
+  "dashboard_category": "Governance & assurance",
+  "dashboard_icon": "clipboard2-pulse",
+  "declared_permissions": [
+    {
+      "id": "compliance_audit_module.inspection",
+      "label": "Compliance audit — inspection read-only (no export)"
+    },
+    {
+      "id": "compliance_audit_module.export",
+      "label": "Compliance audit — download export bundles (requires compliance PIN)"
+    }
+  ],
+  "installed": true
+}

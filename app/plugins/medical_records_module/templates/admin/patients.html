@@ -1,0 +1,854 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Patient Management - Sparrow ERP{% endblock %}
+{% block content %}
+<div class="container mt-5">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Patient Management</h1>
+    <!-- Add Client Button -->
+    <button type="button" class="btn btn-success" data-mdb-toggle="modal" data-mdb-target="#addClientModal">
+      Add Client
+    </button>
+  </div>
+
+  <!-- Live Search Bar -->
+  <div class="mb-3">
+    <input type="text" id="patientSearchInput" class="form-control" placeholder="Search patients by name or customer number" value="{{ request.args.get('q', '') }}">
+  </div>
+  
+  <!-- Patients Table -->
+  <div id="patientTableContainer">
+    <table class="table table-bordered table-striped" id="patientsTable">
+      <thead class="table-light">
+        <tr>
+          <th>Customer Number</th>
+          <th>Name</th>
+          <th>Date of Birth</th>
+          <th>Age</th>
+          <th>Gender</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for patient in patients %}
+        <tr>
+          <td>{{ patient.id }}</td>
+          <td>{{ patient.first_name }} {{ patient.last_name }}</td>
+          <td>{{ patient.date_of_birth }}</td>
+          <td>{{ patient.age }}</td>
+          <td>{{ patient.gender }}</td>
+          <td>
+            <a href="{{ url_for('medical_records_internal.admin_view_record', id=patient.id) }}" class="btn btn-sm btn-primary">View Record</a>
+            <a href="{{ url_for('medical_records_internal.edit_patient_record', id=patient.id) }}" class="btn btn-sm btn-warning">Edit</a>
+            <form action="{{ url_for('medical_records_internal.delete_patient_record', id=patient.id) }}" method="POST" class="d-inline">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this record?');">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  /* Make checkboxes more visible by applying an accent color and setting a fixed size */
+  input[type="checkbox"] {
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  width: 20px !important;
+  height: 20px !important;
+  border: 2px solid #ccc !important;
+  border-radius: 3px !important;
+  outline: none !important;
+  cursor: pointer !important;
+  position: relative !important;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #28a745 !important;
+  border: 2px solid #28a745 !important;
+}
+
+input[type="checkbox"]:checked::after {
+  color: white !important;
+  position: absolute !important;
+  top: 0px !important;
+  left: 4px !important;
+  font-size: 18px !important;
+}
+
+</style>
+
+<!-- ==================== Add Client Modal ==================== -->
+<div class="modal fade" id="addClientModal" tabindex="-1" aria-labelledby="addClientModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form id="patientForm" action="{{ url_for('medical_records_internal.add_patient_record') }}" method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addClientModalLabel">Add New Patient</h5>
+          <button type="button" class="btn-close" data-mdb-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Basic Patient Details -->
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label for="nhs_number" class="form-label">NHS Number</label>
+              <input type="text" class="form-control" id="nhs_number" name="nhs_number">
+            </div>
+            <!-- Care Company Search Field -->
+            <div class="col-md-6 mb-3">
+              <label for="care_company_search" class="form-label">Assign Care Company</label>
+              <input type="text" class="form-control" id="care_company_search" placeholder="Search by name or ID">
+              <input type="hidden" id="care_company_id" name="care_company_id">
+              <div id="care_company_results" class="list-group"></div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label for="first_name" class="form-label">First Name</label>
+              <input type="text" class="form-control" id="first_name" name="first_name" required>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="middle_name" class="form-label">Middle Name</label>
+              <input type="text" class="form-control" id="middle_name" name="middle_name">
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="last_name" class="form-label">Last Name</label>
+              <input type="text" class="form-control" id="last_name" name="last_name" required>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="address" class="form-label">Address</label>
+            <textarea class="form-control" id="address" name="address" required></textarea>
+          </div>
+          <div class="mb-3">
+            <label for="package_type" class="form-label">Package Type</label>
+            <input type="text" class="form-control" name="package_type" id="package_type">
+          </div>
+          <div class="mb-3">
+            <label for="contact_number" class="form-label">Contact Number</label>
+            <input type="tel" class="form-control" name="contact_number" id="contact_number">
+          </div>
+          
+          <!-- GP Details -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">GP Details</legend>
+            <div class="mb-3">
+              <label for="gp_name" class="form-label">GP Name</label>
+              <input type="text" class="form-control" id="gp_name">
+            </div>
+            <div class="mb-3">
+              <label for="gp_address" class="form-label">GP Address</label>
+              <textarea class="form-control" id="gp_address"></textarea>
+            </div>
+            <div class="mb-3">
+              <label for="gp_contact" class="form-label">GP Contact Number</label>
+              <input type="text" class="form-control" id="gp_contact">
+            </div>
+            <div class="mb-3">
+              <label for="gp_email" class="form-label">GP Email</label>
+              <input type="email" class="form-control" id="gp_email">
+            </div>
+          </fieldset>
+          <input type="hidden" name="gp_details" id="gp_details">
+          
+          <!-- Medical Conditions -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Medical Conditions</legend>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="no_medical_conditions">
+              <label class="form-check-label" for="no_medical_conditions">None Diagnosed</label>
+            </div>
+            <div id="medical_conditions_container">
+              <!-- Dynamic rows will be appended here -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add_medical_condition">Add Condition</button>
+          </fieldset>
+          <input type="hidden" name="medical_conditions" id="medical_conditions">
+          
+          <!-- Allergies -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Allergies</legend>
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="nkda">
+              <label class="form-check-label" for="nkda">No Known Drug Allergies (NKDA)</label>
+            </div>
+            <div id="allergies_container">
+              <!-- Dynamic rows will be appended here -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add_allergy">Add Allergy</button>
+          </fieldset>
+          <input type="hidden" name="allergies" id="allergies">
+          
+          <!-- Medications -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Medications</legend>
+            <div id="medications_container">
+              <!-- Dynamic medication rows -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add_medication">Add Medication</button>
+          </fieldset>
+          <input type="hidden" name="medications" id="medications">
+          
+          <!-- Hidden System Fields -->
+          <input type="hidden" name="previous_visit_records" value="{}">
+          <input type="hidden" name="notes" value="{}">
+          <input type="hidden" name="message_log" value="{}">
+          
+          <!-- Access Requirements (Dynamic Multiple Rows) -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Access Requirements</legend>
+            <div id="access_requirements_container">
+              <!-- Dynamic rows will be added here -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add_access_requirement">Add Access Requirement</button>
+          </fieldset>
+          <input type="hidden" name="access_requirements" id="access_requirements">
+          
+          <!-- Payment Details -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Payment Details</legend>
+            <div class="mb-3">
+              <label for="payment_method" class="form-label">Payment Method</label>
+              <input type="text" class="form-control" id="payment_method">
+            </div>
+            <div class="mb-3">
+              <label for="billing_email" class="form-label">Billing Email</label>
+              <input type="email" class="form-control" id="billing_email">
+            </div>
+          </fieldset>
+          <input type="hidden" name="payment_details" id="payment_details">
+          
+          <!-- Next of Kin & LPA (Dynamic Multiple Rows) -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Next of Kin & LPA</legend>
+            <!-- Container for multiple Next of Kin -->
+            <div id="nok_container">
+              <!-- Dynamic NOK rows will go here -->
+            </div>
+            <button type="button" class="btn btn-secondary" id="add_nok">Add Next of Kin</button>
+          </fieldset>
+          <!-- Hidden fields remain the same so your backend code does not change -->
+          <input type="hidden" name="next_of_kin_details" id="next_of_kin_details">
+          <input type="hidden" name="lpa_details" id="lpa_details">
+          
+          <!-- Resuscitation Directive -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Resuscitation Directive</legend>
+            <div class="mb-3">
+              <label class="form-label">For Resuscitation</label><br>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="resus_option" id="resus_yes" value="Yes">
+                <label class="form-check-label" for="resus_yes">Yes</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="resus_option" id="resus_no" value="No">
+                <label class="form-check-label" for="resus_no">No</label>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Documents in Place</label><br>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_dnar" value="DNAR">
+                <label class="form-check-label" for="doc_dnar">DNAR</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_respect" value="Respect Form">
+                <label class="form-check-label" for="doc_respect">Respect Form</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_advanced" value="Advanced Directive">
+                <label class="form-check-label" for="doc_advanced">Advanced Directive</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_living" value="Living Will">
+                <label class="form-check-label" for="doc_living">Living Will</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_lpa" value="LPA">
+                <label class="form-check-label" for="doc_lpa">LPA</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="doc_care" value="Care Plan">
+                <label class="form-check-label" for="doc_care">Care Plan</label>
+              </div>
+            </div>
+          </fieldset>
+          <input type="hidden" name="resuscitation_directive" id="resuscitation_directive">
+          
+          <!-- Documents Upload -->
+          <div class="mb-3">
+            <label for="documents" class="form-label">Documents</label>
+            <input type="file" class="form-control" id="documents" name="documents" multiple>
+          </div>
+          
+          <!-- Weight -->
+          <fieldset class="border p-3 mb-3">
+            <legend class="w-auto">Weight</legend>
+            <div class="mb-3">
+              <label for="weight_value" class="form-label">Weight (kg)</label>
+              <input type="number" class="form-control" id="weight_value" step="0.1">
+            </div>
+            <div class="mb-3">
+              <label for="date_weighed" class="form-label">Date Weighed</label>
+              <input type="date" class="form-control" id="date_weighed">
+            </div>
+            <div class="mb-3">
+              <label for="weight_source" class="form-label">Source of Weight Measurement</label>
+              <select class="form-control" id="weight_source">
+                <option value="">Select Source</option>
+                <option value="Home">Home</option>
+                <option value="Relative">Relative</option>
+                <option value="Hospital">Hospital</option>
+                <option value="Crew">Crew</option>
+                <option value="Assessments">Assessments</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </fieldset>
+          <input type="hidden" name="weight" id="weight">
+
+          <!-- Standard Fields -->
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label for="date_of_birth" class="form-label">Date of Birth</label>
+              <input type="date" class="form-control" id="date_of_birth" name="date_of_birth" required>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="gender" class="form-label">Gender</label>
+              <select class="form-control" id="gender" name="gender" required>
+                <option value="">Select Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label for="postcode" class="form-label">Postcode</label>
+              <input type="text" class="form-control" id="postcode" name="postcode" required>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-primary">Add Patient</button>
+          <button type="button" class="btn btn-secondary" data-mdb-dismiss="modal">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+  <!-- Persistent Modal for Personal PIN Entry -->
+  <div class="modal fade"
+       id="pinModal"
+       tabindex="-1"
+       aria-labelledby="pinModalLabel"
+       aria-hidden="true"
+       data-mdb-backdrop="static"
+       data-mdb-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pinModalLabel">Enter Your Personal PIN</h5>
+        </div>
+        <div class="modal-body">
+          <div class="form-outline mb-3">
+            <input type="password" id="personalPinInput" class="form-control" maxlength="6" placeholder="6-digit PIN" required>
+            <label class="form-label" for="personalPinInput">Personal PIN</label>
+          </div>
+          <div id="pinError" class="text-danger" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="verifyPinButton" class="btn btn-primary">Verify PIN</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal fade"
+       id="pinModal"
+       tabindex="-1"
+       aria-labelledby="pinModalLabel"
+       aria-hidden="true"
+       data-mdb-backdrop="static"
+       data-mdb-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="pinModalLabel">Enter Your Personal PIN</h5>
+        </div>
+        <div class="modal-body">
+          <div class="form-outline mb-3">
+            <input
+              type="password"
+              id="personalPinInput"
+              class="form-control"
+              maxlength="6"
+              placeholder="6-digit PIN"
+              required
+            >
+            <label class="form-label" for="personalPinInput">Personal PIN</label>
+          </div>
+          <div id="pinError" class="text-danger" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="verifyPinButton" class="btn btn-primary">Verify PIN</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MDB / Bootstrap JS -->
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/6.3.1/mdb.min.js"
+  ></script>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function() {
+      const pinModalEl = document.getElementById("pinModal");
+      const pinModal = new mdb.Modal(pinModalEl);
+
+      // Show the modal as soon as the page loads
+      pinModal.show();
+
+      // On modal show, modify the backdrop with !important
+      pinModalEl.addEventListener("show.mdb.modal", function() {
+        setTimeout(function() {
+          const backdrop = document.querySelector(".modal-backdrop.show");
+          if (backdrop) {
+            // Force heavy overlay + blur with !important
+            backdrop.style.setProperty("background-color", "rgba(0,0,0,0.98)", "important");
+            backdrop.style.setProperty("backdrop-filter", "blur(50px)", "important");
+            backdrop.style.setProperty("-webkit-backdrop-filter", "blur(50px)", "important");
+          }
+        }, 10);
+      });
+
+      // Example PIN verification
+      document.getElementById("verifyPinButton").addEventListener("click", function() {
+        const pinValue = document.getElementById("personalPinInput").value.trim();
+        if (pinValue.length !== 6) {
+          document.getElementById("pinError").innerText = "Enter a 6-digit PIN.";
+          document.getElementById("pinError").style.display = "block";
+          return;
+        }
+
+        // Replace with your verification logic
+        fetch("{{ url_for('medical_records_internal.verify_pin') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ personal_pin: pinValue })
+        })
+        .then(response => response.json().then(data => ({ status: response.status, data })))
+        .then(obj => {
+          if (obj.status !== 200) {
+            document.getElementById("pinError").innerText = obj.data.error || "Invalid PIN.";
+            document.getElementById("pinError").style.display = "block";
+          } else {
+            pinModal.hide();
+          }
+        })
+        .catch(error => {
+          console.error("Error verifying PIN:", error);
+        });
+      });
+    });
+  </script>
+
+
+<script>
+  // -------------------------------------------------------------------
+  // 1) Utility functions for dynamic row creation
+  // -------------------------------------------------------------------
+  
+  function createMedicalConditionRow() {
+    var row = document.createElement('div');
+    row.className = 'row mb-2';
+    row.innerHTML = `
+      <div class="col-md-4">
+        <input type="month" class="form-control condition_date" placeholder="Diagnosed Date">
+      </div>
+      <div class="col-md-4">
+        <input type="text" class="form-control condition_severity" placeholder="Severity/Stage">
+      </div>
+      <div class="col-md-3">
+        <input type="text" class="form-control condition_name" placeholder="Condition Name">
+      </div>
+      <div class="col-md-1">
+        <button type="button" class="btn btn-danger remove_condition">&times;</button>
+      </div>
+    `;
+    return row;
+  }
+  
+  function createAllergyRow() {
+    var row = document.createElement('div');
+    row.className = 'row mb-2';
+    row.innerHTML = `
+      <div class="col-md-4">
+        <input type="month" class="form-control allergy_date" placeholder="Diagnosed Date">
+      </div>
+      <div class="col-md-4">
+        <input type="text" class="form-control allergy_name" placeholder="Allergy Name">
+      </div>
+      <div class="col-md-3">
+        <input type="text" class="form-control allergy_severity" placeholder="Severity">
+      </div>
+      <div class="col-md-1">
+        <button type="button" class="btn btn-danger remove_allergy">&times;</button>
+      </div>
+    `;
+    return row;
+  }
+  
+  function createMedicationRow() {
+    var row = document.createElement('div');
+    row.className = 'border p-2 mb-2';
+    row.innerHTML = `
+      <div class="mb-2">
+        <label>Medication Name</label>
+        <input type="text" class="form-control med_name">
+      </div>
+      <div class="mb-2">
+        <label>Date Prescribed</label>
+        <input type="date" class="form-control med_date_prescribed">
+      </div>
+      <div class="mb-2">
+        <label>Dosage</label>
+        <input type="text" class="form-control med_dosage">
+      </div>
+      <div class="mb-2">
+        <label>Frequency</label>
+        <input type="text" class="form-control med_frequency">
+      </div>
+      <div class="mb-2">
+        <label>Prescriber (if Known)</label>
+        <input type="text" class="form-control med_prescriber">
+      </div>
+      <div class="mb-2">
+        <label>Review Date</label>
+        <input type="date" class="form-control med_review_date">
+        <div class="form-check">
+          <input type="checkbox" class="form-check-input med_indefinite">
+          <label class="form-check-label">Indefinite</label>
+        </div>
+      </div>
+      <div class="mb-2">
+        <label>Reason For Prescription</label>
+        <input type="text" class="form-control med_reason">
+      </div>
+      <button type="button" class="btn btn-danger remove_medication">Remove Medication</button>
+    `;
+    return row;
+  }
+  
+  function createAccessRequirementRow() {
+    var row = document.createElement('div');
+    row.className = 'row mb-2';
+    row.innerHTML = `
+      <div class="col-md-5">
+        <select class="form-control access_category">
+          <option value="">Select Category</option>
+          <option value="Keysafe Number">Keysafe Number</option>
+          <option value="Access Requirements">Access Requirements</option>
+          <option value="Door Code">Door Code</option>
+          <option value="Entry Instructions">Entry Instructions</option>
+        </select>
+      </div>
+      <div class="col-md-5">
+        <input type="text" class="form-control access_details" placeholder="Details">
+      </div>
+      <div class="col-md-2">
+        <button type="button" class="btn btn-danger remove_access_requirement">&times;</button>
+      </div>
+    `;
+    return row;
+  }
+  
+  /**
+   * Create a Next of Kin row, each with an “Is LPA?” checkbox.
+   */
+  function createNextOfKinRow() {
+    const row = document.createElement('div');
+    row.className = 'border p-2 mb-3'; /* Adjust styling as desired */
+    row.innerHTML = `
+      <div class="mb-2">
+        <label>Name</label>
+        <input type="text" class="form-control nok_name">
+      </div>
+      <div class="mb-2">
+        <label>Relationship</label>
+        <input type="text" class="form-control nok_relationship">
+      </div>
+      <div class="mb-2">
+        <label>Contact Number</label>
+        <input type="text" class="form-control nok_contact">
+      </div>
+      <div class="mb-2">
+        <label>Address</label>
+        <textarea class="form-control nok_address"></textarea>
+      </div>
+      <div class="form-check mb-2">
+        <input type="checkbox" class="form-check-input nok_is_lpa" id="isLPA">
+        <label class="form-check-label" for="isLPA">Is LPA?</label>
+      </div>
+      <button type="button" class="btn btn-danger remove_nok">Remove</button>
+    `;
+    return row;
+  }
+  
+  // -------------------------------------------------------------------
+  // 2) Event listeners for adding dynamic rows
+  // -------------------------------------------------------------------
+  document.getElementById('add_medical_condition').addEventListener('click', function() {
+    if(document.getElementById('no_medical_conditions').checked) return;
+    document.getElementById('medical_conditions_container').appendChild(createMedicalConditionRow());
+  });
+  
+  document.getElementById('add_allergy').addEventListener('click', function() {
+    if(document.getElementById('nkda').checked) return;
+    document.getElementById('allergies_container').appendChild(createAllergyRow());
+  });
+  
+  document.getElementById('add_medication').addEventListener('click', function() {
+    document.getElementById('medications_container').appendChild(createMedicationRow());
+  });
+  
+  document.getElementById('add_access_requirement').addEventListener('click', function() {
+    document.getElementById('access_requirements_container').appendChild(createAccessRequirementRow());
+  });
+  
+  // Next of Kin
+  document.getElementById('add_nok').addEventListener('click', function() {
+    document.getElementById('nok_container').appendChild(createNextOfKinRow());
+  });
+  
+  // -------------------------------------------------------------------
+  // 3) Removing dynamic rows
+  // -------------------------------------------------------------------
+  document.addEventListener('click', function(e) {
+    if(e.target && e.target.classList.contains('remove_condition')) {
+      e.target.closest('.row').remove();
+    }
+    if(e.target && e.target.classList.contains('remove_allergy')) {
+      e.target.closest('.row').remove();
+    }
+    if(e.target && e.target.classList.contains('remove_medication')) {
+      e.target.closest('.border').remove();
+    }
+    if(e.target && e.target.classList.contains('remove_access_requirement')) {
+      e.target.closest('.row').remove();
+    }
+    if(e.target && e.target.classList.contains('remove_nok')) {
+      e.target.closest('.border').remove();
+    }
+  });
+  
+  // -------------------------------------------------------------------
+  // 4) Toggle dynamic sections based on checkboxes
+  // -------------------------------------------------------------------
+  document.getElementById('no_medical_conditions').addEventListener('change', function() {
+    document.getElementById('medical_conditions_container').style.display = this.checked ? 'none' : 'block';
+  });
+  
+  document.getElementById('nkda').addEventListener('change', function() {
+    document.getElementById('allergies_container').style.display = this.checked ? 'none' : 'block';
+  });
+  
+  // -------------------------------------------------------------------
+  // 5) On form submission: gather structured inputs into JSON
+  // -------------------------------------------------------------------
+  document.getElementById('patientForm').addEventListener('submit', function(e) {
+    // 1) GP Details
+    var gpDetails = {
+      name: document.getElementById('gp_name').value,
+      address: document.getElementById('gp_address').value,
+      contact: document.getElementById('gp_contact').value,
+      email: document.getElementById('gp_email').value
+    };
+    document.getElementById('gp_details').value = JSON.stringify(gpDetails);
+    
+    // 2) Medical Conditions
+    var medicalConditions = [];
+    if(!document.getElementById('no_medical_conditions').checked) {
+      document.querySelectorAll('#medical_conditions_container .row').forEach(function(row) {
+        medicalConditions.push({
+          diagnosed_date: row.querySelector('.condition_date').value,
+          severity: row.querySelector('.condition_severity').value,
+          condition_name: row.querySelector('.condition_name').value
+        });
+      });
+    }
+    document.getElementById('medical_conditions').value = JSON.stringify(medicalConditions);
+    
+    // 3) Allergies
+    var allergies = [];
+    if(!document.getElementById('nkda').checked) {
+      document.querySelectorAll('#allergies_container .row').forEach(function(row) {
+        allergies.push({
+          diagnosed_date: row.querySelector('.allergy_date').value,
+          allergy_name: row.querySelector('.allergy_name').value,
+          severity: row.querySelector('.allergy_severity').value
+        });
+      });
+    }
+    document.getElementById('allergies').value = JSON.stringify(allergies);
+    
+    // 4) Medications
+    var medications = [];
+    document.querySelectorAll('#medications_container .border').forEach(function(row) {
+      medications.push({
+        medication_name: row.querySelector('.med_name').value,
+        date_prescribed: row.querySelector('.med_date_prescribed').value,
+        dosage: row.querySelector('.med_dosage').value,
+        frequency: row.querySelector('.med_frequency').value,
+        prescriber: row.querySelector('.med_prescriber').value,
+        review_date: row.querySelector('.med_indefinite').checked
+          ? "Indefinite"
+          : row.querySelector('.med_review_date').value,
+        reason: row.querySelector('.med_reason').value
+      });
+    });
+    document.getElementById('medications').value = JSON.stringify(medications);
+    
+    // 5) Access Requirements
+    var accessReqs = [];
+    document.querySelectorAll('#access_requirements_container .row').forEach(function(row) {
+      accessReqs.push({
+        category: row.querySelector('.access_category').value,
+        details: row.querySelector('.access_details').value
+      });
+    });
+    document.getElementById('access_requirements').value = JSON.stringify(accessReqs);
+    
+    // 6) Payment Details
+    var paymentDetails = {
+      payment_method: document.getElementById('payment_method').value,
+      billing_email: document.getElementById('billing_email').value
+    };
+    document.getElementById('payment_details').value = JSON.stringify(paymentDetails);
+    
+    // 7) Next of Kin & LPA
+    var nextOfKinArray = [];
+    var lpaArray = [];
+  
+    document.querySelectorAll('#nok_container .border').forEach(function(row) {
+      let name = row.querySelector('.nok_name').value;
+      let relationship = row.querySelector('.nok_relationship').value;
+      let contact = row.querySelector('.nok_contact').value;
+      let address = row.querySelector('.nok_address').value;
+      let isLPA = row.querySelector('.nok_is_lpa').checked;
+  
+      // Always add to the main Next of Kin array
+      nextOfKinArray.push({
+        name: name,
+        relationship: relationship,
+        contact: contact,
+        address: address
+      });
+  
+      // If "Is LPA?" is checked, also push to the LPA array
+      if(isLPA) {
+        lpaArray.push({
+          name: name,
+          relationship: relationship,
+          contact: contact,
+          address: address
+        });
+      }
+    });
+    // Store as JSON strings in the existing hidden fields (no backend change needed)
+    document.getElementById('next_of_kin_details').value = JSON.stringify(nextOfKinArray);
+    document.getElementById('lpa_details').value = JSON.stringify(lpaArray);
+    
+    // 8) Resuscitation Directive
+    var resusDirective = {
+      for_resuscitation: document.querySelector('input[name="resus_option"]:checked')
+        ? document.querySelector('input[name="resus_option"]:checked').value
+        : "",
+      documents: []
+    };
+    if(document.getElementById('doc_dnar').checked)    resusDirective.documents.push("DNAR");
+    if(document.getElementById('doc_respect').checked) resusDirective.documents.push("Respect Form");
+    if(document.getElementById('doc_advanced').checked)resusDirective.documents.push("Advanced Directive");
+    if(document.getElementById('doc_living').checked)  resusDirective.documents.push("Living Will");
+    if(document.getElementById('doc_lpa').checked)     resusDirective.documents.push("LPA");
+    if(document.getElementById('doc_care').checked)    resusDirective.documents.push("Care Plan");
+    document.getElementById('resuscitation_directive').value = JSON.stringify(resusDirective);
+    
+    // 9) Weight
+    var weightData = {
+      weight: document.getElementById('weight_value').value,
+      date_weighed: document.getElementById('date_weighed').value,
+      source: document.getElementById('weight_source').value
+    };
+    document.getElementById('weight').value = JSON.stringify(weightData);
+  
+    // After this, the form will submit normally
+  });
+  </script>
+
+<script>
+  document.getElementById("care_company_search").addEventListener("input", function() {
+    let query = this.value.trim();
+  
+    // If you want the search to run even if there's only 1 character, remove any length checks:
+    if (!query) {
+      document.getElementById("care_company_results").innerHTML = "";
+      return;
+    }
+  
+    fetch("{{ url_for('medical_records_internal.search_care_company') }}?q=" + encodeURIComponent(query))
+      .then(response => response.json())
+      .then(data => {
+        let resultsDiv = document.getElementById("care_company_results");
+        resultsDiv.innerHTML = ""; // Clear old results
+  
+        data.companies.forEach(company => {
+          let item = document.createElement("a");
+          item.className = "list-group-item list-group-item-action";
+          item.textContent = `${company.name} (ID: ${company.id})`;
+  
+          item.onclick = function() {
+            // Fill text input + hidden ID field
+            document.getElementById("care_company_search").value = company.name;
+            document.getElementById("care_company_id").value = company.id;
+            // Clear results after selection
+            resultsDiv.innerHTML = "";
+          };
+  
+          resultsDiv.appendChild(item);
+        });
+      })
+      .catch(error => {
+        console.error("Error fetching care company search results:", error);
+      });
+  });
+  </script>
+  
+
+<script>
+// Live search: Listen for input changes on the search bar.
+document.getElementById("patientSearchInput").addEventListener("input", function() {
+    var query = this.value.trim();
+    fetch("{{ url_for('medical_records_internal.admin_search') }}?q=" + encodeURIComponent(query))
+      .then(response => response.json())
+      .then(data => {
+         var tbody = document.querySelector("#patientsTable tbody");
+         tbody.innerHTML = "";
+         data.patients.forEach(function(patient) {
+            var csrfToken = {{ csrf_token()|tojson }};
+            var row = `\n            <tr>\n              <td>${patient.id}</td>\n              <td>${patient.first_name} ${patient.last_name}</td>\n              <td>${patient.date_of_birth}</td>\n              <td>${patient.age}</td>\n              <td>${patient.gender}</td>\n              <td>\n                <a href="{{ url_for('medical_records_internal.admin_view_record', id='') }}${patient.id}" class="btn btn-sm btn-primary">View Record</a>\n                <a href="{{ url_for('medical_records_internal.edit_patient_record', id='') }}${patient.id}" class="btn btn-sm btn-warning">Edit</a>\n                <form action="{{ url_for('medical_records_internal.delete_patient_record', id='') }}${patient.id}" method="POST" class="d-inline">\n                  <input type="hidden" name="_csrf_token" value="${csrfToken}">\n                  <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this record?');">Delete</button>\n                </form>\n              </td>\n            </tr>\n            `;
+            tbody.insertAdjacentHTML('beforeend', row);
+         });
+      })
+      .catch(error => console.error("Error fetching patient search results:", error));
+});
+</script>
+{% endblock %}

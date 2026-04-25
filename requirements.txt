@@ -86,6 +86,7 @@ pyhanko-certvalidator==0.29.0
 PyMySQL==1.1.2
 pyparsing==3.3.2
 pywebpush==1.14.0
+pyproj==3.7.1
 pypdf==6.0.0
 pyphen==0.17.2
 pytesseract==0.3.13

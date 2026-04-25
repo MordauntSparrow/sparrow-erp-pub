@@ -11,11 +11,17 @@ Internal alerts go to:
 
 Environment:
   RECRUITMENT_EMAILS_DISABLED   — set to 1/true to skip all recruitment emails
-  RECRUITMENT_NOTIFY_ADMIN_EMAILS — optional extra internal recipients (always merged in)
+  RECRUITMENT_NOTIFY_ADMIN_EMAILS — optional extra internal recipients (always merged in; not affected by user prefs)
   RECRUITMENT_NOTIFY_INCLUDE_SUPERUSERS — default true; set 0/false to exclude superuser role from internal alerts
   RECRUITMENT_PUBLIC_BASE_URL   — site origin for links in emails (e.g. https://hr.example.com)
   RAILWAY_PUBLIC_DOMAIN       — optional; Railway hostname (https:// added if no scheme); used if no explicit base URL
   Applicant-facing links use {origin}/vacancies; post-hire employee portal hint uses {origin}/employee-portal.
+
+Outbound email (when SMTP is configured) includes: new application, applicant registration welcome,
+pre-hire request added / approved / rejected, stage changes, interview details, form tasks, hire notice.
+
+Staff users with recruitment access can opt out of internal **email** categories under
+**Account → Email notifications** (in-app); realtime panel events are unchanged.
 """
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.objects import get_db_connection
+from app.user_notification_preferences import user_wants_recruitment_internal_email
 from app.public_base import (
     EMPLOYEE_PORTAL_PUBLIC_PATH,
     RECRUITMENT_VACANCIES_PATH,
@@ -116,15 +123,25 @@ def _env_extra_notify_emails() -> List[str]:
     return [x.strip().lower() for x in raw.split(",") if x.strip() and "@" in x.strip()]
 
 
-def list_recruitment_internal_notify_targets() -> Tuple[List[str], List[str]]:
+def user_qualifies_for_recruitment_internal_list(user) -> bool:
+    """True if this account is in the same audience as internal recruitment emails (for self-service prefs)."""
+    role = (getattr(user, "role", None) or "").strip().lower()
+    if _include_superusers_for_internal_notify() and role == "superuser":
+        return True
+    raw = getattr(user, "permissions", None) or []
+    perms = [str(x).strip() for x in raw if str(x).strip()]
+    pset = set(perms)
+    return bool(pset & _recruitment_internal_notify_permission_ids())
+
+
+def list_recruitment_internal_notify_recipients() -> List[Tuple[str, Optional[str]]]:
     """
-    Returns (emails, user_ids) for staff who should receive internal recruitment alerts
-    and Socket.IO recruitment_event fanout. Deduplicated emails (lowercase).
+    (email, user_id) for staff eligible for recruitment internal alerts.
+    ``user_id`` is None for addresses from RECRUITMENT_NOTIFY_ADMIN_EMAILS only (always receive mail).
+    Sorted by email; one row per email (first matching user id kept).
     """
     notify_perm_ids = _recruitment_internal_notify_permission_ids()
-    emails: Set[str] = set()
-    user_ids: List[str] = []
-    seen_id: Set[str] = set()
+    by_email: Dict[str, Optional[str]] = {}
     include_su = _include_superusers_for_internal_notify()
 
     conn = get_db_connection()
@@ -155,17 +172,26 @@ def list_recruitment_internal_notify_targets() -> Tuple[List[str], List[str]]:
             match = True
         if not match:
             continue
-        if sid and sid not in seen_id:
-            seen_id.add(sid)
-            user_ids.append(sid)
         em = (row.get("email") or "").strip().lower()
-        if em and "@" in em:
-            emails.add(em)
+        if not em or "@" not in em:
+            continue
+        if em not in by_email:
+            by_email[em] = sid or None
 
     for extra in _env_extra_notify_emails():
-        emails.add(extra)
+        by_email.setdefault(extra, None)
 
-    return sorted(emails), user_ids
+    return sorted(by_email.items(), key=lambda t: t[0])
+
+
+def _internal_notify_user_ids() -> List[str]:
+    seen: Set[str] = set()
+    out: List[str] = []
+    for _, uid in list_recruitment_internal_notify_recipients():
+        if uid and uid not in seen:
+            seen.add(uid)
+            out.append(uid)
+    return out
 
 
 def _get_email_manager():
@@ -212,20 +238,33 @@ def _send_applicant_email(to_email: str, subject: str, body: str) -> None:
     if not em:
         return
     try:
-        em.send_email(subject=subject, body=body, recipients=[to_email.strip().lower()])
+        from app.email_branding import send_branded_email
+
+        send_branded_email(
+            em,
+            subject,
+            body,
+            [to_email.strip().lower()],
+            preheader=subject,
+        )
     except Exception as e:
         logger.warning("Recruitment: applicant email failed (%s): %s", to_email, e)
 
 
-def _send_internal_email(subject: str, body: str) -> None:
-    recipients, _ = list_recruitment_internal_notify_targets()
-    if not recipients:
+def _send_internal_email(subject: str, body: str, *, internal_kind: str) -> None:
+    filtered: List[str] = []
+    for email, uid in list_recruitment_internal_notify_recipients():
+        if user_wants_recruitment_internal_email(uid, internal_kind):
+            filtered.append(email)
+    if not filtered:
         return
     em = _get_email_manager()
     if not em:
         return
     try:
-        em.send_email(subject=subject, body=body, recipients=recipients)
+        from app.email_branding import send_branded_email
+
+        send_branded_email(em, subject, body, filtered, preheader=subject)
     except Exception as e:
         logger.warning("Recruitment: internal email failed: %s", e)
 
@@ -237,7 +276,7 @@ def emit_recruitment_panel_event(event_type: str, payload: Dict[str, Any]) -> No
     except Exception:
         return
     body = {"type": str(event_type), **(payload or {})}
-    _, panel_ids = list_recruitment_internal_notify_targets()
+    panel_ids = _internal_notify_user_ids()
     for uid in panel_ids:
         try:
             socketio.emit("recruitment_event", body, room=f"panel_user_{uid}")
@@ -264,6 +303,7 @@ def notify_applicant_stage_change(application_id: int, new_stage: str) -> None:
     _send_internal_email(
         f"[Recruitment] Stage → {label}: {opening}",
         f"Application #{application_id} ({name}) is now in stage: {label}.\nOpening: {opening}\n",
+        internal_kind="stage_change",
     )
     emit_recruitment_panel_event(
         "stage_change",
@@ -297,11 +337,71 @@ def notify_interview_details_updated(application_id: int) -> None:
     _send_internal_email(
         f"[Recruitment] Interview details set: {opening}",
         f"Application #{application_id} ({name}) — interview arrangement updated.\n",
+        internal_kind="interview",
     )
     emit_recruitment_panel_event(
         "interview_details",
         {"application_id": application_id, "opening_title": opening},
     )
+
+
+def notify_applicant_prehire_request_added(application_id: int, request_id: int) -> None:
+    """Email applicant (and internal staff) when HR adds a new pre-hire document request."""
+    row = _fetch_application_row(application_id)
+    if not row:
+        return
+    email = (row.get("applicant_email") or "").strip()
+    name = (row.get("applicant_name") or "there").strip()
+    opening = (row.get("opening_title") or "").strip()
+    title = fetch_prehire_request_title(request_id, application_id)
+    subj = f"Action needed: {title}"
+    body = (
+        f"Hello {name},\n\n"
+        f"HR has added a pre-hire request for your application for \"{opening}\": {title}.\n"
+        f"Please sign in via {_applicant_portal_hint()} and open your application to upload or confirm what is needed.\n\n"
+        f"(Application #{application_id})\n"
+    )
+    _send_applicant_email(email, subj, body)
+    _send_internal_email(
+        f"[Recruitment] Pre-hire request added: {title}",
+        f"Application #{application_id} ({name}) — new pre-hire item: {title}.\n",
+        internal_kind="prehire",
+    )
+    emit_recruitment_panel_event(
+        "prehire_request_added",
+        {
+            "application_id": application_id,
+            "request_id": request_id,
+            "opening_title": opening,
+            "title": title,
+        },
+    )
+
+
+def notify_applicant_account_registered(email: str, display_name: str) -> None:
+    """Welcome email after public applicant registration (best-effort)."""
+    em = (email or "").strip().lower()
+    if not em or "@" not in em:
+        return
+    if _emails_globally_disabled():
+        return
+    mgr = _get_email_manager()
+    if not mgr:
+        return
+    name = (display_name or "").strip() or "there"
+    subj = "Your applicant account is ready"
+    body = (
+        f"Hello {name},\n\n"
+        "Thanks for registering on our careers site.\n"
+        f"You can browse vacancies and apply when signed in:\n{_applicant_portal_hint()}\n\n"
+        "Use the same email and password you chose at registration.\n"
+    )
+    try:
+        from app.email_branding import send_branded_email
+
+        send_branded_email(mgr, subj, body, [em], preheader=subj)
+    except Exception as e:
+        logger.warning("Recruitment: applicant registration email failed (%s): %s", em, e)
 
 
 def notify_prehire_outcome(
@@ -339,6 +439,7 @@ def notify_prehire_outcome(
     _send_internal_email(
         f"[Recruitment] Pre-hire {'approved' if approved else 'rejected'}: {title}",
         f"Application #{application_id} — {title}\n",
+        internal_kind="prehire",
     )
     emit_recruitment_panel_event(
         "prehire_" + ("approved" if approved else "rejected"),
@@ -364,6 +465,7 @@ def notify_new_application_submitted(application_id: int) -> None:
     _send_internal_email(
         f"[Recruitment] New application: {opening}",
         f"{name} <{email}> applied for \"{opening}\" (application #{application_id}).\n",
+        internal_kind="new_application",
     )
     emit_recruitment_panel_event(
         "new_application",
@@ -386,6 +488,11 @@ def notify_applicant_new_task(application_id: int) -> None:
         f"(Application #{application_id})\n"
     )
     _send_applicant_email(email, subj, body)
+    _send_internal_email(
+        f"[Recruitment] New applicant task: {opening}",
+        f"Application #{application_id} ({name}) — a form or task was assigned.\n",
+        internal_kind="form_task",
+    )
     emit_recruitment_panel_event(
         "new_task",
         {"application_id": application_id, "opening_title": opening},
@@ -418,6 +525,7 @@ def notify_applicant_hired(application_id: int, contractor_id: int) -> None:
     _send_internal_email(
         f"[Recruitment] Hired: {opening}",
         f"{name} hired as contractor #{contractor_id} (application #{application_id}).\n",
+        internal_kind="hired",
     )
     emit_recruitment_panel_event(
         "hired",

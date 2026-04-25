@@ -87,7 +87,8 @@ def _create_table(conn, name: str, columns_sql: str) -> None:
             pass
 
 
-def _alter_add_column(conn, table: str, col_def: str) -> None:
+def _alter_add_column(conn, table: str, col_def: str) -> bool:
+    """Return True if the column was added; False if it already existed or on error."""
     parts = col_def.strip().split(None, 1)
     col_name = parts[0]
     rest = parts[1] if len(parts) > 1 else ""
@@ -96,9 +97,11 @@ def _alter_add_column(conn, table: str, col_def: str) -> None:
         cur.execute(f"ALTER TABLE `{table}` ADD COLUMN `{col_name}` {rest}")
         conn.commit()
         print(f"[crm_module] Added column {table}.{col_name}")
+        return True
     except Exception as e:
         if "Duplicate column" not in str(e):
             print(f"[crm_module] ALTER {table}.{col_name}: {e}")
+        return False
     finally:
         try:
             cur.close()
@@ -169,6 +172,48 @@ def _seed_event_plan_questions(conn) -> None:
 
 
 def _migrate_crm_extensions(conn) -> None:
+    _create_table(
+        conn,
+        "crm_dispatch_bases",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        label VARCHAR(128) NOT NULL,
+        postcode VARCHAR(32) DEFAULT NULL,
+        what3words VARCHAR(128) DEFAULT NULL,
+        lat DECIMAL(10,7) DEFAULT NULL,
+        lng DECIMAL(11,7) DEFAULT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_crm_dispatch_bases_sort (sort_order, id)
+        """,
+    )
+    _create_table(
+        conn,
+        "crm_account_saved_venues",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        account_id INT NOT NULL,
+        label VARCHAR(255) NOT NULL,
+        venue_address VARCHAR(512) DEFAULT NULL,
+        venue_postcode VARCHAR(32) DEFAULT NULL,
+        venue_what3words VARCHAR(128) DEFAULT NULL,
+        venue_lat DECIMAL(10,7) DEFAULT NULL,
+        venue_lng DECIMAL(11,7) DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY idx_crm_asv_account (account_id),
+        CONSTRAINT fk_crm_asv_account
+            FOREIGN KEY (account_id) REFERENCES crm_accounts(id) ON DELETE CASCADE
+        """,
+    )
+    _alter_add_column(
+        conn, "crm_accounts", "operating_base_label VARCHAR(128) DEFAULT NULL"
+    )
+    _alter_add_column(
+        conn, "crm_accounts", "operating_base_postcode VARCHAR(32) DEFAULT NULL"
+    )
+    _alter_add_column(conn, "crm_accounts", "operating_base_lat DECIMAL(10,7) DEFAULT NULL")
+    _alter_add_column(conn, "crm_accounts", "operating_base_lng DECIMAL(11,7) DEFAULT NULL")
     _alter_add_column(conn, "crm_event_plans", "wizard_step TINYINT NOT NULL DEFAULT 1")
     _alter_add_column(conn, "crm_event_plans", "handoff_status VARCHAR(32) DEFAULT NULL")
     _alter_add_column(conn, "crm_event_plans", "handoff_external_ref VARCHAR(128) DEFAULT NULL")
@@ -198,9 +243,224 @@ def _migrate_crm_extensions(conn) -> None:
     for _coldef in _CRM_EVENT_PLAN_EXTRA_FIELDS:
         _alter_add_column(conn, "crm_event_plans", _coldef)
     _alter_add_column(conn, "crm_opportunities", "lead_meta_json JSON NULL")
+    _alter_add_column(conn, "crm_opportunities", "schedule_shift_id BIGINT NULL")
+    _alter_add_column(conn, "crm_event_plans", "schedule_shift_id BIGINT NULL")
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "event_days_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "cura_sync_enabled TINYINT(1) NOT NULL DEFAULT 0",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "attendance_by_day_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "operational_timings_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "access_egress_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "rendezvous_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "management_support_json JSON DEFAULT NULL",
+    )
+    _mi_col_added = _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "major_incident_detail_json JSON DEFAULT NULL",
+    )
+    if _mi_col_added:
+        cur_wz = conn.cursor()
+        try:
+            cur_wz.execute(
+                "UPDATE crm_event_plans SET wizard_step = wizard_step + 1 WHERE wizard_step >= 9"
+            )
+            conn.commit()
+            print(
+                "[crm_module] Shifted wizard_step 9+ by 1 for new Major incident editor tab"
+            )
+        except Exception as e:
+            print(f"[crm_module] wizard_step bump after major_incident_detail_json: {e}")
+        finally:
+            try:
+                cur_wz.close()
+            except Exception:
+                pass
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "accommodation_enabled TINYINT(1) NOT NULL DEFAULT 0",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "accommodation_venues_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "accommodation_rooms_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "staff_transport_json JSON DEFAULT NULL",
+    )
+    _create_table(
+        conn,
+        "crm_event_plan_purpose_templates",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_crm_eppt_sort (sort_order, id)
+        """,
+    )
+    _create_table(
+        conn,
+        "crm_event_plan_policy_templates",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        category VARCHAR(32) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        body TEXT NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_crm_eppol_cat_sort (category, sort_order, id)
+        """,
+    )
+    _create_table(
+        conn,
+        "crm_event_plan_pre_alert_templates",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        policy VARCHAR(16) NOT NULL,
+        payload_json JSON NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY idx_crm_eppat_sort (sort_order, id)
+        """,
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "uniform_ppe_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "plan_distribution_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "clinical_signoff_json JSON DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "plan_cover_image_path VARCHAR(512) DEFAULT NULL",
+    )
+    _alter_add_column(
+        conn,
+        "crm_event_plans",
+        "event_organiser_phone VARCHAR(64) DEFAULT NULL",
+    )
+    cur_ws = conn.cursor()
+    try:
+        cur_ws.execute(
+            "ALTER TABLE crm_event_plans MODIFY COLUMN wizard_step TINYINT NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+    except Exception as e:
+        if "Unknown column" not in str(e):
+            print(f"[crm_module] wizard_step default 0: {e}")
+    finally:
+        try:
+            cur_ws.close()
+        except Exception:
+            pass
+    cur_hs = conn.cursor()
+    try:
+        cur_hs.execute(
+            """
+            UPDATE crm_event_plans SET cura_sync_enabled=1
+            WHERE (handoff_status IN ('synced','synced_unchanged'))
+               OR (cura_operational_event_id IS NOT NULL)
+            """
+        )
+        conn.commit()
+    except Exception as e:
+        if "Unknown column" not in str(e):
+            print(f"[crm_module] cura_sync_enabled backfill: {e}")
+    finally:
+        try:
+            cur_hs.close()
+        except Exception:
+            pass
+    cur_rm = conn.cursor()
+    try:
+        cur_rm.execute(
+            "ALTER TABLE crm_event_plans MODIFY COLUMN resources_medics TEXT DEFAULT NULL"
+        )
+        conn.commit()
+    except Exception as e:
+        if "Unknown column" not in str(e) and "doesn't exist" not in str(e).lower():
+            print(f"[crm_module] resources_medics TEXT widen: {e}")
+    finally:
+        try:
+            cur_rm.close()
+        except Exception:
+            pass
     _alter_add_column(conn, "crm_quote_rules", "conditions_json JSON NULL")
     _alter_add_column(conn, "crm_quotes", "quote_group_id INT NULL")
     _alter_add_column(conn, "crm_quotes", "parent_quote_id INT NULL")
+    _alter_add_column(conn, "crm_quotes", "accounting_provider VARCHAR(32) DEFAULT NULL")
+    _alter_add_column(conn, "crm_quotes", "accounting_external_id VARCHAR(256) DEFAULT NULL")
+    _alter_add_column(conn, "crm_quotes", "accounting_push_status VARCHAR(32) DEFAULT NULL")
+    _alter_add_column(conn, "crm_quotes", "accounting_last_error TEXT DEFAULT NULL")
+    _alter_add_column(conn, "crm_quotes", "accounting_pushed_at DATETIME DEFAULT NULL")
+    _create_table(
+        conn,
+        "crm_intake_form_definitions",
+        """
+        id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        slug VARCHAR(64) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        fields_json JSON NOT NULL,
+        default_stage VARCHAR(32) NOT NULL DEFAULT 'prospecting',
+        company_field VARCHAR(64) NOT NULL DEFAULT 'company',
+        is_public TINYINT(1) NOT NULL DEFAULT 0,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_crm_intake_slug (slug),
+        KEY idx_crm_intake_active (is_active, is_public)
+        """,
+    )
     cur = conn.cursor()
     try:
         cur.execute(
@@ -258,9 +518,47 @@ def install():
             website VARCHAR(512) DEFAULT NULL,
             phone VARCHAR(64) DEFAULT NULL,
             notes TEXT,
+            operating_base_label VARCHAR(128) DEFAULT NULL,
+            operating_base_postcode VARCHAR(32) DEFAULT NULL,
+            operating_base_lat DECIMAL(10,7) DEFAULT NULL,
+            operating_base_lng DECIMAL(11,7) DEFAULT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_crm_accounts_name (name)
+            """,
+        )
+        _create_table(
+            conn,
+            "crm_dispatch_bases",
+            """
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            label VARCHAR(128) NOT NULL,
+            postcode VARCHAR(32) DEFAULT NULL,
+            what3words VARCHAR(128) DEFAULT NULL,
+            lat DECIMAL(10,7) DEFAULT NULL,
+            lng DECIMAL(11,7) DEFAULT NULL,
+            sort_order INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY idx_crm_dispatch_bases_sort (sort_order, id)
+            """,
+        )
+        _create_table(
+            conn,
+            "crm_account_saved_venues",
+            """
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            account_id INT NOT NULL,
+            label VARCHAR(255) NOT NULL,
+            venue_address VARCHAR(512) DEFAULT NULL,
+            venue_postcode VARCHAR(32) DEFAULT NULL,
+            venue_what3words VARCHAR(128) DEFAULT NULL,
+            venue_lat DECIMAL(10,7) DEFAULT NULL,
+            venue_lng DECIMAL(11,7) DEFAULT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY idx_crm_asv_account (account_id),
+            CONSTRAINT fk_crm_asv_account
+                FOREIGN KEY (account_id) REFERENCES crm_accounts(id) ON DELETE CASCADE
             """,
         )
         _create_table(
@@ -295,6 +593,7 @@ def install():
             amount DECIMAL(12,2) DEFAULT NULL,
             notes TEXT,
             lead_meta_json JSON NULL,
+            schedule_shift_id BIGINT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             KEY idx_crm_opp_account (account_id),
@@ -448,6 +747,25 @@ def install():
         )
         _create_table(
             conn,
+            "crm_intake_form_definitions",
+            """
+            id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            slug VARCHAR(64) NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            fields_json JSON NOT NULL,
+            default_stage VARCHAR(32) NOT NULL DEFAULT 'prospecting',
+            company_field VARCHAR(64) NOT NULL DEFAULT 'company',
+            is_public TINYINT(1) NOT NULL DEFAULT 0,
+            is_active TINYINT(1) NOT NULL DEFAULT 1,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_crm_intake_slug (slug),
+            KEY idx_crm_intake_active (is_active, is_public)
+            """,
+        )
+        _create_table(
+            conn,
             "crm_event_plan_questions",
             """
             id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -483,7 +801,7 @@ def install():
             """
             id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
             status ENUM('draft','completed','archived') NOT NULL DEFAULT 'draft',
-            wizard_step TINYINT NOT NULL DEFAULT 1,
+            wizard_step TINYINT NOT NULL DEFAULT 0,
             quote_id INT DEFAULT NULL,
             opportunity_id INT DEFAULT NULL,
             account_id INT DEFAULT NULL,
@@ -502,36 +820,51 @@ def install():
             hospitals_json JSON DEFAULT NULL,
             clinical_handover_json JSON DEFAULT NULL,
             staff_roster_json JSON DEFAULT NULL,
+            management_support_json JSON DEFAULT NULL,
             event_map_path VARCHAR(512) DEFAULT NULL,
             event_map_caption VARCHAR(512) DEFAULT NULL,
+            plan_cover_image_path VARCHAR(512) DEFAULT NULL,
             plan_pdf_version VARCHAR(32) DEFAULT NULL,
             plan_pdf_status VARCHAR(128) DEFAULT NULL,
             plan_written_by VARCHAR(255) DEFAULT NULL,
             plan_distribution TEXT,
+            plan_distribution_json JSON DEFAULT NULL,
             plan_document_release_date DATE DEFAULT NULL,
             plan_purpose TEXT,
             event_organiser VARCHAR(255) DEFAULT NULL,
+            event_organiser_phone VARCHAR(64) DEFAULT NULL,
             event_content_summary TEXT,
             purple_guide_tier VARCHAR(64) DEFAULT NULL,
             operational_timings TEXT,
+            operational_timings_json JSON DEFAULT NULL,
+            event_days_json JSON DEFAULT NULL,
             access_egress_text TEXT,
+            access_egress_json JSON DEFAULT NULL,
             rendezvous_text TEXT,
+            rendezvous_json JSON DEFAULT NULL,
             risk_register_json JSON DEFAULT NULL,
             health_safety_work_text TEXT,
             staff_transport_text TEXT,
+            staff_transport_json JSON DEFAULT NULL,
             command_control_text TEXT,
             uniform_ppe_text TEXT,
+            uniform_ppe_json JSON DEFAULT NULL,
             privacy_ipc_text TEXT,
             incident_reporting_text TEXT,
             equipment_detail_text TEXT,
             major_incident_text TEXT,
+            major_incident_detail_json JSON DEFAULT NULL,
+            accommodation_enabled TINYINT(1) NOT NULL DEFAULT 0,
+            accommodation_venues_json JSON DEFAULT NULL,
+            accommodation_rooms_json JSON DEFAULT NULL,
             welfare_text TEXT,
             safeguarding_text TEXT,
             ambulance_trust_text TEXT,
             other_event_specific_text TEXT,
             plan_pdf_revision INT NOT NULL DEFAULT 0,
             attendance_by_day_text TEXT,
-            resources_medics VARCHAR(255) DEFAULT NULL,
+            attendance_by_day_json JSON DEFAULT NULL,
+            resources_medics TEXT,
             resources_vehicles TEXT,
             resources_comms TEXT,
             escalation_notes TEXT,
@@ -540,11 +873,13 @@ def install():
             signoff_name VARCHAR(255) DEFAULT NULL,
             signoff_role VARCHAR(255) DEFAULT NULL,
             signoff_at DATETIME DEFAULT NULL,
+            clinical_signoff_json JSON DEFAULT NULL,
             handoff_status VARCHAR(32) DEFAULT NULL,
             handoff_external_ref VARCHAR(128) DEFAULT NULL,
             handoff_at DATETIME DEFAULT NULL,
             handoff_error TEXT DEFAULT NULL,
             cura_operational_event_id BIGINT NULL,
+            cura_sync_enabled TINYINT(1) NOT NULL DEFAULT 0,
             checklist_answers_json JSON DEFAULT NULL,
             created_by VARCHAR(64) DEFAULT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -12,9 +12,13 @@
       <label class="form-label" for="job_role_id">Job role</label>
       <select class="form-select" id="job_role_id" name="job_role_id" required>
         {% for r in roles %}
-        <option value="{{ r.id }}" {% if opening and opening.job_role_id == r.id %}selected{% endif %}>{{ r.title }}</option>
+        <option value="{{ r.id }}"
+          data-tb-role-id="{{ r.time_billing_role_id or '' }}"
+          data-default-card-id="{{ r.default_wage_rate_card_id or '' }}"
+          {% if opening and opening.job_role_id == r.id %}selected{% endif %}>{{ r.title }}</option>
         {% endfor %}
       </select>
+      <div class="form-text">Links this vacancy to recruitment job roles (synced with Time Billing staff roles on the <a href="{{ url_for('internal_recruitment.admin_roles') }}">Job roles</a> screen).</div>
     </div>
     <div class="mb-3">
       <label class="form-label" for="title">Listing title</label>
@@ -45,6 +49,22 @@
           value="{{ opening.closes_at.strftime('%Y-%m-%d') if opening and opening.closes_at else '' }}">
       </div>
     </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="max_applicants">Max applicants (optional)</label>
+        <input class="form-control" type="number" min="1" step="1" id="max_applicants" name="max_applicants"
+          placeholder="No limit"
+          value="{{ opening.max_applicants if opening and opening.max_applicants is not none else '' }}">
+        <div class="form-text">When total applications reach this number, the public page stops accepting new ones.</div>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label" for="positions_to_fill">Positions to fill (optional)</label>
+        <input class="form-control" type="number" min="1" step="1" id="positions_to_fill" name="positions_to_fill"
+          placeholder="No hire cap"
+          value="{{ opening.positions_to_fill if opening and opening.positions_to_fill is not none else '' }}">
+        <div class="form-text">When this many applications reach <strong>Hired</strong>, new applications are blocked.</div>
+      </div>
+    </div>
     <div class="mb-3">
       <label class="form-label" for="summary">Summary (short)</label>
       <textarea class="form-control" id="summary" name="summary" rows="2">{{ opening.summary if opening else '' }}</textarea>
@@ -53,7 +73,83 @@
       <label class="form-label" for="description">Full description</label>
       <textarea class="form-control" id="description" name="description" rows="8">{{ opening.description if opening else '' }}</textarea>
     </div>
+
+    <hr class="my-4">
+    <h2 class="h6 text-uppercase text-muted mb-3">Public careers listing — pay</h2>
+    <div class="mb-3">
+      <label class="form-label" for="listing_pay_mode">Pay on vacancy page</label>
+      <select class="form-select" id="listing_pay_mode" name="listing_pay_mode">
+        {% set lpm = (opening.listing_pay_mode if opening else 'none') or 'none' %}
+        <option value="none" {{ 'selected' if lpm == 'none' else '' }}>Do not show pay</option>
+        <option value="wage_card" {{ 'selected' if lpm == 'wage_card' else '' }}>Show label from a Time Billing wage rate card</option>
+        <option value="custom" {{ 'selected' if lpm == 'custom' else '' }}>Show custom text (e.g. negotiated range)</option>
+      </select>
+    </div>
+    <div class="mb-3" id="listing_pay_card_block">
+      <label class="form-label" for="listing_pay_wage_card_id">Wage card to display</label>
+      <select class="form-select" id="listing_pay_wage_card_id" name="listing_pay_wage_card_id">
+        <option value="" data-role-id="">— Use job role default, or first active card for the role —</option>
+        {% for wc in wage_cards %}
+        <option value="{{ wc.id }}" data-role-id="{{ wc.role_id or '' }}"
+          {% if opening and opening.listing_pay_wage_card_id == wc.id %}selected{% endif %}>
+          {% if wc.role_name %}{{ wc.role_name }} — {% endif %}{{ wc.name }} (#{{ wc.id }})
+        </option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Only cards for the same Time Billing role as this job role are shown. Leave blank to use the default card set on <strong>Job roles</strong>.</div>
+    </div>
+    <div class="mb-3" id="listing_pay_custom_block">
+      <label class="form-label" for="listing_pay_custom_text">Custom pay text</label>
+      <textarea class="form-control" id="listing_pay_custom_text" name="listing_pay_custom_text" rows="2" maxlength="512" placeholder="e.g. £12.50–£14.00 per hour depending on experience">{{ opening.listing_pay_custom_text if opening else '' }}</textarea>
+    </div>
+
+    <hr class="my-4">
+    <h2 class="h6 text-uppercase text-muted mb-3">On hire — HR &amp; Time Billing</h2>
+    <div class="mb-3">
+      <label class="form-label" for="hire_employment_type">Employment basis for new staff</label>
+      {% set het = (opening.hire_employment_type if opening else '') or '' %}
+      <select class="form-select" id="hire_employment_type" name="hire_employment_type">
+        <option value="" {{ 'selected' if not het else '' }}>Default (self-employed — matches existing Time Billing behaviour)</option>
+        <option value="paye" {{ 'selected' if het == 'paye' else '' }}>PAYE</option>
+        <option value="self_employed" {{ 'selected' if het == 'self_employed' else '' }}>Self-employed</option>
+      </select>
+      <div class="form-text">When you complete a hire, this sets <code>tb_contractors.employment_type</code> and seeds HR <strong>contract type</strong> (PAYE vs self-employed). Wage rate card on hire still comes from the job role / hire overrides.</div>
+    </div>
+
     <button type="submit" class="btn btn-primary">Save</button>
   </form>
+  <script>
+  (function(){
+    var mode = document.getElementById('listing_pay_mode');
+    var cardBlock = document.getElementById('listing_pay_card_block');
+    var customBlock = document.getElementById('listing_pay_custom_block');
+    var wc = document.getElementById('listing_pay_wage_card_id');
+    var jr = document.getElementById('job_role_id');
+    function syncPayPanels(){
+      var m = (mode && mode.value) || 'none';
+      if (cardBlock) cardBlock.style.display = (m === 'wage_card') ? '' : 'none';
+      if (customBlock) customBlock.style.display = (m === 'custom') ? '' : 'none';
+      if (m === 'wage_card') filterWageCards();
+    }
+    function selectedRoleTbId(){
+      if (!jr || !jr.selectedOptions[0]) return '';
+        return jr.selectedOptions[0].getAttribute('data-tb-role-id') || '';
+    }
+    function filterWageCards(){
+      if (!wc) return;
+      var rid = selectedRoleTbId();
+      wc.querySelectorAll('option[data-role-id]').forEach(function(o){
+        var orid = o.getAttribute('data-role-id') || '';
+        var show = !rid || !orid || String(orid) === String(rid);
+        o.hidden = !show;
+        o.disabled = !show;
+      });
+      if (wc.value && wc.selectedOptions[0] && wc.selectedOptions[0].hidden) wc.value = '';
+    }
+    if (mode) mode.addEventListener('change', syncPayPanels);
+    if (jr) jr.addEventListener('change', function(){ syncPayPanels(); });
+    syncPayPanels();
+  })();
+  </script>
 </div>
 {% endblock %}

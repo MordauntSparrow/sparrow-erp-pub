@@ -1,0 +1,134 @@
+{
+  "version": "1.5.0",
+  "title": "What is new: Sparrow, Ventus and Cura",
+  "summary": "This is a very large coordinated release on the order of eighty thousand lines of change across CAD, MDT, dispatch, CRM, Cura, Sparrow core, fleet, inventory, compliance, recruitment, scheduling, timesheets, and integrations. The list below is deliberately complete so you can see what is actually in the build. The biggest concentration of work is in CAD and live operations mapping. Where two areas said the same thing in different words, it is merged here once.",
+  "sections": [
+    {
+      "heading": "CAD and the live operations map",
+      "paragraphs": [
+        "CAD and the map stack received the largest share of engineering time this cycle. That includes zoom, scroll, maximum distance and grid behaviour, line weights, layout, ribbon and menu behaviour, system log presentation, triage forms, panic handling, and ongoing hardening of the main CAD dashboard.",
+        "MET weather integration is a significant operational upgrade. Temperature and related weather context are available in CAD and dispatch led views so controllers see conditions that affect driving, standing outside, scene time, and safety alongside units and jobs, instead of treating weather as an afterthought.",
+        "What3Words is in scope as a real map capability, not only a text field on a form. Server support covers jobs and standby, geocoding and triage flows, and resolving latitude and longitude to a three word address through the existing triage proxy. Intake and MDT job detail continue to use What3Words where appropriate.",
+        "Division and unit presentation advanced: custom division icons, standby colouring on the map, standby points, division control KPIs and saving, unit CAD status, MET related behaviour on the map and in control views, and clearer open and close flows for CADs. Drag and drop, reopening CADs from a cleared state, and fixes so CADs do not auto close when units are cleared address common control room frustrations.",
+        "Major incident handling on CAD moved through multiple passes: pills, banners, notifications, refresh behaviour, resolve and extra actions, meal break visibility for controllers, and form builder default loading when incidents are raised."
+      ]
+    },
+    {
+      "heading": "OOHCA, ROLE, and JRCALC aligned documentation",
+      "paragraphs": [
+        "This part matters for clinical compliance with current Joint Royal Colleges Ambulance Liaison Committee expectations for out of hospital cardiac arrest documentation.",
+        "On the Cura OOHCA ROLE tab, clinicians can record both monitored asystole lasting at least thirty seconds and asystole lasting at least five minutes continuous per protocol. These are no longer forced into a single exclusive choice. Each line can carry its own evidence, including multiple ECG and monitor photos per category.",
+        "Images are stored as Sparrow attachments. Case access HTML and PDF generation, and the case access HTML API used with Cura, carry those attachments through so evidence appears when the case document is produced. The API continues to inject and strip render only keys on save so clinical data stays clean in storage while previews remain faithful."
+      ]
+    },
+    {
+      "heading": "MDT, dispatch APIs, and meal or break policy",
+      "paragraphs": [
+        "Break behaviour is no longer hard wired as if every shift were about four hours from start. Policy is stored on dispatch settings and can follow fixed minutes or a percentage of the shift length, with sensible limits. Defaults cover how many minutes ahead to warn crews they are nearing a break, default meal length, and how break due time is chosen when the shift length is unknown versus known.",
+        "The same policy is applied consistently on sign on, placeholder unit creation, meal break actions, units and eligibility, suggested next jobs, assignment and preemption, job detail, and assign job paths so near break warnings and break blocking agree when controllers assign work.",
+        "Dispatchers, admins, superusers, and clinical leads can read and save policy through the dispatch break policy endpoint. Response Admin includes the Shift and breaks tab, also referenced as meal breaks or break policy in navigation. CAD bootstrap through divisions and MDT divisions through the API expose break policy so sign on does not depend on a separate policy fetch.",
+        "After upgrade your organisation should run its usual database migration practice on a copy of production MySQL, then smoke test MDT sign on with and without break due minutes in the payload, if you rely on custom mobile builds."
+      ]
+    },
+    {
+      "heading": "MDT sessions, sign on, and messages",
+      "paragraphs": [
+        "Stale MDT sessions can be expired server side on status poll when time past shift end is implausible or the session has been idle long enough. The handset respects shift end with grace, widens handling when the session is gone, and performs an immediate first status poll in those cases. Shift end time is stored at sign on for client checks and cleared on sign off or reset.",
+        "The messages panel only pulls traffic from the current sign on onward, so each new sign on starts a clean thread from the server side. That window clears on logout or session clear. Crew originated lines where the sender looks like call sign and name are treated as self traffic so they merge with optimistic sends and you do not see a double sent row, consistent with incident comms deduplication.",
+        "Sign off handling is shared between voluntary sign off and stale expiry, with an audit path when a session expires on poll."
+      ]
+    },
+    {
+      "heading": "Major incidents, IR1, and Safety and Incidents",
+      "paragraphs": [
+        "IR1 moved through multiple iterations including email handling and regulatory workspace alignment.",
+        "The Safety and Incidents module adds ways for admins on the ERP to start a new draft incident aimed at the IR1 and regulatory workspace, from overview, list, pipeline, and module sub navigation. The employee portal avoids deep links that assume the internal incident blueprint is always registered, which prevents broken navigation on sites that only run the portal shell.",
+        "Settings control which Sparrow roles see IR1 versus HSE style walkarounds. The manifest supports parent and child role category trees, and ticking a parent includes descendants. Empty selection means everyone who already has module access continues to see forms as before. Visibility is stored per area in the database so it survives upgrades cleanly."
+      ]
+    },
+    {
+      "heading": "Clearer names from CRM through Cura to CAD and MDT",
+      "paragraphs": [
+        "Quotes and event plans could build very long compound titles, for example account name plus the full opportunity title, which then flowed into Cura operational period names, Ventus dispatch division labels, and MDT headers.",
+        "There is now a single short display path that prefers lead metadata event name, then sensible fallbacks, and trims redundant segments joined by repeated separators. Auto suggested event plan titles no longer default to account dash opportunity when that would duplicate the event name after organisation matching. New medical event plan suggested titles follow the same rules when opportunity metadata is available.",
+        "Sync to Cura applies that naming to the operational period and resynchronises the linked Ventus dispatch division so CAD receives the friendly label instead of a stale long string.",
+        "On MDT, the sidebar and mobile header prefer the division human readable label from the API when present, rather than only prettifying an internal slug. Deploy the current vue connector build alongside the server so the division name appears correctly next to the call sign. If older plans still show long names after upgrade, run Sync to Cura once on those plans."
+      ]
+    },
+    {
+      "heading": "Website deploys and push to volume",
+      "paragraphs": [
+        "After an image update or when operators use Website, Volume and deploy, then Push package to volume, some customer sites previously lost favicon, social links, pages style configuration, manifest overlay fragments, local service pages, and other site data because the push replaced those files and performed a full replace of static assets.",
+        "The product now seeds site data style JSON only when the file is not already on the volume. Existing tenant files are kept and skipped, with logging for operators. New seeds strip version from copied manifest overlays. Saved user manifest overlays hold settings only, and at load time version always comes from the bundled manifest so the update manager is not blocked by an old overlay on disk.",
+        "After static is refreshed from the image, the push merges back uploads including builder media, favicon when present, and root files referenced in settings such as favicon path and default open graph image, so branding and uploads survive. Contact and builder data under site data data paths were not in the JSON overwrite list. The main fix is that site data JSON and static no longer clobber live tenant files on push. Admin copy on the Volume and deploy page matches this behaviour."
+      ]
+    },
+    {
+      "heading": "Cura clinical experience beyond OOHCA",
+      "paragraphs": [
+        "Case preview and historic cases load hospital style HTML inside an embedded preview. Root relative static URLs used to resolve against the Cura host so body and chest diagrams showed alt text instead of SVG artwork. When Sparrow serves the case access HTML API for Cura, diagram assets now use absolute URLs to your Sparrow server so embedded previews render correctly.",
+        "Clinical datasets download more predictably: after sign in and on launch with an existing session, Cura pulls tenant app settings and downloads clinical datasets from Sparrow in the background, equivalent to a full sync from server. If a download fails, the dashboard still surfaces retry with clearer wording.",
+        "Billing and governance by dispatch division: Sparrow Cura settings keep tenant wide defaults for billing on or off and DNAR photo gate style behaviour. Advanced administrators can add optional per division overrides in tenant JSON, keyed by the same division slugs you use on MDT and Cura sign on, to turn billing or DNAR photo checks on or off for specific divisions only. Cura applies the override for the signed on division whenever settings merge from the server, and again when the user changes division in Settings."
+      ]
+    },
+    {
+      "heading": "Event planning, medical records, and CRM desk",
+      "paragraphs": [
+        "Medical event planning and Cura integration continued, including routing and placement under the medical records surface where that applies. CAD and the event plan manager received related updates from the same programme of work.",
+        "CRM desk intake improved for event and private transfer flows across layout, settings, and manifest driven behaviour. Sensitive CRM and intake actions gained stronger CSRF handling. Operator facing copy was revised to reduce internal jargon. Hospital and geolocation helper work and planner API behaviour advanced, including behaviour aligned with external postcode services."
+      ]
+    },
+    {
+      "heading": "Recruitment, careers site, and hire into HR and Time Billing",
+      "paragraphs": [
+        "Vacancy admin cards no longer show public vacancy links when careers live on another site. There is one clear path to applications from the board. List view uses Pipeline and New counts as links instead of duplicating a separate Applications button. Edit and Stages are folded under one Actions menu with Edit position and Stage and forms. The diagonal Live ribbon returned on open roles with click blocking tuned off.",
+        "Recruitment job roles remain a dedicated list, with optional sync from Time Billing staff roles and on install or upgrade so real client roles appear next to starter or demo rows. The Care line on cards reflects the department on that recruitment job role, editable under Recruitment then Job roles.",
+        "Each opening can hide pay, show a Time Billing wage rate card label, or show custom text such as Competitive or DOE without exposing numbers.",
+        "Openings can set employment basis for hire, defaulting to self employed with options for PAYE or self employed. On hire that flows to Time Billing on the contractor employment type and seeds HR contract type where a profile is created from hire.",
+        "The Employees directory lists staff and contractor payroll records, not every row in Users. Admin users appear after they are linked to a contractor through user save sync, portal link, Add employee, hire, or equivalent flows. That is expected behaviour.",
+        "Staff sign in can use username or email. Contractor promotion into admin and related edge cases were tightened. User management permissions work includes grouping into manifest and UI categories such as managers and crew style buckets."
+      ]
+    },
+    {
+      "heading": "Scheduling, shared labour, and timesheets",
+      "paragraphs": [
+        "Shifts may include optional shared labour hours: a fixed person hour budget where wall clock end shortens as assigned headcount rises, or required count when nobody is yet assigned, so people multiplied by duration stays near the budget. This is wired through create and update, assignment changes, admin shift form and routes, install and upgrade, and documented schema.",
+        "Scheduler rows continue to mirror scheduled times. Actual start and end stay empty until they are real: clock or portal capture, manual entry, shift level actuals, or runsheet actuals. Scheduler prefill and runsheet publish no longer copy scheduled into actual by default.",
+        "Saving validates no actuals or both actuals. Partial saves merge missing actual fields from the database so the UI cannot wipe times by omission. Runsheet flat day and hourly style overrides skip lines that are still in the no actuals state so you do not get a full day rate on a line with no worked time. Time values coming from MySQL in time or timedelta shapes are normalised in compute, validate, and save paths. Admin patch paths normalise time types from the database. Invalid timesheet entry identifiers no longer crash the merge step."
+      ]
+    },
+    {
+      "heading": "Compliance, audit, transparency, and reference documentation",
+      "paragraphs": [
+        "Compliance module: optional public policy pages under policies style URLs mirror the central policy library when expose on website is enabled, including install migration, admin checkbox, and a compliance website public blueprint. The website module adds marketing templates for that experience, a curated policies link in public welcome style discovery, and sits alongside the broader website storage, contact, and volume work described earlier.",
+        "Compliance audit updates touched home and base templates and routes, DSPT checklist presentation, governance evidence packs UI, and related navigation.",
+        "Reference documentation under docs compliance was added or refreshed, including material aligned with DCB0129 and DCB0160, NHS DTAC style considerations, and security code of practice alignment notes.",
+        "Staff audit distinguishes permission labelling for compliance work versus compliance audit views so reporting stays unambiguous."
+      ]
+    },
+    {
+      "heading": "Fleet Management: UK data, tenant industry, and portal access",
+      "paragraphs": [
+        "Registration lookup merges DVLA and MOT style data so that when DVLA or MOT already populated the form, noisy MOT transport errors are removed from the merged payload and the screen stays coherent next to Fetch. The official DVSA MOT tab can enter a circuit breaker after repeated infrastructure failures, hiding the tab for a cooldown and skipping noisy errors. Support can disable that circuit for investigation where configuration allows. Copy explains GOV.UK fallback when in app DVSA history is not shown but the unit has a plate. Lookup success messaging was calmed to success only where partial routes apply.",
+        "First time fleet vehicle type seeds depend on organisation profile industries from the manifest instead of a single ambulance first list for every tenant. Install and upgrade log which industries drove seeding. Templates gate ambulance and clinical wording with industry visibility helpers so non medical tenants are not buried in ambulance first language by default.",
+        "Employee portal and VDI access use manifest role category trees plus database rules for VDI versus portal workshop safety forms. Fleet exposes Portal access under Fleet administration with navigation from Forms. Empty selection keeps legacy sensible defaults. Non empty selection expands categories. Sparrow admin, superuser, and support break glass always pass VDI visibility checks. Portal report issue validates vehicle identity before insert. Vehicle detail no longer passes a removed defects template argument that could error at runtime."
+      ]
+    },
+    {
+      "heading": "Inventory Control: medical bags, kits, training stock, and command centre",
+      "paragraphs": [
+        "Med and drug bag features are tied to the tenant Medical industry flag. APIs respond clearly when the tenant is not medical so clients do not silently fail. Navigation entries and automatic API catalogue entries for med bag routes only register when medical is enabled. Witness rule seeding on install runs only for medical tenants. Schema still exists for all tenants. Asset detail examples mention ambulance context only when medical is selected.",
+        "Recursive digital kit loadlists walk parent bags and nested pods and modules depth first with SKU, item, expected and on bag quantities, lot, and expiry. PDF and CSV exports are available from the instance loadlist endpoints. A digital kit check page shows the full tree with date hints, checklist editing, and lot or expiry updates in one save. Checklist statuses include wrong lot or batch, expiry issue, and quantity mismatch. A single submit can save checklist and trace together. Where transaction permission allows, the same save can run restock movements HQ to bag and disposals on rows with optional default witnesses when row witnesses are blank. Processing order runs movements first, then checklist and trace.",
+        "A reserved training pool location is created on install or upgrade for stock that is used for training rather than direct patient care. The dashboard surfaces expired patient care stock by batch and location with actions to move quantity into the training pool so stock stays on hand but leaves patient facing expiry panels, or to dispose with an out of date disposal reference and note. Metrics and command centre expiring and expired batch logic exclude training locations so training stock does not pollute patient care expiry counts.",
+        "Bag instances carry usage context patient care versus training. Training bags soften patient style expiry badges on kit check with explicit training use hints. Editors can set context on bag detail while other users see a short explanatory line."
+      ]
+    },
+    {
+      "heading": "Also moving in the same release window",
+      "paragraphs": [
+        "Broader history on the branch also includes case access refinements, MET beyond the CAD notes above, timesheets integration with scheduling behaviour, Ventus response route hardening, inventory command centre tweaks, safeguarding and medical records routing where applicable, desk level CRM polish, and routine merges from the main development line. Treat those as part of the same deployment wave when your organisation cuts a release."
+      ]
+    }
+  ],
+  "bullets": []
+}

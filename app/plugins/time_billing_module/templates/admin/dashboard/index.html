@@ -1,146 +1,246 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
 {% block content %}
-<div class="container py-4">
-
-    <!-- Header -->
-    <div class="d-flex align-items-center justify-content-between mb-4">
-        <h4 class="mb-0 d-flex align-items-center">
-            <i class="bi bi-speedometer2 me-2"></i> Shift Timesheets
-        </h4>
-        {% if now_local %}
-            <span class="badge bg-light text-dark">{{ now_local }}</span>
+{% set _th = (config.theme_settings.theme if config and config.theme_settings else 'light') %}
+<div class="container py-4" style="max-width: 1320px;">
+  <!-- Hero -->
+  <div class="rounded-3 border shadow-sm mb-4 overflow-hidden">
+    <div
+      class="px-4 py-4 px-md-5"
+      style="background: {% if _th == 'dark' %}linear-gradient(135deg, #0f172a 0%, #1e293b 100%){% elif _th == 'modern' %}linear-gradient(135deg, #e3f2fd 0%, #ffffff 100%){% else %}linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%){% endif %};"
+    >
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+        <div>
+          <p class="small text-muted text-uppercase mb-1 letter-spacing-tight">Time Billing</p>
+          <h4 class="mb-2 d-flex align-items-center fw-semibold">
+            <i class="bi bi-speedometer2 me-2 text-primary"></i> Shift timesheets
+          </h4>
+          <p class="mb-0 text-muted small">
+            Review timesheets and runsheets. Staff profiles live in
+            <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Employees</a>.
+            Rates and templates:
+            <a href="{{ url_for('internal_time_billing.config_page') }}">Configuration</a>.
+          </p>
+        </div>
+        {% if now %}
+        <span class="badge bg-light text-dark border align-self-start">{{ now.strftime('%d %b %Y %H:%M') }} UTC</span>
         {% endif %}
+      </div>
     </div>
-    <p class="text-muted small mb-4">Core timesheets and runsheets. Add and edit staff in <a href="{{ url_for('internal_hr.admin_employees') }}">HR → Employees</a>. Rates, policies, and templates: <a href="{{ url_for('internal_time_billing.config_page') }}">Configuration</a>.</p>
+  </div>
 
-    <!-- KPI Cards -->
-    <div class="row g-3 mb-4">
-
-        <div class="col-12 col-md-6 col-lg-3">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <div class="me-3 text-primary fs-2"><i class="bi bi-clock-history"></i></div>
-                    <div>
-                        <div class="text-muted small">Pending Approvals</div>
-                        <div class="fs-5 fw-semibold">{{ kpis.pending_approvals or 0 }}</div>
-                    </div>
-                </div>
-                <div class="card-footer d-flex justify-content-end gap-2 flex-wrap">
-                    <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-primary">Review</a>
-                </div>
-            </div>
+  <!-- Core KPIs -->
+  <div class="row g-3 mb-2">
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-primary fs-2"><i class="bi bi-clock-history"></i></div>
+          <div>
+            <div class="text-muted small">Pending approvals</div>
+            <div class="fs-5 fw-semibold">{{ kpis.pending_approvals or 0 }}</div>
+          </div>
         </div>
-
-        <div class="col-12 col-md-6 col-lg-3">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <div class="me-3 text-success fs-2"><i class="bi bi-calendar2-check"></i></div>
-                    <div>
-                        <div class="text-muted small">Approved This Week</div>
-                        <div class="fs-5 fw-semibold">{{ kpis.approved_this_week or 0 }}</div>
-                    </div>
-                </div>
-                <div class="card-footer text-end">
-                    <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-secondary">View</a>
-                </div>
-            </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex justify-content-end">
+          <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-primary">Review</a>
         </div>
-
-        <div class="col-12 col-md-6 col-lg-3">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <div class="me-3 text-info fs-2"><i class="bi bi-people"></i></div>
-                    <div>
-                        <div class="text-muted small">Active Runsheets</div>
-                        <div class="fs-5 fw-semibold">{{ kpis.active_runsheets or 0 }}</div>
-                    </div>
-                </div>
-                <div class="card-footer d-flex justify-content-end gap-2 flex-wrap">
-                    <a href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}" class="btn btn-sm btn-outline-primary">Staffing overview</a>
-                    <a href="{{ url_for('internal_time_billing.runsheets_page') }}" class="btn btn-sm btn-secondary">Open</a>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-12 col-md-6 col-lg-3">
-            <div class="card h-100 shadow-sm">
-                <div class="card-body d-flex align-items-center">
-                    <div class="me-3 text-warning fs-2"><i class="bi bi-cash-coin"></i></div>
-                    <div>
-                        <div class="text-muted small">Total Pay (Week)</div>
-                        <div class="fs-5 fw-semibold">£{{ '{:,.2f}'.format(kpis.total_pay_week or 0) }}</div>
-                    </div>
-                </div>
-                <div class="card-footer text-end">
-                    <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-secondary">Details</a>
-                </div>
-            </div>
-        </div>
-
+      </div>
     </div>
-
-    <!-- Core navigation: Timesheets, runsheets, invoices (staff: HR) -->
-    <div class="row g-3">
-
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title d-flex align-items-center">
-                        <i class="bi bi-table me-2"></i> Timesheets
-                    </h5>
-                    <p class="card-text text-muted small">Review, approve, and manage all weeks. Issue weeks in bulk.</p>
-                    <ul class="list-unstyled small mb-3">
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Overview of all users</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Approve / Reject</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Issue weeks (single/bulk)</li>
-                    </ul>
-                </div>
-                <div class="card-footer border-0 text-end">
-                    <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-primary btn-sm">Open Timesheets</a>
-                </div>
-            </div>
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-success fs-2"><i class="bi bi-calendar2-check"></i></div>
+          <div>
+            <div class="text-muted small">Approved this week</div>
+            <div class="fs-5 fw-semibold">{{ kpis.approved_this_week or 0 }}</div>
+          </div>
         </div>
-
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title d-flex align-items-center">
-                        <i class="bi bi-clipboard2-check me-2"></i> Runsheets
-                    </h5>
-                    <p class="card-text text-muted small">Plan and publish shifts; optionally push to timesheets.</p>
-                    <ul class="list-unstyled small mb-3">
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> List & filter</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Edit assignments</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Publish</li>
-                    </ul>
-                </div>
-                <div class="card-footer border-0 text-end">
-                    <a href="{{ url_for('internal_time_billing.runsheets_page') }}" class="btn btn-primary btn-sm">Open Runsheets</a>
-                </div>
-            </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex justify-content-end">
+          <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-outline-secondary">View</a>
         </div>
-
-        <div class="col-12 col-md-6 col-lg-4">
-            <div class="card h-100 border-0 shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title d-flex align-items-center">
-                        <i class="bi bi-receipt me-2"></i> Invoices
-                    </h5>
-                    <p class="card-text text-muted small">Contractor invoices linked to timesheets—list, filter, and status.</p>
-                    <ul class="list-unstyled small mb-3">
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Per-contractor views</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Draft and sent tracking</li>
-                        <li><i class="bi bi-check2-circle text-success me-1"></i> Invoice analytics</li>
-                    </ul>
-                </div>
-                <div class="card-footer border-0 d-flex justify-content-end gap-2 flex-wrap">
-                    <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="btn btn-primary btn-sm">Open invoices</a>
-                    <a href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}" class="btn btn-outline-secondary btn-sm">Totals</a>
-                </div>
-            </div>
-        </div>
-
+      </div>
     </div>
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-info fs-2"><i class="bi bi-people"></i></div>
+          <div>
+            <div class="text-muted small">Active runsheets</div>
+            <div class="fs-5 fw-semibold">{{ kpis.active_runsheets or 0 }}</div>
+          </div>
+        </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex justify-content-end gap-2 flex-wrap">
+          <a href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}" class="btn btn-sm btn-outline-primary">Staffing</a>
+          <a href="{{ url_for('internal_time_billing.runsheets_page') }}" class="btn btn-sm btn-secondary">Open</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body d-flex align-items-center">
+          <div class="me-3 text-warning fs-2"><i class="bi bi-cash-coin"></i></div>
+          <div>
+            <div class="text-muted small">Total pay (this ISO week)</div>
+            <div class="fs-5 fw-semibold">£{{ '{:,.2f}'.format(kpis.total_pay_week or 0) }}</div>
+          </div>
+        </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex justify-content-end">
+          <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-sm btn-outline-secondary">Details</a>
+        </div>
+      </div>
+    </div>
+  </div>
 
+  {% set rs = kpis.runsheet_stats or {} %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-4 mb-3">
+    <h5 class="mb-0 fw-semibold d-flex align-items-center">
+      <i class="bi bi-clipboard2-data me-2 text-primary"></i> Runsheets
+    </h5>
+    <span class="badge rounded-pill bg-light text-muted border small fw-normal">
+      <strong>Active</strong> (top row) = draft + published, work date from today onward
+    </span>
+  </div>
+  <div class="row g-3 mb-2">
+    <div class="col-12 col-sm-6 col-xl-4">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-warning border-4 rounded-start">
+          <div class="text-muted small mb-1">Draft (from today)</div>
+          <div class="fs-4 fw-semibold">{{ rs.draft_from_today or 0 }}</div>
+          <div class="small text-muted">Scheduled, not yet published</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl-4">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-success border-4 rounded-start">
+          <div class="text-muted small mb-1">Published (from today)</div>
+          <div class="fs-4 fw-semibold text-success">{{ rs.published_from_today or 0 }}</div>
+          <div class="small text-muted">Live on the board / crews</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl-4">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-info border-4 rounded-start">
+          <div class="text-muted small mb-1">This ISO week</div>
+          <div class="fs-4 fw-semibold text-info">{{ rs.draft_published_this_iso_week or 0 }}</div>
+          <div class="small text-muted">Draft + published in current week</div>
+        </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex flex-wrap gap-2 justify-content-end">
+          <a href="{{ url_for('internal_time_billing.runsheets_staffing_overview_page') }}" class="btn btn-sm btn-outline-primary">Staffing</a>
+          <a href="{{ url_for('internal_time_billing.runsheets_page') }}" class="btn btn-sm btn-primary">Open runsheets</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if invoice_dash.visible %}
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-4 mb-3">
+    <h5 class="mb-0 fw-semibold d-flex align-items-center">
+      <i class="bi bi-receipt-cutoff me-2 text-primary"></i> Contractor invoices
+    </h5>
+    <span class="badge rounded-pill bg-light text-muted border small fw-normal">
+      {{ invoice_dash.year }} YTD · amounts by timesheet week ending
+    </span>
+  </div>
+  <div class="row g-3 mb-3">
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-primary border-4 rounded-start">
+          <div class="text-muted small mb-1">Paid (YTD)</div>
+          <div class="fs-4 fw-semibold text-primary">£{{ '{:,.2f}'.format(invoice_dash.ytd_paid.total or 0) }}</div>
+          <div class="small text-muted">{{ invoice_dash.ytd_paid.count }} invoice(s) finalised</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-secondary border-4 rounded-start">
+          <div class="text-muted small mb-1">Current (pipeline)</div>
+          <div class="fs-4 fw-semibold">£{{ '{:,.2f}'.format(invoice_dash.ytd_current.total or 0) }}</div>
+          <div class="small text-muted">{{ invoice_dash.ytd_current.count }} awaiting finalise</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body border-start border-success border-4 rounded-start">
+          <div class="text-muted small mb-1">Paid (this month)</div>
+          <div class="fs-4 fw-semibold text-success">£{{ '{:,.2f}'.format(invoice_dash.current_month_paid.total or 0) }}</div>
+          <div class="small text-muted">{{ invoice_dash.current_month_paid.count }} invoice(s)</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-sm-6 col-xl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="text-muted small mb-1">Directory</div>
+          <div class="fs-5 fw-semibold">{{ invoice_dash.self_employed_contractors }} self-employed</div>
+          <div class="small text-muted">{{ invoice_dash.total_invoices }} invoice row(s) on file</div>
+        </div>
+        <div class="card-footer bg-transparent border-0 pt-0 d-flex flex-wrap gap-2 justify-content-end">
+          <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="btn btn-sm btn-primary">All invoices</a>
+          <a href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}" class="btn btn-sm btn-outline-primary">Analytics</a>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <h5 class="fw-semibold mt-4 mb-3">Operations</h5>
+  <div class="row g-3 mb-2">
+    <div class="col-12 col-md-6 {% if invoice_dash.visible %}col-lg-4{% else %}col-lg-6{% endif %}">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="card-title d-flex align-items-center fw-semibold">
+            <i class="bi bi-table me-2 text-primary"></i> Timesheets
+          </h6>
+          <p class="card-text text-muted small mb-3">All contractors, approve or reject, issue weeks.</p>
+          <ul class="list-unstyled small text-muted mb-0">
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>Overview &amp; filters</li>
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>Bulk issue</li>
+          </ul>
+        </div>
+        <div class="card-footer bg-transparent border-0 d-flex justify-content-end">
+          <a href="{{ url_for('internal_time_billing.timesheets_overview_page') }}" class="btn btn-primary btn-sm">Open timesheets</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 {% if invoice_dash.visible %}col-lg-4{% else %}col-lg-6{% endif %}">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="card-title d-flex align-items-center fw-semibold">
+            <i class="bi bi-clipboard2-check me-2 text-primary"></i> Runsheets
+          </h6>
+          <p class="card-text text-muted small mb-3">Plan shifts, assignments, publish to crews.</p>
+          <ul class="list-unstyled small text-muted mb-0">
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>List &amp; filter</li>
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>Staffing overview</li>
+          </ul>
+        </div>
+        <div class="card-footer bg-transparent border-0 d-flex justify-content-end">
+          <a href="{{ url_for('internal_time_billing.runsheets_page') }}" class="btn btn-primary btn-sm">Open runsheets</a>
+        </div>
+      </div>
+    </div>
+    {% if invoice_dash.visible %}
+    <div class="col-12 col-md-12 col-lg-4">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <h6 class="card-title d-flex align-items-center fw-semibold">
+            <i class="bi bi-receipt me-2 text-primary"></i> Invoice admin
+          </h6>
+          <p class="card-text text-muted small mb-3">Per-contractor list, voids, and year analytics.</p>
+          <ul class="list-unstyled small text-muted mb-0">
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>Current vs paid status</li>
+            <li class="mb-1"><i class="bi bi-check2-circle text-success me-1"></i>Totals by week &amp; month</li>
+          </ul>
+        </div>
+        <div class="card-footer bg-transparent border-0 d-flex flex-wrap gap-2 justify-content-end">
+          <a href="{{ url_for('internal_time_billing.admin_invoices_list_page') }}" class="btn btn-primary btn-sm">Invoices</a>
+          <a href="{{ url_for('internal_time_billing.admin_invoices_analytics_page') }}" class="btn btn-outline-secondary btn-sm">Analytics</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}

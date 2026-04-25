@@ -48,15 +48,15 @@ Timesheet – Week {{ data.week.week_id }}
         Invoice #{{ data.invoice_info.current_invoice.invoice_number }} ({{ data.invoice_info.current_invoice.status }})
       </a>
       {% endif %}
-      {% if data.can_finalize_draft_invoice %}
+      {% if data.can_finalize_current_invoice %}
       <form method="post" action="{{ url_for('public_time_billing.public_week_invoice_finalize', week_id=data.week.week_id) }}" class="d-inline">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-warning" style="min-height:44px" title="Mark your draft invoice as sent now that this week is approved">
+        <button type="submit" class="btn btn-warning" style="min-height:44px" title="Mark your current invoice as paid now that this week is approved">
           <i class="bi bi-check2-circle me-1"></i> Finalize invoice
         </button>
       </form>
       {% endif %}
-      {% if data.invoice_draft_pending and data.invoice_info.current_invoice %}
+      {% if data.invoice_current_pending and data.invoice_info.current_invoice %}
       <span class="badge bg-secondary py-2">Invoice #{{ data.invoice_info.current_invoice.invoice_number }} submitted with timesheet – pending approval</span>
       {% elif data.can_show_invoice_prompt %}
       <a href="{{ url_for('public_time_billing.public_week_invoice_page', week_id=data.week.week_id) }}" class="btn btn-success" style="min-height:44px">
@@ -79,7 +79,7 @@ Timesheet – Week {{ data.week.week_id }}
   </div>
   {% endif %}
 
-  {% if data.employment_type == 'self_employed' and (data.invoice_billing_frequency or 'weekly')|lower != 'monthly' %}
+  {% if data.employment_type == 'self_employed' and not data.combined_invoice_billing %}
   <div class="modal fade" id="tb-post-submit-invoice-modal" tabindex="-1" aria-labelledby="tb-post-submit-invoice-label" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content border-success" style="border-width:2px;">
@@ -343,6 +343,29 @@ Timesheet – Week {{ data.week.week_id }}
     return Number(v || 0).toFixed(2);
   }
 
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Pay uplift / office adjustment reason from server (shown in list rows). */
+  function staffNoteBlock(e) {
+    const reason = String(e.edit_reason || "").trim();
+    const rateOv =
+      e.rate_overridden === true ||
+      e.rate_overridden === 1 ||
+      String(e.rate_overridden || "") === "1";
+    const edited = e.edited_by != null && Number(e.edited_by) > 0;
+    if (!reason && !edited && !rateOv) return "";
+    const label = rateOv ? "Pay uplift" : edited ? "Office" : "Note";
+    const body = reason || (edited || rateOv ? "Updated by office" : "");
+    if (!body) return "";
+    const cls = rateOv || edited ? "text-warning" : "text-muted";
+    return `<div class="small ${cls} mt-1 text-break" style="max-width:14rem;"><span class="text-muted">${label} — </span>${escapeHtml(body)}</div>`;
+  }
+
   function hhmmToMinutes(str) {
     if (!str) return 0;
     const [h, m] = str.split(":").map(Number);
@@ -408,6 +431,32 @@ Timesheet – Week {{ data.week.week_id }}
     if (!container.children.length) container.remove();
     }, timeout);
     }
+
+  function policyPayBadges(entry) {
+    const raw = entry && entry.policy_applied;
+    if (!raw || typeof raw !== "string") return "";
+    let j = null;
+    try { j = JSON.parse(raw); } catch (e) { return ""; }
+    if (!j || typeof j !== "object") return "";
+    const parts = [];
+    const ms = j.minimum_per_shift;
+    if (ms && ms.floor_hours != null) {
+      const fh = Number(ms.floor_hours).toFixed(2);
+      parts.push(
+        `<span class="badge bg-warning text-dark ms-1" title="Minimum paid hours this shift">Min ${fh}h pay</span>`
+      );
+    }
+    const dm = j.daily_minimum;
+    if (dm && dm.minimum_hours != null) {
+      const mh = Number(dm.minimum_hours).toFixed(2);
+      const up = Number(dm.line_uplift || 0).toFixed(2);
+      const basis = String(dm.basis || "").replace(/_/g, " ");
+      parts.push(
+        `<span class="badge bg-info text-dark ms-1" title="Daily minimum hours uplift">Daily min ${mh}h (${basis}) +£${up}</span>`
+      );
+    }
+    return parts.join("");
+  }
 
   // ============================
   // API
@@ -577,17 +626,21 @@ Timesheet – Week {{ data.week.week_id }}
   }
 
   async function submitWeek() {
-    const res = await fetchJSON(`/time-billing/api/weeks/${weekId}/submit`, { method: "POST" });
-    if (!res.ok) {
-      showToast("Submit failed. Please try again.", "danger", 2500);
-      return false;
+    const method = "POST";
+    const headers = typeof window.tbMergeCsrfHeaders === "function"
+      ? window.tbMergeCsrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }, method)
+      : { "Content-Type": "application/json", Accept: "application/json" };
+    const res = await fetch(`/time-billing/api/weeks/${weekId}/submit`, { method, headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      throw new Error((data && data.message) || ("HTTP " + res.status));
     }
     const d = await refreshWeek();
     showToast("Timesheet submitted.", "success", 2000);
 
     const guideWeekly =
       d.employment_type === "self_employed" &&
-      String(d.invoice_billing_frequency || "weekly").toLowerCase() !== "monthly" &&
+      d.combined_invoice_billing !== true &&
       d.can_show_invoice_prompt === true;
 
     if (guideWeekly) {
@@ -782,6 +835,7 @@ Timesheet – Week {{ data.week.week_id }}
       const jtColour    = colourForJobType(e);
       const jtName      = (e.job_type_name || e.job_type_id || "").toString();
       const jtSafeName  = jtName.replace(/</g, "&lt;");
+      const staffNote   = staffNoteBlock(e);
 
       const tr = document.createElement("tr");
       tr.dataset.id = e.id;
@@ -790,6 +844,7 @@ Timesheet – Week {{ data.week.week_id }}
         <td>${locationTxt}</td>
         <td class="text-nowrap">
           <span class="badge me-1" style="background-color:${jtColour}; color:#fff">${jtSafeName}</span>
+          ${policyPayBadges(e)}
         </td>
         <td class="text-nowrap">
           <span class="text-muted">Scheduled</span> ${(e.scheduled_start || "").slice(0,5)}–${(e.scheduled_end || "").slice(0,5)}
@@ -800,7 +855,7 @@ Timesheet – Week {{ data.week.week_id }}
         <td class="text-end">£${money(e.wage_rate_used)}</td>
         <td class="text-end">£${money(e.pay)}</td>
         <td class="text-end">£${money(e.travel_parking)}</td>
-        <td>${(e.notes || "").replace(/</g, "&lt;")}</td>
+        <td>${(e.notes || "").replace(/</g, "&lt;")}${staffNote}</td>
         <td>
           <div class="btn-group btn-group-sm">
             <button class="btn btn-outline-primary ts-edit" ${tsActionsLocked ? "disabled" : ""}>Edit</button>
@@ -826,6 +881,7 @@ Timesheet – Week {{ data.week.week_id }}
       const jtColour    = colourForJobType(e);
       const jtName      = (e.job_type_name || e.job_type_id || "").toString();
       const jtSafeName  = jtName.replace(/</g, "&lt;");
+      const staffNote   = staffNoteBlock(e);
 
       const card = document.createElement("div");
       card.className = "card mb-2";
@@ -837,6 +893,7 @@ Timesheet – Week {{ data.week.week_id }}
               <div class="fw-bold">${e.work_date || ""}</div>
               <div class="text-muted small">
                 <span class="badge" style="background-color:${jtColour}; color:#fff">${jtSafeName}</span>
+                ${policyPayBadges(e)}
               </div>
             </div>
             <div class="text-end small">
@@ -854,6 +911,7 @@ Timesheet – Week {{ data.week.week_id }}
               <span class="text-muted">Travel:</span> £${money(e.travel_parking)}
             </div>
             ${e.notes ? `<div class="mt-1"><span class="text-muted">Notes:</span> ${(e.notes || "").replace(/</g, "&lt;")}</div>` : ""}
+            ${staffNote || ""}
           </div>
           <div class="mt-2 d-flex gap-2">
             <button class="btn btn-sm btn-outline-primary ts-edit w-50" ${tsActionsLocked ? "disabled" : ""}>Edit</button>
@@ -872,14 +930,18 @@ Timesheet – Week {{ data.week.week_id }}
     titleEl.textContent = entry && entry.id ? "Edit Shift" : "Add Shift";
 
     const isSchedulerSource = !!(entry && entry.source === "scheduler");
-    const lockJobClientFields = !!(entry && entry.lock_job_client && (entry.source === "scheduler" || entry.source === "runsheet"));
+    const lockSchedulerCore = !!(entry && entry.lock_job_client && (entry.source === "scheduler" || entry.source === "runsheet"));
+    const hasServerLocationText = !!(
+      String(entry?.client_name || "").trim() ||
+      String(entry?.site_name || "").trim()
+    );
     const scheduledLocked = isSchedulerSource && !SCHEDULER_SOURCE_SCHEDULED_EDIT_ALLOWED;
 
-    // Lock fields when entries were prefilled/generated from schedule_shifts.
-    // Staff can always override actual times; scheduled times are configurable.
-    fClientName.disabled = lockJobClientFields;
-    fSiteName.disabled = lockJobClientFields;
-    fJob.disabled = lockJobClientFields;
+    // Lock job type (and client/site when roster already supplied them).
+    // If roster left client/site empty, allow the contractor to type them.
+    fClientName.disabled = lockSchedulerCore && hasServerLocationText;
+    fSiteName.disabled = lockSchedulerCore && hasServerLocationText;
+    fJob.disabled = lockSchedulerCore;
     fSchedStart.disabled = scheduledLocked;
     fSchedEnd.disabled = scheduledLocked;
 

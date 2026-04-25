@@ -1,55 +1,19 @@
-# Virtual environments
-.venv/
-venv/
-env/
-.env/
-.env.local
-.env.*.local
-
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Testing / coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-
-# IDE / editor
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs and local config
+.venv/
+venv/
+.env
 *.log
-*.sqlite
-*.db
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
 
-# Cursor / project local
-.cursor/
+# Docker build snapshots (website_module); do not commit generated trees
+app/plugins/website_module/templates/public_bundled/
+app/plugins/website_module/static_bundled/

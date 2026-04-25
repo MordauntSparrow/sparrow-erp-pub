@@ -1,0 +1,435 @@
+{% extends "incident_reporting_module/admin/base.html" %}
+{% block title %}HSE walkarounds · Safety &amp; Incidents{% endblock %}
+{% block incident_admin_inner %}
+<div class="container-fluid mt-3 px-lg-4 pb-4">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}" class="text-decoration-none">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_incident_reporting.admin_index') }}" class="text-decoration-none">Safety &amp; Incidents</a></li>
+      <li class="breadcrumb-item active" aria-current="page">HSE walkarounds</li>
+    </ol>
+  </nav>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+      <h1 class="h4 fw-semibold mb-1">HSE walkarounds</h1>
+      <p class="small text-muted mb-0">Complete due tours, record observations, and open debrief packs. Edit forms and schedules in Settings.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if can_configure %}
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_incident_reporting.admin_configuration_walkarounds') }}"><i class="bi bi-gear me-1"></i>Tour definitions</a>
+      {% endif %}
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_incident_reporting.admin_index') }}">Overview</a>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm h-100 bg-primary bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="small text-muted text-uppercase">Pending tours</div>
+          <div class="h4 fw-semibold mb-0">{{ wa_ops.pending_total }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm h-100 {% if wa_ops.overdue_pending %}border-warning{% endif %}">
+        <div class="card-body py-3">
+          <div class="small text-muted text-uppercase">Overdue</div>
+          <div class="h4 fw-semibold mb-0 text-{% if wa_ops.overdue_pending %}warning{% else %}dark{% endif %}">{{ wa_ops.overdue_pending }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="small text-muted text-uppercase">Completed (all time)</div>
+          <div class="h4 fw-semibold mb-0">{{ wa_ops.completed_total }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body py-3">
+          <div class="small text-muted text-uppercase">Observations listed</div>
+          <div class="h4 fw-semibold mb-0">{{ wa_ops.finding_rows|length }}</div>
+          <div class="small text-muted">From recent completions</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold small">Next due by active tour</div>
+    <div class="card-body p-0 small">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light"><tr><th>Tour</th><th>Site / area</th><th>Next due</th><th>Overdue slots</th></tr></thead>
+          <tbody>
+            {% for row in wa_ops.template_next %}
+            <tr>
+              <td><strong>{{ row.template_name|e }}</strong></td>
+              <td class="text-muted">{% if row.site_label %}{{ row.site_label|e }}{% else %}—{% endif %}</td>
+              <td>
+                {% if row.next_due %}
+                  {{ row.next_due }}
+                  {% if row._next_due_cmp and row._next_due_cmp < today %}<span class="badge bg-warning text-dark ms-1">Due</span>{% endif %}
+                {% else %}
+                  <span class="text-muted">No pending tour</span>
+                {% endif %}
+              </td>
+              <td>{{ (row.overdue_pending or 0)|int }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted px-3 py-3">No active walkaround definitions.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold small">Due &amp; complete checks</div>
+    <div class="card-body small">
+      {% for p in pending %}
+      <div class="border rounded p-2 mb-3 {% if p._due_cmp and p._due_cmp < today %}border-warning{% endif %}">
+        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+          <div>
+            <strong>{{ p.template_name|e }}</strong>
+            <span class="text-muted">· due {{ p.due_at }}</span>
+            {% if p._due_cmp and p._due_cmp < today %}<span class="badge bg-warning text-dark ms-1">Overdue</span>{% endif %}
+          </div>
+        </div>
+        <form method="post" action="{{ url_for('internal_incident_reporting.admin_walkaround_complete_post') }}" enctype="multipart/form-data">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="record_id" value="{{ p.id }}">
+          {% for c in p._checklist %}
+          {% set cid = c.id | string %}
+          {% if c.type == 'bool' %}
+          <div class="form-check mb-1">
+            <input class="form-check-input" type="checkbox" name="wchk_{{ p.id }}_{{ cid }}" value="1" id="wc{{ p.id }}_{{ cid }}">
+            <label class="form-check-label" for="wc{{ p.id }}_{{ cid }}">{{ c.label|e }}{% if c.required %} *{% endif %}</label>
+          </div>
+          {% else %}
+          <div class="mb-1">
+            <label class="form-label small mb-0">{{ c.label|e }}</label>
+            <input class="form-control form-control-sm" name="wtxt_{{ p.id }}_{{ cid }}" placeholder="">
+          </div>
+          {% endif %}
+          {% else %}
+          <p class="text-muted mb-1 small">No checklist items.</p>
+          {% endfor %}
+
+          <details class="mt-3 mb-2">
+            <summary class="fw-semibold small">Observations</summary>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle mb-2">
+                <thead class="table-light"><tr><th>Finding</th><th>Rating</th><th>Rectify by</th><th>Guidance ref.</th><th>Photo</th></tr></thead>
+                <tbody id="finding-tbody-{{ p.id }}" class="walkaround-finding-tbody" data-next-index="3">
+                  {% for i in [0,1,2] %}
+                  <tr class="walkaround-finding-row">
+                    <td><input class="form-control form-control-sm" name="finding_point_{{ p.id }}_{{ i }}" placeholder="Describe hazard / non-conformance"></td>
+                    <td class="align-top">
+                      <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Severity for observation {{ i + 1 }}">
+                        {% for code, lab in severity_choices %}
+                        {% set btn = severity_btn_outline.get(code, 'secondary') %}
+                        <input type="radio" class="btn-check" name="finding_severity_{{ p.id }}_{{ i }}" id="fs_{{ p.id }}_{{ i }}_{{ code }}" value="{{ code }}" autocomplete="off" {% if code == 'low' %}checked{% endif %}>
+                        <label class="btn btn-outline-{{ btn }}" for="fs_{{ p.id }}_{{ i }}_{{ code }}" title="{{ lab|e }}">{{ severity_short.get(code, '?')|e }}</label>
+                        {% endfor %}
+                      </div>
+                    </td>
+                    <td><input type="date" class="form-control form-control-sm" name="finding_rectify_by_{{ p.id }}_{{ i }}"></td>
+                    <td><input class="form-control form-control-sm" name="finding_guidance_{{ p.id }}_{{ i }}" placeholder="e.g. HSE INDG163"></td>
+                    <td><input class="form-control form-control-sm" type="file" name="finding_file_{{ p.id }}_{{ i }}" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp"></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <button type="button" class="btn btn-sm btn-outline-secondary mb-2" data-walkaround-finding-add data-record-id="{{ p.id }}"><i class="bi bi-plus-lg" aria-hidden="true"></i> Add observation row</button>
+            </div>
+            <div class="mb-1">
+              <label class="form-label small">General walkaround photos (optional)</label>
+              <input class="form-control form-control-sm" type="file" name="overview_file_{{ p.id }}" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp" multiple>
+            </div>
+          </details>
+
+          <div class="mt-2">
+            <label class="form-label small">Notes</label>
+            <textarea class="form-control form-control-sm" name="notes" rows="2"></textarea>
+          </div>
+          <div class="mt-2" style="max-width:28rem;">
+            <label class="form-label small mb-1" for="wlink-q-{{ p.id }}">Link to existing incident (optional)</label>
+            <p class="small text-muted mb-2">Search by reference, title, or Sparrow id. Only incidents you can open under your access scope appear.</p>
+            <input type="hidden" name="linked_incident_id" value="" id="wlink-hid-{{ p.id }}">
+            <input type="search" class="form-control form-control-sm mb-1" id="wlink-q-{{ p.id }}" autocomplete="off" placeholder="Type at least 2 characters" data-walkaround-incident-search="{{ url_for('internal_incident_reporting.admin_incidents_search') }}" data-record-id="{{ p.id }}">
+            <ul class="list-group list-group-flush small border rounded mb-1 d-none" id="wlink-ul-{{ p.id }}" style="max-height:11rem;overflow:auto;"></ul>
+            <div class="small text-muted d-flex flex-wrap align-items-center gap-2" id="wlink-picked-{{ p.id }}"></div>
+          </div>
+          <button type="submit" class="btn btn-sm btn-primary mt-2">Mark complete &amp; schedule next</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="text-muted mb-0">No pending walkarounds. Add an active definition under Settings → Tour definitions to schedule the first due date.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-semibold small">Observations to follow up</div>
+    <div class="card-body p-0 small">
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Ref</th>
+              <th>Tour</th>
+              <th>Finding</th>
+              <th>Rating</th>
+              <th>Rectify by</th>
+              <th>Completed</th>
+              <th>Incident</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in wa_ops.finding_rows %}
+            <tr>
+              <td class="font-monospace">{{ f.report_ref|e }}</td>
+              <td>{{ f.template_name|e }}</td>
+              <td>{{ f.point|e }}</td>
+              <td><span class="badge bg-light text-dark border">{{ finding_severity_labels.get(f.severity, f.severity)|e }}</span></td>
+              <td>{{ f.rectify_by or '—' }}</td>
+              <td class="text-muted">{{ f.completed_at or '—' }}</td>
+              <td>
+                {% if f.linked_incident_id %}
+                <a href="{{ url_for('internal_incident_reporting.admin_detail', incident_id=f.linked_incident_id, tab='summary') }}">{% if f.linked_incident_ref %}{{ f.linked_incident_ref|e }}{% else %}#{{ f.linked_incident_id }}{% endif %}</a>
+                {% else %}—{% endif %}
+              </td>
+              <td class="text-end text-nowrap">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_incident_reporting.admin_walkaround_report', record_id=f.record_id) }}" target="_blank" rel="noopener">Pack</a>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="text-muted px-3 py-3">No observations recorded on completed tours yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-header fw-semibold small">Recently completed — debrief packs</div>
+    <div class="card-body small p-0">
+      <table class="table table-sm mb-0">
+        <thead class="table-light"><tr><th>Reference</th><th>Completed</th><th>Tour</th><th>Was due</th><th></th></tr></thead>
+        <tbody>
+          {% for c in completed %}
+          <tr>
+            <td class="font-monospace">{{ 'WA-%05d' % (c.id|int) }}</td>
+            <td>{{ c.completed_at or '—' }}</td>
+            <td>{{ c.template_name|e }}</td>
+            <td>{{ c.due_at }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('internal_incident_reporting.admin_walkaround_report', record_id=c.id) }}" target="_blank" rel="noopener">Open pack</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-muted px-3 py-2">No completed walkarounds yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="walkaround-finding-severity-spec">{{ finding_severity_ui_json|safe }}</script>
+<script>
+(function () {
+  var specEl = document.getElementById("walkaround-finding-severity-spec");
+  if (!specEl) return;
+  var spec;
+  try {
+    spec = JSON.parse(specEl.textContent || "{}");
+  } catch (e) {
+    return;
+  }
+  var maxRows = 40;
+  function escAttr(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
+  }
+  function findingRowHtml(rid, idx) {
+    var sev = "";
+    var ch = spec.choices || [];
+    var outline = spec.outline || {};
+    var short = spec.short || {};
+    for (var k = 0; k < ch.length; k++) {
+      var code = ch[k][0];
+      var lab = ch[k][1] || "";
+      var btn = outline[code] || "secondary";
+      var sh = short[code] || "?";
+      var id = "fs_" + rid + "_" + idx + "_" + code;
+      var ck = code === "low" ? " checked" : "";
+      sev +=
+        '<input type="radio" class="btn-check" name="finding_severity_' +
+        rid +
+        "_" +
+        idx +
+        '" id="' +
+        id +
+        '" value="' +
+        escAttr(code) +
+        '" autocomplete="off"' +
+        ck +
+        ">" +
+        '<label class="btn btn-outline-' +
+        btn +
+        '" for="' +
+        id +
+        '" title="' +
+        escAttr(lab) +
+        '">' +
+        escAttr(sh) +
+        "</label>";
+    }
+    return (
+      '<tr class="walkaround-finding-row">' +
+      '<td><input class="form-control form-control-sm" name="finding_point_' +
+      rid +
+      "_" +
+      idx +
+      '" placeholder="Describe hazard / non-conformance"></td>' +
+      '<td class="align-top"><div class="btn-group btn-group-sm flex-wrap" role="group">' +
+      sev +
+      "</div></td>" +
+      '<td><input type="date" class="form-control form-control-sm" name="finding_rectify_by_' +
+      rid +
+      "_" +
+      idx +
+      '"></td>' +
+      '<td><input class="form-control form-control-sm" name="finding_guidance_' +
+      rid +
+      "_" +
+      idx +
+      '" placeholder="e.g. HSE INDG163"></td>' +
+      '<td><input class="form-control form-control-sm" type="file" name="finding_file_' +
+      rid +
+      "_" +
+      idx +
+      '" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp"></td>' +
+      "</tr>"
+    );
+  }
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-walkaround-finding-add]");
+    if (!btn) return;
+    ev.preventDefault();
+    var rid = btn.getAttribute("data-record-id");
+    if (!rid) return;
+    var tb = document.getElementById("finding-tbody-" + rid);
+    if (!tb) return;
+    var idx = parseInt(tb.getAttribute("data-next-index") || "0", 10);
+    if (idx >= maxRows) return;
+    tb.insertAdjacentHTML("beforeend", findingRowHtml(rid, idx));
+    tb.setAttribute("data-next-index", String(idx + 1));
+  });
+})();
+(function () {
+  function esc(s) {
+    var d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }
+  document.addEventListener("input", function (ev) {
+    var inp = ev.target.closest("[data-walkaround-incident-search]");
+    if (!inp || !inp.dataset.walkaroundIncidentSearch) return;
+    var rid = inp.getAttribute("data-record-id");
+    if (!rid) return;
+    var ul = document.getElementById("wlink-ul-" + rid);
+    var hid = document.getElementById("wlink-hid-" + rid);
+    var picked = document.getElementById("wlink-picked-" + rid);
+    if (!ul || !hid || !picked) return;
+    if (!inp._wlinkT) inp._wlinkT = null;
+    function hide() {
+      ul.classList.add("d-none");
+      ul.innerHTML = "";
+    }
+    clearTimeout(inp._wlinkT);
+    var q = (inp.value || "").trim();
+    if (q.length < 2) {
+      hide();
+      return;
+    }
+    inp._wlinkT = setTimeout(function () {
+      fetch(
+        inp.dataset.walkaroundIncidentSearch + "?q=" + encodeURIComponent(q),
+        { credentials: "same-origin" }
+      )
+        .then(function (r) {
+          return r.json();
+        })
+        .then(function (rows) {
+          ul.innerHTML = "";
+          if (!rows || !rows.length) {
+            hide();
+            return;
+          }
+          rows.forEach(function (row) {
+            var li = document.createElement("li");
+            li.className = "list-group-item list-group-item-action py-1";
+            li.textContent = row.label;
+            li.addEventListener("click", function () {
+              hid.value = String(row.id);
+              picked.innerHTML =
+                '<span>Linked: <strong>' +
+                esc(row.label) +
+                '</strong></span> <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-walkaround-incident-clear="' +
+                esc(rid) +
+                '">Clear</button>';
+              inp.value = "";
+              hide();
+            });
+            ul.appendChild(li);
+          });
+          ul.classList.remove("d-none");
+        })
+        .catch(function () {
+          hide();
+        });
+    }, 250);
+  });
+  document.addEventListener("click", function (ev) {
+    var clr = ev.target.closest("[data-walkaround-incident-clear]");
+    if (clr) {
+      ev.preventDefault();
+      var rid = clr.getAttribute("data-walkaround-incident-clear");
+      var hid = document.getElementById("wlink-hid-" + rid);
+      var picked = document.getElementById("wlink-picked-" + rid);
+      var inp = document.querySelector(
+        '[data-walkaround-incident-search][data-record-id="' + rid.replace(/"/g, "") + '"]'
+      );
+      if (hid) hid.value = "";
+      if (picked) picked.innerHTML = "";
+      var ul = document.getElementById("wlink-ul-" + rid);
+      if (ul) {
+        ul.classList.add("d-none");
+        ul.innerHTML = "";
+      }
+      if (inp) inp.value = "";
+      return;
+    }
+    var t = ev.target;
+    if (t.closest && t.closest("[data-walkaround-incident-search]")) return;
+    if (t.closest && t.closest('[id^="wlink-ul-"]')) return;
+    document.querySelectorAll('[id^="wlink-ul-"]').forEach(function (ul) {
+      ul.classList.add("d-none");
+      ul.innerHTML = "";
+    });
+  });
+})();
+</script>
+{% endblock %}

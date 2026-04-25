@@ -1,0 +1,343 @@
+{% extends 'medical_records_shell.html' %}
+{% block title %}Ops report — {{ event_name or ('#' ~ event_id) }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_hub') }}">Event manager</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('medical_records_internal.cura_ops_operational_event_detail', event_id=event_id) }}">Event #{{ event_id }}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Report</li>
+  </ol>
+</nav>
+
+<div class="mr-page-header d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+  <div>
+    <h1 class="h3 mb-1">Operational period statistics</h1>
+    <p class="text-muted mb-0 small">{{ event_name or ('Operational period #' ~ event_id) }} — aggregates only; no patient identifiers. Incident meta coverage counts how many cases had a value per configured key (e.g. runner number); it does not list those values here.</p>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <a class="btn btn-primary btn-sm" href="{{ url_for('medical_records_internal.cura_ops_operational_event_report', event_id=event_id, format='json', min_cell=stats.min_cell|default(0), scan_limit=stats.scan_limit|default(8000)) }}">Download full report file</a>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('medical_records_internal.cura_ops_operational_event_detail', event_id=event_id) }}">Back to event</a>
+  </div>
+</div>
+
+{% if assets_error %}
+<div class="alert alert-warning">{{ assets_error }}</div>
+{% endif %}
+
+<h2 class="h5 mb-3">Overview charts</h2>
+<p class="small text-muted mb-3">Hour and day views use each EPCR case&rsquo;s <strong>created</strong> timestamp (server time). Disposition groups are derived from clinical handover outcome text.</p>
+<div class="row g-4 mb-4">
+  <div class="col-lg-6 col-xl-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header py-2">EPCR vs minor injury (submitted)</div>
+      <div class="card-body" style="height: 280px; position: relative;">
+        <canvas id="curaChartEpcrMi" aria-label="Pie chart of EPCR cases versus minor injury reports"></canvas>
+      </div>
+      <div class="card-footer small text-muted">Full EPCR cases linked to this period compared with <strong>submitted</strong> minor-injury reports (separate documentation paths).</div>
+    </div>
+  </div>
+  <div class="col-lg-6 col-xl-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header py-2">Disposition (handover outcome)</div>
+      <div class="card-body" style="height: 280px; position: relative;">
+        <canvas id="curaChartDisposition" aria-label="Disposition categories from clinical handover"></canvas>
+      </div>
+      <div class="card-footer small text-muted">Keyword grouping of free-text outcomes; see the handover table below for raw values.</div>
+    </div>
+  </div>
+  <div class="col-lg-12 col-xl-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header py-2">Cases created by hour of day</div>
+      <div class="card-body" style="height: 280px; position: relative;">
+        <canvas id="curaChartHour" aria-label="Bar chart of cases by hour"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% set _days = stats.epcr_cases_created_by_day or {} %}
+{% if _days is mapping and _days|length > 0 %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header py-2">Cases created by day{% if _days|length > 1 %} (multi-day event){% endif %}</div>
+  <div class="card-body" style="height: min(360px, 50vh); position: relative; min-height: 220px;">
+    <canvas id="curaChartDay" aria-label="Bar chart of cases by calendar day"></canvas>
+  </div>
+</div>
+{% endif %}
+
+{% macro kv_table(title, data) %}
+{% if data is mapping and data %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header py-2">{{ title }}</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0 align-middle">
+        <thead><tr><th>Category</th><th class="text-end">Count</th></tr></thead>
+        <tbody>
+          {% for k, v in data|dictsort %}
+          <tr>
+            <td class="small">{{ k }}</td>
+            <td class="text-end">{% if v is none %}<span class="text-muted">suppressed</span>{% else %}{{ v }}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+<div class="row g-4">
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-header py-2">Record totals (this period)</div>
+      <div class="card-body">
+        <dl class="row small mb-0">
+          <dt class="col-sm-6">Patient contact reports</dt><dd class="col-sm-6 text-end">{{ stats.totals.patient_contact_reports|default(0) }}</dd>
+          <dt class="col-sm-6">Safeguarding referrals</dt><dd class="col-sm-6 text-end">{{ stats.totals.safeguarding_referrals|default(0) }}</dd>
+          <dt class="col-sm-6">EPCR cases scanned</dt><dd class="col-sm-6 text-end">{{ stats.epcr_cases_scanned|default(0) }}</dd>
+          <dt class="col-sm-6">Minor injury events (this period only)</dt><dd class="col-sm-6 text-end">{{ stats.minor_injury.mi_events_linked|default(0) }}</dd>
+          <dt class="col-sm-6">MI reports (rows scanned)</dt><dd class="col-sm-6 text-end">{{ stats.minor_injury.mi_report_rows_scanned|default(0) }}</dd>
+          <dt class="col-sm-6">MI submitted</dt><dd class="col-sm-6 text-end">{{ stats.minor_injury.mi_submitted_reports|default(0) }}</dd>
+        </dl>
+        <p class="small text-muted mb-0 mt-2">Minor injury &ldquo;events&rdquo; are Cura MI configurations whose JSON points at <strong>this</strong> operational period only.</p>
+      </div>
+    </div>
+    {{ kv_table('Patient contact by status', stats.patient_contact_reports_by_status) }}
+    {{ kv_table('Safeguarding by status', stats.safeguarding_referrals_by_status) }}
+    {{ kv_table('Minor injury — injury type', stats.minor_injury.mi_injury_type) }}
+    {{ kv_table('Minor injury — outcome', stats.minor_injury.mi_outcome) }}
+    {{ kv_table('Minor injury — body region', stats.minor_injury.mi_body_region) }}
+    {{ kv_table('EPCR — primary presentation (SNOMED)', stats.epcr_presenting_snomed_primary) }}
+    {{ kv_table('EPCR — suspected conditions (SNOMED)', stats.epcr_presenting_snomed_suspected) }}
+  </div>
+  <div class="col-lg-6">
+    {{ kv_table('EPCR case status', stats.epcr_case_status) }}
+    {{ kv_table('EPCR response type', stats.epcr_response_type) }}
+    {{ kv_table('EPCR incident meta — cases with a value (by field key)', stats.epcr_incident_response_meta_coverage) }}
+    {{ kv_table('EPCR response other (top)', stats.epcr_response_other_top) }}
+    {{ kv_table('EPCR handover outcome (top)', stats.epcr_handover_outcome_top) }}
+    {{ kv_table('EPCR disposition (grouped)', stats.epcr_disposition_category) }}
+    {{ kv_table('EPCR receiving hospital (top)', stats.epcr_receiving_hospital_top) }}
+    {{ kv_table('EPCR receiving ward (top)', stats.epcr_receiving_ward_top) }}
+    {{ kv_table('EPCR age band', stats.epcr_age_band) }}
+    {{ kv_table('EPCR sex (hint)', stats.epcr_sex_hint) }}
+    {{ kv_table('EPCR drugs administered count bucket', stats.epcr_drugs_administered_count_bucket) }}
+    {{ kv_table('EPCR billing section present', stats.epcr_has_billing_section) }}
+    {{ kv_table('EPCR clinical handover content', stats.epcr_has_clinical_handover_content) }}
+    {{ kv_table('EPCR clinical indicator modules', stats.epcr_clinical_indicator_modules_present) }}
+    {{ kv_table('EPCR section tab popularity', stats.epcr_section_tab_popularity) }}
+  </div>
+</div>
+
+{% if stats.epcr_cases_created_by_day is mapping and stats.epcr_cases_created_by_day %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header py-2">EPCR cases created by day (table)</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Date</th><th class="text-end">Cases</th></tr></thead>
+        <tbody>
+          {% for day, n in stats.epcr_cases_created_by_day|dictsort %}
+          <tr><td class="small">{{ day }}</td><td class="text-end">{{ n }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if stats.epcr_cases_created_by_hour_of_day is mapping and stats.epcr_cases_created_by_hour_of_day %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header py-2">EPCR cases created by hour of day (table)</div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Hour</th><th class="text-end">Cases created</th></tr></thead>
+        <tbody>
+          {% for hk, n in stats.epcr_cases_created_by_hour_of_day|dictsort %}
+          <tr><td class="small">{{ hk }}</td><td class="text-end">{{ n }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if stats.epcr_cases_updated_by_hour_bucket is mapping and stats.epcr_cases_updated_by_hour_bucket %}
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-header py-2">EPCR update activity by hour (recent buckets)</div>
+  <div class="card-body p-0">
+    <div class="table-responsive" style="max-height: 22rem; overflow-y: auto;">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Hour</th><th class="text-end">Touches</th></tr></thead>
+        <tbody>
+          {% for hk, n in stats.epcr_cases_updated_by_hour_bucket|dictsort %}
+          <tr><td class="small">{{ hk }}</td><td class="text-end">{{ n }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if stats.note %}
+<p class="small text-muted">{{ stats.note }}</p>
+{% endif %}
+
+{% if assets and assets|length > 0 %}
+<h2 class="h5 mt-4 mb-2">Event documents (metadata)</h2>
+<p class="small text-muted mb-2">PDFs and bulletins for this period are stored with your other Sparrow uploads.</p>
+<div class="table-responsive mr-table-wrap mb-4">
+  <table class="table table-sm table-hover align-middle">
+    <thead><tr><th>Kind</th><th>Title</th><th>File</th><th>By</th><th>When</th></tr></thead>
+    <tbody>
+      {% for a in assets %}
+      <tr>
+        <td class="small">{{ a.asset_kind }}</td>
+        <td>{{ a.title }}</td>
+        <td class="small">{% if a.original_filename %}{{ a.original_filename }}{% else %}—{% endif %}</td>
+        <td>{{ a.created_by or '—' }}</td>
+        <td>{{ a.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  function num(v) {
+    if (v === null || v === undefined || v === '') return 0;
+    var n = Number(v);
+    return isFinite(n) ? n : 0;
+  }
+
+  var dispOrder = {{ (stats.epcr_disposition_category_order or [])|tojson }};
+  var dispRaw = {{ (stats.epcr_disposition_category or {})|tojson }};
+  var hourRaw = {{ (stats.epcr_cases_created_by_hour_of_day or {})|tojson }};
+  var dayRaw = {{ (stats.epcr_cases_created_by_day or {})|tojson }};
+  var epcrN = {{ stats.epcr_cases_scanned|default(0)|int }};
+  var miN = {{ stats.minor_injury.mi_submitted_reports|default(0)|int }};
+
+  var colors = {
+    pie: ['#0d6efd', '#6f42c1', '#20c997', '#fd7e14', '#dc3545', '#6c757d', '#0dcaf0'],
+    bar1: 'rgba(13, 110, 253, 0.75)',
+    bar2: 'rgba(32, 201, 151, 0.8)'
+  };
+
+  function run() {
+    if (typeof Chart === 'undefined') return;
+
+    var elMi = document.getElementById('curaChartEpcrMi');
+    if (elMi && (epcrN > 0 || miN > 0)) {
+      new Chart(elMi, {
+        type: 'pie',
+        data: {
+          labels: ['EPCR cases (this period)', 'MI reports submitted'],
+          datasets: [{ data: [epcrN, miN], backgroundColor: [colors.pie[0], colors.pie[1]], borderWidth: 1 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } }
+        }
+      });
+    } else if (elMi) {
+      elMi.closest('.card').querySelector('.card-body').innerHTML = '<p class="small text-muted mb-0 p-2">No EPCR or submitted MI data yet for this period.</p>';
+    }
+
+    var elDisp = document.getElementById('curaChartDisposition');
+    if (elDisp) {
+      var dLabels = [];
+      var dData = [];
+      var order = dispOrder.length ? dispOrder : Object.keys(dispRaw || {});
+      order.forEach(function (k) {
+        var v = num(dispRaw[k]);
+        if (v > 0) {
+          dLabels.push(k);
+          dData.push(v);
+        }
+      });
+      if (dLabels.length) {
+        new Chart(elDisp, {
+          type: 'doughnut',
+          data: {
+            labels: dLabels,
+            datasets: [{ data: dData, backgroundColor: colors.pie, borderWidth: 1 }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+          }
+        });
+      } else {
+        elDisp.closest('.card').querySelector('.card-body').innerHTML = '<p class="small text-muted mb-0 p-2">No disposition data yet.</p>';
+      }
+    }
+
+    var elHour = document.getElementById('curaChartHour');
+    if (elHour && hourRaw && typeof hourRaw === 'object') {
+      var hLabels = Object.keys(hourRaw).sort();
+      var hVals = hLabels.map(function (k) { return num(hourRaw[k]); });
+      new Chart(elHour, {
+        type: 'bar',
+        data: {
+          labels: hLabels,
+          datasets: [{ label: 'Cases created', data: hVals, backgroundColor: colors.bar1, borderWidth: 0 }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+            y: { beginAtZero: true, ticks: { precision: 0 } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    var elDay = document.getElementById('curaChartDay');
+    if (elDay && dayRaw && typeof dayRaw === 'object') {
+      var dKeys = Object.keys(dayRaw).sort();
+      if (dKeys.length) {
+        var dVals = dKeys.map(function (k) { return num(dayRaw[k]); });
+        new Chart(elDay, {
+          type: 'bar',
+          data: {
+            labels: dKeys,
+            datasets: [{ label: 'Cases created', data: dVals, backgroundColor: colors.bar2, borderWidth: 0 }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { maxRotation: 45, autoSkip: true } },
+              y: { beginAtZero: true, ticks: { precision: 0 } }
+            },
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+})();
+</script>
+{% endblock %}

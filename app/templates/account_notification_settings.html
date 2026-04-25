@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Email notifications · Account{% endblock %}
+{% block content %}
+<div class="container mt-4 col-lg-8">
+  <nav aria-label="Breadcrumb" class="mb-3">
+    <ol class="breadcrumb mb-0 small">
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.dashboard') }}">Dashboard</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Email notifications</li>
+    </ol>
+  </nav>
+  <h1 class="h3 mb-2">Email notifications</h1>
+  <p class="text-muted small mb-4">
+    Choose which automated emails we send <strong>to your work account</strong> when SMTP is configured.
+    Applicant-facing careers messages are not controlled here. Realtime in-app recruitment alerts are unchanged.
+  </p>
+
+  {% if not show_recruitment and not show_hr_contractor %}
+  <div class="alert alert-light border rounded">
+    No optional categories apply: you need recruitment permissions (for team recruitment alerts) and/or an HR-linked employee record (for HR document request emails to your portal email).
+  </div>
+  {% else %}
+  <form method="post" class="card shadow-sm">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <div class="card-body">
+      {% if show_recruitment %}
+      <h2 class="h6 text-uppercase text-muted mb-3">Recruitment (internal team)</h2>
+      <p class="small text-muted mb-3">When you appear on the recruitment notifications list, these emails use your organisation branding from Core settings.</p>
+      {% for k in recruitment_kinds %}
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="rec_int_{{ k }}" value="1" id="rec_{{ k }}"
+          {% if prefs.email.recruitment_internal.get(k, true) %}checked{% endif %}>
+        <label class="form-check-label" for="rec_{{ k }}">{{ recruitment_kind_labels.get(k, k) }}</label>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      {% if show_hr_contractor %}
+      <hr class="my-4">
+      <h2 class="h6 text-uppercase text-muted mb-3">HR (my employee record)</h2>
+      <p class="small text-muted mb-3">Your user is linked to employee record <strong>#{{ linked_contractor_id }}</strong>. HR can open document requests that email your work address on file.</p>
+      {% for k in hr_contractor_kinds %}
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" name="hr_co_{{ k }}" value="1" id="hr_{{ k }}"
+          {% if prefs.email.hr_contractor.get(k, true) %}checked{% endif %}>
+        <label class="form-check-label" for="hr_{{ k }}">{{ hr_contractor_kind_labels.get(k, k) }}</label>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <div class="mt-4 d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary">Save preferences</button>
+        <a href="{{ url_for('routes.dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

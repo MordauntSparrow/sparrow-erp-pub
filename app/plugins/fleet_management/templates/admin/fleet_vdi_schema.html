@@ -1,0 +1,582 @@
+{% extends "admin/fleet_admin_base.html" %}
+{% block page_title %}Forms{% endblock %}
+{% block content %}
+<div class="container-fluid py-3" style="max-width:920px">
+  <div class="fleet-page-hero mb-3">
+    <h1 class="h5 mb-1"><i class="bi bi-file-earmark-text text-primary me-2"></i>Forms</h1>
+    <p class="fleet-page-hero__sub mb-0">Configure the <strong>daily vehicle inspection</strong> checklist (used on <strong>/VDIs</strong> and the employee-portal inspection flow) and <strong>contractor-only</strong> portal forms (e.g. pre-delivery with photos). Workshop <strong>safety</strong> checklists are per vehicle type — see the table below or <a href="{{ url_for('fleet_management.vehicle_types_list') }}">Vehicle types</a>. <a href="{{ url_for('fleet_management.fleet_portal_form_access') }}">Portal form access</a> controls which roles see VDI vs safety on the portal and /VDIs.</p>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-body py-3">
+      <h2 class="h6 mb-2"><i class="bi bi-shield-check text-primary me-1"></i>Workshop safety form (per vehicle type)</h2>
+      <p class="small text-muted mb-2">Each type has its own workshop safety checklist. Open the type’s settings from the list, or jump straight to the form editor here.</p>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered mb-0 bg-white">
+          <thead class="table-light"><tr><th>Type</th><th class="text-end" style="width:9rem">Safety form</th></tr></thead>
+          <tbody>
+            {% for vt in vehicle_types %}
+            <tr class="{% if not vt.active %}text-muted{% endif %}">
+              <td>{{ vt.name or ('Type #' ~ vt.id) }}{% if not vt.active %} <span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('fleet_management.vehicle_type_safety_schema', type_id=vt.id) }}">Edit</a>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fleet_management.vehicle_type_edit', type_id=vt.id) }}">Type</a>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="2" class="text-muted small">No vehicle types yet. <a href="{{ url_for('fleet_management.vehicle_type_new') }}">Create a type</a> first.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h6 mb-2">Daily inspection &amp; contractor portal forms</h2>
+  <p class="small text-muted mb-3">The builder below applies to <strong>all</strong> vehicles. Field types: short text, number, odometer, yes/no, photo.</p>
+
+  <form method="post" id="vdi-builder-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="builder_action" value="save" id="builder-action">
+
+    <div class="mb-3">
+      <label class="form-label small fw-semibold">Form title (shown to drivers)</label>
+      <input type="text" class="form-control" name="form_title" id="form_title_input" value="{{ schema.title|default('Vehicle daily inspection') }}" required maxlength="120">
+    </div>
+
+    <div id="sections-root">
+      {% for sec in schema.sections or [] %}
+      <div class="section-block card shadow-sm mb-3" data-role="section">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="small fw-semibold">Section</span>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-section">Remove section</button>
+        </div>
+        <div class="card-body">
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <label class="form-label small mb-0">Section id <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="id" value="{{ sec.id }}" maxlength="64" placeholder="e.g. walkaround">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label small mb-0">Section heading</label>
+              <input type="text" class="form-control form-control-sm" data-sec-input="title" value="{{ sec.title }}" maxlength="120" placeholder="Shown on the inspection form" required>
+            </div>
+          </div>
+          <div class="fields-container border rounded p-2 bg-light bg-opacity-50" data-role="fields-container">
+            {% for field in sec.fields|default([]) %}
+            <div class="field-row border-bottom pb-2 mb-2" data-role="field">
+              <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Field id</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="id" value="{{ field.id }}" maxlength="64" placeholder="auto">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small mb-0">Type</label>
+                  <select class="form-select form-select-sm" data-field-input="type" data-field-type-select>
+                    <option value="text" {% if (field.type or 'text') == 'text' %}selected{% endif %}>Short text</option>
+                    <option value="number" {% if field.type == 'number' %}selected{% endif %}>Number</option>
+                    <option value="mileage" {% if field.type == 'mileage' %}selected{% endif %}>Odometer</option>
+                    <option value="bool" {% if field.type == 'bool' %}selected{% endif %}>Yes / No</option>
+                    <option value="photo" {% if field.type == 'photo' %}selected{% endif %}>Photo upload</option>
+                  </select>
+                </div>
+                <div class="col-md-5">
+                  <label class="form-label small mb-0">Question / label</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="label" value="{{ field.label }}" maxlength="255" required>
+                </div>
+                <div class="col-md-2">
+                  <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" value="1" data-field-input="required" {% if field.required %}checked{% endif %}>
+                    <label class="form-check-label small">Required</label>
+                  </div>
+                </div>
+                <div class="col-md-1 text-end">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-action="remove-field" title="Remove field">&times;</button>
+                </div>
+              </div>
+              <div class="row g-2 mt-1 number-opts" data-role="number-opts"{% if (field.type or 'text')|lower not in ['number', 'mileage'] %} style="display:none"{% endif %}>
+                <div class="col-4 col-md-2">
+                  <label class="form-label small mb-0">Min</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="min" value="{{ field.min if field.min is defined else '' }}" placeholder="—">
+                </div>
+                <div class="col-4 col-md-2">
+                  <label class="form-label small mb-0">Max</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="max" value="{{ field.max if field.max is defined else '' }}" placeholder="—">
+                </div>
+                <div class="col-4 col-md-2">
+                  <label class="form-label small mb-0">Step</label>
+                  <input type="text" class="form-control form-control-sm" data-field-input="step" value="{{ field.step if field.step is defined else '' }}" placeholder="—">
+                </div>
+                <div class="col-12 small text-muted">Used for number and odometer fields only.</div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-action="add-field">Add field</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="button" class="btn btn-outline-primary btn-sm" id="btn-add-section">Add section</button>
+    </div>
+
+    <hr class="my-4">
+    <h2 class="h6">Contractor-only forms (employee portal)</h2>
+    <p class="small text-muted">Extra inspections appear beside the workshop safety check. Give each form a short unique reference, pick who sees it on the portal, then add sections and fields—the same as the main builder. Submissions are saved as fleet safety checks. Use <strong>Photo upload</strong> when you need a picture.</p>
+    <div id="extra-forms-root">
+      {% for ax in schema.additional_forms or [] %}
+      {% set xf = loop.index0 %}
+      {% include 'admin/partials/fleet_safety_extra_form_block.html' %}
+      {% endfor %}
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm mb-4" id="btn-add-xf">Add contractor form</button>
+
+    <template id="tpl-xf-empty">{% include 'admin/partials/fleet_safety_extra_form_empty_tpl.html' %}</template>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button type="submit" class="btn btn-primary btn-sm">Save form</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('fleet_management.dashboard') }}">Cancel</a>
+      <button type="button" class="btn btn-outline-warning btn-sm" id="btn-restore-default">Restore default form</button>
+    </div>
+  </form>
+
+  <template id="tpl-section">
+    <div class="section-block card shadow-sm mb-3" data-role="section">
+      <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="small fw-semibold">Section</span>
+        <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-section">Remove section</button>
+      </div>
+      <div class="card-body">
+        <div class="row g-2 mb-2">
+          <div class="col-md-4">
+            <label class="form-label small mb-0">Section id <span class="text-muted">(optional)</span></label>
+            <input type="text" class="form-control form-control-sm" data-sec-input="id" maxlength="64" placeholder="e.g. walkaround">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label small mb-0">Section heading</label>
+            <input type="text" class="form-control form-control-sm" data-sec-input="title" maxlength="120" placeholder="Shown on the inspection form" required>
+          </div>
+        </div>
+        <div class="fields-container border rounded p-2 bg-light bg-opacity-50" data-role="fields-container"></div>
+        <button type="button" class="btn btn-sm btn-outline-primary mt-2" data-action="add-field">Add field</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="tpl-field">
+    <div class="field-row border-bottom pb-2 mb-2" data-role="field">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Field id</label>
+          <input type="text" class="form-control form-control-sm" data-field-input="id" maxlength="64" placeholder="auto">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small mb-0">Type</label>
+          <select class="form-select form-select-sm" data-field-input="type" data-field-type-select>
+            <option value="text" selected>Short text</option>
+            <option value="number">Number</option>
+            <option value="mileage">Odometer</option>
+            <option value="bool">Yes / No</option>
+            <option value="photo">Photo upload</option>
+          </select>
+        </div>
+        <div class="col-md-5">
+          <label class="form-label small mb-0">Question / label</label>
+          <input type="text" class="form-control form-control-sm" data-field-input="label" maxlength="255" required>
+        </div>
+        <div class="col-md-2">
+          <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" value="1" data-field-input="required">
+            <label class="form-check-label small">Required</label>
+          </div>
+        </div>
+        <div class="col-md-1 text-end">
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-action="remove-field" title="Remove field">&times;</button>
+        </div>
+      </div>
+      <div class="row g-2 mt-1 number-opts" data-role="number-opts" style="display:none">
+        <div class="col-4 col-md-2">
+          <label class="form-label small mb-0">Min</label>
+          <input type="text" class="form-control form-control-sm" data-field-input="min" placeholder="—">
+        </div>
+        <div class="col-4 col-md-2">
+          <label class="form-label small mb-0">Max</label>
+          <input type="text" class="form-control form-control-sm" data-field-input="max" placeholder="—">
+        </div>
+        <div class="col-4 col-md-2">
+          <label class="form-label small mb-0">Step</label>
+          <input type="text" class="form-control form-control-sm" data-field-input="step" placeholder="—">
+        </div>
+        <div class="col-12 small text-muted">Used for number and odometer fields only.</div>
+      </div>
+    </div>
+  </template>
+</div>
+
+<script type="application/json" id="fleet-tb-role-data">{{ tb_role_names|tojson }}</script>
+<script>
+(function () {
+  const root = document.getElementById('sections-root');
+  const tplSec = document.getElementById('tpl-section');
+  const tplField = document.getElementById('tpl-field');
+  const form = document.getElementById('vdi-builder-form');
+  const builderAction = document.getElementById('builder-action');
+
+  function wireFleetRolePickers(scope) {
+    var el = scope || document;
+    var dataScript = document.getElementById('fleet-tb-role-data');
+    var ROLE_NAMES = [];
+    try {
+      ROLE_NAMES = JSON.parse(dataScript && dataScript.textContent ? dataScript.textContent : '[]');
+    } catch (e) { ROLE_NAMES = []; }
+    function norm(s) { return String(s || '').trim().toLowerCase(); }
+    function parseHidden(val) {
+      return String(val || '').split(/[,;\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+    }
+    el.querySelectorAll('[data-fleet-role-picker]').forEach(function (wrap) {
+      if (wrap.getAttribute('data-picker-wired') === '1') return;
+      wrap.setAttribute('data-picker-wired', '1');
+      var hidden = wrap.querySelector('.fleet-role-picker-hidden');
+      var chips = wrap.querySelector('[data-chips]');
+      var search = wrap.querySelector('[data-role-search]');
+      var ul = wrap.querySelector('[data-suggestions]');
+      if (!hidden || !chips || !search || !ul) return;
+      var selected = [];
+
+      function canonicalForToken(tok) {
+        var t = norm(tok);
+        if (!t) return null;
+        for (var i = 0; i < ROLE_NAMES.length; i++) {
+          if (norm(ROLE_NAMES[i]) === t) return ROLE_NAMES[i];
+        }
+        return String(tok).trim();
+      }
+
+      function syncHidden() {
+        hidden.value = selected.map(function (s) { return s.stored; }).join(', ');
+      }
+
+      function renderChips() {
+        chips.innerHTML = '';
+        selected.forEach(function (s, idx) {
+          var sp = document.createElement('span');
+          sp.className = 'badge bg-secondary d-inline-flex align-items-center gap-1';
+          var lbl = document.createElement('span');
+          lbl.textContent = s.label;
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'btn-close btn-close-white';
+          btn.style.fontSize = '0.55rem';
+          btn.style.opacity = '0.9';
+          btn.setAttribute('data-remove-chip', String(idx));
+          btn.setAttribute('aria-label', 'Remove');
+          sp.appendChild(lbl);
+          sp.appendChild(btn);
+          chips.appendChild(sp);
+        });
+      }
+
+      chips.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('button[data-remove-chip]');
+        if (!btn || !chips.contains(btn)) return;
+        var idx = parseInt(btn.getAttribute('data-remove-chip'), 10);
+        if (isNaN(idx)) return;
+        selected.splice(idx, 1);
+        syncHidden();
+        renderChips();
+      });
+
+      function addFromString(raw) {
+        var c = canonicalForToken(raw);
+        if (!c) return;
+        var n = norm(c);
+        for (var j = 0; j < selected.length; j++) {
+          if (norm(selected[j].stored) === n) return;
+        }
+        selected.push({ label: c, stored: c });
+        syncHidden();
+        renderChips();
+      }
+
+      parseHidden(hidden.value).forEach(addFromString);
+      renderChips();
+
+      function showSuggestions() {
+        var q = norm(search.value);
+        ul.innerHTML = '';
+        if (!q) {
+          ul.style.display = 'none';
+          ul.hidden = true;
+          return;
+        }
+        var seen = {};
+        selected.forEach(function (s) { seen[norm(s.stored)] = true; });
+        var nShown = 0;
+        for (var i = 0; i < ROLE_NAMES.length && nShown < 25; i++) {
+          var name = ROLE_NAMES[i];
+          if (seen[norm(name)]) continue;
+          var ln = norm(name);
+          if (ln.indexOf(q) === -1) continue;
+          var li = document.createElement('li');
+          li.className = 'list-group-item list-group-item-action py-1 px-2 small';
+          li.textContent = name;
+          li.addEventListener('mousedown', (function (nm) {
+            return function (ev) {
+              ev.preventDefault();
+              addFromString(nm);
+              search.value = '';
+              ul.style.display = 'none';
+              ul.hidden = true;
+            };
+          })(name));
+          ul.appendChild(li);
+          nShown++;
+        }
+        ul.style.display = nShown ? 'block' : 'none';
+        ul.hidden = !nShown;
+      }
+
+      search.addEventListener('input', showSuggestions);
+      search.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var open = ul.style.display !== 'none' && !ul.hidden;
+          var first = open ? ul.querySelector('.list-group-item') : null;
+          if (first) {
+            addFromString(first.textContent || '');
+            search.value = '';
+            ul.style.display = 'none';
+            ul.hidden = true;
+            return;
+          }
+          var t = search.value.trim();
+          if (t) {
+            addFromString(t);
+            search.value = '';
+            ul.style.display = 'none';
+            ul.hidden = true;
+          }
+        }
+      });
+      search.addEventListener('blur', function () {
+        setTimeout(function () {
+          ul.style.display = 'none';
+          ul.hidden = true;
+        }, 180);
+      });
+    });
+  }
+
+  function toggleNumberOpts(selectEl) {
+    const row = selectEl.closest('[data-role="field"]').querySelector('[data-role="number-opts"]');
+    if (!row) return;
+    const t = (selectEl.value || '').toLowerCase();
+    row.style.display = (t === 'number' || t === 'mileage') ? '' : 'none';
+  }
+
+  function reindexAll() {
+    root.querySelectorAll('[data-role="section"]').forEach(function (sec, si) {
+      sec.querySelectorAll('[data-sec-input]').forEach(function (inp) {
+        const key = inp.getAttribute('data-sec-input');
+        inp.name = 'sec_' + si + '_' + key;
+      });
+      sec.querySelectorAll('[data-role="field"]').forEach(function (fieldRow, fi) {
+        fieldRow.querySelectorAll('[data-field-input]').forEach(function (inp) {
+          const key = inp.getAttribute('data-field-input');
+          if (inp.type === 'checkbox') {
+            inp.name = 'field_' + si + '_' + fi + '_' + key;
+          } else {
+            inp.name = 'field_' + si + '_' + fi + '_' + key;
+          }
+        });
+      });
+    });
+  }
+
+  function wireTypeSelects(scope) {
+    (scope || root).querySelectorAll('[data-field-type-select]').forEach(function (sel) {
+      if (sel._vdiWired) return;
+      sel._vdiWired = true;
+      sel.addEventListener('change', function () { toggleNumberOpts(sel); });
+      toggleNumberOpts(sel);
+    });
+  }
+
+  function addField(fieldsContainer) {
+    const frag = tplField.content.cloneNode(true);
+    fieldsContainer.appendChild(frag);
+    wireTypeSelects(fieldsContainer);
+    reindexAll();
+  }
+
+  document.getElementById('btn-add-section').addEventListener('click', function () {
+    const frag = tplSec.content.cloneNode(true);
+    const secEl = frag.firstElementChild;
+    if (!secEl) return;
+    root.appendChild(secEl);
+    const container = secEl.querySelector('[data-role="fields-container"]');
+    if (container) addField(container);
+    wireTypeSelects(root);
+    reindexAll();
+  });
+
+  root.addEventListener('click', function (e) {
+    const t = e.target;
+    if (t.getAttribute('data-action') === 'remove-section') {
+      e.preventDefault();
+      const sec = t.closest('[data-role="section"]');
+      if (sec && root.contains(sec) && root.querySelectorAll('[data-role="section"]').length > 1) {
+        sec.remove();
+        reindexAll();
+      }
+    }
+    if (t.getAttribute('data-action') === 'remove-field') {
+      e.preventDefault();
+      const row = t.closest('[data-role="field"]');
+      const sec = t.closest('[data-role="section"]');
+      if (row && sec && root.contains(sec)) {
+        const fc = sec.querySelector('[data-role="fields-container"]');
+        if (fc && fc.querySelectorAll('[data-role="field"]').length > 1) {
+          row.remove();
+          reindexAll();
+        }
+      }
+    }
+    if (t.getAttribute('data-action') === 'add-field') {
+      e.preventDefault();
+      const sec = t.closest('[data-role="section"]');
+      if (sec && root.contains(sec)) addField(sec.querySelector('[data-role="fields-container"]'));
+    }
+  });
+
+  document.getElementById('btn-restore-default').addEventListener('click', function () {
+    if (!confirm('Replace the daily inspection form with the default template and reset contractor-only forms to none? This cannot be undone.')) return;
+    builderAction.value = 'restore_default';
+    form.submit();
+  });
+
+  wireTypeSelects(root);
+  reindexAll();
+
+  const extraRoot = document.getElementById('extra-forms-root');
+  const tplXf = document.getElementById('tpl-xf-empty');
+
+  function reindexXfForms() {
+    if (!extraRoot) return;
+    extraRoot.querySelectorAll('.extra-xf-block').forEach(function (blk, xi) {
+      const p = 'xf_' + xi + '_';
+      blk.querySelectorAll('[data-xf-meta]').forEach(function (inp) {
+        const m = inp.getAttribute('data-xf-meta');
+        if (m) inp.name = p + m;
+      });
+      const secRoot = blk.querySelector('[data-role="xf-sections-root"]');
+      if (!secRoot) return;
+      secRoot.querySelectorAll('[data-role="section"]').forEach(function (sec, si) {
+        sec.querySelectorAll('[data-sec-input]').forEach(function (inp) {
+          const key = inp.getAttribute('data-sec-input');
+          inp.name = p + 'sec_' + si + '_' + key;
+        });
+        sec.querySelectorAll('[data-role="field"]').forEach(function (fieldRow, fi) {
+          fieldRow.querySelectorAll('[data-field-input]').forEach(function (inp) {
+            const key = inp.getAttribute('data-field-input');
+            inp.name = p + 'field_' + si + '_' + fi + '_' + key;
+          });
+        });
+      });
+    });
+  }
+
+  const btnAddXf = document.getElementById('btn-add-xf');
+  if (extraRoot && tplXf && btnAddXf) {
+    btnAddXf.addEventListener('click', function () {
+      const n = extraRoot.querySelectorAll('.extra-xf-block').length;
+      const html = tplXf.innerHTML.replace(/___XF___/g, '_' + String(n) + '_');
+      extraRoot.insertAdjacentHTML('beforeend', html);
+      wireTypeSelects(extraRoot);
+      reindexXfForms();
+      wireFleetRolePickers(extraRoot);
+    });
+    extraRoot.addEventListener('click', function (e) {
+      const t = e.target;
+      if (t.getAttribute('data-action') === 'remove-xf-block') {
+        e.preventDefault();
+        const blk = t.closest('.extra-xf-block');
+        if (blk) { blk.remove(); reindexXfForms(); }
+        return;
+      }
+      if (t.getAttribute('data-action') === 'xf-add-section') {
+        e.preventDefault();
+        const blk = t.closest('.extra-xf-block');
+        const secRoot = blk && blk.querySelector('[data-role="xf-sections-root"]');
+        if (!secRoot || !tplSec) return;
+        const frag = tplSec.content.cloneNode(true);
+        const secEl = frag.firstElementChild;
+        if (!secEl) return;
+        secRoot.appendChild(secEl);
+        const container = secEl.querySelector('[data-role="fields-container"]');
+        if (container && tplField) container.appendChild(tplField.content.cloneNode(true).firstElementChild);
+        wireTypeSelects(secRoot);
+        reindexXfForms();
+        return;
+      }
+      if (t.getAttribute('data-action') === 'remove-section') {
+        const sec = t.closest('[data-role="section"]');
+        const blk = t.closest('.extra-xf-block');
+        if (sec && blk && sec.closest('[data-role="xf-sections-root"]')) {
+          e.preventDefault();
+          const sr = blk.querySelector('[data-role="xf-sections-root"]');
+          if (sr && sr.querySelectorAll('[data-role="section"]').length > 1) {
+            sec.remove();
+            reindexXfForms();
+          }
+        }
+        return;
+      }
+      if (t.getAttribute('data-action') === 'remove-field') {
+        const row = t.closest('[data-role="field"]');
+        const sec = t.closest('[data-role="section"]');
+        const blk = t.closest('.extra-xf-block');
+        if (row && sec && blk) {
+          e.preventDefault();
+          const fc = sec.querySelector('[data-role="fields-container"]');
+          if (fc && fc.querySelectorAll('[data-role="field"]').length > 1) {
+            row.remove();
+            reindexXfForms();
+          }
+        }
+        return;
+      }
+      if (t.getAttribute('data-action') === 'add-field') {
+        const sec = t.closest('[data-role="section"]');
+        if (sec && sec.closest('.extra-xf-block') && tplField) {
+          e.preventDefault();
+          const fc = sec.querySelector('[data-role="fields-container"]');
+          if (fc) {
+            fc.appendChild(tplField.content.cloneNode(true).firstElementChild);
+            wireTypeSelects(fc);
+            reindexXfForms();
+          }
+        }
+      }
+    });
+    reindexXfForms();
+    wireTypeSelects(extraRoot);
+  }
+
+  wireFleetRolePickers(form || document);
+
+  if (root.querySelectorAll('[data-role="section"]').length === 0) {
+    document.getElementById('btn-add-section').click();
+  } else {
+    root.querySelectorAll('[data-role="fields-container"]').forEach(function (fc) {
+      if (!fc.querySelector('[data-role="field"]')) {
+        addField(fc);
+      }
+    });
+    reindexAll();
+  }
+})();
+</script>
+{% endblock %}

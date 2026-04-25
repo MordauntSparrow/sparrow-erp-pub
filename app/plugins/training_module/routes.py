@@ -367,6 +367,7 @@ def admin_course_new():
         "training_module/admin/course_form.html",
         course=None,
         delivery_types=sorted(DELIVERY_TYPES),
+        compliance_policies=TrainingService.list_comp_policies_for_course_select(),
         config=_core_manifest,
     )
 
@@ -492,6 +493,7 @@ def admin_course_edit(course_id):
         delivery_types=sorted(DELIVERY_TYPES),
         roles=TrainingService.list_roles(),
         assignment_rules=TrainingService.list_course_assignment_rules(course_id),
+        compliance_policies=TrainingService.list_comp_policies_for_course_select(),
         config=_core_manifest,
     )
 

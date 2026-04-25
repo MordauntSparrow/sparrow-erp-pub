@@ -93,7 +93,7 @@
   <div class="card border mb-4">
     <div class="card-body">
       <h2 class="h6 card-title">HCPC register — mass checks</h2>
-      <p class="small text-muted mb-3">Run register checks for every employee with an HCPC registration number on file. Scheduled runs use the same live HCPC API as the manual profile button. Shown because <strong>Medical</strong> is enabled in Core settings → Industry.</p>
+      <p class="small text-muted mb-3">Run register checks for every employee with an HCPC registration number on file.</p>
       <div class="d-flex flex-wrap gap-3 align-items-end">
         <form method="post" action="{{ url_for('internal_hr.admin_hr_hcpc_mass_interval_save') }}" class="row g-2 align-items-end flex-wrap m-0">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

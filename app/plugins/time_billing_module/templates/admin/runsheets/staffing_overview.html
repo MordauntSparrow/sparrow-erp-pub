@@ -1,20 +1,56 @@
 {% extends "admin/base_timesheet_billing_module.html" %}
+{% block tb_page_head %}{% include "admin/runsheets/_runsheets_ui_styles.html" %}{% endblock %}
 {% block content %}
-<div class="container-fluid py-3">
-  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
-    <div>
-      <h1 class="h4 mb-1"><i class="bi bi-calendar2-check text-primary me-2"></i>Staffing overview</h1>
-      <p class="text-muted small mb-0">Run sheets in the next few days vs positions to cover{% if industry_visible('medical') %} (Cura expected roster when linked, otherwise at least one crew){% else %} (expected crew vs assigned where configured){% endif %}. <strong>Labour (planning)</strong> uses median wage-card rates among active contractors for that job type, run-sheet window hours (or 8h default), and any posted shift pay. Figures are indicative only.</p>
+<div class="tb-rs-page">
+  <nav class="tb-rs-breadcrumb mb-3" aria-label="Breadcrumb">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('routes.plugins') }}">Plugins</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_time_billing.admin_dashboard_page') }}">Time &amp; Billing</a></li>
+      <li class="breadcrumb-item"><a href="{{ url_for('internal_time_billing.runsheets_page') }}">Run sheets</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Staffing overview</li>
+    </ol>
+  </nav>
+
+  <div class="tb-rs-hero d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+    <div class="flex-grow-1" style="min-width:220px">
+      <p class="tb-rs-hero-kicker mb-0">Planning</p>
+      <h1 class="text-white mb-1"><i class="bi bi-calendar2-check me-2"></i> Staffing overview</h1>
+      <p class="tb-rs-hero-lead mb-0">
+        Run sheets in the selected window vs positions to cover{% if industry_visible('medical') %} (Cura expected roster when linked){% endif %}.
+        <strong class="text-white">Labour</strong> figures are indicative — median wage-card rates, window hours (or 8h default), and posted shift pay.
+      </p>
     </div>
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-      <label class="small text-muted mb-0">Ahead (days)</label>
-      <input type="number" class="form-control form-control-sm" id="inpDays" value="14" min="1" max="90" style="width:4.5rem">
-      <label class="small text-muted mb-0">Urgent ≤</label>
-      <input type="number" class="form-control form-control-sm" id="inpUrgent" value="3" min="0" max="14" style="width:4rem" title="Days from today to flag as urgent">
-      <label class="small text-muted mb-0">Past</label>
-      <input type="number" class="form-control form-control-sm" id="inpPast" value="0" min="0" max="14" style="width:4rem" title="Include past days for overdue gaps">
-      <button type="button" class="btn btn-primary btn-sm" id="btnRefresh"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
-      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('internal_time_billing.runsheets_page') }}"><i class="bi bi-clipboard2-check me-1"></i>Runsheets list</a>
+    <a class="btn btn-outline-light btn-sm align-self-start" href="{{ url_for('internal_time_billing.runsheets_page') }}">
+      <i class="bi bi-clipboard2-check me-1"></i> Run sheets list
+    </a>
+  </div>
+
+  <div class="card tb-rs-panel mb-4">
+    <div class="card-header d-flex align-items-center gap-2">
+      <i class="bi bi-sliders text-primary"></i>
+      <span>Window &amp; refresh</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-6 col-md-2">
+          <label class="tb-rs-filter-label d-block" for="inpDays">Ahead (days)</label>
+          <input type="number" class="form-control form-control-sm" id="inpDays" value="14" min="1" max="90">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="tb-rs-filter-label d-block" for="inpUrgent" title="Days from today to flag as urgent">Urgent ≤</label>
+          <input type="number" class="form-control form-control-sm" id="inpUrgent" value="3" min="0" max="14">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="tb-rs-filter-label d-block" for="inpPast" title="Include past days for overdue gaps">Past</label>
+          <input type="number" class="form-control form-control-sm" id="inpPast" value="0" min="0" max="14">
+        </div>
+        <div class="col-12 col-md-3 ms-md-auto">
+          <button type="button" class="btn btn-primary btn-sm w-100" id="btnRefresh">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -22,49 +58,49 @@
 
   <div id="kpiRow" class="row g-3 mb-4 d-none">
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100">
+      <div class="card tb-rs-panel h-100">
         <div class="card-body py-3">
-          <div class="text-muted small">Run sheets</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Run sheets</div>
           <div class="fs-4 fw-semibold" id="kpiSheets">—</div>
         </div>
       </div>
     </div>
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100">
+      <div class="card tb-rs-panel h-100">
         <div class="card-body py-3">
-          <div class="text-muted small">Positions required</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Positions required</div>
           <div class="fs-4 fw-semibold" id="kpiReq">—</div>
         </div>
       </div>
     </div>
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100">
+      <div class="card tb-rs-panel h-100">
         <div class="card-body py-3">
-          <div class="text-muted small">Filled (vs req.)</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Filled</div>
           <div class="fs-4 fw-semibold text-success" id="kpiFilled">—</div>
         </div>
       </div>
     </div>
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100" id="kpiGapCard">
+      <div class="card tb-rs-panel h-100" id="kpiGapCard">
         <div class="card-body py-3">
-          <div class="text-muted small">Gap (uncovered)</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Gap</div>
           <div class="fs-4 fw-semibold" id="kpiGap">—</div>
         </div>
       </div>
     </div>
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100">
+      <div class="card tb-rs-panel h-100">
         <div class="card-body py-3">
-          <div class="text-muted small">Events with gap</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Events w/ gap</div>
           <div class="fs-4 fw-semibold" id="kpiEventsGap">—</div>
         </div>
       </div>
     </div>
     <div class="col-6 col-lg-2">
-      <div class="card border-0 shadow-sm h-100" id="kpiUrgentCard">
+      <div class="card tb-rs-panel h-100" id="kpiUrgentCard">
         <div class="card-body py-3">
-          <div class="text-muted small">Urgent gaps</div>
+          <div class="text-muted small text-uppercase" style="font-size:0.68rem;letter-spacing:0.04em">Urgent gaps</div>
           <div class="fs-4 fw-semibold" id="kpiUrgent">—</div>
         </div>
       </div>
@@ -73,10 +109,10 @@
 
   <div class="row g-4">
     <div class="col-lg-7">
-      <div class="card border-0 shadow-sm">
-        <div class="card-header bg-transparent py-2 d-flex justify-content-between align-items-center">
-          <strong><i class="bi bi-exclamation-triangle text-warning me-2"></i>Pressing — uncovered positions</strong>
-          <span class="small text-muted" id="gapHint"></span>
+      <div class="card tb-rs-panel">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="d-flex align-items-center gap-2"><i class="bi bi-exclamation-triangle text-warning"></i><strong>Pressing — uncovered positions</strong></span>
+          <span class="small text-muted font-monospace" id="gapHint"></span>
         </div>
         <div class="card-body p-0">
           <div class="table-responsive">
@@ -102,13 +138,13 @@
       </div>
     </div>
     <div class="col-lg-5">
-      <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-transparent py-2"><strong><i class="bi bi-calendar3 me-2"></i>By day</strong></div>
+      <div class="card tb-rs-panel mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2"><i class="bi bi-calendar3 text-primary"></i><strong>By day</strong></div>
         <div class="card-body py-2" id="byDayBody" style="max-height:280px;overflow-y:auto"></div>
       </div>
       {% if industry_visible('medical') %}
-      <div class="card border-0 shadow-sm">
-        <div class="card-header bg-transparent py-2"><strong><i class="bi bi-link-45deg me-2"></i>Upcoming Cura-linked events</strong></div>
+      <div class="card tb-rs-panel">
+        <div class="card-header py-2 d-flex align-items-center gap-2"><i class="bi bi-link-45deg text-primary"></i><strong>Upcoming Cura-linked events</strong></div>
         <div class="card-body py-2 small" id="curaBody" style="max-height:220px;overflow-y:auto"></div>
       </div>
       {% endif %}

@@ -1,0 +1,121 @@
+{% extends "cad/ventus_admin_base.html" %}
+{% block content %}
+<div style="padding:12px;">
+  <h3 style="margin-top:6px;">Panel: {{ panel|e }}</h3>
+  <div id="panelRoot"></div>
+</div>
+
+<script>
+// Simple popout panel that subscribes to the realtime channel (Socket.IO preferred, BroadcastChannel fallback)
+const panelType = '{{ panel|e }}';
+const root = document.getElementById('panelRoot');
+let socket = null;
+let bc = null;
+try{ if(typeof io !== 'undefined') socket = io(); }catch(e){ socket = null; }
+try{ bc = new BroadcastChannel('ventus_cad'); }catch(e){ bc = null; }
+
+function renderJobs(data){
+  if(!Array.isArray(data)) { root.innerHTML = '<div>No data</div>'; return; }
+  let html = '<ul style="list-style:none;padding:0;margin:0;">';
+  data.forEach(j=>{
+    html += `<li style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);"><b>CAD #${j.cad}</b> <div style="font-size:13px;color:#9aa4b2">${j.reason_for_call||''} — <span style="color:#9fb6ff">${j.status||''}</span></div></li>`;
+  });
+  html += '</ul>';
+  root.innerHTML = html;
+}
+// dispatch an action to main window (or other listeners)
+function dispatchAction(action, payload){
+  const msg = {type:'panel_action', action, payload};
+  try{ if(socket) socket.emit('panel_message', {channel:'ventus_cad', message: msg}); else if(bc) bc.postMessage(msg); }catch(e){ console.warn('dispatchAction failed', e); }
+}
+function assignJobLocal(cad){
+  const callsign = prompt('Assign CAD #'+cad+' to which unit (callsign)?');
+  if(!callsign) return;
+  dispatchAction('assign_job', {cad, callsign});
+  // optimistic UI
+  const el = root.querySelector(`[data-cad-'+cad+']`);
+}
+function closeJobLocal(cad){
+  if(!confirm('Close CAD #'+cad+'?')) return;
+  dispatchAction('close_job', {cad});
+}
+function renderUnits(data){
+  if(!Array.isArray(data)) { root.innerHTML = '<div>No data</div>'; return; }
+  let html = '<ul style="list-style:none;padding:0;margin:0;">';
+  data.forEach(u=>{
+    html += `<li data-cad-${j.cad} style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);"><div style="display:flex;justify-content:space-between;align-items:center"><div><b>CAD #${j.cad}</b> <div style="font-size:13px;color:#9aa4b2">${j.reason_for_call||''} — <span style="color:#9fb6ff">${j.status||''}</span></div></div><div style="display:flex;gap:6px"><button onclick="assignJobLocal(${j.cad})">Assign</button><button onclick="closeJobLocal(${j.cad})">Close</button></div></div></li>`;
+  });
+  html += '</ul>';
+  root.innerHTML = html;
+}
+function renderMsgs(data){
+  if(!Array.isArray(data)) { root.innerHTML = '<div>No data</div>'; return; }
+  let html = '<div style="max-height:420px;overflow:auto;padding:6px;">';
+  data.forEach(m=>{
+    html += `<li style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);"><div style="display:flex;justify-content:space-between;align-items:center"><div><b>${m.from}</b> <div style="font-size:13px;color:#9aa4b2">${m.text||''}</div></div></div></li>`;
+  });
+  html += '</div>';
+  root.innerHTML = html;
+}
+function msgUnitLocal(callsign){
+  const text = prompt('Send message to '+callsign+':');
+  if(!text) return;
+  dispatchAction('send_msg', {callsign, text});
+}
+function changeUnitStatusLocal(callsign){
+  const status = prompt('Set new status for '+callsign+':');
+  if(!status) return;
+  dispatchAction('change_unit_status', {callsign, status});
+}
+
+// Fetch initial data for the panel
+function fetchInitial(){
+  if(panelType==='jobs'){
+    fetch('/plugin/ventus_response_module/jobs').then(r=>r.json()).then(renderJobs).catch(()=>root.innerHTML='<div class="error">Failed to load jobs.</div>');
+  } else if(panelType==='units'){
+    fetch('/plugin/ventus_response_module/units').then(r=>r.json()).then(renderUnits).catch(()=>root.innerHTML='<div class="error">Failed to load units.</div>');
+  } else if(panelType==='msgs'){
+    // show global recent messages - we fetch units then first callsign's messages as example
+    root.innerHTML = '<div class="loading">Loading messages...</div>';
+  }
+}
+
+// Handle BroadcastChannel messages from main window
+// Wire incoming messages from socket or BroadcastChannel
+function handleIncoming(payload){
+  try{
+    const msg = payload.message || payload || {};
+    if(msg.type === 'jobs_updated' && panelType==='jobs'){
+      // if full data provided use it, otherwise fetch
+      if(payload.data) renderJobs(payload.data);
+      else fetch('/plugin/ventus_response_module/jobs').then(r=>r.json()).then(renderJobs).catch(()=>{});
+    }
+    if(msg.type === 'units_updated' && panelType==='units'){
+      if(payload.data) renderUnits(payload.data);
+      else fetch('/plugin/ventus_response_module/units').then(r=>r.json()).then(renderUnits).catch(()=>{});
+    }
+    if(msg.type === 'message_sent' && panelType==='msgs'){
+      fetch('/plugin/ventus_response_module/messages/'+(msg.callsign||''))
+        .then(r=>r.json()).then(renderMsgs).catch(()=>{});
+    }
+    if(msg.type === 'panel_action_result'){
+      // Optional: show result in popout
+      if(msg.success) {
+        // no-op for now
+      }
+    }
+  }catch(e){ console.warn('incoming err', e); }
+}
+
+if(socket){
+  socket.on('panel_message', function(payload){ handleIncoming(payload); });
+  socket.on('mdt_event', function(ev){ handleIncoming(ev); });
+}
+if(bc){ bc.onmessage = (ev) => handleIncoming(ev.data || {}); }
+
+// Also announce we are listening (main can optionally send targeted updates)
+if(bc) bc.postMessage({type:'panel_subscribe', panel: panelType});
+
+fetchInitial();
+</script>
+{% endblock %}
