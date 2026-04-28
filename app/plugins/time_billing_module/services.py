@@ -2595,9 +2595,12 @@ class TimesheetService:
     ) -> None:
         contractor_id = int(contractor["id"])
         role_id = contractor.get("role_id")
+        # Legacy installs may have free-text client_name only (no client_id column).
+        ecf = TimesheetService._tb_entry_column_flags(cur)
+        client_sel = "client_id" if ecf.get("client_id") else "NULL AS client_id"
         cur.execute(
-            """
-            SELECT id, work_date, client_id, job_type_id, actual_hours, pay, policy_applied,
+            f"""
+            SELECT id, work_date, {client_sel}, job_type_id, actual_hours, pay, policy_applied,
                    COALESCE(rate_overridden, 0) AS rate_overridden
             FROM tb_timesheet_entries
             WHERE user_id=%s AND week_id=%s
